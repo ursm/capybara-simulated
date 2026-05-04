@@ -101,22 +101,28 @@
     // an event before performing the default action.
     addEventListener(type, handler, options) {
       if (!handler) return;
+      type = String(type);
       const opts = (options && typeof options === 'object') ? options : {capture: !!options};
       let byType = __listeners.get(this.__h);
       if (!byType) __listeners.set(this.__h, byType = new Map());
-      let arr = byType.get(String(type));
-      if (!arr) byType.set(String(type), arr = []);
+      let arr = byType.get(type);
+      if (!arr) byType.set(type, arr = []);
       arr.push({handler, capture: !!opts.capture, once: !!opts.once});
+      bumpListenerCount(type, +1);
     }
     removeEventListener(type, handler, options) {
+      type = String(type);
       const byType = __listeners.get(this.__h);
       if (!byType) return;
-      const arr = byType.get(String(type));
+      const arr = byType.get(type);
       if (!arr) return;
       const opts = (options && typeof options === 'object') ? options : {capture: !!options};
       const cap = !!opts.capture;
       const i = arr.findIndex(l => l.handler === handler && l.capture === cap);
-      if (i >= 0) arr.splice(i, 1);
+      if (i >= 0) {
+        arr.splice(i, 1);
+        bumpListenerCount(type, -1);
+      }
     }
     dispatchEvent(event) {
       return __dispatch(this, event);
@@ -167,6 +173,20 @@
   // Keyed by handle rather than Element because each JS access wraps the same
   // node in a fresh Element object — the integer handle is the stable identity.
   const __listeners = new Map();
+  // Per-type listener counts so Ruby can short-circuit dispatch when no
+  // one's listening for a given event type. Notified via __setListenedType.
+  const __listenerCounts = new Map();
+  function bumpListenerCount(type, delta) {
+    const cur = __listenerCounts.get(type) || 0;
+    const nxt = cur + delta;
+    if (nxt <= 0) {
+      __listenerCounts.delete(type);
+      if (cur > 0) __setListenedType(type, false);
+    } else {
+      __listenerCounts.set(type, nxt);
+      if (cur === 0) __setListenedType(type, true);
+    }
+  }
 
   class Event {
     constructor(type, init) {
@@ -283,13 +303,17 @@
     if (typeof handler !== 'function') return 0;
     const id = __nextTimerId++;
     const delay = Math.max(0, +ms || 0);
+    const wasEmpty = __timers.size === 0;
     __timers.set(id, {handler, args, due: __virtualNow + delay, period});
+    if (wasEmpty) __setTimersActive(true);
     return id;
   }
 
   globalThis.setTimeout    = function (h, ms, ...a) { return scheduleTimer(h, ms, a, null); };
   globalThis.setInterval   = function (h, ms, ...a) { return scheduleTimer(h, ms, a, Math.max(1, +ms || 0)); };
-  globalThis.clearTimeout  = function (id) { __timers.delete(id); };
+  globalThis.clearTimeout  = function (id) {
+    if (__timers.delete(id) && __timers.size === 0) __setTimersActive(false);
+  };
   globalThis.clearInterval = globalThis.clearTimeout;
   globalThis.requestAnimationFrame = function (cb) { return scheduleTimer(() => cb(__virtualNow), 16, [], null); };
   globalThis.cancelAnimationFrame  = globalThis.clearTimeout;
@@ -321,13 +345,35 @@
         try { console.error('timer threw:', e && e.message ? e.message : e); } catch (_) {}
       }
     }
+    if (__timers.size === 0) __setTimersActive(false);
   };
 
   // Reset between sessions / pages so leftover timers from a prior page
   // don't fire on the next one.
   globalThis.__resetTimers = function () {
+    const had = __timers.size > 0;
     __timers.clear();
     __virtualNow = 0;
+    if (had) __setTimersActive(false);
+  };
+
+  // Wipe per-page JS state on navigate / reset!. Handle integers from the
+  // old document end up reassigned to fresh nodes after the document
+  // re-parses, so listeners / observers / CE instances keyed on those
+  // handles would silently fire against the wrong nodes (and accumulate
+  // every visit). customElement *definitions* clear too — registry is
+  // window-scoped, and our tests treat each visit as a fresh window.
+  globalThis.__resetPage = function () {
+    __listeners.clear();
+    for (const t of __listenerCounts.keys()) __setListenedType(t, false);
+    __listenerCounts.clear();
+    __observers.clear();
+    __notifyMutationActive(false);
+    __ceDefs.clear();
+    __ceInstances.clear();
+    __ceWaiters.clear();
+    __ceObserver = null;
+    __resetTimers();
   };
 
   // ── MutationObserver ────────────────────────────────────────

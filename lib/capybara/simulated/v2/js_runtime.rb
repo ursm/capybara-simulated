@@ -33,6 +33,13 @@ module Capybara
           @vm.eval_code('__resetTimers()')
         end
 
+        # Wipe all per-page state — listeners, observers, custom-element
+        # instances, timer queue. Handle integers get reused across docs,
+        # so leftover JS state would alias the wrong nodes after navigate.
+        def reset_page
+          @vm.eval_code('__resetPage()')
+        end
+
         # Run every inline `<script>` in document order. External `src`
         # scripts and `type="module"` are skipped here — those land in
         # later phases.
@@ -56,6 +63,12 @@ module Capybara
           end
           @vm.define_function('__notifyMutationActive') do |active|
             @browser.mutation_recording = !!active
+          end
+          @vm.define_function('__setListenedType') do |type, active|
+            @browser.set_listened_type(type, !!active)
+          end
+          @vm.define_function('__setTimersActive') do |active|
+            @browser.timers_active = !!active
           end
           @vm.on_log do |level, *parts|
             warn "[capybara-simulated/v2 console.#{level}] #{parts.map(&:to_s).join(' ')}"

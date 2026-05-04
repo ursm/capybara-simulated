@@ -1,6 +1,7 @@
 require 'json'
 require 'nokogiri'
 require 'rack/mock'
+require 'set'
 require_relative 'handle_table'
 require_relative 'js_runtime'
 
@@ -16,7 +17,7 @@ module Capybara
       # writes from JS land in subsequent phases.
       class Browser
         attr_reader :app, :current_url
-        attr_accessor :mutation_recording
+        attr_accessor :mutation_recording, :timers_active
 
         def initialize(app)
           @app          = app
@@ -27,6 +28,19 @@ module Capybara
           @js           = nil  # lazy — only spin up QuickJS on first script
           @mutations    = []
           @mutation_recording = false
+          @timers_active     = false
+          # Set of event types with at least one live listener — JS notifies
+          # us via __setListenedType so dispatch_event can skip the entire
+          # JS hop for events nobody cares about.
+          @listened_types    = Set.new
+        end
+
+        def set_listened_type(type, active)
+          if active
+            @listened_types << type.to_s
+          else
+            @listened_types.delete(type.to_s)
+          end
         end
 
         def js
@@ -46,8 +60,15 @@ module Capybara
           @handles.reset!(@document)
           @current_url = nil
           @cookies.clear
+          @js&.reset_page
+          reset_per_page_state
+        end
+
+        def reset_per_page_state
           @mutations.clear
-          @js&.reset_timers
+          @mutation_recording = false
+          @timers_active      = false
+          @listened_types.clear
         end
 
         # ── reads ──────────────────────────────────────────────────
@@ -223,10 +244,13 @@ module Capybara
         end
 
         # Fire a JS event at `handle`. Returns true unless a listener called
-        # `preventDefault()`. If JS hasn't been booted (no <script> on the
-        # page), there's nothing to prevent — short-circuit to true.
+        # `preventDefault()`. Short-circuits when JS isn't booted, when no
+        # listener is registered for this event type, *and* no observer is
+        # watching for the side-effects — the cheap path covers the bulk of
+        # plain rack_test-style flows where most events are nobody's problem.
         def dispatch_event(handle, type, bubbles: true, cancelable: true)
           return true unless @js && handle
+          return true unless @listened_types.include?(type) || @mutation_recording
           init = {bubbles: bubbles, cancelable: cancelable}
           result = js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
           settle
@@ -248,7 +272,7 @@ module Capybara
         def settle
           return unless @js
           10.times do
-            js.drain_timers
+            js.drain_timers if @timers_active
             break if @mutations.empty?
             records, @mutations = @mutations, []
             js.eval("__deliverMutations(#{records.to_json})")
@@ -408,13 +432,13 @@ module Capybara
           # the virtual clock so timers from the previous page can't fire on
           # this one, and drain afterwards to settle initial setTimeout(0)s.
           if @document.css('script').any? { |s| !s['src'] }
-            js.reset_timers
-            @mutations.clear
+            js.reset_page
+            reset_per_page_state
             js.run_inline_scripts(@document)
             settle
           elsif @js
-            @js.reset_timers
-            @mutations.clear
+            @js.reset_page
+            reset_per_page_state
           end
           status
         end
