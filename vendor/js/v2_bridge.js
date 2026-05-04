@@ -47,7 +47,19 @@
     hasAttribute(name)        { return !!__dom(this.__h, 'hasAttribute', [String(name)]); }
     setAttribute(name, value) { __dom(this.__h, 'setAttribute', [String(name), String(value)]); }
     removeAttribute(name)     { __dom(this.__h, 'removeAttribute', [String(name)]); }
-    get attributes()          { return __dom(this.__h, 'attributes', []); }
+    // NamedNodeMap-shaped: array-iterable AND name-indexable. jQuery
+    // does `el.attributes[name].expando` for feature detection, so we
+    // return Attr-like records on each named slot.
+    get attributes() {
+      const pairs = __dom(this.__h, 'attributes', []);
+      const out = [];
+      for (const p of pairs) {
+        const attr = {name: p[0], value: p[1], specified: true, expando: false};
+        out.push(attr);
+        out[p[0]] = attr;
+      }
+      return out;
+    }
 
     // Common element shortcuts
     get id()        { return this.getAttribute('id') || ''; }
@@ -63,6 +75,38 @@
 
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form', [])); }
+
+    // Library boot-time probes — ownerDocument is the Document any node
+    // belongs to; we model a single document so it's always the global.
+    get ownerDocument() { return globalThis.document; }
+    get nodeValue()     { return null; }
+    get prefix()        { return null; }
+    get namespaceURI()  { return null; }
+
+    // Layout-related getters return zeros / empties — no layout engine,
+    // but libraries probe these during boot and at runtime. Returning
+    // a plausible-shaped object is enough to keep them out of the way.
+    getClientRects()         { return []; }
+    getBoundingClientRect()  { return {top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0, x: 0, y: 0}; }
+    get offsetParent()       { return null; }
+    get offsetWidth()        { return 0; }
+    get offsetHeight()       { return 0; }
+    get offsetLeft()         { return 0; }
+    get offsetTop()          { return 0; }
+    get clientWidth()        { return 0; }
+    get clientHeight()       { return 0; }
+    get clientLeft()         { return 0; }
+    get clientTop()          { return 0; }
+    get scrollWidth()        { return 0; }
+    get scrollHeight()       { return 0; }
+    get scrollLeft()         { return 0; }
+    get scrollTop()          { return 0; }
+    set scrollLeft(v)        {}
+    set scrollTop(v)         {}
+    scrollIntoView()         {}
+    scrollTo()               {}
+    focus()                  {}
+    blur()                   {}
 
     // Mutations
     appendChild(child) {
@@ -88,8 +132,30 @@
 
     // Document factory ops live on Element so document.createElement works
     // without a separate Document subclass.
-    createElement(tag)   { return wrap(__dom(this.__h, 'createElement',  [String(tag)])); }
-    createTextNode(text) { return wrap(__dom(this.__h, 'createTextNode', [String(text)])); }
+    createElement(tag)        { return wrap(__dom(this.__h, 'createElement',         [String(tag)])); }
+    createTextNode(text)      { return wrap(__dom(this.__h, 'createTextNode',        [String(text)])); }
+    createComment(text)       { return wrap(__dom(this.__h, 'createComment',         [String(text)])); }
+    createDocumentFragment()  { return wrap(__dom(this.__h, 'createDocumentFragment', [])); }
+    // Attribute object isn't really used by libraries except for
+    // existence-checks; return a plain shape with name/value.
+    createAttribute(name)     { return {name: String(name), value: '', specified: true}; }
+
+    // getElementsBy* — jQuery / older libs probe for these directly.
+    getElementsByTagName(tag)   { return __dom(this.__h, 'getElementsByTagName',   [String(tag)]).map(wrap); }
+    getElementsByClassName(cls) { return __dom(this.__h, 'getElementsByClassName', [String(cls)]).map(wrap); }
+    getElementsByName(name)     { return __dom(this.__h, 'getElementsByName',      [String(name)]).map(wrap); }
+
+    cloneNode(deep)              { return wrap(__dom(this.__h, 'cloneNode', [!!deep])); }
+    compareDocumentPosition(o)   { return __dom(this.__h, 'compareDocumentPosition', [o && o.__h]); }
+
+    // CSSStyleDeclaration-shaped: cssText round-trips through the style
+    // attribute; getPropertyValue / setProperty / removeProperty edit
+    // individual rules. Named property access (`el.style.color`) isn't
+    // wired — would need a Proxy, which adds cost most callers don't
+    // need. Libraries that boot-probe via cssText (jQuery 1.12) work.
+    get style() {
+      return CSSStyleFacade(this);
+    }
 
     // classList — implemented in JS atop get/setAttribute. Two round-trips
     // per mutation, but classList ops are infrequent enough that adding
@@ -127,6 +193,62 @@
     dispatchEvent(event) {
       return __dispatch(this, event);
     }
+  }
+
+  // CSSStyleDeclaration shim. Wraps a Proxy so libraries that touch
+  // `el.style.backgroundColor` (camelCase) and `el.style['background-color']`
+  // (kebab) both flow through getPropertyValue / setProperty against the
+  // underlying `style` attribute.
+  function camelToKebab(s) {
+    return String(s).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+  }
+  function CSSStyleFacade(el) {
+    const target = {
+      _el: el,
+      get cssText() { return el.getAttribute('style') || ''; },
+      set cssText(v) { el.setAttribute('style', String(v)); },
+      getPropertyValue(name) {
+        const want = String(name).toLowerCase();
+        const text = el.getAttribute('style') || '';
+        for (const rule of text.split(';')) {
+          const m = rule.match(/^\s*([^:]+?)\s*:\s*(.*?)\s*$/);
+          if (m && m[1].toLowerCase() === want) return m[2];
+        }
+        return '';
+      },
+      setProperty(name, value) {
+        const want = String(name).toLowerCase();
+        const rules = (el.getAttribute('style') || '').split(';')
+          .map(r => r.trim()).filter(Boolean)
+          .filter(r => r.split(':')[0].trim().toLowerCase() !== want);
+        if (value !== '' && value != null) rules.push(`${want}: ${value}`);
+        el.setAttribute('style', rules.join('; '));
+      },
+      removeProperty(name) {
+        const want = String(name).toLowerCase();
+        const rules = (el.getAttribute('style') || '').split(';')
+          .map(r => r.trim()).filter(Boolean)
+          .filter(r => r.split(':')[0].trim().toLowerCase() !== want);
+        el.setAttribute('style', rules.join('; '));
+      },
+      get length() {
+        return (el.getAttribute('style') || '').split(';').filter(r => r.trim()).length;
+      }
+    };
+    return new Proxy(target, {
+      get(t, p) {
+        if (typeof p === 'symbol' || p in t) return t[p];
+        return t.getPropertyValue(camelToKebab(p));
+      },
+      set(t, p, v) {
+        if (p in t) { t[p] = v; return true; }
+        t.setProperty(camelToKebab(p), v);
+        return true;
+      },
+      has(t, p) {
+        return (p in t) || t.getPropertyValue(camelToKebab(p)) !== '';
+      }
+    });
   }
 
   class ClassList {
@@ -294,17 +416,42 @@
     return __dispatch(new Element(handle), new Event(type, init));
   };
 
-  // Mailbox shims — Ruby parks args via instance ivars and triggers a
-  // fixed-source eval. JS pulls the args back through the
-  // __pull*-prefixed Ruby callbacks, so QuickJS only ever has to parse
-  // a constant short literal instead of a JSON-interpolated expression.
-  globalThis.__dispatchViaMailbox = function () {
-    const a = __pullDispatchArgs();
-    return __dispatch(new Element(a[0]), new Event(a[1], {bubbles: a[2], cancelable: a[3]}));
+  // Called from Ruby#fire_lifecycle_events. Dispatches DOMContentLoaded /
+  // load on document AND window — libraries listen on either.
+  globalThis.__fireLifecycle = function (type) {
+    const ev = new Event(type, {bubbles: false, cancelable: false});
+    __dispatch(globalThis.document, ev);
+    // Same event, separate dispatch on the window-as-EventTarget.
+    if (typeof globalThis.dispatchEvent === 'function') {
+      try { globalThis.dispatchEvent(ev); } catch (_) {}
+    }
   };
-  globalThis.__deliverMutationsViaMailbox = function () {
-    return __deliverMutations(__pullMutationBatch());
+  globalThis.__setReadyState = function (state) {
+    globalThis.document.readyState = state;
   };
+  // Window-level event listener API — jQuery binds `load` on window.
+  // Reuses the document's listener machinery so __dispatch routes there.
+  const __windowListeners = new Map();
+  globalThis.addEventListener = function (type, handler) {
+    let arr = __windowListeners.get(String(type));
+    if (!arr) __windowListeners.set(String(type), arr = []);
+    arr.push(handler);
+  };
+  globalThis.removeEventListener = function (type, handler) {
+    const arr = __windowListeners.get(String(type));
+    if (!arr) return;
+    const i = arr.indexOf(handler);
+    if (i >= 0) arr.splice(i, 1);
+  };
+  globalThis.dispatchEvent = function (event) {
+    const arr = __windowListeners.get(event.type);
+    if (!arr) return true;
+    for (const h of arr.slice()) {
+      try { h.call(globalThis, event); } catch (_) {}
+    }
+    return !event.defaultPrevented;
+  };
+
 
   // ── evaluate_script ──────────────────────────────────────────
   // Capybara's `evaluate_script(code, *args)` wraps `code` in a
@@ -338,10 +485,6 @@
     // uniformly — selenium's "return <expr>" wrapping can't.
     const fn = new Function('return eval(' + JSON.stringify(code) + ');');
     return marshalResult(fn.apply(null, a));
-  };
-  globalThis.__evalScriptViaMailbox = function () {
-    const c = __pullScriptCall();
-    return __evalScript(c[0], c[1]);
   };
 
   // ── Virtual clock + timer queue ─────────────────────────────
@@ -522,12 +665,16 @@
   globalThis.document.documentElement = globalThis.document.querySelector('html');
   // jQuery and friends sniff for these — define them as best-effort
   // no-ops so library load time doesn't ReferenceError.
-  globalThis.document.readyState  = 'complete';
+  // Start as 'loading'; Browser bumps us through interactive → complete
+  // around the lifecycle-event firing.
+  globalThis.document.readyState  = 'loading';
   globalThis.document.compatMode  = 'CSS1Compat';
   globalThis.document.location    = {href: '', host: '', protocol: 'http:', pathname: '/'};
   globalThis.document.cookie      = '';
   globalThis.document.implementation = {createHTMLDocument: () => globalThis.document};
-  globalThis.document.documentElement.style = {};
+  // window === defaultView is the canonical relationship; libraries
+  // walk it via `node.ownerDocument.defaultView` to find the global.
+  globalThis.document.defaultView = globalThis;
 
   // window === globalThis is the universal "this is a browser-ish env"
   // signal. Plus a handful of shims used during library boot.

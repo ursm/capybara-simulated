@@ -373,15 +373,7 @@ module Capybara
         end
 
         def evaluate_script(code, args = [])
-          @pending_script = [code, args.map { |a| marshal_script_arg(a) }]
-          js.eval('__evalScriptViaMailbox()')
-        end
-
-        # Drained by JS via __pullScriptCall — the source is a fixed literal,
-        # so QuickJS doesn't have to reparse a JSON-laced expression per call.
-        def consume_pending_script
-          out, @pending_script = @pending_script, nil
-          out
+          js.call('__evalScript', code, args.map { |a| marshal_script_arg(a) })
         end
 
         def marshal_script_arg(arg)
@@ -401,15 +393,10 @@ module Capybara
         def dispatch_event(handle, type, bubbles: true, cancelable: true)
           return true unless @js && handle
           return true unless @listened_types.include?(type) || @mutation_recording
-          @pending_dispatch = [handle, type.to_s, bubbles, cancelable]
-          result = js.eval('__dispatchViaMailbox()')
+          result = js.call('__dispatchFromRuby', handle, type.to_s,
+                           {bubbles: bubbles, cancelable: cancelable})
           settle
           result
-        end
-
-        def consume_pending_dispatch
-          out, @pending_dispatch = @pending_dispatch, nil
-          out
         end
 
         # Push a buffered MutationRecord. No-op when no observer is active —
@@ -429,14 +416,9 @@ module Capybara
           10.times do
             js.drain_timers if @timers_active
             break if @mutations.empty?
-            @pending_mutations, @mutations = @mutations, []
-            js.eval('__deliverMutationsViaMailbox()')
+            records, @mutations = @mutations, []
+            js.call('__deliverMutations', records)
           end
-        end
-
-        def consume_pending_mutations
-          out, @pending_mutations = @pending_mutations, nil
-          out
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
@@ -546,6 +528,26 @@ module Capybara
             @handles.track(@document.create_element(args[0].to_s))
           when 'createTextNode'
             @handles.track(@document.create_text_node(args[0].to_s))
+          when 'createComment'
+            @handles.track(Nokogiri::XML::Comment.new(@document, args[0].to_s))
+          when 'createDocumentFragment'
+            @handles.track(Nokogiri::XML::DocumentFragment.new(@document))
+          when 'getElementsByTagName'
+            tag = args[0].to_s.downcase
+            return @document.css('*').map { |n| @handles.track(n) } if tag == '*'
+            (node.respond_to?(:css) ? node.css(tag) : []).map { |n| @handles.track(n) }
+          when 'getElementsByClassName'
+            cls = args[0].to_s
+            (node.respond_to?(:css) ? node.css(".#{cls.split.first}") : []).map { |n| @handles.track(n) }
+          when 'getElementsByName'
+            @document.xpath('.//*[@name=$n]', nil, n: args[0].to_s).map { |n| @handles.track(n) }
+          when 'cloneNode'
+            deep = !!args[0]
+            cloned = node.dup(deep ? 1 : 0)
+            @handles.track(cloned)
+          when 'compareDocumentPosition'
+            other = lookup_node(args[0])
+            compare_positions(node, other)
           else
             warn "[capybara-simulated/v2] unsupported dom op: #{op}" if ENV['CSIM_V2_DEBUG']
             nil
@@ -615,6 +617,10 @@ module Capybara
             js.reset_page
             reset_per_page_state
             js.run_scripts(@document) { |src| fetch_resource(resolve(src)) }
+            # Fire DOMContentLoaded + load so libraries that queue work
+            # behind those events (jQuery's $(fn) ready queue, Stimulus's
+            # connectedCallback wiring) actually run.
+            fire_lifecycle_events
             settle
           elsif @js
             @js.reset_page
@@ -674,6 +680,16 @@ module Capybara
           warn "[capybara-simulated/v2] script src #{url} returned #{status}" if ENV['CSIM_V2_DEBUG']
           body_iter.close if body_iter.respond_to?(:close)
           nil
+        end
+
+        def fire_lifecycle_events
+          return unless @js
+          # readyState transitions: loading → interactive (just before
+          # DOMContentLoaded) → complete (after window load).
+          js.call('__setReadyState', 'interactive')
+          js.call('__fireLifecycle', 'DOMContentLoaded')
+          js.call('__setReadyState', 'complete')
+          js.call('__fireLifecycle', 'load')
         end
 
         def cookie_header_value
@@ -855,6 +871,28 @@ module Capybara
             return @document.at_xpath('.//*[@id=$id]', nil, id: target_id.to_s)
           end
           label.css('input,select,textarea,button').first
+        end
+
+        # DOM compareDocumentPosition bitmask, restricted to the cases
+        # libraries actually branch on (DISCONNECTED / FOLLOWING / PRECEDING
+        # / CONTAINS / CONTAINED_BY).
+        DOC_POS_DISCONNECTED = 1
+        DOC_POS_PRECEDING    = 2
+        DOC_POS_FOLLOWING    = 4
+        DOC_POS_CONTAINS     = 8
+        DOC_POS_CONTAINED_BY = 16
+
+        def compare_positions(a, b)
+          return DOC_POS_DISCONNECTED if a.nil? || b.nil? || a.document != b.document
+          return 0 if a == b
+          return DOC_POS_CONTAINS     if b.ancestors.include?(a)
+          return DOC_POS_CONTAINED_BY if a.ancestors.include?(b)
+          # Linear walk in document order: whichever appears first PRECEDES.
+          a.document.traverse do |n|
+            return DOC_POS_FOLLOWING if n == a
+            return DOC_POS_PRECEDING if n == b
+          end
+          DOC_POS_DISCONNECTED
         end
 
         def node_type_for(node)
