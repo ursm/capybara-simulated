@@ -96,6 +96,36 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
     expect(session.title).to eq('About')
   end
 
+  it 'runs inline <script> and reads DOM via the QuickJS bridge' do
+    js_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <h1 id="greeting">hello</h1>
+            <ul>
+              <li>One</li>
+              <li>Two</li>
+              <li>Three</li>
+            </ul>
+            <input id="name" value="alice">
+            <script>
+              globalThis.__title = document.querySelector('#greeting').textContent;
+              globalThis.__items = document.querySelectorAll('li').map(li => li.textContent);
+              globalThis.__name  = document.querySelector('#name').value;
+              globalThis.__matches = document.querySelector('#name').matches('input#name');
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v2, js_app)
+    s.visit '/'
+    expect(s.evaluate_script('globalThis.__title')).to eq('hello')
+    expect(s.evaluate_script('globalThis.__items')).to eq(%w[One Two Three])
+    expect(s.evaluate_script('globalThis.__name')).to eq('alice')
+    expect(s.evaluate_script('globalThis.__matches')).to be true
+  end
+
   it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
     session.visit '/'
     session.fill_in 'Name', with: 'Daisy'

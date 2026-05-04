@@ -1,6 +1,7 @@
 require 'nokogiri'
 require 'rack/mock'
 require_relative 'handle_table'
+require_relative 'js_runtime'
 
 module Capybara
   module Simulated
@@ -21,6 +22,11 @@ module Capybara
           @document     = Nokogiri::HTML5('<!doctype html><html><body></body></html>')
           @handles      = HandleTable.new(@document)
           @cookies      = []
+          @js           = nil  # lazy — only spin up QuickJS on first script
+        end
+
+        def js
+          @js ||= JsRuntime.new(self)
         end
 
         def visit(url)
@@ -192,6 +198,65 @@ module Capybara
           form ? submit(form, nil) : false
         end
 
+        def evaluate_script(code)
+          js.eval(code)
+        end
+
+        # Single dispatch entry called from JS via `__dom(handle, op, args)`.
+        # Read-only ops in Phase 3a — writes / events arrive in 3b/3c.
+        def dom_op(handle, op, args)
+          node = lookup_node(handle) || @document
+          case op
+          when 'querySelector'
+            @handles.track(node.respond_to?(:at_css) ? node.at_css(args[0]) : nil)
+          when 'querySelectorAll'
+            (node.respond_to?(:css) ? node.css(args[0]) : []).map { |n| @handles.track(n) }
+          when 'getElementById'
+            @handles.track(@document.at_css("##{css_escape(args[0])}"))
+          when 'closest'
+            cur = node
+            while cur && cur.element?
+              return @handles.track(cur) if cur.matches?(args[0])
+              cur = cur.parent
+            end
+            nil
+          when 'matches'
+            node.element? && node.matches?(args[0])
+          when 'contains'
+            other = lookup_node(args[0])
+            other && (node == other || other.ancestors.include?(node))
+          when 'parentNode', 'parentElement'
+            parent = node.respond_to?(:parent) ? node.parent : nil
+            parent.respond_to?(:element?) ? @handles.track(parent) : nil
+          when 'firstChild'      then @handles.track(node.children.first)
+          when 'lastChild'       then @handles.track(node.children.last)
+          when 'nextSibling'     then @handles.track(node.next)
+          when 'previousSibling' then @handles.track(node.previous)
+          when 'children'        then node.element_children.map { |n| @handles.track(n) }
+          when 'childNodes'      then node.children.map { |n| @handles.track(n) }
+          when 'nodeType'        then node_type_for(node)
+          when 'nodeName'        then (node.name || '').upcase
+          when 'tagName'         then (node.element? ? node.name.upcase : '')
+          when 'textContent'     then node.text
+          when 'innerText'       then visible_text(handle)
+          when 'innerHTML'       then node.respond_to?(:inner_html) ? node.inner_html : node.to_html
+          when 'outerHTML'       then node.to_html
+          when 'getAttribute'    then node.respond_to?(:[]) ? node[args[0]] : nil
+          when 'hasAttribute'    then node.respond_to?(:[]) ? !node[args[0]].nil? : false
+          when 'attributes'
+            (node.respond_to?(:attributes) ? node.attributes : {})
+              .map { |k, v| [k, v.respond_to?(:value) ? v.value : v.to_s] }
+          when 'value'           then value(handle)
+          when 'checked'         then checked?(handle)
+          when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
+          when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
+          when 'form'            then @handles.track(enclosing_form(node))
+          else
+            warn "[capybara-simulated/v2] unsupported dom op: #{op}" if ENV['CSIM_V2_DEBUG']
+            nil
+          end
+        end
+
         # ── helpers ────────────────────────────────────────────────
 
         def lookup_node(handle)
@@ -224,6 +289,9 @@ module Capybara
           @current_url = url
           @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
+          # Run inline `<script>` tags only when the page actually has any —
+          # avoids paying QuickJS cold-start on rack_test-style flows.
+          js.run_inline_scripts(@document) if @document.css('script').any? { |s| !s['src'] }
           status
         end
 
@@ -316,6 +384,19 @@ module Capybara
           end
           # Implicit label: first descendant input/select/textarea/button.
           label.css('input,select,textarea,button').first
+        end
+
+        def css_escape(ident)
+          ident.to_s.gsub(/(["\\])/, '\\\\\\1')
+        end
+
+        def node_type_for(node)
+          return 9  if node.is_a?(Nokogiri::XML::Document)
+          return 1  if node.element?
+          return 3  if node.is_a?(Nokogiri::XML::Text)
+          return 8  if node.is_a?(Nokogiri::XML::Comment)
+          return 11 if node.is_a?(Nokogiri::XML::DocumentFragment)
+          0
         end
 
         def style_hidden?(node)

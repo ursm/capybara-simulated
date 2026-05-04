@@ -31,6 +31,9 @@ module Capybara
           browser.find_xpath(query).map { |id| Node.new(self, id) }
         end
 
+        def evaluate_script(script, *_args) = browser.evaluate_script(script)
+        def execute_script(script, *_args)  = browser.evaluate_script(script)
+
         def find_css(query, **_)
           browser.find_css(query).map { |id| Node.new(self, id) }
         end
