@@ -13,6 +13,8 @@ module Capybara
       DEFAULT_HOST    = 'http://www.example.com'
       BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
 
+      Request = Data.define(:method, :url, :body, :content_type)
+
       # Owns the Nokogiri document, the in-process Rack client, and the
       # lazy QuickJS runtime. Capybara DSL queries hit Nokogiri directly;
       # user JS (when present) sees a thin DOM proxy backed by `dom_op`.
@@ -58,8 +60,7 @@ module Capybara
 
         def refresh
           return unless @last_request
-          method, url, body, content_type = @last_request
-          navigate(method, url, body: body, content_type: content_type, replay: true)
+          replay(@last_request)
         end
 
         def reset!
@@ -498,15 +499,19 @@ module Capybara
 
         private
 
-        def navigate(method, url, body: nil, content_type: nil, replay: false)
-          @last_request = [method, url, body, content_type] unless replay
-          uri  = URI.parse(url)
-          path = uri.request_uri
-          opts = {method: method.to_s.upcase}
-          opts[:input] = body if body
-          opts['CONTENT_TYPE'] = content_type if content_type
+        def navigate(method, url, body: nil, content_type: nil)
+          req = Request.new(method: method, url: url, body: body, content_type: content_type)
+          @last_request = req
+          replay(req)
+        end
+
+        def replay(req)
+          uri  = URI.parse(req.url)
+          opts = {method: req.method.to_s.upcase}
+          opts[:input]         = req.body if req.body
+          opts['CONTENT_TYPE'] = req.content_type if req.content_type
           opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
-          env  = Rack::MockRequest.env_for(path, **opts)
+          env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
           status, headers, body_iter = @app.call(env)
           response_body = +''
           if body_iter.respond_to?(:each)
@@ -519,13 +524,13 @@ module Capybara
           ingest_set_cookie(headers)
 
           if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
-            @current_url = resolve(loc, base: url)
-            return navigate(:get, @current_url)
+            @current_url = resolve(loc, base: req.url)
+            return replay(Request.new(method: :get, url: @current_url, body: nil, content_type: nil))
           end
 
           @status_code      = status
           @response_headers = headers
-          @current_url      = url
+          @current_url      = req.url
           # Handle integers get reused across documents, so the old file-pick
           # map would silently re-attach to whatever now lives at those ints.
           @file_picks.clear
