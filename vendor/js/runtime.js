@@ -5,7 +5,7 @@
 
 (function () {
   const {Window, URL: WhatwgURL, URLSearchParams: WhatwgURLSearchParams,
-         evaluateXPathToNodes} = globalThis.__csim_bundle;
+         installXPath} = globalThis.__csim_bundle;
   if (!globalThis.URL) globalThis.URL = WhatwgURL;
   if (!globalThis.URLSearchParams) globalThis.URLSearchParams = WhatwgURLSearchParams;
 
@@ -170,6 +170,7 @@
     installValidationMessages(win);
     installMutationObserverPin(win);
     installAttrNodeValue(win);
+    installXPath(win);
   }
 
   // happy-dom 20's `Attr` class implements `value` / `textContent` / `name`
@@ -963,7 +964,6 @@
       patchWindowGlobals(win);
       installFetchShim(win);
       installCustomElementUpgrade(win);
-      installDocumentEvaluate(win.document);
       installHistoryTracking(win);
       currentWindow = win;
       currentDocument = win.document;
@@ -1257,11 +1257,14 @@
       const fast = tryFastXPath(xpath, root);
       if (fast) return fast.map(track);
       try {
-        const nodes = evaluateXPathToNodes(xpath, root, xpathDomFacade, null, {
-          // happy-dom places elements in the XHTML namespace.
-          namespaceResolver: () => 'http://www.w3.org/1999/xhtml'
-        });
-        return nodes.map(track);
+        const result = currentDocument.evaluate(
+          xpath, root, null,
+          /* UNORDERED_NODE_ITERATOR_TYPE */ 4, null
+        );
+        const ids = [];
+        let n;
+        while ((n = result.iterateNext())) ids.push(track(n));
+        return ids;
       } catch (e) {
         return findViaXPathFallback(xpath, root);
       }
@@ -1954,111 +1957,6 @@
     wrap('pushState');
     wrap('replaceState');
   }
-
-  // happy-dom does not implement `document.evaluate`. Capybara internals
-  // and user scripts both reach for it occasionally. Polyfill it on top of
-  // fontoxpath so callers see W3C XPathResult semantics.
-  function installDocumentEvaluate(doc) {
-    if (typeof doc.evaluate === 'function') return;
-    const ANY_TYPE = 0;
-    const NUMBER_TYPE = 1;
-    const STRING_TYPE = 2;
-    const BOOLEAN_TYPE = 3;
-    const UNORDERED_NODE_ITERATOR_TYPE = 4;
-    const ORDERED_NODE_ITERATOR_TYPE = 5;
-    const UNORDERED_NODE_SNAPSHOT_TYPE = 6;
-    const ORDERED_NODE_SNAPSHOT_TYPE = 7;
-    const ANY_UNORDERED_NODE_TYPE = 8;
-    const FIRST_ORDERED_NODE_TYPE = 9;
-
-    function makeResult(type, items) {
-      return {
-        resultType: type,
-        snapshotLength: items.length,
-        snapshotItem: (i) => items[i] || null,
-        get singleNodeValue() { return items[0] || null; },
-        iterateNext: (() => { let i = 0; return () => items[i++] || null; })()
-      };
-    }
-
-    doc.evaluate = function (xpath, contextNode, _resolver, type, _result) {
-      const root = contextNode || doc.documentElement || doc;
-      let nodes = [];
-      try {
-        nodes = evaluateXPathToNodes(xpath, root, xpathDomFacade, null, {
-          namespaceResolver: () => 'http://www.w3.org/1999/xhtml'
-        });
-      } catch (_) {
-        nodes = [];
-      }
-      switch (type) {
-        case FIRST_ORDERED_NODE_TYPE:
-        case ANY_UNORDERED_NODE_TYPE:
-          return makeResult(type, nodes.slice(0, 1));
-        case NUMBER_TYPE:
-        case STRING_TYPE:
-        case BOOLEAN_TYPE:
-          // We do not support primitive XPath results; callers fall back.
-          return makeResult(type, []);
-        default:
-          return makeResult(type || ORDERED_NODE_SNAPSHOT_TYPE, nodes);
-      }
-    };
-  }
-
-  // Custom DOM facade for fontoxpath that uses childNodes-based traversal
-  // so happy-dom quirks around sibling links don't break root-anchored
-  // queries. Mirrors the helper we built for linkedom.
-  // fontoxpath calls into this facade tens of thousands of times per
-  // traversal, so each method needs to delegate to happy-dom's native
-  // pointers rather than reconstructing them. Earlier revisions of
-  // getNextSibling / getPreviousSibling rebuilt childNodes via
-  // Array.from(parent.childNodes) and then indexOf'd the node — quadratic
-  // in tree size, and the dominant cost on any non-trivial page.
-  const xpathDomFacade = {
-    getAllAttributes(node) {
-      if (!node || node.nodeType !== 1 || !node.attributes) return [];
-      return Array.from(node.attributes);
-    },
-    getAttribute(node, name) {
-      return node && node.getAttribute ? node.getAttribute(name) : null;
-    },
-    getChildNodes(node) {
-      if (!node) return [];
-      if (node.childNodes) return Array.from(node.childNodes);
-      if (node.nodeType === 9 && node.documentElement) return [node.documentElement];
-      return [];
-    },
-    getData(node) {
-      if (!node) return '';
-      if (node.nodeType === 2) return node.value || '';
-      return node.data || '';
-    },
-    // happy-dom 20 has a quirk on `<template>`: `template.childNodes` is
-    // empty (the parsed content lives in `template.content`) but
-    // `template.firstChild` / `template.lastChild` still return the first
-    // text node of `template.content`. Walking into that ghost child
-    // makes fontoxpath traverse content as if it were a regular descendant,
-    // which scrambles every predicate downstream. Verify against
-    // childNodes.length before trusting firstChild / lastChild.
-    getFirstChild(node) {
-      const fc = node?.firstChild ?? null;
-      if (!fc) return null;
-      const cs = node.childNodes;
-      if (cs && cs.length === 0) return null;
-      return fc;
-    },
-    getLastChild(node) {
-      const lc = node?.lastChild ?? null;
-      if (!lc) return null;
-      const cs = node.childNodes;
-      if (cs && cs.length === 0) return null;
-      return lc;
-    },
-    getNextSibling(node)     { return node?.nextSibling     ?? null; },
-    getPreviousSibling(node) { return node?.previousSibling ?? null; },
-    getParentNode(node)      { return node?.parentNode      ?? null; }
-  };
 
   // Capybara's xpath gem produces a small set of stable XPath shapes for
   // its built-in selectors (link, button, link_or_button, select, option,
