@@ -185,8 +185,24 @@ module Capybara
             end
           when 'textarea'
             node.content = value.to_s
+          else
+            # contenteditable: anything else with `contenteditable` (or
+            # whose ancestor has it) accepts text via Node#set the same way
+            # a real WYSIWYG would.
+            node.content = value.to_s if contenteditable?(node)
           end
           true
+        end
+
+        def contenteditable?(node)
+          cur = node
+          while cur.respond_to?(:[])
+            ce = cur['contenteditable']
+            return true  if ce && ce != 'false'
+            return false if ce == 'false'
+            cur = cur.respond_to?(:parent) ? cur.parent : nil
+          end
+          false
         end
 
         def file_picks_for(handle)
