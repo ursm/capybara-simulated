@@ -1,6 +1,7 @@
 require 'json'
 require 'nokogiri'
 require 'rack/mock'
+require 'securerandom'
 require 'set'
 require_relative 'handle_table'
 require_relative 'js_runtime'
@@ -170,6 +171,12 @@ module Capybara
                   peer.delete('checked') unless peer == node
                 end
               end
+            when 'file'
+              # File picks travel as a private attribute on the node — the
+              # form serializer reads it back to build multipart/form-data.
+              # Newline-separated for the rare multiple-file case.
+              paths = Array(value).map(&:to_s)
+              node[FILE_PATHS_ATTR] = paths.join("\n")
             else
               node['value'] = value.to_s
             end
@@ -178,6 +185,8 @@ module Capybara
           end
           true
         end
+
+        FILE_PATHS_ATTR = 'data-csim-file-paths'.freeze
 
         def select_option(handle)
           opt = lookup_node(handle)
@@ -581,18 +590,80 @@ module Capybara
           return true unless dispatch_event(form_handle, 'submit')
           method = (form['method'] || 'get').downcase
           action = resolve(form['action'].to_s.empty? ? @current_url.to_s : form['action'])
-          fields = serialize_form(form, submitter)
-          if method == 'post'
-            body = URI.encode_www_form(fields)
+          if method == 'post' && multipart_form?(form)
+            content_type, body = build_multipart(form, submitter)
+            navigate(:post, action, body: body, content_type: content_type)
+          elsif method == 'post'
+            body = URI.encode_www_form(serialize_form(form, submitter))
             navigate(:post, action,
                      body: body,
                      content_type: 'application/x-www-form-urlencoded')
           else
             uri = URI.parse(action)
-            uri.query = URI.encode_www_form(fields)
+            uri.query = URI.encode_www_form(serialize_form(form, submitter))
             navigate(:get, uri.to_s)
           end
           true
+        end
+
+        def multipart_form?(form)
+          form['enctype'].to_s.downcase == 'multipart/form-data'
+        end
+
+        def build_multipart(form, submitter)
+          boundary = "csim-#{SecureRandom.hex(8)}"
+          body = String.new.force_encoding(Encoding::ASCII_8BIT)
+          form.css('input, textarea, select, button').each do |field|
+            name = field['name']
+            next if name.nil? || name.empty? || field['disabled']
+            type = (field['type'] || (field.name == 'button' ? 'submit' : nil) || field.name).downcase
+            case type
+            when 'submit', 'image', 'button', 'reset'
+              next unless field == submitter
+              append_multipart_text(body, boundary, name, field['value'].to_s)
+            when 'checkbox', 'radio'
+              append_multipart_text(body, boundary, name, field['value'] || 'on') if field['checked']
+            when 'select'
+              field.css('option').each do |opt|
+                append_multipart_text(body, boundary, name, opt['value'] || opt.text) if opt['selected']
+              end
+            when 'textarea'
+              append_multipart_text(body, boundary, name, field.text)
+            when 'file'
+              paths = field[FILE_PATHS_ATTR].to_s.split("\n").reject(&:empty?)
+              if paths.empty?
+                append_multipart_file(body, boundary, name, nil)
+              else
+                paths.each { |p| append_multipart_file(body, boundary, name, p) }
+              end
+            else
+              append_multipart_text(body, boundary, name, field['value'].to_s)
+            end
+          end
+          body << "--#{boundary}--\r\n"
+          ["multipart/form-data; boundary=#{boundary}", body]
+        end
+
+        def append_multipart_text(body, boundary, name, value)
+          body << "--#{boundary}\r\n"
+          body << %[Content-Disposition: form-data; name="#{name}"\r\n\r\n]
+          body << value.to_s.b
+          body << "\r\n"
+        end
+
+        def append_multipart_file(body, boundary, name, path)
+          body << "--#{boundary}\r\n"
+          if path.nil? || path.empty?
+            body << %[Content-Disposition: form-data; name="#{name}"; filename=""\r\n]
+            body << "Content-Type: application/octet-stream\r\n\r\n\r\n"
+            return
+          end
+          filename = File.basename(path)
+          content  = File.binread(path)
+          body << %[Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\r\n]
+          body << "Content-Type: #{file_content_type(path)}\r\n\r\n"
+          body << content
+          body << "\r\n"
         end
 
         def serialize_form(form, submitter)
@@ -616,12 +687,35 @@ module Capybara
             when 'textarea'
               out << [name, field.text]
             when 'file'
-              # Phase-1 stub — multipart upload comes later.
+              # Non-multipart forms submit only the basename of any picked
+              # file (browsers can't actually upload through urlencoded).
+              paths = field[FILE_PATHS_ATTR].to_s.split("\n").reject(&:empty?)
+              out << [name, paths.empty? ? '' : File.basename(paths.first)]
             else
               out << [name, field['value'].to_s]
             end
           end
           out
+        end
+
+        def file_content_type(path)
+          ext = File.extname(path).downcase
+          {
+            '.txt'  => 'text/plain',
+            '.html' => 'text/html',
+            '.htm'  => 'text/html',
+            '.css'  => 'text/css',
+            '.js'   => 'application/javascript',
+            '.json' => 'application/json',
+            '.xml'  => 'application/xml',
+            '.pdf'  => 'application/pdf',
+            '.png'  => 'image/png',
+            '.jpg'  => 'image/jpeg',
+            '.jpeg' => 'image/jpeg',
+            '.gif'  => 'image/gif',
+            '.svg'  => 'image/svg+xml',
+            '.csv'  => 'text/csv'
+          }.fetch(ext, 'application/octet-stream')
         end
 
         def enclosing_form(node)
