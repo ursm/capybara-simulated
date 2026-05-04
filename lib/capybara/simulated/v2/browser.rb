@@ -55,7 +55,7 @@ module Capybara
         end
 
         def visit(url)
-          navigate(:get, resolve(url))
+          navigate(:get, resolve_against_current(url))
         end
 
         def refresh
@@ -528,6 +528,7 @@ module Capybara
           opts[:input]         = req.body if req.body
           opts['CONTENT_TYPE'] = req.content_type if req.content_type
           opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
+          opts['HTTP_REFERER'] = @current_url if @current_url
           env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
           status, headers, body_iter = @app.call(env)
           response_body = +''
@@ -541,8 +542,11 @@ module Capybara
           ingest_set_cookie(headers)
 
           if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
-            @current_url = resolve(loc, base: req.url)
-            return replay(Request.new(method: :get, url: @current_url, body: nil, content_type: nil))
+            # Don't bump @current_url here — keep the pre-redirect URL so
+            # the recursive replay sends the original page as Referer
+            # (matches Capybara's #visit-with-redirect contract).
+            return replay(Request.new(method: :get, url: resolve(loc, base: req.url),
+                                       body: nil, content_type: nil))
           end
 
           @status_code      = status
@@ -569,9 +573,28 @@ module Capybara
           status
         end
 
-        def resolve(url, base: @current_url)
+        # In-page resolution — link href, form action, <script src>. Honours
+        # `<base href="...">` per the HTML spec.
+        def resolve(url, base: nil)
           return url if url =~ %r{\A[a-z]+://}i
-          URI.join(base || DEFAULT_HOST, url).to_s
+          URI.join(base || base_for_relative_urls || DEFAULT_HOST, url).to_s
+        end
+
+        # Top-level navigation (visit). A bare relative path is treated as
+        # path-from-root of the current host — Capybara's `#visit` contract
+        # is "go here under the test app", not browser `location.href` URI
+        # joining (which would carry over the previous page's directory).
+        def resolve_against_current(url)
+          return url if url =~ %r{\A[a-z]+://}i
+          current = URI.parse(@current_url || DEFAULT_HOST)
+          rooted  = url.start_with?('/') ? url : "/#{url}"
+          URI.join("#{current.scheme}://#{current.host}", rooted).to_s
+        end
+
+        def base_for_relative_urls
+          base_href = @document&.at_xpath('.//base/@href')&.value
+          return @current_url if base_href.nil? || base_href.empty?
+          base_href.match?(%r{\A[a-z]+://}i) ? base_href : URI.join(@current_url || DEFAULT_HOST, base_href).to_s
         end
 
         # Fetch a static resource through the same Rack app (e.g. an
