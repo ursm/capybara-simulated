@@ -180,8 +180,10 @@ module Capybara
               # handle — keeps them off the live DOM (where they'd leak into
               # innerHTML / be visible to user JS).
               @file_picks[handle] = Array(value).map(&:to_s)
+            when 'range', 'number'
+              node['value'] = clamp_numeric_input(node, value).to_s
             else
-              node['value'] = value.to_s
+              node['value'] = apply_maxlength(node, value.to_s)
             end
           when 'textarea'
             node.content = value.to_s
@@ -207,6 +209,27 @@ module Capybara
 
         def file_picks_for(handle)
           @file_picks[handle] || []
+        end
+
+        # Without focus tracking we fall back to <body>, mirroring the spec:
+        # "if there is no focused element, return the body element".
+        def active_element_handle
+          body = @document.at_css('body')
+          body && @handles.track(body)
+        end
+
+        def apply_maxlength(node, str)
+          ml = Integer(node['maxlength']) rescue nil
+          ml && ml >= 0 ? str[0, ml] : str
+        end
+
+        def clamp_numeric_input(node, value)
+          n   = Float(value) rescue (return value)
+          min = Float(node['min']) rescue nil
+          max = Float(node['max']) rescue nil
+          n = min if min && n < min
+          n = max if max && n > max
+          n == n.to_i ? n.to_i : n
         end
 
         def select_option(handle)
@@ -285,7 +308,11 @@ module Capybara
           case node.name
           when 'a'
             href = node['href']
-            navigate(:get, resolve(href)) if href
+            return true if href.nil? || href.empty?
+            target = resolve(href)
+            # Pure-fragment / same-document anchor — browsers don't navigate.
+            return true if same_document_fragment?(target)
+            navigate(:get, target)
             true
           when 'button', 'input'
             click_form_control(node)
@@ -612,6 +639,14 @@ module Capybara
           current = URI.parse(@current_url || DEFAULT_HOST)
           rooted  = url.start_with?('/') ? url : "/#{url}"
           URI.join("#{current.scheme}://#{current.host}", rooted).to_s
+        end
+
+        def same_document_fragment?(target)
+          return true if target.start_with?('#')
+          return false if @current_url.nil?
+          tgt = URI.parse(target) rescue (return false)
+          cur = URI.parse(@current_url) rescue (return false)
+          tgt.scheme == cur.scheme && tgt.host == cur.host && tgt.path == cur.path && !tgt.fragment.nil?
         end
 
         def base_for_relative_urls

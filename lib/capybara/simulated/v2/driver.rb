@@ -29,6 +29,11 @@ module Capybara
         def status_code      = browser.status_code
         def response_headers = browser.response_headers
 
+        def active_element
+          handle = browser.active_element_handle
+          handle ? Node.new(self, handle) : nil
+        end
+
         def find_xpath(query, **_)
           browser.find_xpath(query).map { |id| Node.new(self, id) }
         end
