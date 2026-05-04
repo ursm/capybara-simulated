@@ -11,6 +11,19 @@
 
   const handles = new Map();
   let nextHandleId = 0;
+
+  // Capybara's `have_text` matchers and several internal checks call into
+  // `visibleText` repeatedly against the same handle while polling. The
+  // text-collection walks happy-dom's textContent / styles each call, so
+  // re-running it 1000+ times per spec adds up. Cache by handle and drop
+  // the whole cache the moment any mutating runtime method runs (or
+  // `drainTimers` advances the virtual clock — Stimulus / Turbo timers
+  // may have rewritten the page). The cache is intentionally narrow:
+  // we measured a broader MutationObserver-driven cache as a wash, since
+  // the dispatch overhead ate the cache wins; pinning a bare `Map.clear()`
+  // to known-mutating call sites is much cheaper.
+  const visibleTextCache = new Map();
+  function clearReadCache() { if (visibleTextCache.size) visibleTextCache.clear(); }
   let currentWindow = null;
   let currentDocument = null;
   let activeHandleId = null;
@@ -47,6 +60,7 @@
       catch (_) {}
     }
     handles.clear();
+    visibleTextCache.clear();
     nextHandleId = 0;
     activeHandleId = null;
     modalQueue.length = 0;
@@ -890,8 +904,9 @@
 
   function drainTimers(ms) {
     if (typeof globalThis.__csim_runTimers === 'function') {
-      try { globalThis.__csim_runTimers(ms); } catch (_) {}
+      try { return !!globalThis.__csim_runTimers(ms); } catch (_) {}
     }
+    return false;
   }
 
   // happy-dom has no layout engine, so getBoundingClientRect always returns
@@ -1308,10 +1323,13 @@
     },
     allText(id)     { return String(lookup(id).textContent || ''); },
     visibleText(id) {
+      const cached = visibleTextCache.get(id);
+      if (cached !== undefined) return cached;
       const el = lookup(id);
       // If any ancestor of `el` is hidden, the element renders nothing.
-      if (!visibleAncestorChainOk(el)) return '';
-      return String(visibleTextOf(el));
+      const txt = visibleAncestorChainOk(el) ? String(visibleTextOf(el)) : '';
+      visibleTextCache.set(id, txt);
+      return txt;
     },
     path(id)        { return String(buildXPath(lookup(id))); },
     rect(id) {
@@ -1350,6 +1368,7 @@
     },
 
     setValue(id, value) {
+      clearReadCache();
       const el = lookup(id);
       const tag = (el.tagName || '').toUpperCase();
       const type = (el.type || (el.getAttribute && el.getAttribute('type')) || '').toLowerCase();
@@ -1457,6 +1476,7 @@
     },
 
     selectOption(id) {
+      clearReadCache();
       const opt = lookup(id);
       const select = opt.parentNode && (opt.parentNode.tagName === 'SELECT'
         ? opt.parentNode
@@ -1475,6 +1495,7 @@
       return true;
     },
     unselectOption(id) {
+      clearReadCache();
       const opt = lookup(id);
       const select = opt.closest && opt.closest('select');
       if (!select || !isMultipleSelect(select)) return false;
@@ -1521,8 +1542,8 @@
                           boolPropOrAttr(lookup(id), 'readonly'); },
     multiple(id) { return boolPropOrAttr(lookup(id), 'multiple'); },
 
-    focus(id)  { activeHandleId = id; lookup(id).dispatchEvent(makeEvent('focus', {bubbles: false})); return true; },
-    blur(id)   { lookup(id).dispatchEvent(makeEvent('blur', {bubbles: false})); if (activeHandleId === id) activeHandleId = null; return true; },
+    focus(id)  { clearReadCache(); activeHandleId = id; lookup(id).dispatchEvent(makeEvent('focus', {bubbles: false})); return true; },
+    blur(id)   { clearReadCache(); lookup(id).dispatchEvent(makeEvent('blur', {bubbles: false})); if (activeHandleId === id) activeHandleId = null; return true; },
     activeElement() {
       // Honour the JS-side `document.activeElement` first — happy-dom
       // updates it when scripts call `focus()` directly, which the
@@ -1534,14 +1555,22 @@
     },
 
     hover(id) {
+      clearReadCache();
       const el = lookup(id);
       el.dispatchEvent(makeEvent('mouseover'));
       el.dispatchEvent(makeEvent('mouseenter', {bubbles: false}));
       return true;
     },
-    trigger(id, name) { lookup(id).dispatchEvent(makeEvent(name)); return true; },
+    trigger(id, name) { clearReadCache(); lookup(id).dispatchEvent(makeEvent(name)); return true; },
 
-    drainTimers(ms) { drainTimers(ms); return true; },
+    drainTimers(ms) {
+      // Only clear the read cache if a timer actually fired — most
+      // `advance_virtual_clock` calls from Ruby have nothing to do but
+      // tick the wall clock. Without this the visibleText cache is
+      // invalidated on every cross-bridge call and never hits.
+      if (drainTimers(ms)) clearReadCache();
+      return true;
+    },
 
     consumeHistoryPushed() {
       const v = _historyPushed;
@@ -1564,6 +1593,7 @@
     },
 
     click(id, button, modifiers, skipDown) {
+      clearReadCache();
       const el = lookup(id);
       activeHandleId = id;
       const m = Object.assign({button: button || 0}, modifiers || {});
@@ -1710,6 +1740,7 @@
     },
 
     doubleClick(id, modifiers) {
+      clearReadCache();
       const el = lookup(id);
       const m = Object.assign({button: 0}, modifiers || {});
       applyClickOffset(el, m);
@@ -1723,6 +1754,7 @@
       return {action: 'none'};
     },
     rightClick(id, modifiers, skipDown) {
+      clearReadCache();
       const el = lookup(id);
       const m = Object.assign({button: 2}, modifiers || {});
       applyClickOffset(el, m);
@@ -1738,6 +1770,7 @@
     // exposes `DragEvent` as a plain `Event`, so we paste `dataTransfer`
     // onto each event before dispatch.
     drop(id, items) {
+      clearReadCache();
       const el = lookup(id);
       const win = currentWindow;
       const dt = new win.DataTransfer();
@@ -1764,9 +1797,10 @@
       return true;
     },
 
-    submit(id) { return submitDescriptor(lookup(id), null); },
+    submit(id) { clearReadCache(); return submitDescriptor(lookup(id), null); },
 
     sendKeys(id, keys) {
+      clearReadCache();
       const el = lookup(id);
       const editable = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
       let formToSubmit = null;

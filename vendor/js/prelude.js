@@ -131,6 +131,7 @@
   globalThis.__csim_runTimers = function (ms) {
     const advance = (typeof ms === 'number') ? Math.max(0, ms) : Infinity;
     _virtualClock += advance;
+    let everFired = false;
     while (true) {
       let fired = false;
       const due = [];
@@ -141,10 +142,13 @@
         _timers.delete(id);
         try { t.fn(); } catch (_) {}
         fired = true;
+        everFired = true;
       }
       if (!fired) break;
     }
+    return everFired;
   };
+  globalThis.__csim_pendingTimerCount = function () { return _timers.size; };
   globalThis.__csim_clearTimers = function () {
     _timers.clear();
     _virtualClock = 0;
