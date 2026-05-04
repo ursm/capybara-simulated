@@ -1,3 +1,4 @@
+require 'json'
 require 'nokogiri'
 require 'rack/mock'
 require_relative 'handle_table'
@@ -176,6 +177,9 @@ module Capybara
         def click(handle)
           node = lookup_node(handle)
           return false if node.nil?
+          # Fire 'click' before the default action — handlers may
+          # preventDefault() to suppress navigation / form submit.
+          return true unless dispatch_event(handle, 'click')
           case node.name
           when 'a'
             href = node['href']
@@ -198,8 +202,28 @@ module Capybara
           form ? submit(form, nil) : false
         end
 
+        # Fire input + change after a user-driven value change. Mirrors what
+        # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
+        # via `setValue` dom_op skip this — that path is the JS author's call.
+        def set_value_with_events(handle, value)
+          changed = set_value(handle, value)
+          return changed unless changed && @js
+          dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+          dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          changed
+        end
+
         def evaluate_script(code)
           js.eval(code)
+        end
+
+        # Fire a JS event at `handle`. Returns true unless a listener called
+        # `preventDefault()`. If JS hasn't been booted (no <script> on the
+        # page), there's nothing to prevent — short-circuit to true.
+        def dispatch_event(handle, type, bubbles: true, cancelable: true)
+          return true unless @js && handle
+          init = {bubbles: bubbles, cancelable: cancelable}
+          js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
@@ -362,6 +386,8 @@ module Capybara
         end
 
         def submit(form, submitter)
+          form_handle = @handles.track(form)
+          return true unless dispatch_event(form_handle, 'submit')
           method = (form['method'] || 'get').downcase
           action = resolve(form['action'].to_s.empty? ? @current_url.to_s : form['action'])
           fields = serialize_form(form, submitter)

@@ -176,6 +176,66 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
     expect(s.find('#rich .tag').text).to eq('hi')
   end
 
+  it 'dispatches click / submit / change events with bubbling and preventDefault' do
+    ev_app = Rack::Builder.new {
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><html><body>
+              <div id="log"></div>
+              <a id="go" href="/about">Go</a>
+              <a id="stay" href="/about">Stay</a>
+              <form id="f" action="/submit" method="get">
+                <input id="name" name="name" value="">
+                <button id="save" type="submit">Save</button>
+              </form>
+              <script>
+                const log = document.querySelector('#log');
+                function append(t) { log.textContent = (log.textContent + ' ' + t).trim(); }
+                document.body.addEventListener('click', () => append('body-click'));
+                document.querySelector('#go').addEventListener('click', () => append('go-click'));
+                document.querySelector('#stay').addEventListener('click', e => {
+                  e.preventDefault();
+                  append('stay-click');
+                });
+                document.querySelector('#name').addEventListener('input',  () => append('input'));
+                document.querySelector('#name').addEventListener('change', () => append('change'));
+                document.querySelector('#f').addEventListener('submit', e => {
+                  e.preventDefault();
+                  append('submit-prevented');
+                });
+              </script>
+            </body></html>
+          HTML
+        when '/about'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><html><head><title>About</title></head><body><h1>About</h1></body></html>
+          HTML
+        else
+          [404, {}, ['nope']]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v2, ev_app)
+
+    s.visit '/'
+    s.click_link 'Stay'
+    expect(s.current_path).to eq('/')
+    expect(s.find('#log').text).to eq('stay-click body-click')
+
+    s.fill_in 'name', with: 'alice'
+    expect(s.find('#log').text).to eq('stay-click body-click input change')
+
+    s.click_button 'Save'
+    expect(s.current_path).to eq('/')
+    expect(s.find('#log').text).to include('submit-prevented')
+
+    s.click_link 'Go'
+    expect(s.current_path).to eq('/about')
+    expect(s.title).to eq('About')
+  end
+
   it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
     session.visit '/'
     session.fill_in 'Name', with: 'Daisy'

@@ -22,7 +22,7 @@ module Capybara
         end
 
         def set(value, **_opts)
-          browser.set_value(handle_id, value)
+          browser.set_value_with_events(handle_id, value)
         end
 
         def select_option
