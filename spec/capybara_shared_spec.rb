@@ -58,7 +58,7 @@ RSpec.configure do |config|
 
   config.before(:each) do |example|
     skip 'needs elementFromPoint / real layout engine — out of scope' \
-      if DESCRIPTION_SKIPS.any? { example.full_description.start_with?(it) }
+      if DESCRIPTION_SKIPS.any? {|prefix| example.full_description.start_with?(prefix) }
   end
 
   # Bail out of any individual example that takes longer than this. happy-dom
