@@ -16,7 +16,7 @@ Gem::Specification.new do |spec|
     'rubygems_mfa_required' => 'true'
   }
 
-  spec.required_ruby_version = '>= 3.2'
+  spec.required_ruby_version = '>= 3.3'
 
   spec.files = Dir['lib/**/*.rb', 'vendor/js/*.js', 'vendor/js/*.mjs', 'README.md', 'LICENSE']
   spec.require_paths = ['lib']
