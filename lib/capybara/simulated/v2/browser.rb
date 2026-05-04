@@ -545,8 +545,15 @@ module Capybara
             # Don't bump @current_url here — keep the pre-redirect URL so
             # the recursive replay sends the original page as Referer
             # (matches Capybara's #visit-with-redirect contract).
-            return replay(Request.new(method: :get, url: resolve(loc, base: req.url),
-                                       body: nil, content_type: nil))
+            # 307/308 preserve the original method + body; 301/302/303 fall
+            # back to GET (browser convention).
+            preserve = status == 307 || status == 308
+            return replay(Request.new(
+              method:       preserve ? req.method : :get,
+              url:          resolve(loc, base: req.url),
+              body:         preserve ? req.body : nil,
+              content_type: preserve ? req.content_type : nil
+            ))
           end
 
           @status_code      = status
@@ -660,8 +667,12 @@ module Capybara
         def submit(form, submitter)
           form_handle = @handles.track(form)
           return true unless dispatch_event(form_handle, 'submit')
-          method = (form['method'] || 'get').downcase
-          action = resolve(form['action'].to_s.empty? ? @current_url.to_s : form['action'])
+          # `formaction` / `formmethod` on the submitter override the form's
+          # own action / method (HTML5).
+          method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
+          action_attr = (submitter && submitter['formaction']) || form['action']
+          method = method_attr.to_s.downcase
+          action = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
           if method == 'post' && multipart_form?(form)
             content_type, body = build_multipart(form, submitter)
             navigate(:post, action, body: body, content_type: content_type)
@@ -685,10 +696,26 @@ module Capybara
         # `[name, type, value, picks]` — `picks` is the array of paths for a
         # file input, otherwise nil. serialize_form / build_multipart consume
         # this single walk so the field-selection rules stay in one place.
+        # Walks fields in document order across descendants AND any field
+        # outside the form that opts in via `form="<id>"`.
         def each_form_field(form, submitter)
-          form.css('input, textarea, select, button').each do |field|
+          form_id = form['id']
+          xpath_parts = ['descendant::input', 'descendant::textarea',
+                         'descendant::select', 'descendant::button']
+          if form_id && !form_id.empty?
+            esc = form_id.to_s
+            %w[input textarea select button].each do |tag|
+              xpath_parts << "//#{tag}[@form=$fid]"
+            end
+            associated = @document.xpath(xpath_parts.join(' | '), nil, fid: esc)
+          else
+            associated = form.xpath(xpath_parts.join(' | '))
+          end
+          associated.each do |field|
             name = field['name']
             next if name.nil? || name.empty? || field['disabled']
+            # If a field declares form="other", skip it for this form.
+            next if (fa = field['form']) && !fa.empty? && fa != form_id
             type = (field['type'] || (field.name == 'button' ? 'submit' : nil) || field.name).downcase
             case type
             when 'submit', 'image', 'button', 'reset'
