@@ -541,7 +541,13 @@ module Capybara
         entries   = Array(details['entries'])
         return if importmap.empty? && entries.empty?
 
-        cache_key = Digest::SHA256.hexdigest(JSON.dump([importmap, entries, @current_url]))
+        # Importmap + module-script entries are page-content-derived, so
+        # keying on them alone covers different pages of the same Rails app
+        # — the bundle output is identical when the inputs are. Including
+        # `@current_url` only suppressed cache hits across visits without
+        # buying any correctness; build_module_bundle was the single biggest
+        # cost in the suite (52% of wall time on a hot test).
+        cache_key = Digest::SHA256.hexdigest(JSON.dump([importmap, entries]))
         @module_bundle_cache ||= {}
         bundle = @module_bundle_cache[cache_key] ||=
                  build_module_bundle(importmap, entries)
