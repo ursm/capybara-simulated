@@ -294,6 +294,40 @@
     return __dispatch(new Element(handle), new Event(type, init));
   };
 
+  // ── evaluate_script ──────────────────────────────────────────
+  // Capybara's `evaluate_script(code, *args)` wraps `code` in a
+  // `return (<code>)` function so an expression's value flows back.
+  // Element args / returns travel as {__elementHandle: N} sidecars so
+  // they round-trip through JSON on both bridge directions.
+  function rehydrateArg(a) {
+    if (a == null || typeof a !== 'object') return a;
+    if (a.__elementHandle != null) return new Element(a.__elementHandle);
+    if (Array.isArray(a)) return a.map(rehydrateArg);
+    const out = {};
+    for (const k of Object.keys(a)) out[k] = rehydrateArg(a[k]);
+    return out;
+  }
+  function marshalResult(v) {
+    if (v == null || typeof v !== 'object') return v;
+    if (v instanceof Element) return {__elementHandle: v.__h};
+    if (Array.isArray(v)) return v.map(marshalResult);
+    // Plain-object walk; skip non-enumerable / throwing accessors.
+    const out = {};
+    for (const k of Object.keys(v)) {
+      try { out[k] = marshalResult(v[k]); } catch (_) {}
+    }
+    return out;
+  }
+  globalThis.__evalScript = function (code, args) {
+    const a = (args || []).map(rehydrateArg);
+    // `eval` inside the function body sees the function's `arguments`,
+    // so user code referencing `arguments[i]` works the same as in
+    // selenium / chrome. eval also handles statements / expressions
+    // uniformly — selenium's "return <expr>" wrapping can't.
+    const fn = new Function('return eval(' + JSON.stringify(code) + ');');
+    return marshalResult(fn.apply(null, a));
+  };
+
   // ── Virtual clock + timer queue ─────────────────────────────
   // Real test runs don't sleep; instead Ruby calls __drainTimers after
   // each user action, advancing __virtualNow until the queue is empty

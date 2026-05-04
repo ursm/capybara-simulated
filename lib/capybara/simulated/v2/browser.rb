@@ -234,8 +234,18 @@ module Capybara
           changed
         end
 
-        def evaluate_script(code)
-          js.eval(code)
+        def evaluate_script(code, args = [])
+          marshalled = args.map { |a| marshal_script_arg(a) }
+          js.eval("__evalScript(#{code.to_json}, #{marshalled.to_json})")
+        end
+
+        def marshal_script_arg(arg)
+          case arg
+          when Capybara::Driver::Node then {'__elementHandle' => arg.native}
+          when Array                  then arg.map { |x| marshal_script_arg(x) }
+          when Hash                   then arg.transform_values { |v| marshal_script_arg(v) }
+          else arg
+          end
         end
 
         # Fire a JS event at `handle`. Returns true unless a listener called

@@ -31,8 +31,22 @@ module Capybara
           browser.find_xpath(query).map { |id| Node.new(self, id) }
         end
 
-        def evaluate_script(script, *_args) = browser.evaluate_script(script)
-        def execute_script(script, *_args)  = browser.evaluate_script(script)
+        def evaluate_script(script, *args)
+          unwrap_script_result(browser.evaluate_script(script, args))
+        end
+
+        # Same wire path; Capybara's contract is that execute_script
+        # discards the result.
+        def execute_script(script, *args)
+          browser.evaluate_script(script, args)
+          nil
+        end
+
+        def evaluate_async_script(script, *args)
+          # No async runtime yet — fall back to sync eval so simple cases
+          # (scripts that don't actually wait) keep working.
+          evaluate_script(script, *args)
+        end
 
         def find_css(query, **_)
           browser.find_css(query).map { |id| Node.new(self, id) }
@@ -44,6 +58,23 @@ module Capybara
 
         def no_such_window_error
           Capybara::WindowError
+        end
+
+        private
+
+        def unwrap_script_result(value)
+          case value
+          when Hash
+            if (h = value['__elementHandle'])
+              Node.new(self, h)
+            else
+              value.transform_values { |v| unwrap_script_result(v) }
+            end
+          when Array
+            value.map { |v| unwrap_script_result(v) }
+          else
+            value
+          end
         end
       end
     end
