@@ -724,11 +724,16 @@ module Capybara
             when 'checkbox', 'radio'
               yield name, type, (field['value'] || 'on'), nil if field['checked']
             when 'select'
-              field.css('option').each do |opt|
-                yield name, type, (opt['value'] || opt.text), nil if opt['selected']
-              end
+              options  = field.css('option')
+              selected = options.select { |o| o['selected'] }
+              # No explicit selection on a single-select → the first option
+              # is the default (HTML4/5 form-submission spec). multiple-
+              # selects with nothing selected submit nothing.
+              selected = [options.first].compact if selected.empty? && !field['multiple']
+              selected.each { |opt| yield name, type, (opt['value'] || opt.text), nil }
             when 'textarea'
-              yield name, type, field.text, nil
+              # HTML form submission normalises LF → CRLF in textarea content.
+              yield name, type, field.text.gsub(/\r\n|\r|\n/, "\r\n"), nil
             when 'file'
               yield name, type, nil, file_picks_for(@handles.track(field))
             else
