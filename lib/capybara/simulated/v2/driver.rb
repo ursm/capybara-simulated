@@ -34,6 +34,49 @@ module Capybara
           handle ? Node.new(self, handle) : nil
         end
 
+        def accept_modal(type, **options, &block)
+          run_modal(type, accept: true, **options, &block)
+        end
+
+        def dismiss_modal(type, **options, &block)
+          run_modal(type, accept: false, **options, &block)
+        end
+
+        private
+
+        def run_modal(type, accept:, text: nil, with: nil, wait: nil, &block)
+          captured = nil
+          handler = ->(_t, msg, default_value) {
+            captured = msg
+            modal_response(type, accept, with, default_value)
+          }
+          browser.with_modal(handler, &block)
+          if captured.nil?
+            raise Capybara::ModalNotFound, "Unable to find modal dialog with #{text.inspect}"
+          end
+          if text && !modal_text_matches?(text, captured)
+            raise Capybara::ModalNotFound,
+              "Unable to find modal dialog with #{text.inspect} (got #{captured.inspect})"
+          end
+          captured
+        end
+
+        def modal_response(type, accept, with, default_value)
+          case type
+          when :alert   then nil
+          when :confirm then accept
+          when :prompt
+            return nil unless accept
+            with.nil? ? default_value.to_s : with.to_s
+          end
+        end
+
+        def modal_text_matches?(matcher, message)
+          matcher.is_a?(Regexp) ? matcher.match?(message) : message.include?(matcher.to_s)
+        end
+
+        public
+
         def find_xpath(query, **_)
           browser.find_xpath(query).map { |id| Node.new(self, id) }
         end

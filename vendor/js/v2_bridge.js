@@ -689,6 +689,22 @@
   globalThis.getComputedStyle = function () { return {getPropertyValue: () => '', length: 0}; };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
+  // Modal dialogs — alert / confirm / prompt route through Ruby-side
+  // __modalDialog (a define_function callback). Ruby decides what to
+  // return based on the active accept_modal / dismiss_modal handler;
+  // when no handler is set, alert is a no-op, confirm dismisses, and
+  // prompt returns null (matches a user clicking "Cancel").
+  globalThis.alert = function (message) {
+    __modalDialog('alert', String(message == null ? '' : message), null);
+  };
+  globalThis.confirm = function (message) {
+    return !!__modalDialog('confirm', String(message == null ? '' : message), null);
+  };
+  globalThis.prompt = function (message, def) {
+    return __modalDialog('prompt', String(message == null ? '' : message),
+                         def == null ? '' : String(def));
+  };
+
   // ── customElements ───────────────────────────────────────────
   // Minimal CE registry: define / get / whenDefined, plus auto-upgrade
   // for existing matches and an internal MutationObserver that catches

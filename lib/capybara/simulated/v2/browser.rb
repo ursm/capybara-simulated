@@ -33,6 +33,7 @@ module Capybara
           @last_request       = nil
           @cookies            = {}
           @file_picks         = {}   # handle -> [path, ...] for <input type="file">
+          @modal_handler      = nil  # Proc(type, message, default) → response
           @mutations          = []
           @mutation_recording = false
           @timers_active      = false
@@ -557,6 +558,29 @@ module Capybara
 
         def lookup_node(handle)
           handle && @handles.lookup(handle)
+        end
+
+        # Wire a one-shot modal handler. The block receives [type, message,
+        # default_value] and returns the JS-side response (nil for alert,
+        # bool for confirm, String|nil for prompt). Cleared after the
+        # `with_modal` body returns regardless of outcome.
+        def with_modal(handler)
+          prev = @modal_handler
+          @modal_handler = handler
+          yield
+        ensure
+          @modal_handler = prev
+        end
+
+        def handle_modal(type, message, default_value)
+          if @modal_handler
+            @modal_handler.call(type, message, default_value)
+          else
+            # No handler installed — match Capybara's auto-dismiss
+            # behaviour for stray dialogs: confirm/prompt → cancel,
+            # alert → ignored.
+            type == 'prompt' ? nil : false
+          end
         end
 
         private

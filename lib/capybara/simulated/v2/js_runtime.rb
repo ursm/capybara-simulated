@@ -105,6 +105,9 @@ module Capybara
           @vm.define_function('__setTimersActive') do |active|
             @browser.timers_active = !!active
           end
+          @vm.define_function('__modalDialog') do |type, message, default_value|
+            @browser.handle_modal(type, message, default_value)
+          end
           @vm.on_log do |level, *parts|
             warn "[capybara-simulated/v2 console.#{level}] #{parts.map(&:to_s).join(' ')}"
           end
