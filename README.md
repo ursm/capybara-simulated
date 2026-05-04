@@ -149,17 +149,22 @@ end
 
 ### Minitest
 
+`Capybara.javascript_driver` is RSpec-only — `ActionDispatch::SystemTestCase`
+ignores it and `Capybara::Minitest::Test` has no `js: true` metadata
+mechanism. Set the driver explicitly:
+
 ```ruby
-# test/test_helper.rb
+# test/application_system_test_case.rb
 require 'capybara/minitest'
 require 'capybara/simulated'
 
-Capybara.javascript_driver = :simulated
-
-class ActionDispatch::SystemTestCase
+class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
   driven_by :simulated
 end
 ```
+
+(For pure `Capybara::Minitest::Test` outside Rails, set
+`Capybara.default_driver = :simulated` in your test_helper.)
 
 ```ruby
 # test/system/sign_in_test.rb
