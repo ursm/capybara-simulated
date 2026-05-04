@@ -21,6 +21,22 @@ module Capybara
           browser.click(handle_id)
         end
 
+        def set(value, **_opts)
+          browser.set_value(handle_id, value)
+        end
+
+        def select_option
+          browser.select_option(handle_id)
+        end
+
+        def unselect_option
+          browser.unselect_option(handle_id)
+        end
+
+        def submit(*_args)
+          browser.submit_form(handle_id)
+        end
+
         def find_xpath(query)
           browser.find_xpath(query, handle_id).map { |id| self.class.new(driver, id) }
         end

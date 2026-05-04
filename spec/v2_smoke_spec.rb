@@ -1,11 +1,12 @@
 require 'capybara/simulated'
 require 'rack'
 
-RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — Phase 1 smoke' do
+RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|
-        case env['PATH_INFO']
+        req = Rack::Request.new(env)
+        case req.path_info
         when '/'
           [200, {'content-type' => 'text/html'}, [<<~HTML]]
             <!doctype html><html><head><title>Index</title></head><body>
@@ -17,6 +18,25 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — Phase 1 smoke' do
                 <li>Two</li>
                 <li>Three</li>
               </ul>
+              <form action="/submit" method="post" id="profile-form">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" value="">
+                <label for="bio">Bio</label>
+                <textarea id="bio" name="bio"></textarea>
+                <fieldset>
+                  <legend>Plan</legend>
+                  <label><input type="radio" name="plan" value="free"> Free</label>
+                  <label><input type="radio" name="plan" value="pro"> Pro</label>
+                </fieldset>
+                <label><input type="checkbox" name="terms" value="yes"> Accept</label>
+                <label for="role">Role</label>
+                <select id="role" name="role">
+                  <option value="">Pick</option>
+                  <option value="dev">Developer</option>
+                  <option value="ops">Operator</option>
+                </select>
+                <button type="submit" id="save">Save</button>
+              </form>
             </body></html>
           HTML
         when '/about'
@@ -24,6 +44,17 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — Phase 1 smoke' do
             <!doctype html><html><head><title>About</title></head><body>
               <h1 id="about-h1">About us</h1>
               <p>The about page.</p>
+            </body></html>
+          HTML
+        when '/submit'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><html><head><title>Saved</title></head><body>
+              <h1>Saved</h1>
+              <pre id="r-name">#{req.params['name']}</pre>
+              <pre id="r-bio">#{req.params['bio']}</pre>
+              <pre id="r-plan">#{req.params['plan']}</pre>
+              <pre id="r-terms">#{req.params['terms']}</pre>
+              <pre id="r-role">#{req.params['role']}</pre>
             </body></html>
           HTML
         else
@@ -63,5 +94,22 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — Phase 1 smoke' do
     expect(session.title).to eq('')
     session.visit '/about'
     expect(session.title).to eq('About')
+  end
+
+  it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
+    session.visit '/'
+    session.fill_in 'Name', with: 'Daisy'
+    session.fill_in 'Bio',  with: 'hello world'
+    session.choose 'Pro'
+    session.check 'Accept'
+    session.select 'Operator', from: 'Role'
+    session.click_button 'Save'
+
+    expect(session.current_path).to eq('/submit')
+    expect(session.find('#r-name').text).to eq('Daisy')
+    expect(session.find('#r-bio').text).to  eq('hello world')
+    expect(session.find('#r-plan').text).to eq('pro')
+    expect(session.find('#r-terms').text).to eq('yes')
+    expect(session.find('#r-role').text).to eq('ops')
   end
 end

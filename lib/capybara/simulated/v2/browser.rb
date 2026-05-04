@@ -89,6 +89,68 @@ module Capybara
           end
         end
 
+        def checked?(handle)
+          !!lookup_node(handle)&.[]('checked')
+        end
+
+        def selected?(handle)
+          !!lookup_node(handle)&.[]('selected')
+        end
+
+        # ── writes ────────────────────────────────────────────────
+
+        def set_value(handle, value)
+          node = lookup_node(handle)
+          return false if node.nil?
+          case node.name
+          when 'input'
+            type = (node['type'] || 'text').downcase
+            case type
+            when 'checkbox', 'radio'
+              if value
+                node['checked'] = 'checked'
+              else
+                node.delete('checked')
+              end
+              # Radio buttons clear other members of the same name group.
+              if type == 'radio' && value && (form = enclosing_form(node))
+                form.css(%[input[type="radio"][name="#{node['name']}"]]).each do |peer|
+                  peer.delete('checked') unless peer == node
+                end
+              end
+            else
+              node['value'] = value.to_s
+            end
+          when 'textarea'
+            node.children.unlink
+            node.add_child(Nokogiri::XML::Text.new(value.to_s, @document))
+          end
+          true
+        end
+
+        def select_option(handle)
+          opt = lookup_node(handle)
+          return false unless opt && opt.name == 'option'
+          select = opt.ancestors('select').first
+          return false unless select
+          if select['multiple']
+            opt['selected'] = 'selected'
+          else
+            select.css('option').each { |o| o.delete('selected') }
+            opt['selected'] = 'selected'
+          end
+          true
+        end
+
+        def unselect_option(handle)
+          opt = lookup_node(handle)
+          return false unless opt && opt.name == 'option'
+          select = opt.ancestors('select').first
+          return false unless select && select['multiple']
+          opt.delete('selected')
+          true
+        end
+
         def visible?(handle)
           node = lookup_node(handle)
           return false if node.nil?
@@ -108,12 +170,26 @@ module Capybara
         def click(handle)
           node = lookup_node(handle)
           return false if node.nil?
-          if node.name == 'a' && (href = node['href'])
-            navigate(:get, resolve(href))
-            return true
+          case node.name
+          when 'a'
+            href = node['href']
+            navigate(:get, resolve(href)) if href
+            true
+          when 'button', 'input'
+            click_form_control(node)
+          when 'label'
+            target = label_target(node)
+            target ? click(@handles.track(target)) : false
+          else
+            false
           end
-          # TODO: form submit, button click, JS event dispatch in later phases.
-          false
+        end
+
+        def submit_form(handle)
+          node = lookup_node(handle)
+          return false unless node
+          form = node.name == 'form' ? node : enclosing_form(node)
+          form ? submit(form, nil) : false
         end
 
         # ── helpers ────────────────────────────────────────────────
@@ -124,13 +200,20 @@ module Capybara
 
         private
 
-        def navigate(method, url)
+        def navigate(method, url, body: nil, content_type: nil)
           uri  = URI.parse(url)
           path = uri.request_uri
-          env  = Rack::MockRequest.env_for(path, method: method.to_s.upcase)
+          opts = {method: method.to_s.upcase}
+          opts[:input] = body if body
+          opts['CONTENT_TYPE'] = content_type if content_type
+          env  = Rack::MockRequest.env_for(path, **opts)
           status, headers, body_iter = @app.call(env)
-          body = body_iter.respond_to?(:each) ? +'' : body_iter.to_s
-          body_iter.each { |chunk| body << chunk } if body_iter.respond_to?(:each)
+          response_body = +''
+          if body_iter.respond_to?(:each)
+            body_iter.each { |chunk| response_body << chunk.to_s }
+          else
+            response_body << body_iter.to_s
+          end
           body_iter.close if body_iter.respond_to?(:close)
 
           if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
@@ -139,7 +222,7 @@ module Capybara
           end
 
           @current_url = url
-          @document    = Nokogiri::HTML5(body)
+          @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
           status
         end
@@ -147,6 +230,92 @@ module Capybara
         def resolve(url, base: @current_url)
           return url if url =~ %r{\A[a-z]+://}i
           URI.join(base || DEFAULT_HOST, url).to_s
+        end
+
+        def click_form_control(node)
+          type = (node['type'] || (node.name == 'button' ? 'submit' : 'text')).downcase
+          case type
+          when 'submit', 'image'
+            form = enclosing_form(node) or return false
+            submit(form, node)
+          when 'reset'
+            (enclosing_form(node) || node).css('input,textarea,select').each do |f|
+              # Re-apply the original `value` / `selected` / `checked` attributes
+              # — happy-dom maintains a defaultValue snapshot; we approximate by
+              # leaving stored attributes alone and clearing in-memory edits if
+              # any exist (Phase-1 doesn't expose those yet).
+            end
+            true
+          when 'checkbox'
+            set_value(@handles.track(node), !node['checked'])
+            true
+          when 'radio'
+            set_value(@handles.track(node), true)
+            true
+          else
+            false
+          end
+        end
+
+        def submit(form, submitter)
+          method = (form['method'] || 'get').downcase
+          action = resolve(form['action'].to_s.empty? ? @current_url.to_s : form['action'])
+          fields = serialize_form(form, submitter)
+          if method == 'post'
+            body = URI.encode_www_form(fields)
+            navigate(:post, action,
+                     body: body,
+                     content_type: 'application/x-www-form-urlencoded')
+          else
+            uri = URI.parse(action)
+            uri.query = URI.encode_www_form(fields)
+            navigate(:get, uri.to_s)
+          end
+          true
+        end
+
+        def serialize_form(form, submitter)
+          out = []
+          form.css('input, textarea, select, button').each do |field|
+            name = field['name']
+            next if name.nil? || name.empty?
+            next if field['disabled']
+            type = (field['type'] || (field.name == 'button' ? 'submit' : nil) || field.name).downcase
+            case type
+            when 'submit', 'image', 'button', 'reset'
+              # Only the clicked submitter contributes its name/value pair.
+              next unless field == submitter
+              out << [name, field['value'].to_s]
+            when 'checkbox', 'radio'
+              out << [name, field['value'] || 'on'] if field['checked']
+            when 'select'
+              field.css('option').each do |opt|
+                out << [name, opt['value'] || opt.text] if opt['selected']
+              end
+            when 'textarea'
+              out << [name, field.text]
+            when 'file'
+              # Phase-1 stub — multipart upload comes later.
+            else
+              out << [name, field['value'].to_s]
+            end
+          end
+          out
+        end
+
+        def enclosing_form(node)
+          if (id = node['form']) && (form = @document.at_css(%[form##{id}]))
+            return form
+          end
+          node.ancestors('form').first
+        end
+
+        def label_target(label)
+          if (target_id = label['for']) && !target_id.empty?
+            return @document.at_css("##{target_id}")
+          end
+          # Implicit label: first descendant input/select/textarea/button.
+          label.css('input,select,textarea,button').first
         end
 
         def style_hidden?(node)
