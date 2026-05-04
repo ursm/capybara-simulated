@@ -148,7 +148,6 @@
     }
     return everFired;
   };
-  globalThis.__csim_pendingTimerCount = function () { return _timers.size; };
   globalThis.__csim_clearTimers = function () {
     _timers.clear();
     _virtualClock = 0;

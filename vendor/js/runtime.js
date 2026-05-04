@@ -73,6 +73,11 @@
     }
   }
 
+  // Match XPath's `normalize-space(string(.))` semantics: collapse runs of
+  // whitespace to a single space, then trim. Shared by every fast-path
+  // matcher that locates a node by its visible text.
+  const normSpace = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+
   // happy-dom keys its private fields with module-level `Symbol("name")`s,
   // so within a single bundle a description maps to one stable symbol.
   // Cache by description to skip the O(symbols) walk on hot paths
@@ -1969,9 +1974,6 @@
     return String(html || '').replace(/^\s*<!doctype[^>]*>\s*/i, '');
   }
 
-  // Capybara emits XPath; happy-dom has no document.evaluate. The fallback
-  // covers a useful subset by translating to CSS, with a hand-rolled text()
-  // and contains() filter on top.
   // history.pushState / replaceState change window.location.href without a
   // real fetch. Wrap them to set a flag the Ruby driver inspects so it
   // does not turn the URL change into a Rack request.
@@ -2027,9 +2029,8 @@
 
   function findByNormText(root, tag, text, isContains) {
     const out = [];
-    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
     for (const el of root.querySelectorAll(tag)) {
-      const t = norm(el.textContent);
+      const t = normSpace(el.textContent);
       if (isContains ? t.indexOf(text) >= 0 : t === text) out.push(el);
     }
     return out;
@@ -2052,7 +2053,6 @@
   );
 
   function findByLabel(root, tag, value) {
-    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
     const matches = new Set();
     for (const el of root.querySelectorAll(tag)) {
       if (
@@ -2067,7 +2067,7 @@
     const doc = root.ownerDocument || (root.nodeType === 9 ? root : currentDocument);
     if (doc) {
       for (const label of doc.querySelectorAll('label[for]')) {
-        if (norm(label.textContent) !== value) continue;
+        if (normSpace(label.textContent) !== value) continue;
         const target = doc.getElementById(label.getAttribute('for'));
         if (
           target &&
@@ -2078,13 +2078,11 @@
     }
     // <label>text<select/></label> — descendant of root.
     for (const label of root.querySelectorAll('label')) {
-      if (norm(label.textContent) !== value) continue;
+      if (normSpace(label.textContent) !== value) continue;
       for (const child of label.querySelectorAll(tag)) matches.add(child);
     }
     return Array.from(matches);
   }
-
-  function unescXp(s) { return s.replace(/\\(.)/g, '$1'); }
 
   // .//a[./@href][((((@id = 'X') or [normalize-space(string(.)) = 'X' | contains(...)])
   //   or [@title = 'X' | contains(...)]) or .//img[(@alt = 'X' | contains)]) or [@aria-label = 'X' | contains])]
@@ -2110,9 +2108,8 @@
   );
 
   function findLinkOrButton(root, value, isContains) {
-    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
     const eq = (s) => isContains ? (s != null && String(s).indexOf(value) >= 0) : (s === value);
-    const eqText = (s) => isContains ? norm(s).indexOf(value) >= 0 : norm(s) === value;
+    const eqText = (s) => isContains ? normSpace(s).indexOf(value) >= 0 : normSpace(s) === value;
     const matches = new Set();
 
     // <a href> by id (always exact), text/title/aria-label, child <img alt>
