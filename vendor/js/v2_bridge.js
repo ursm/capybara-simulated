@@ -330,6 +330,86 @@
     __virtualNow = 0;
   };
 
+  // ── MutationObserver ────────────────────────────────────────
+  // Observer storage lives in JS; Ruby buffers records during DOM
+  // writes (dom_op) and ships them in batches through __deliverMutations.
+  // observe()/disconnect() flip a Ruby-side flag via __notifyMutationActive
+  // so that pages with no observers pay zero per-mutation overhead.
+  const __observers = new Set();
+
+  function matchRecord(obsTarget, options, rec) {
+    if (rec.type === 'childList' && !options.childList) return false;
+    if (rec.type === 'attributes' &&
+        !options.attributes && !options.attributeFilter) return false;
+    if (rec.type === 'characterData' && !options.characterData) return false;
+    if (rec.type === 'attributes' && options.attributeFilter &&
+        options.attributeFilter.indexOf(rec.attributeName) === -1) return false;
+    if (rec.target.__h === obsTarget.__h) return true;
+    return !!options.subtree && obsTarget.contains(rec.target);
+  }
+
+  class MutationObserver {
+    constructor(callback) {
+      Object.defineProperty(this, '_cb', {value: callback, writable: false});
+      this._observed  = [];
+      this._records   = [];
+      this._scheduled = false;
+    }
+    observe(target, options) {
+      if (!target) return;
+      this._observed.push({target, options: options || {}});
+      const wasEmpty = __observers.size === 0;
+      __observers.add(this);
+      if (wasEmpty) __notifyMutationActive(true);
+    }
+    disconnect() {
+      this._observed = [];
+      this._records  = [];
+      const had = __observers.delete(this);
+      if (had && __observers.size === 0) __notifyMutationActive(false);
+    }
+    takeRecords() {
+      const out = this._records;
+      this._records = [];
+      return out;
+    }
+  }
+  globalThis.MutationObserver = MutationObserver;
+
+  // Called from Ruby with a JSON-serialised batch of records. We wrap
+  // node handles back into Element instances, route to interested
+  // observers, and queue a microtask per observer to flush its batch
+  // (matching the spec's "deliver as a microtask" semantics).
+  globalThis.__deliverMutations = function (records) {
+    if (!records || records.length === 0) return;
+    for (const r of records) {
+      r.target       = wrap(r.target);
+      r.addedNodes   = (r.addedNodes   || []).map(wrap);
+      r.removedNodes = (r.removedNodes || []).map(wrap);
+    }
+    for (const obs of __observers) {
+      const matched = [];
+      for (const rec of records) {
+        for (const o of obs._observed) {
+          if (matchRecord(o.target, o.options, rec)) { matched.push(rec); break; }
+        }
+      }
+      if (matched.length === 0) continue;
+      for (const rec of matched) obs._records.push(rec);
+      if (obs._scheduled) continue;
+      obs._scheduled = true;
+      queueMicrotask(() => {
+        obs._scheduled = false;
+        const out = obs._records;
+        if (out.length === 0) return;
+        obs._records = [];
+        try { obs._cb(out, obs); } catch (e) {
+          try { console.error('MO threw:', e && e.message ? e.message : e); } catch (_) {}
+        }
+      });
+    }
+  };
+
   globalThis.Element = Element;
   globalThis.document = new Element(0);
 

@@ -16,6 +16,7 @@ module Capybara
       # writes from JS land in subsequent phases.
       class Browser
         attr_reader :app, :current_url
+        attr_accessor :mutation_recording
 
         def initialize(app)
           @app          = app
@@ -24,6 +25,8 @@ module Capybara
           @handles      = HandleTable.new(@document)
           @cookies      = []
           @js           = nil  # lazy — only spin up QuickJS on first script
+          @mutations    = []
+          @mutation_recording = false
         end
 
         def js
@@ -43,6 +46,7 @@ module Capybara
           @handles.reset!(@document)
           @current_url = nil
           @cookies.clear
+          @mutations.clear
           @js&.reset_timers
         end
 
@@ -225,8 +229,30 @@ module Capybara
           return true unless @js && handle
           init = {bubbles: bubbles, cancelable: cancelable}
           result = js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
-          js.drain_timers
+          settle
           result
+        end
+
+        # Push a buffered MutationRecord. No-op when no observer is active —
+        # the JS side flips @mutation_recording via the __notifyMutationActive
+        # callback so dom_op writes pay nothing on observer-less pages.
+        def record_mutation(type, target_handle, **extra)
+          return unless @mutation_recording && target_handle
+          @mutations << {type: type, target: target_handle, **extra}
+        end
+
+        # Run timers, deliver mutation records, repeat until quiescent.
+        # Each iteration: drain queued timers (which may queue mutations
+        # via dom_op), then ship pending mutations to JS observers (whose
+        # callbacks may queue more timers). Cap iterations to break loops.
+        def settle
+          return unless @js
+          10.times do
+            js.drain_timers
+            break if @mutations.empty?
+            records, @mutations = @mutations, []
+            js.eval("__deliverMutations(#{records.to_json})")
+          end
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
@@ -281,34 +307,59 @@ module Capybara
           when 'form'            then @handles.track(enclosing_form(node))
           # ── writes ────────────────────────────────────────────
           when 'setAttribute'
-            node[args[0]] = args[1].to_s if node.element?
+            if node.element?
+              old = node[args[0]]
+              node[args[0]] = args[1].to_s
+              record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
+            end
             nil
           when 'removeAttribute'
-            node.delete(args[0]) if node.element?
+            if node.element?
+              old = node[args[0]]
+              node.delete(args[0])
+              record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
+            end
             nil
           when 'setValue'        then set_value(handle, args[0]); nil
           when 'setChecked'      then set_value(handle, !!args[0]); nil
-          when 'setTextContent'  then replace_children_with_text(node, args[0].to_s); nil
-          when 'setInnerHTML'    then replace_children_with_html(node, args[0].to_s); nil
+          when 'setTextContent'
+            replace_children_with_text(node, args[0].to_s)
+            record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+            nil
+          when 'setInnerHTML'
+            replace_children_with_html(node, args[0].to_s)
+            record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+            nil
           when 'appendChild'
             child = lookup_node(args[0])
-            node.add_child(child) if child && node.respond_to?(:add_child)
+            if child && node.respond_to?(:add_child)
+              node.add_child(child)
+              record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
+            end
             args[0]
           when 'removeChild'
             child = lookup_node(args[0])
-            child&.unlink
+            if child && child.parent
+              parent_handle = @handles.track(child.parent)
+              child.unlink
+              record_mutation('childList', parent_handle, addedNodes: [], removedNodes: [args[0]])
+            end
             args[0]
           when 'insertBefore'
             new_child = lookup_node(args[0])
             ref_child = lookup_node(args[1])
             if new_child
               ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+              record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
             end
             args[0]
           when 'replaceChild'
             new_child = lookup_node(args[0])
             old_child = lookup_node(args[1])
-            old_child.replace(new_child) if new_child && old_child
+            if new_child && old_child
+              old_child.replace(new_child)
+              record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [args[1]])
+            end
             args[1]
           when 'createElement'
             @handles.track(@document.create_element(args[0].to_s))
@@ -358,10 +409,12 @@ module Capybara
           # this one, and drain afterwards to settle initial setTimeout(0)s.
           if @document.css('script').any? { |s| !s['src'] }
             js.reset_timers
+            @mutations.clear
             js.run_inline_scripts(@document)
-            js.drain_timers
+            settle
           elsif @js
             @js.reset_timers
+            @mutations.clear
           end
           status
         end
