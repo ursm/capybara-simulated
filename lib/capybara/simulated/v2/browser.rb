@@ -200,6 +200,36 @@ module Capybara
           %w[head script style].include?(node.name) ? false : !style_hidden?(node)
         end
 
+        # `<option>` is disabled if any ancestor `<optgroup>`/`<select>` is
+        # disabled. Other form controls inherit `disabled` from a wrapping
+        # `<fieldset disabled>` *unless* they sit inside its first `<legend>`.
+        def disabled?(handle)
+          node = lookup_node(handle)
+          return false if node.nil? || !node.respond_to?(:[])
+          return true  if node['disabled']
+          if node.name == 'option'
+            cur = node.parent
+            while cur.respond_to?(:element?) && cur.element? && %w[optgroup select].include?(cur.name)
+              return true if cur['disabled']
+              cur = cur.parent
+            end
+          end
+          if FORM_CONTROL_TAGS.include?(node.name)
+            cur = node.parent
+            while cur.respond_to?(:element?) && cur.element?
+              if cur.name == 'fieldset' && cur['disabled']
+                legend = cur.element_children.find { |c| c.name == 'legend' }
+                return false if legend && (node == legend || node.ancestors.include?(legend))
+                return true
+              end
+              cur = cur.parent
+            end
+          end
+          false
+        end
+
+        FORM_CONTROL_TAGS = %w[input select textarea button optgroup option].to_set.freeze
+
         def html
           @document.to_html
         end

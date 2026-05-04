@@ -48,10 +48,11 @@ module Capybara
           browser.find_css(query, handle_id).map { |id| self.class.new(driver, id) }
         end
 
-        def disabled?    = !!self['disabled']
+        def disabled?    = browser.disabled?(handle_id)
         def selected?    = !!self['selected']
         def checked?     = !!self['checked']
         def readonly?    = !!self['readonly']
+        def obscured?(*) = !visible?
 
         def synchronize(*) = yield
         def style(*)       = {}
