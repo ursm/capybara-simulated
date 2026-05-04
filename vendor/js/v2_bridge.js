@@ -252,7 +252,10 @@
       }
       if (l.once) {
         const i = arr.indexOf(l);
-        if (i >= 0) arr.splice(i, 1);
+        if (i >= 0) {
+          arr.splice(i, 1);
+          bumpListenerCount(event.type, -1);
+        }
       }
     }
   }
@@ -543,13 +546,21 @@
       name = String(name).toLowerCase();
       if (__ceDefs.has(name)) throw new Error('customElement already defined: ' + name);
       if (typeof ctor !== 'function') throw new TypeError('ctor must be a function');
-      // Make instances see Element's getters / setters via prototype chain.
-      try { Object.setPrototypeOf(ctor.prototype, Element.prototype); } catch (_) {}
+      // Splice Element.prototype into the chain only if it isn't already
+      // reachable — preserves user inheritance like
+      // `class B extends HTMLElement {}; class A extends B {}`.
+      let p = ctor.prototype;
+      while (p && p !== Element.prototype) {
+        const next = Object.getPrototypeOf(p);
+        if (next === Object.prototype || next === null) {
+          try { Object.setPrototypeOf(p, Element.prototype); } catch (_) {}
+          break;
+        }
+        p = next;
+      }
       __ceDefs.set(name, ctor);
       ceEnsureObserver();
-      // Upgrade any existing matches synchronously.
       for (const el of document.querySelectorAll(name)) ceUpgrade(el);
-      // Resolve whenDefined waiters.
       const arr = __ceWaiters.get(name);
       if (arr) { for (const r of arr) { try { r(ctor); } catch (_) {} } __ceWaiters.delete(name); }
     },

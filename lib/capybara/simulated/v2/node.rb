@@ -1,17 +1,20 @@
 require 'capybara/node/base'
+require 'capybara/node/whitespace_normalizer'
 
 module Capybara
   module Simulated
     module V2
       class Node < Capybara::Driver::Node
+        include Capybara::Node::WhitespaceNormalizer
+
         def initialize(driver, handle)
           super(driver, handle)
         end
 
         def handle_id = native
 
-        def all_text     = browser.all_text(handle_id)
-        def visible_text = browser.visible_text(handle_id)
+        def all_text     = normalize_spacing(browser.all_text(handle_id))
+        def visible_text = normalize_visible_spacing(browser.visible_text(handle_id))
         def value        = browser.value(handle_id)
         def visible?     = browser.visible?(handle_id)
         def tag_name     = browser.tag_name(handle_id)
@@ -54,7 +57,7 @@ module Capybara
         def style(*)       = {}
         def path           = browser.find_xpath('.', handle_id).first.to_s
 
-        def == (other)
+        def ==(other)
           other.is_a?(Node) && other.handle_id == handle_id
         end
 

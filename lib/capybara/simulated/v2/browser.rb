@@ -8,13 +8,12 @@ require_relative 'js_runtime'
 module Capybara
   module Simulated
     module V2
-      DEFAULT_HOST = 'http://www.example.com'
+      DEFAULT_HOST    = 'http://www.example.com'
+      BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
 
-      # Phase-1 skeleton: Ruby/Nokogiri owns the DOM, Capybara DSL goes
-      # straight against it, no JS engine yet. Visit, link click, and text
-      # reads work; that's enough to drive `:request`-style flows under the
-      # Capybara DSL. Forms, JS-driven Stimulus / Turbo, and imperative DOM
-      # writes from JS land in subsequent phases.
+      # Owns the Nokogiri document, the in-process Rack client, and the
+      # lazy QuickJS runtime. Capybara DSL queries hit Nokogiri directly;
+      # user JS (when present) sees a thin DOM proxy backed by `dom_op`.
       class Browser
         attr_reader :app, :current_url
         attr_accessor :mutation_recording, :timers_active
@@ -22,7 +21,7 @@ module Capybara
         def initialize(app)
           @app          = app
           @current_url  = nil
-          @document     = Nokogiri::HTML5('<!doctype html><html><body></body></html>')
+          @document     = Nokogiri::HTML5(BLANK_DOCUMENT)
           @handles      = HandleTable.new(@document)
           @cookies      = []
           @js           = nil  # lazy — only spin up QuickJS on first script
@@ -56,7 +55,7 @@ module Capybara
         end
 
         def reset!
-          @document    = Nokogiri::HTML5('<!doctype html><html><body></body></html>')
+          @document    = Nokogiri::HTML5(BLANK_DOCUMENT)
           @handles.reset!(@document)
           @current_url = nil
           @cookies.clear
@@ -70,8 +69,6 @@ module Capybara
           @timers_active      = false
           @listened_types.clear
         end
-
-        # ── reads ──────────────────────────────────────────────────
 
         def find_xpath(xpath, context = nil)
           root = lookup_node(context) || @document
@@ -87,14 +84,17 @@ module Capybara
           (lookup_node(handle)&.text || '').to_s
         end
 
-        # Approximate "visible text" by stripping <head>/<script>/<style>
-        # subtrees and collapsing whitespace, matching Capybara's notion.
+        VISIBLE_TEXT_SKIP_TAGS = %w[script style head].to_set.freeze
+
+        # Concatenate text from this node's subtree, skipping script / style /
+        # head subtrees. Whitespace normalization is the caller's job
+        # (Capybara::Node::WhitespaceNormalizer in V2::Node).
         def visible_text(handle)
           node = lookup_node(handle)
           return '' if node.nil?
-          dup  = node.dup
-          dup.css('script, style, head').remove
-          dup.text.gsub(/\s+/, ' ').strip
+          out = String.new
+          collect_visible_text(node, out)
+          out
         end
 
         def tag_name(handle)
@@ -130,8 +130,6 @@ module Capybara
           !!lookup_node(handle)&.[]('selected')
         end
 
-        # ── writes ────────────────────────────────────────────────
-
         def set_value(handle, value)
           node = lookup_node(handle)
           return false if node.nil?
@@ -155,8 +153,7 @@ module Capybara
               node['value'] = value.to_s
             end
           when 'textarea'
-            node.children.unlink
-            node.add_child(Nokogiri::XML::Text.new(value.to_s, @document))
+            node.content = value.to_s
           end
           true
         end
@@ -197,8 +194,6 @@ module Capybara
         def title
           @document.at('head > title')&.text || ''
         end
-
-        # ── interactions (Phase 1: link click only) ───────────────
 
         def click(handle)
           node = lookup_node(handle)
@@ -280,8 +275,6 @@ module Capybara
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
-        # Phase 3a added read-only ops; Phase 3b layers in writes (mutate
-        # attributes, replace children, create nodes). Events arrive in 3c.
         def dom_op(handle, op, args)
           node = lookup_node(handle) || @document
           case op
@@ -290,7 +283,7 @@ module Capybara
           when 'querySelectorAll'
             (node.respond_to?(:css) ? node.css(args[0]) : []).map { |n| @handles.track(n) }
           when 'getElementById'
-            @handles.track(@document.at_css("##{css_escape(args[0])}"))
+            @handles.track(@document.at_xpath('.//*[@id=$id]', nil, id: args[0].to_s))
           when 'closest'
             cur = node
             while cur && cur.element?
@@ -329,7 +322,6 @@ module Capybara
           when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
           when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
           when 'form'            then @handles.track(enclosing_form(node))
-          # ── writes ────────────────────────────────────────────
           when 'setAttribute'
             if node.element?
               old = node[args[0]]
@@ -347,11 +339,11 @@ module Capybara
           when 'setValue'        then set_value(handle, args[0]); nil
           when 'setChecked'      then set_value(handle, !!args[0]); nil
           when 'setTextContent'
-            replace_children_with_text(node, args[0].to_s)
+            node.content = args[0].to_s if node.respond_to?(:content=)
             record_mutation('childList', handle, addedNodes: [], removedNodes: [])
             nil
           when 'setInnerHTML'
-            replace_children_with_html(node, args[0].to_s)
+            node.inner_html = args[0].to_s if node.respond_to?(:inner_html=)
             record_mutation('childList', handle, addedNodes: [], removedNodes: [])
             nil
           when 'appendChild'
@@ -388,14 +380,13 @@ module Capybara
           when 'createElement'
             @handles.track(@document.create_element(args[0].to_s))
           when 'createTextNode'
-            @handles.track(Nokogiri::XML::Text.new(args[0].to_s, @document))
+            @handles.track(@document.create_text_node(args[0].to_s))
           else
             warn "[capybara-simulated/v2] unsupported dom op: #{op}" if ENV['CSIM_V2_DEBUG']
             nil
           end
         end
 
-        # ── helpers ────────────────────────────────────────────────
 
         def lookup_node(handle)
           handle && @handles.lookup(handle)
@@ -431,7 +422,7 @@ module Capybara
           # avoids paying QuickJS cold-start on rack_test-style flows. Reset
           # the virtual clock so timers from the previous page can't fire on
           # this one, and drain afterwards to settle initial setTimeout(0)s.
-          if @document.css('script').any? { |s| !s['src'] }
+          if @document.at_xpath('.//script[not(@src)]')
             js.reset_page
             reset_per_page_state
             js.run_inline_scripts(@document)
@@ -455,12 +446,8 @@ module Capybara
             form = enclosing_form(node) or return false
             submit(form, node)
           when 'reset'
-            (enclosing_form(node) || node).css('input,textarea,select').each do |f|
-              # Re-apply the original `value` / `selected` / `checked` attributes
-              # — happy-dom maintains a defaultValue snapshot; we approximate by
-              # leaving stored attributes alone and clearing in-memory edits if
-              # any exist (Phase-1 doesn't expose those yet).
-            end
+            # Stored attributes are the source of truth in v2 — we don't track
+            # an in-memory defaultValue snapshot, so reset is a no-op.
             true
           when 'checkbox'
             set_value(@handles.track(node), !node['checked'])
@@ -522,10 +509,13 @@ module Capybara
         end
 
         def enclosing_form(node)
-          if (id = node['form']) && (form = @document.at_css(%[form##{id}]))
-            return form
+          if (id = node['form'])
+            form = @document.at_xpath('.//form[@id=$id]', nil, id: id.to_s)
+            return form if form
           end
-          node.ancestors('form').first
+          cur = node.respond_to?(:parent) ? node.parent : nil
+          cur = cur.parent while cur.respond_to?(:parent) && cur.name != 'form'
+          cur if cur.respond_to?(:name) && cur.name == 'form'
         end
 
         def label_target(label)
@@ -534,10 +524,6 @@ module Capybara
           end
           # Implicit label: first descendant input/select/textarea/button.
           label.css('input,select,textarea,button').first
-        end
-
-        def css_escape(ident)
-          ident.to_s.gsub(/(["\\])/, '\\\\\\1')
         end
 
         def node_type_for(node)
@@ -549,27 +535,27 @@ module Capybara
           0
         end
 
-        def replace_children_with_text(node, text)
-          return unless node.respond_to?(:children)
-          node.children.unlink
-          node.add_child(Nokogiri::XML::Text.new(text, @document))
+        def collect_visible_text(node, out)
+          if node.is_a?(Nokogiri::XML::Text)
+            out << node.text
+          elsif node.respond_to?(:children) && !VISIBLE_TEXT_SKIP_TAGS.include?(node.name)
+            node.children.each { |c| collect_visible_text(c, out) }
+          end
         end
 
-        def replace_children_with_html(node, html)
-          return unless node.respond_to?(:children)
-          node.children.unlink
-          fragment = Nokogiri::HTML5.fragment(html)
-          fragment.children.each { |c| node.add_child(c) }
-        end
+        DISPLAY_NONE_RE       = /display\s*:\s*none/i
+        VISIBILITY_HIDDEN_RE  = /visibility\s*:\s*hidden/i
 
         def style_hidden?(node)
-          return false unless node.respond_to?(:[])
-          style = node['style'].to_s
-          return true if style.match?(/display\s*:\s*none/i)
-          return true if style.match?(/visibility\s*:\s*hidden/i)
-          return true if node['hidden']
-          parent = node.respond_to?(:parent) ? node.parent : nil
-          parent && parent.respond_to?(:[]) ? style_hidden?(parent) : false
+          cur = node
+          while cur.respond_to?(:[])
+            return true if cur['hidden']
+            style = cur['style'].to_s
+            return true if style.match?(DISPLAY_NONE_RE)
+            return true if style.match?(VISIBILITY_HIDDEN_RE)
+            cur = cur.respond_to?(:parent) ? cur.parent : nil
+          end
+          false
         end
       end
     end
