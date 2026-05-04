@@ -411,10 +411,123 @@
   };
 
   globalThis.Element = Element;
+  // HTMLElement is the conventional base for `class Foo extends HTMLElement`
+  // — we don't model an HTML/SVG split, so it's just an alias for Element.
+  globalThis.HTMLElement = Element;
   globalThis.document = new Element(0);
 
   // Convenience top-level shortcuts.
   globalThis.document.body            = globalThis.document.querySelector('body');
   globalThis.document.head            = globalThis.document.querySelector('head');
   globalThis.document.documentElement = globalThis.document.querySelector('html');
+
+  // ── customElements ───────────────────────────────────────────
+  // Minimal CE registry: define / get / whenDefined, plus auto-upgrade
+  // for existing matches and an internal MutationObserver that catches
+  // future insertions / removals to fire connected / disconnectedCallback.
+  // observedAttributes / attributeChangedCallback aren't wired yet —
+  // libraries that need attribute reactivity tend to use MutationObserver
+  // directly anyway.
+  const __ceDefs      = new Map();   // tag (lowercased) → ctor
+  const __ceInstances = new Map();   // handle → instance object
+  const __ceWaiters   = new Map();   // tag → [resolve, ...]
+  let   __ceObserver  = null;
+
+  function ceCtorFor(tagName) {
+    return __ceDefs.get(String(tagName || '').toLowerCase());
+  }
+
+  function ceUpgrade(el) {
+    if (!el || el.nodeType !== 1) return;
+    if (__ceInstances.has(el.__h)) return;
+    const ctor = ceCtorFor(el.tagName);
+    if (!ctor) return;
+    const inst = Object.create(ctor.prototype);
+    Object.defineProperty(inst, '__h', {value: el.__h, writable: false});
+    __ceInstances.set(el.__h, inst);
+    if (typeof inst.connectedCallback === 'function') {
+      try { inst.connectedCallback.call(inst); } catch (e) {
+        try { console.error('connectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
+      }
+    }
+  }
+
+  function ceUpgradeTree(el) {
+    if (!el) return;
+    ceUpgrade(el);
+    if (el.nodeType === 1) {
+      for (const c of el.children) ceUpgradeTree(c);
+    }
+  }
+
+  function ceDisconnect(el) {
+    if (!el || el.nodeType !== 1) return;
+    const inst = __ceInstances.get(el.__h);
+    if (!inst) return;
+    __ceInstances.delete(el.__h);
+    if (typeof inst.disconnectedCallback === 'function') {
+      try { inst.disconnectedCallback.call(inst); } catch (e) {
+        try { console.error('disconnectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
+      }
+    }
+  }
+
+  function ceDisconnectTree(el) {
+    if (!el) return;
+    ceDisconnect(el);
+    if (el.nodeType === 1) {
+      for (const c of el.children) ceDisconnectTree(c);
+    }
+  }
+
+  function ceEnsureObserver() {
+    if (__ceObserver) return;
+    __ceObserver = new MutationObserver(records => {
+      for (const r of records) {
+        if (r.type !== 'childList') continue;
+        for (const el of r.addedNodes)   ceUpgradeTree(el);
+        for (const el of r.removedNodes) ceDisconnectTree(el);
+      }
+    });
+    __ceObserver.observe(document, {childList: true, subtree: true});
+  }
+
+  globalThis.customElements = {
+    define(name, ctor /*, options */) {
+      name = String(name).toLowerCase();
+      if (__ceDefs.has(name)) throw new Error('customElement already defined: ' + name);
+      if (typeof ctor !== 'function') throw new TypeError('ctor must be a function');
+      // Make instances see Element's getters / setters via prototype chain.
+      try { Object.setPrototypeOf(ctor.prototype, Element.prototype); } catch (_) {}
+      __ceDefs.set(name, ctor);
+      ceEnsureObserver();
+      // Upgrade any existing matches synchronously.
+      for (const el of document.querySelectorAll(name)) ceUpgrade(el);
+      // Resolve whenDefined waiters.
+      const arr = __ceWaiters.get(name);
+      if (arr) { for (const r of arr) { try { r(ctor); } catch (_) {} } __ceWaiters.delete(name); }
+    },
+    get(name) {
+      return __ceDefs.get(String(name).toLowerCase());
+    },
+    whenDefined(name) {
+      name = String(name).toLowerCase();
+      const ctor = __ceDefs.get(name);
+      if (ctor && typeof Promise !== 'undefined') return Promise.resolve(ctor);
+      // Best-effort thenable when Promise isn't around: invoke immediately.
+      if (ctor) return {then: cb => cb(ctor)};
+      if (typeof Promise !== 'undefined') {
+        return new Promise(resolve => {
+          let arr = __ceWaiters.get(name);
+          if (!arr) __ceWaiters.set(name, arr = []);
+          arr.push(resolve);
+        });
+      }
+      return {then: cb => {
+        let arr = __ceWaiters.get(name);
+        if (!arr) __ceWaiters.set(name, arr = []);
+        arr.push(cb);
+      }};
+    }
+  };
 })();

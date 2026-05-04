@@ -335,6 +335,54 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
     expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)+attr(class:off)')
   end
 
+  it 'upgrades custom elements on define and on later insertion' do
+    ce_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <my-card id="a"></my-card>
+            <button id="add">Add</button>
+            <button id="rm">Remove</button>
+            <div id="dock"></div>
+            <div id="log"></div>
+            <script>
+              const log = document.querySelector('#log');
+              function append(t) { log.textContent = (log.textContent + ' ' + t).trim(); }
+
+              class MyCard extends HTMLElement {
+                connectedCallback()    { this.textContent = 'card'; append('connect:' + (this.id || '?')); }
+                disconnectedCallback() { append('disconnect:' + (this.id || '?')); }
+              }
+              customElements.define('my-card', MyCard);
+
+              document.querySelector('#add').addEventListener('click', () => {
+                const el = document.createElement('my-card');
+                el.id = 'b';
+                document.querySelector('#dock').appendChild(el);
+              });
+              document.querySelector('#rm').addEventListener('click', () => {
+                const el = document.querySelector('my-card#a');
+                el.parentNode.removeChild(el);
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v2, ce_app)
+    s.visit '/'
+
+    expect(s.find('#a').text).to eq('card')
+    expect(s.find('#log').text).to eq('connect:a')
+
+    s.click_button 'Add'
+    expect(s.find('#b').text).to eq('card')
+    expect(s.find('#log').text).to eq('connect:a connect:b')
+
+    s.click_button 'Remove'
+    expect(s.find('#log').text).to eq('connect:a connect:b disconnect:a')
+  end
+
   it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
     session.visit '/'
     session.fill_in 'Name', with: 'Daisy'
