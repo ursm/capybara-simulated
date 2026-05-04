@@ -3,7 +3,7 @@
 A lightweight Capybara driver that runs JavaScript in a long-lived
 [mini_racer](https://github.com/rubyjs/mini_racer) V8 context against a
 [happy-dom](https://github.com/capricorn86/happy-dom) DOM. XPath queries
-are powered by [fontoxpath](https://github.com/FontoXML/fontoxpath).
+are powered by [Wicked Good XPath](https://github.com/google/wicked-good-xpath).
 
 The goal is the middle ground between `rack-test` (zero JS) and full
 headless browsers like cuprite/selenium: in-process tests, no Chrome,
@@ -16,17 +16,18 @@ Used in production by a Rails 8 app to run ~200 `js: true` system specs
 without spawning a headless Chrome.
 
 Against Capybara 3.40's shared `Capybara::SpecHelper.spec` suite the
-driver passes **1337 / 1357 examples (98.5%)** with the unsupported-
-capability tags `about_scheme`, `css`, `download`, `frames`, `hover`,
-`screenshot`, `scroll`, `server`, `spatial`, `windows` filtered out.
-The remaining 20 failures all need capabilities the driver intentionally
-does not implement:
+driver passes **1335 / 1357 examples** with 0 failures and 22 pending,
+once the unsupported-capability tags `about_scheme`, `css`, `download`,
+`frames`, `hover`, `screenshot`, `scroll`, `server`, `spatial`, `windows`
+are filtered out. The 22 pending all need capabilities the driver
+intentionally does not implement:
 
 - 19 `#drag_to` tests — Dragula / SortableJS / jsTree resolve drop
   targets through `elementFromPoint(clientX, clientY)`, which needs a
   real layout engine with stacking-context awareness.
 - 1 `#click should not retry clicking when wait is disabled` — depends
   on the same `elementFromPoint`-based obscured-element detection.
+- 2 unrelated upstream-pending specs.
 
 `evaluate_async_script` is supported by polling the Ruby↔V8 bridge while
 draining the virtual clock until the user callback fires (or
@@ -75,6 +76,15 @@ out of the box:
   swapped `<turbo-frame>`. We patch `MutationObserver.prototype.observe`
   per Window to swap each WeakRef out for a strong-reference shim with
   the same `.deref()` shape, so listeners survive the next GC.
+- happy-dom 20's `Attr` class doesn't override `Node.nodeValue`, which
+  the [DOM spec](https://dom.spec.whatwg.org/#dom-node-nodevalue)
+  defines as the attribute's `value`. The default getter inherited
+  from `Node` returns `null`, so any XPath engine reading attribute
+  string-values via `nodeValue` (wgxpath included) collapses every
+  attribute compare to `"null" === "null"` and predicates like
+  `[@id = //label/@for]` match every element with any `@id`. We install
+  a per-Window `Attr.prototype.nodeValue` getter / setter that mirrors
+  `value`.
 
 WebSocket, frames and multi-window remain explicitly out of scope — they
 need a real browser (Selenium / Cuprite) or a separate transport that
@@ -88,7 +98,7 @@ torn down between specs. This keeps `reset!` cheap.
 
 ```
 npm install
-npm run build         # produces vendor/js/csim.bundle.js (~3.3MB)
+npm run build         # produces vendor/js/csim.bundle.js (~2.9MB)
 bundle install
 bundle exec rspec
 ```
@@ -202,12 +212,17 @@ puts page.text
 - `vendor/js/prelude.js` — minimal Web Platform polyfills (TextEncoder,
   atob/btoa, crypto.getRandomValues, performance, timers, process).
 - `vendor/js/csim.bundle.js` — bundled happy-dom + whatwg-url +
-  fontoxpath. Built via `build.mjs` with esbuild, with shims for the
-  Node built-ins happy-dom imports (`url`, `buffer`, `vm`, `path`, etc.).
+  Wicked Good XPath. Built via `build.mjs` with esbuild, with shims
+  for the Node built-ins happy-dom imports (`url`, `buffer`, `vm`,
+  `path`, etc.).
 - `vendor/js/runtime.js` — driver glue exposed on `globalThis.__csim`.
   Manages the active happy-dom `Window`, an integer→DOM-node handle
   table, modal capture, form serialization, click/submit dispatch, and
-  XPath via fontoxpath with a custom DOM facade.
+  XPath through `document.evaluate` (installed by wgxpath). Fast-paths
+  Capybara's hot xpath shapes (`:option`, `:select`, `:link_or_button`)
+  to native `querySelectorAll` + `getElementById`.
+- `vendor/esbuild-wasm/` — vendored copy of esbuild-wasm so the gem can
+  bundle Rails importmap modules without a runtime npm dependency.
 - `lib/capybara/simulated/browser.rb` — owns the `MiniRacer::Context`,
   drives HTTP via `Rack::MockRequest`, fetches `<script src>` inline,
   and routes form submissions back through Rack.
