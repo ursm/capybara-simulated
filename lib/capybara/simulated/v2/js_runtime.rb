@@ -40,22 +40,34 @@ module Capybara
           @vm.eval_code('__resetPage()')
         end
 
-        # Run every inline `<script>` in document order. External `src`
-        # scripts and `type="module"` are skipped here — those land in
-        # later phases.
-        def run_inline_scripts(document)
+        SCRIPT_TYPES_RUNNABLE = ['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
+
+        # Run every classic `<script>` in document order — both inline and
+        # external `src=...`. The caller supplies a fetcher block that
+        # resolves a `src` attr to its body text (or nil to skip). Async /
+        # defer hints are honoured implicitly because everything runs
+        # synchronously in document order. `type="module"` is skipped.
+        def run_scripts(document)
           document.css('script').each do |script|
-            next if script['src']
-            next if script['type'] && script['type'] != 'text/javascript' && script['type'] != ''
-            begin
-              @vm.eval_code(script.text)
-            rescue Quickjs::RuntimeError => e
-              warn "[capybara-simulated/v2] inline script failed: #{e.message[0, 200]}"
+            type = script['type'].to_s
+            next unless SCRIPT_TYPES_RUNNABLE.include?(type)
+            if (src = script['src']) && !src.empty?
+              body = yield(src)
+              next if body.nil?
+              eval_safely(body, src)
+            else
+              eval_safely(script.text, '<inline>')
             end
           end
         end
 
         private
+
+        def eval_safely(code, label)
+          @vm.eval_code(code)
+        rescue Quickjs::RuntimeError => e
+          warn "[capybara-simulated/v2] script #{label} failed: #{e.message[0, 200]}"
+        end
 
         def attach_dom_bridge
           @vm.define_function('__dom') do |handle, op, args|

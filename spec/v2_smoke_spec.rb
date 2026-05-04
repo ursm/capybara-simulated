@@ -383,6 +383,38 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
     expect(s.find('#log').text).to eq('connect:a connect:b disconnect:a')
   end
 
+  it 'loads external <script src=...> through the same Rack app' do
+    src_app = Rack::Builder.new {
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><html><body>
+              <h1 id="t">init</h1>
+              <script src="/lib.js"></script>
+              <script>
+                window.__cap_loaded = (typeof window.__libExports === 'object');
+                if (window.__libExports) document.querySelector('#t').textContent = window.__libExports.greet('alice');
+              </script>
+            </body></html>
+          HTML
+        when '/lib.js'
+          [200, {'content-type' => 'application/javascript'}, [<<~JS]]
+            window.__libExports = {
+              greet: function(name) { return 'hello ' + name; }
+            };
+          JS
+        else
+          [404, {}, ['nope']]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v2, src_app)
+    s.visit '/'
+    expect(s.evaluate_script('window.__cap_loaded')).to be true
+    expect(s.find('#t').text).to eq('hello alice')
+  end
+
   it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
     session.visit '/'
     session.fill_in 'Name', with: 'Daisy'

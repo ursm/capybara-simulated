@@ -557,10 +557,10 @@ module Capybara
           # avoids paying QuickJS cold-start on rack_test-style flows. Reset
           # the virtual clock so timers from the previous page can't fire on
           # this one, and drain afterwards to settle initial setTimeout(0)s.
-          if @document.at_xpath('.//script[not(@src)]')
+          if @document.at_xpath('.//script')
             js.reset_page
             reset_per_page_state
-            js.run_inline_scripts(@document)
+            js.run_scripts(@document) { |src| fetch_resource(resolve(src)) }
             settle
           elsif @js
             @js.reset_page
@@ -572,6 +572,27 @@ module Capybara
         def resolve(url, base: @current_url)
           return url if url =~ %r{\A[a-z]+://}i
           URI.join(base || DEFAULT_HOST, url).to_s
+        end
+
+        # Fetch a static resource through the same Rack app (e.g. an
+        # external <script src="...">). Returns the body string, or nil on
+        # non-200. Doesn't update navigation state — the document, current
+        # URL, and last-request tuple stay put.
+        def fetch_resource(url)
+          uri  = URI.parse(url)
+          opts = {method: 'GET'}
+          opts['HTTP_COOKIE'] = cookie_header_value unless @cookies.empty?
+          env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
+          status, _headers, body_iter = @app.call(env)
+          if (200..299).cover?(status)
+            body = +''
+            body_iter.each { |c| body << c.to_s } if body_iter.respond_to?(:each)
+            body_iter.close if body_iter.respond_to?(:close)
+            return body
+          end
+          warn "[capybara-simulated/v2] script src #{url} returned #{status}" if ENV['CSIM_V2_DEBUG']
+          body_iter.close if body_iter.respond_to?(:close)
+          nil
         end
 
         def cookie_header_value

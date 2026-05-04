@@ -513,12 +513,34 @@
   // HTMLElement is the conventional base for `class Foo extends HTMLElement`
   // — we don't model an HTML/SVG split, so it's just an alias for Element.
   globalThis.HTMLElement = Element;
+  globalThis.Node        = Element;
   globalThis.document = new Element(0);
 
   // Convenience top-level shortcuts.
   globalThis.document.body            = globalThis.document.querySelector('body');
   globalThis.document.head            = globalThis.document.querySelector('head');
   globalThis.document.documentElement = globalThis.document.querySelector('html');
+  // jQuery and friends sniff for these — define them as best-effort
+  // no-ops so library load time doesn't ReferenceError.
+  globalThis.document.readyState  = 'complete';
+  globalThis.document.compatMode  = 'CSS1Compat';
+  globalThis.document.location    = {href: '', host: '', protocol: 'http:', pathname: '/'};
+  globalThis.document.cookie      = '';
+  globalThis.document.implementation = {createHTMLDocument: () => globalThis.document};
+  globalThis.document.documentElement.style = {};
+
+  // window === globalThis is the universal "this is a browser-ish env"
+  // signal. Plus a handful of shims used during library boot.
+  globalThis.window     = globalThis;
+  globalThis.self       = globalThis;
+  globalThis.location   = globalThis.document.location;
+  globalThis.navigator  = {userAgent: 'capybara-simulated/v2', language: 'en-US', languages: ['en-US']};
+  globalThis.screen     = {width: 1024, height: 768};
+  globalThis.history    = {length: 0, pushState: () => {}, replaceState: () => {}, back: () => {}, forward: () => {}};
+  globalThis.localStorage   = {getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, length: 0, key: () => null};
+  globalThis.sessionStorage = {getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, length: 0, key: () => null};
+  globalThis.getComputedStyle = function () { return {getPropertyValue: () => '', length: 0}; };
+  globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
   // ── customElements ───────────────────────────────────────────
   // Minimal CE registry: define / get / whenDefined, plus auto-upgrade
