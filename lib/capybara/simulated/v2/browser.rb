@@ -84,11 +84,24 @@ module Capybara
           (lookup_node(handle)&.text || '').to_s
         end
 
-        VISIBLE_TEXT_SKIP_TAGS = %w[script style head].to_set.freeze
+        VISIBLE_TEXT_SKIP_TAGS = %w[script style head template noscript].to_set.freeze
 
-        # Concatenate text from this node's subtree, skipping script / style /
-        # head subtrees. Whitespace normalization is the caller's job
-        # (Capybara::Node::WhitespaceNormalizer in V2::Node).
+        # Block-level tags that produce a line break at boundaries (browser
+        # `innerText` semantics). Inline whitespace in text nodes is collapsed
+        # to a single space; explicit `\n`s here survive normalize_visible_spacing
+        # so multi-block content lays out as separate lines.
+        BLOCK_TAGS = %w[
+          address article aside blockquote body div dl dd dt fieldset
+          figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main
+          nav ol p pre section table thead tbody tfoot tr td th ul video
+        ].to_set.freeze
+
+        INLINE_WHITESPACE_RE = /[\s&&[^ ]]+/
+
+        # Concatenate text from this node's subtree, skipping invisible
+        # subtrees and inserting `\n` at block-tag boundaries. Whitespace
+        # normalization is the caller's job (V2::Node mixes in
+        # Capybara::Node::WhitespaceNormalizer).
         def visible_text(handle)
           node = lookup_node(handle)
           return '' if node.nil?
@@ -546,11 +559,22 @@ module Capybara
         end
 
         def collect_visible_text(node, out)
+          return if node.nil?
           if node.is_a?(Nokogiri::XML::Text)
-            out << node.text
-          elsif node.respond_to?(:children) && !VISIBLE_TEXT_SKIP_TAGS.include?(node.name)
-            node.children.each { |c| collect_visible_text(c, out) }
+            out << node.text.gsub(INLINE_WHITESPACE_RE, ' ').tr("\n", ' ')
+            return
           end
+          return unless node.respond_to?(:children)
+          return if VISIBLE_TEXT_SKIP_TAGS.include?(node.name)
+          return if node.respond_to?(:[]) && style_hidden?(node)
+          if node.name == 'br'
+            out << "\n"
+            return
+          end
+          block = BLOCK_TAGS.include?(node.name)
+          out << "\n" if block && !out.empty? && !out.end_with?("\n")
+          node.children.each { |c| collect_visible_text(c, out) }
+          out << "\n" if block && !out.end_with?("\n")
         end
 
         DISPLAY_NONE_RE       = /display\s*:\s*none/i
