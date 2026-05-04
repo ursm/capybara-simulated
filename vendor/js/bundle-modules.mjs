@@ -28,7 +28,13 @@
 // On success: the bundle text on stdout, exit 0.
 // On failure: a JSON `{error: ...}` on stderr, exit 1.
 
-import * as esbuild from 'esbuild';
+// We import the vendored esbuild-wasm so the published gem doesn't need
+// a runtime `npm install` step. Native esbuild is used at gem build time
+// only — see build.mjs. The Node entry (`lib/main.js`) requires its own
+// directory to be named `lib` and looks for sibling `bin/esbuild` +
+// `esbuild.wasm`, so the import path has to follow that layout.
+import * as esbuild from '../esbuild-wasm/lib/main.js';
+await esbuild.initialize({});
 
 async function readStdin() {
   let data = '';

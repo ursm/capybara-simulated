@@ -1,9 +1,14 @@
 // Custom esbuild configuration that maps Node built-in imports (including
 // subpaths like `stream/web`) to small browser-compatible shims so that
 // happy-dom can be bundled for mini_racer's V8 isolate.
+//
+// Also vendors esbuild-wasm into vendor/esbuild-wasm/ — that copy is what
+// the published gem uses at runtime to bundle Rails importmap modules.
+// The local (native) `esbuild` is used here at build time only.
 import * as esbuild from 'esbuild';
 import {fileURLToPath} from 'url';
-import {resolve, dirname} from 'path';
+import {resolve, dirname, join} from 'path';
+import {copyFileSync, mkdirSync} from 'fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SHIMS = `${here}/vendor/js/shims`;
@@ -67,3 +72,20 @@ await esbuild.build({
   plugins: [nodeBuiltinShim],
   logLevel: 'info'
 });
+
+// Vendor esbuild-wasm so the published gem can bundle Rails importmaps
+// without a runtime npm dependency. The Node entry (`lib/main.js`) checks
+// its own __dirname and spawns `node ../bin/esbuild`, which then loads
+// `../wasm_exec_node.js` + `../esbuild.wasm`. So we have to preserve the
+// original directory layout — flattening breaks the runtime sanity check.
+const wasmSrc = `${here}/node_modules/esbuild-wasm`;
+const wasmDst = `${here}/vendor/esbuild-wasm`;
+mkdirSync(`${wasmDst}/lib`, {recursive: true});
+mkdirSync(`${wasmDst}/bin`, {recursive: true});
+copyFileSync(`${wasmSrc}/lib/main.js`,        `${wasmDst}/lib/main.js`);
+copyFileSync(`${wasmSrc}/bin/esbuild`,        `${wasmDst}/bin/esbuild`);
+copyFileSync(`${wasmSrc}/esbuild.wasm`,       `${wasmDst}/esbuild.wasm`);
+copyFileSync(`${wasmSrc}/wasm_exec.js`,       `${wasmDst}/wasm_exec.js`);
+copyFileSync(`${wasmSrc}/wasm_exec_node.js`,  `${wasmDst}/wasm_exec_node.js`);
+copyFileSync(`${wasmSrc}/LICENSE.md`,         `${wasmDst}/LICENSE.md`);
+console.log(`vendored esbuild-wasm → ${wasmDst}`);

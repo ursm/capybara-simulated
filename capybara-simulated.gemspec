@@ -18,7 +18,19 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.3'
 
-  spec.files = Dir['lib/**/*.rb', 'vendor/js/*.js', 'vendor/js/*.mjs', 'README.md', 'LICENSE']
+  spec.files = Dir[
+    'lib/**/*.rb',
+    'vendor/js/*.js',
+    'vendor/js/*.mjs',
+    'vendor/esbuild-wasm/lib/main.js',
+    'vendor/esbuild-wasm/bin/esbuild',
+    'vendor/esbuild-wasm/esbuild.wasm',
+    'vendor/esbuild-wasm/wasm_exec.js',
+    'vendor/esbuild-wasm/wasm_exec_node.js',
+    'vendor/esbuild-wasm/LICENSE.md',
+    'README.md',
+    'LICENSE'
+  ]
   spec.require_paths = ['lib']
 
   spec.add_dependency 'capybara',   '>= 3.40'
