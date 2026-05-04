@@ -294,6 +294,18 @@
     return __dispatch(new Element(handle), new Event(type, init));
   };
 
+  // Mailbox shims — Ruby parks args via instance ivars and triggers a
+  // fixed-source eval. JS pulls the args back through the
+  // __pull*-prefixed Ruby callbacks, so QuickJS only ever has to parse
+  // a constant short literal instead of a JSON-interpolated expression.
+  globalThis.__dispatchViaMailbox = function () {
+    const a = __pullDispatchArgs();
+    return __dispatch(new Element(a[0]), new Event(a[1], {bubbles: a[2], cancelable: a[3]}));
+  };
+  globalThis.__deliverMutationsViaMailbox = function () {
+    return __deliverMutations(__pullMutationBatch());
+  };
+
   // ── evaluate_script ──────────────────────────────────────────
   // Capybara's `evaluate_script(code, *args)` wraps `code` in a
   // `return (<code>)` function so an expression's value flows back.
@@ -326,6 +338,10 @@
     // uniformly — selenium's "return <expr>" wrapping can't.
     const fn = new Function('return eval(' + JSON.stringify(code) + ');');
     return marshalResult(fn.apply(null, a));
+  };
+  globalThis.__evalScriptViaMailbox = function () {
+    const c = __pullScriptCall();
+    return __evalScript(c[0], c[1]);
   };
 
   // ── Virtual clock + timer queue ─────────────────────────────

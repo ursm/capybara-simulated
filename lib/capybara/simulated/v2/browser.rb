@@ -330,8 +330,15 @@ module Capybara
         end
 
         def evaluate_script(code, args = [])
-          marshalled = args.map { |a| marshal_script_arg(a) }
-          js.eval("__evalScript(#{code.to_json}, #{marshalled.to_json})")
+          @pending_script = [code, args.map { |a| marshal_script_arg(a) }]
+          js.eval('__evalScriptViaMailbox()')
+        end
+
+        # Drained by JS via __pullScriptCall — the source is a fixed literal,
+        # so QuickJS doesn't have to reparse a JSON-laced expression per call.
+        def consume_pending_script
+          out, @pending_script = @pending_script, nil
+          out
         end
 
         def marshal_script_arg(arg)
@@ -351,10 +358,15 @@ module Capybara
         def dispatch_event(handle, type, bubbles: true, cancelable: true)
           return true unless @js && handle
           return true unless @listened_types.include?(type) || @mutation_recording
-          init = {bubbles: bubbles, cancelable: cancelable}
-          result = js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
+          @pending_dispatch = [handle, type.to_s, bubbles, cancelable]
+          result = js.eval('__dispatchViaMailbox()')
           settle
           result
+        end
+
+        def consume_pending_dispatch
+          out, @pending_dispatch = @pending_dispatch, nil
+          out
         end
 
         # Push a buffered MutationRecord. No-op when no observer is active —
@@ -374,9 +386,14 @@ module Capybara
           10.times do
             js.drain_timers if @timers_active
             break if @mutations.empty?
-            records, @mutations = @mutations, []
-            js.eval("__deliverMutations(#{records.to_json})")
+            @pending_mutations, @mutations = @mutations, []
+            js.eval('__deliverMutationsViaMailbox()')
           end
+        end
+
+        def consume_pending_mutations
+          out, @pending_mutations = @pending_mutations, nil
+          out
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.

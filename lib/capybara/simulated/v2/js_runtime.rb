@@ -70,6 +70,14 @@ module Capybara
           @vm.define_function('__setTimersActive') do |active|
             @browser.timers_active = !!active
           end
+          # Mailbox: Ruby parks per-call args here and triggers a fixed-
+          # source eval; the JS shim pulls them through these callbacks.
+          # Avoids re-parsing a JSON-interpolated expression every call —
+          # a constant 24-byte literal is much cheaper for QuickJS to
+          # tokenize + compile.
+          @vm.define_function('__pullDispatchArgs')   { @browser.consume_pending_dispatch }
+          @vm.define_function('__pullMutationBatch')  { @browser.consume_pending_mutations }
+          @vm.define_function('__pullScriptCall')     { @browser.consume_pending_script }
           @vm.on_log do |level, *parts|
             warn "[capybara-simulated/v2 console.#{level}] #{parts.map(&:to_s).join(' ')}"
           end
