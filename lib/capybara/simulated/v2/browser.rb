@@ -277,6 +277,37 @@ module Capybara
           changed
         end
 
+        # Best-effort send_keys: appends each printable key to the field's
+        # current value, fires keydown / keypress / keyup per key, then
+        # input + change. Special tokens (:enter, :tab, :backspace, etc.)
+        # are passed as the event's `key` field but produce no value change
+        # except :backspace which trims one trailing char.
+        def send_keys(handle, keys)
+          node = lookup_node(handle)
+          return false if node.nil?
+          current = node['value'].to_s
+          keys.each do |k|
+            case k
+            when Symbol
+              event_key = k.to_s
+              current = current[0...-1] if k == :backspace && !current.empty?
+              dispatch_event(handle, 'keydown')
+              dispatch_event(handle, 'keyup')
+            when String
+              k.each_char do |c|
+                current = current + c
+                dispatch_event(handle, 'keydown')
+                dispatch_event(handle, 'keypress')
+                dispatch_event(handle, 'keyup')
+              end
+            end
+          end
+          set_value(handle, current)
+          dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+          dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          true
+        end
+
         def evaluate_script(code, args = [])
           marshalled = args.map { |a| marshal_script_arg(a) }
           js.eval("__evalScript(#{code.to_json}, #{marshalled.to_json})")

@@ -24,6 +24,27 @@ module Capybara
           browser.click(handle_id)
         end
 
+        # right_click and double_click fire the matching event but skip the
+        # default action for click — there's no synthesized "open native menu"
+        # behaviour to dispatch, and tests typically just look at the JS
+        # handler the event triggers.
+        def right_click(*_args, **_opts)
+          browser.dispatch_event(handle_id, 'contextmenu')
+          true
+        end
+
+        def double_click(*_args, **_opts)
+          browser.dispatch_event(handle_id, 'click')
+          browser.dispatch_event(handle_id, 'click')
+          browser.dispatch_event(handle_id, 'dblclick')
+          true
+        end
+
+        def send_keys(*keys)
+          browser.send_keys(handle_id, keys)
+          true
+        end
+
         def set(value, **_opts)
           browser.set_value_with_events(handle_id, value)
         end
