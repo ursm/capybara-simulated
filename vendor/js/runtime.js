@@ -169,6 +169,26 @@
     win.cancelAnimationFrame  = (id) => globalThis.clearTimeout(id);
     installValidationMessages(win);
     installMutationObserverPin(win);
+    installAttrNodeValue(win);
+  }
+
+  // happy-dom 20's `Attr` class implements `value` / `textContent` / `name`
+  // but skips `nodeValue`, so it inherits `Node.prototype.nodeValue` which
+  // returns `null`. The DOM spec says `Attr.nodeValue === Attr.value`
+  // (https://dom.spec.whatwg.org/#dom-node-nodevalue), and any XPath engine
+  // (including wgxpath) reads attributes via `nodeValue` to compute their
+  // string-value — without this shim every attribute compares as the string
+  // `"null"` and predicates like `[@id = //label/@for]` collapse to
+  // `"null" === "null"` (matches every element with any id).
+  function installAttrNodeValue(win) {
+    const proto = win.Attr && win.Attr.prototype;
+    if (!proto || proto.__csim_node_value) return;
+    Object.defineProperty(proto, 'nodeValue', {
+      configurable: true,
+      get() { return this.value; },
+      set(v) { this.value = v; }
+    });
+    proto.__csim_node_value = true;
   }
 
   // happy-dom's MutationObserverListener wraps its dispatch arrow in a
@@ -1234,6 +1254,8 @@
     findXPath(xpath, contextId) {
       if (!currentDocument) return [];
       const root = contextId ? lookup(contextId) : (currentDocument.documentElement || currentDocument);
+      const fast = tryFastXPath(xpath, root);
+      if (fast) return fast.map(track);
       try {
         const nodes = evaluateXPathToNodes(xpath, root, xpathDomFacade, null, {
           // happy-dom places elements in the XHTML namespace.
@@ -2037,6 +2059,201 @@
     getPreviousSibling(node) { return node?.previousSibling ?? null; },
     getParentNode(node)      { return node?.parentNode      ?? null; }
   };
+
+  // Capybara's xpath gem produces a small set of stable XPath shapes for
+  // its built-in selectors (link, button, link_or_button, select, option,
+  // field, fillable_field, …). Even after the facade fix fontoxpath spends
+  // ~4ms on each of these — partly because the predicates redundantly walk
+  // the whole document for `//label[text=X]/@for`. When we recognise the
+  // pattern we can skip fontoxpath entirely and resolve the match through
+  // happy-dom's native `getElementById` + `querySelectorAll('label[for]')`,
+  // which is O(label-count) instead of O(elements × labels).
+  //
+  // Returns an array of nodes on a hit, or `null` on miss (caller falls
+  // back to fontoxpath).
+  function tryFastXPath(xpath, root) {
+    if (typeof xpath !== 'string') return null;
+    // Capybara appends `(./@<test_id> = 'X')` to every locator predicate when
+    // `Capybara.test_id` is set. The aria-label clause is the standard last
+    // attr; a `)) or (` immediately after means a 6th (test_id) clause was
+    // injected. Bail to fontoxpath in that case — falling through is just
+    // slower, not broken.
+    if (/aria-label\s*(?:=|,) '[^']+'\)\)\s+or\s+\(/.test(xpath)) return null;
+    const ms = NORM_TEXT_RX.exec(xpath);
+    if (ms) return findByNormText(root, ms[1], ms[3], ms[2] === 'contains');
+    const ll = LOCATE_FIELD_RX.exec(xpath);
+    if (ll) return findByLabel(root, ll[1], ll[2]);
+    const lb = LINK_OR_BUTTON_RX.exec(xpath);
+    if (lb) return findLinkOrButton(root, lb[1], lb[2] === 'contains');
+    return null;
+  }
+
+  // .//TAG[(normalize-space(string(.)) = 'X')]
+  // .//TAG[contains(normalize-space(string(.)), 'X')]
+  // .//TAG[normalize-space(string(.)) = 'X']    (no outer parens — rare)
+  const NORM_TEXT_RX = /^\.\/\/([a-z][\w-]*)\[\(?(contains)?\(?normalize-space\(string\(\.\)\)(?:, ?| = )'((?:[^'\\]|\\.)*)'\)?\)?\]$/;
+
+  function findByNormText(root, tag, text, isContains) {
+    const out = [];
+    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    for (const el of root.querySelectorAll(tag)) {
+      const t = norm(el.textContent);
+      if (isContains ? t.indexOf(text) >= 0 : t === text) out.push(el);
+    }
+    return out;
+  }
+
+  // .//select[((((@id = 'X') or (@name = 'X')) or (@placeholder = 'X'))
+  //   or (@id = //label[(normalize-space(string(.)) = 'X')]/@for))
+  //   or (@aria-label = 'X'))]
+  //   | .//label[(normalize-space(string(.)) = 'X')]//.//select
+  //
+  // Capybara's `:select` selector. The same locator value is repeated in
+  // every clause, so capture once and verify.
+  const LOCATE_FIELD_RX = new RegExp(
+    '^\\.\\/\\/(select|textarea)\\[\\(\\(\\(\\(\\(\\.\\/@id = \'([^\']+)\'\\)' +
+    ' or \\(\\.\\/@name = \'\\2\'\\)\\)' +
+    ' or \\(\\.\\/@placeholder = \'\\2\'\\)\\)' +
+    ' or \\(\\.\\/@id = \\/\\/label\\[\\(normalize-space\\(string\\(\\.\\)\\) = \'\\2\'\\)\\]\\/@for\\)\\)' +
+    ' or \\(\\.\\/@aria-label = \'\\2\'\\)\\)\\]' +
+    '(?: \\| \\.\\/\\/label\\[\\(normalize-space\\(string\\(\\.\\)\\) = \'\\2\'\\)\\]\\/\\/\\.\\/\\/\\1)?$'
+  );
+
+  function findByLabel(root, tag, value) {
+    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    const matches = new Set();
+    for (const el of root.querySelectorAll(tag)) {
+      if (
+        el.getAttribute('id') === value ||
+        el.getAttribute('name') === value ||
+        el.getAttribute('placeholder') === value ||
+        el.getAttribute('aria-label') === value
+      ) matches.add(el);
+    }
+    // <label for="…">text</label> — anywhere in the *document*, then resolve
+    // its target by id and verify the target is inside `root`.
+    const doc = root.ownerDocument || (root.nodeType === 9 ? root : currentDocument);
+    if (doc) {
+      for (const label of doc.querySelectorAll('label[for]')) {
+        if (norm(label.textContent) !== value) continue;
+        const target = doc.getElementById(label.getAttribute('for'));
+        if (
+          target &&
+          (target.tagName || '').toLowerCase() === tag &&
+          (root === doc.documentElement || root === doc || root.contains(target))
+        ) matches.add(target);
+      }
+    }
+    // <label>text<select/></label> — descendant of root.
+    for (const label of root.querySelectorAll('label')) {
+      if (norm(label.textContent) !== value) continue;
+      for (const child of label.querySelectorAll(tag)) matches.add(child);
+    }
+    return Array.from(matches);
+  }
+
+  function unescXp(s) { return s.replace(/\\(.)/g, '$1'); }
+
+  // .//a[./@href][((((@id = 'X') or [normalize-space(string(.)) = 'X' | contains(...)])
+  //   or [@title = 'X' | contains(...)]) or .//img[(@alt = 'X' | contains)]) or [@aria-label = 'X' | contains])]
+  // | .//input[type=submit/...][...] | .//label[X]//*[input-or-button]
+  // | .//input[type=image][...] | .//button[...] | .//label[X]//* (dup) | .//input[image] (dup)
+  //
+  // Capybara's `:link_or_button` selector — by far the most common shape we
+  // see (~25% of all xpath calls in a Rails system spec). The detector
+  // anchors on the link clause (5 OR'd predicates ending with @aria-label)
+  // and reads off whether the suite is in exact-match or contains mode.
+  // If the last clause isn't aria-label (e.g. Capybara.test_id is set, or
+  // enable_aria_label is off), we bail and fontoxpath handles it.
+  const LINK_OR_BUTTON_RX = new RegExp(
+    '^\\.\\/\\/a\\[\\.\\/@href\\]' +
+    '\\[\\(\\(\\(\\(\\(' +
+      '\\.\\/@id = \'([^\']+)\'\\)' +
+      ' or (?:\\(normalize-space\\(string\\(\\.\\)\\) = \'\\1\'\\)|(contains)\\(normalize-space\\(string\\(\\.\\)\\), \'\\1\'\\))\\)' +
+      ' or (?:\\(\\.\\/@title = \'\\1\'\\)|contains\\(\\.\\/@title, \'\\1\'\\))\\)' +
+      ' or \\.\\/\\/img\\[(?:\\(\\.\\/@alt = \'\\1\'\\)|contains\\(\\.\\/@alt, \'\\1\'\\))\\]\\)' +
+      ' or (?:\\(\\.\\/@aria-label = \'\\1\'\\)|contains\\(\\.\\/@aria-label, \'\\1\'\\))\\)' +
+    '\\]' +
+    ' \\| \\.\\/\\/input\\['
+  );
+
+  function findLinkOrButton(root, value, isContains) {
+    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    const eq = (s) => isContains ? (s != null && String(s).indexOf(value) >= 0) : (s === value);
+    const eqText = (s) => isContains ? norm(s).indexOf(value) >= 0 : norm(s) === value;
+    const matches = new Set();
+
+    // <a href> by id (always exact), text/title/aria-label, child <img alt>
+    for (const a of root.querySelectorAll('a[href]')) {
+      if (
+        a.getAttribute('id') === value ||
+        eqText(a.textContent) ||
+        eq(a.getAttribute('title')) ||
+        eq(a.getAttribute('aria-label'))
+      ) { matches.add(a); continue; }
+      for (const img of a.querySelectorAll('img')) {
+        if (eq(img.getAttribute('alt'))) { matches.add(a); break; }
+      }
+    }
+
+    // <input type=submit/reset/image/button>
+    for (const input of root.querySelectorAll(
+      'input[type=submit],input[type=reset],input[type=image],input[type=button]'
+    )) {
+      if (
+        input.getAttribute('id') === value ||
+        input.getAttribute('name') === value ||
+        eq(input.getAttribute('value')) ||
+        eq(input.getAttribute('title')) ||
+        eq(input.getAttribute('aria-label'))
+      ) matches.add(input);
+    }
+
+    // <input type=image> alt / aria-label
+    for (const input of root.querySelectorAll('input[type=image]')) {
+      if (eq(input.getAttribute('alt')) || eq(input.getAttribute('aria-label'))) matches.add(input);
+    }
+
+    // <button> id/name/value/title/aria-label/text/child <img alt>
+    for (const btn of root.querySelectorAll('button')) {
+      if (
+        btn.getAttribute('id') === value ||
+        btn.getAttribute('name') === value ||
+        eq(btn.getAttribute('value')) ||
+        eq(btn.getAttribute('title')) ||
+        eq(btn.getAttribute('aria-label')) ||
+        eqText(btn.textContent)
+      ) { matches.add(btn); continue; }
+      for (const img of btn.querySelectorAll('img')) {
+        if (eq(img.getAttribute('alt'))) { matches.add(btn); break; }
+      }
+    }
+
+    // <label>text<input|button/></label>
+    for (const label of root.querySelectorAll('label')) {
+      if (!eqText(label.textContent)) continue;
+      for (const c of label.querySelectorAll(
+        'input[type=submit],input[type=reset],input[type=image],input[type=button],button'
+      )) matches.add(c);
+    }
+
+    // <label for="…">text</label> (anywhere in the document) → input/button
+    const doc = root.ownerDocument || (root.nodeType === 9 ? root : currentDocument);
+    if (doc && doc.querySelectorAll) {
+      for (const label of doc.querySelectorAll('label[for]')) {
+        if (!eqText(label.textContent)) continue;
+        const target = doc.getElementById(label.getAttribute('for'));
+        if (!target) continue;
+        const tag  = (target.tagName || '').toLowerCase();
+        const type = ((target.getAttribute && target.getAttribute('type')) || '').toLowerCase();
+        const clickable = (tag === 'input' && /^(submit|reset|image|button)$/.test(type)) || tag === 'button';
+        if (!clickable) continue;
+        if (root === doc.documentElement || root === doc || root.contains(target)) matches.add(target);
+      }
+    }
+
+    return Array.from(matches);
+  }
 
   function findViaXPathFallback(xpath, root) {
     if (typeof xpath !== 'string') return [];
