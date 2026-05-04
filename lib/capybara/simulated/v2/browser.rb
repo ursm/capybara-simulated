@@ -203,7 +203,8 @@ module Capybara
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
-        # Read-only ops in Phase 3a — writes / events arrive in 3b/3c.
+        # Phase 3a added read-only ops; Phase 3b layers in writes (mutate
+        # attributes, replace children, create nodes). Events arrive in 3c.
         def dom_op(handle, op, args)
           node = lookup_node(handle) || @document
           case op
@@ -251,6 +252,41 @@ module Capybara
           when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
           when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
           when 'form'            then @handles.track(enclosing_form(node))
+          # ── writes ────────────────────────────────────────────
+          when 'setAttribute'
+            node[args[0]] = args[1].to_s if node.element?
+            nil
+          when 'removeAttribute'
+            node.delete(args[0]) if node.element?
+            nil
+          when 'setValue'        then set_value(handle, args[0]); nil
+          when 'setChecked'      then set_value(handle, !!args[0]); nil
+          when 'setTextContent'  then replace_children_with_text(node, args[0].to_s); nil
+          when 'setInnerHTML'    then replace_children_with_html(node, args[0].to_s); nil
+          when 'appendChild'
+            child = lookup_node(args[0])
+            node.add_child(child) if child && node.respond_to?(:add_child)
+            args[0]
+          when 'removeChild'
+            child = lookup_node(args[0])
+            child&.unlink
+            args[0]
+          when 'insertBefore'
+            new_child = lookup_node(args[0])
+            ref_child = lookup_node(args[1])
+            if new_child
+              ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+            end
+            args[0]
+          when 'replaceChild'
+            new_child = lookup_node(args[0])
+            old_child = lookup_node(args[1])
+            old_child.replace(new_child) if new_child && old_child
+            args[1]
+          when 'createElement'
+            @handles.track(@document.create_element(args[0].to_s))
+          when 'createTextNode'
+            @handles.track(Nokogiri::XML::Text.new(args[0].to_s, @document))
           else
             warn "[capybara-simulated/v2] unsupported dom op: #{op}" if ENV['CSIM_V2_DEBUG']
             nil
@@ -397,6 +433,19 @@ module Capybara
           return 8  if node.is_a?(Nokogiri::XML::Comment)
           return 11 if node.is_a?(Nokogiri::XML::DocumentFragment)
           0
+        end
+
+        def replace_children_with_text(node, text)
+          return unless node.respond_to?(:children)
+          node.children.unlink
+          node.add_child(Nokogiri::XML::Text.new(text, @document))
+        end
+
+        def replace_children_with_html(node, html)
+          return unless node.respond_to?(:children)
+          node.children.unlink
+          fragment = Nokogiri::HTML5.fragment(html)
+          fragment.children.each { |c| node.add_child(c) }
         end
 
         def style_hidden?(node)
