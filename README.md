@@ -93,12 +93,103 @@ bundle install
 bundle exec rspec
 ```
 
-## Use
+## Install
+
+Add to your Gemfile (development / test group):
 
 ```ruby
+gem 'capybara-simulated', '~> 0.0', group: :test
+```
+
+Then `bundle install`. The gem ships its own pre-built happy-dom bundle
+under `vendor/js/`, so no `npm install` is required at consume time.
+
+## Use
+
+`require 'capybara/simulated'` registers the `:simulated` driver. The
+snippets below are minimal — drop them into your existing test bootstrap.
+
+### RSpec
+
+```ruby
+# spec/spec_helper.rb (or spec/rails_helper.rb)
+require 'capybara/rspec'
 require 'capybara/simulated'
 
 Capybara.javascript_driver = :simulated
+# Optional: make :simulated the default for non-JS specs too.
+# Capybara.default_driver = :simulated
+```
+
+Tests tagged `js: true` (or `type: :system, js: true` in Rails) will run
+in the simulated driver:
+
+```ruby
+RSpec.describe 'sign-in', type: :system, js: true do
+  it 'logs the user in' do
+    visit '/login'
+    fill_in 'Email',    with: 'alice@example.com'
+    fill_in 'Password', with: 'hunter2'
+    click_button 'Log in'
+    expect(page).to have_text('Welcome, Alice')
+  end
+end
+```
+
+For a Rails system test, set the driver in `before_setup` /
+`driven_by`:
+
+```ruby
+# spec/system/sign_in_spec.rb
+RSpec.describe 'sign-in', type: :system do
+  before { driven_by :simulated }
+  # ...
+end
+```
+
+### Minitest
+
+```ruby
+# test/test_helper.rb
+require 'capybara/minitest'
+require 'capybara/simulated'
+
+Capybara.javascript_driver = :simulated
+
+class ActionDispatch::SystemTestCase
+  driven_by :simulated
+end
+```
+
+```ruby
+# test/system/sign_in_test.rb
+require 'application_system_test_case'
+
+class SignInTest < ApplicationSystemTestCase
+  test 'logs the user in' do
+    visit '/login'
+    fill_in 'Email',    with: 'alice@example.com'
+    fill_in 'Password', with: 'hunter2'
+    click_button 'Log in'
+    assert_text 'Welcome, Alice'
+  end
+end
+```
+
+### Plain Capybara DSL (no framework)
+
+```ruby
+require 'capybara/dsl'
+require 'capybara/simulated'
+
+Capybara.app = MyRackApp
+Capybara.default_driver = :simulated
+
+include Capybara::DSL
+
+visit '/'
+click_link 'About'
+puts page.text
 ```
 
 ## How it fits together
