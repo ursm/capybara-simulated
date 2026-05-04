@@ -12,15 +12,15 @@ forms submit through `Rack::MockRequest`.
 
 ## Status
 
-PoC. Against Capybara 3.40's shared `Capybara::SpecHelper.spec` suite the
+Used in production by a Rails 8 app to run ~200 `js: true` system specs
+without spawning a headless Chrome.
+
+Against Capybara 3.40's shared `Capybara::SpecHelper.spec` suite the
 driver passes **1337 / 1357 examples (98.5%)** with the unsupported-
 capability tags `about_scheme`, `css`, `download`, `frames`, `hover`,
 `screenshot`, `scroll`, `server`, `spatial`, `windows` filtered out.
-Tags that started skipped but now pass: `active_element`, `modals`
-(alert/confirm/prompt incl. nested + page-change + async),
-`html_validation`, `send_keys`, `shadow_dom`. The remaining 20
-failures all need capabilities the driver intentionally does not
-implement:
+The remaining 20 failures all need capabilities the driver intentionally
+does not implement:
 
 - 19 `#drag_to` tests — Dragula / SortableJS / jsTree resolve drop
   targets through `elementFromPoint(clientX, clientY)`, which needs a
