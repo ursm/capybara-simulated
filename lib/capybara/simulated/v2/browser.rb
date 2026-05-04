@@ -1,5 +1,6 @@
 require 'json'
 require 'nokogiri'
+require 'rack/mime'
 require 'rack/mock'
 require 'securerandom'
 require 'set'
@@ -20,22 +21,23 @@ module Capybara
         attr_accessor :mutation_recording, :timers_active
 
         def initialize(app)
-          @app          = app
-          @current_url  = nil
-          @status_code     = nil
-          @response_headers = {}
-          @last_request    = nil   # [method, url, body, content_type]
-          @document     = Nokogiri::HTML5(BLANK_DOCUMENT)
-          @handles      = HandleTable.new(@document)
-          @cookies      = {}       # name -> value (single-domain cookie jar)
-          @js           = nil  # lazy — only spin up QuickJS on first script
-          @mutations    = []
+          @app                = app
+          @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
+          @handles            = HandleTable.new(@document)
+          @js                 = nil
+          @current_url        = nil
+          @status_code        = nil
+          @response_headers   = {}
+          @last_request       = nil
+          @cookies            = {}
+          @file_picks         = {}   # handle -> [path, ...] for <input type="file">
+          @mutations          = []
           @mutation_recording = false
-          @timers_active     = false
-          # Set of event types with at least one live listener — JS notifies
-          # us via __setListenedType so dispatch_event can skip the entire
-          # JS hop for events nobody cares about.
-          @listened_types    = Set.new
+          @timers_active      = false
+          # Event types with at least one live listener — JS notifies us
+          # via __setListenedType so dispatch_event can skip the JS hop
+          # for events nobody cares about.
+          @listened_types     = Set.new
         end
 
         def set_listened_type(type, active)
@@ -61,13 +63,14 @@ module Capybara
         end
 
         def reset!
-          @document    = Nokogiri::HTML5(BLANK_DOCUMENT)
+          @document         = Nokogiri::HTML5(BLANK_DOCUMENT)
           @handles.reset!(@document)
-          @current_url = nil
-          @status_code = nil
+          @current_url      = nil
+          @status_code      = nil
           @response_headers = {}
-          @last_request = nil
+          @last_request     = nil
           @cookies.clear
+          @file_picks.clear
           @js&.reset_page
           reset_per_page_state
         end
@@ -115,7 +118,7 @@ module Capybara
           node = lookup_node(handle)
           return '' if node.nil?
           out = String.new
-          collect_visible_text(node, out)
+          collect_visible_text(node, out, root: true)
           out
         end
 
@@ -172,11 +175,10 @@ module Capybara
                 end
               end
             when 'file'
-              # File picks travel as a private attribute on the node — the
-              # form serializer reads it back to build multipart/form-data.
-              # Newline-separated for the rare multiple-file case.
-              paths = Array(value).map(&:to_s)
-              node[FILE_PATHS_ATTR] = paths.join("\n")
+              # File picks live in the Browser-side @file_picks map keyed by
+              # handle — keeps them off the live DOM (where they'd leak into
+              # innerHTML / be visible to user JS).
+              @file_picks[handle] = Array(value).map(&:to_s)
             else
               node['value'] = value.to_s
             end
@@ -186,7 +188,9 @@ module Capybara
           true
         end
 
-        FILE_PATHS_ATTR = 'data-csim-file-paths'.freeze
+        def file_picks_for(handle)
+          @file_picks[handle] || []
+        end
 
         def select_option(handle)
           opt = lookup_node(handle)
@@ -302,17 +306,16 @@ module Capybara
         def send_keys(handle, keys)
           node = lookup_node(handle)
           return false if node.nil?
-          current = node['value'].to_s
+          current = (node.name == 'textarea' ? node.text : node['value']).to_s
           keys.each do |k|
             case k
             when Symbol
-              event_key = k.to_s
               current = current[0...-1] if k == :backspace && !current.empty?
               dispatch_event(handle, 'keydown')
               dispatch_event(handle, 'keyup')
             when String
               k.each_char do |c|
-                current = current + c
+                current << c
                 dispatch_event(handle, 'keydown')
                 dispatch_event(handle, 'keypress')
                 dispatch_event(handle, 'keyup')
@@ -523,6 +526,9 @@ module Capybara
           @status_code      = status
           @response_headers = headers
           @current_url      = url
+          # Handle integers get reused across documents, so the old file-pick
+          # map would silently re-attach to whatever now lives at those ints.
+          @file_picks.clear
           @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
           # Run inline `<script>` tags only when the page actually has any —
@@ -594,9 +600,8 @@ module Capybara
             content_type, body = build_multipart(form, submitter)
             navigate(:post, action, body: body, content_type: content_type)
           elsif method == 'post'
-            body = URI.encode_www_form(serialize_form(form, submitter))
             navigate(:post, action,
-                     body: body,
+                     body:         URI.encode_www_form(serialize_form(form, submitter)),
                      content_type: 'application/x-www-form-urlencoded')
           else
             uri = URI.parse(action)
@@ -610,9 +615,11 @@ module Capybara
           form['enctype'].to_s.downcase == 'multipart/form-data'
         end
 
-        def build_multipart(form, submitter)
-          boundary = "csim-#{SecureRandom.hex(8)}"
-          body = String.new.force_encoding(Encoding::ASCII_8BIT)
+        # Yields each submittable form-control entry as
+        # `[name, type, value, picks]` — `picks` is the array of paths for a
+        # file input, otherwise nil. serialize_form / build_multipart consume
+        # this single walk so the field-selection rules stay in one place.
+        def each_form_field(form, submitter)
           form.css('input, textarea, select, button').each do |field|
             name = field['name']
             next if name.nil? || name.empty? || field['disabled']
@@ -620,102 +627,68 @@ module Capybara
             case type
             when 'submit', 'image', 'button', 'reset'
               next unless field == submitter
-              append_multipart_text(body, boundary, name, field['value'].to_s)
+              yield name, type, field['value'].to_s, nil
             when 'checkbox', 'radio'
-              append_multipart_text(body, boundary, name, field['value'] || 'on') if field['checked']
+              yield name, type, (field['value'] || 'on'), nil if field['checked']
             when 'select'
               field.css('option').each do |opt|
-                append_multipart_text(body, boundary, name, opt['value'] || opt.text) if opt['selected']
+                yield name, type, (opt['value'] || opt.text), nil if opt['selected']
               end
             when 'textarea'
-              append_multipart_text(body, boundary, name, field.text)
+              yield name, type, field.text, nil
             when 'file'
-              paths = field[FILE_PATHS_ATTR].to_s.split("\n").reject(&:empty?)
-              if paths.empty?
-                append_multipart_file(body, boundary, name, nil)
+              yield name, type, nil, file_picks_for(@handles.track(field))
+            else
+              yield name, type, field['value'].to_s, nil
+            end
+          end
+        end
+
+        def serialize_form(form, submitter)
+          out = []
+          each_form_field(form, submitter) do |name, type, value, picks|
+            if type == 'file'
+              # Non-multipart forms submit only the basename of any picked
+              # file (browsers can't actually upload through urlencoded).
+              out << [name, picks.empty? ? '' : File.basename(picks.first)]
+            else
+              out << [name, value]
+            end
+          end
+          out
+        end
+
+        def build_multipart(form, submitter)
+          boundary = "csim-#{SecureRandom.hex(8)}"
+          body     = String.new.force_encoding(Encoding::ASCII_8BIT)
+          each_form_field(form, submitter) do |name, type, value, picks|
+            if type == 'file'
+              if picks.empty?
+                append_multipart_part(body, boundary, name, '', filename: '')
               else
-                paths.each { |p| append_multipart_file(body, boundary, name, p) }
+                picks.each do |path|
+                  append_multipart_part(body, boundary, name, File.binread(path),
+                                        filename:     File.basename(path),
+                                        content_type: Rack::Mime.mime_type(File.extname(path)))
+                end
               end
             else
-              append_multipart_text(body, boundary, name, field['value'].to_s)
+              append_multipart_part(body, boundary, name, value.to_s)
             end
           end
           body << "--#{boundary}--\r\n"
           ["multipart/form-data; boundary=#{boundary}", body]
         end
 
-        def append_multipart_text(body, boundary, name, value)
+        def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
           body << "--#{boundary}\r\n"
-          body << %[Content-Disposition: form-data; name="#{name}"\r\n\r\n]
-          body << value.to_s.b
+          disposition = %[form-data; name="#{name}"]
+          disposition += %[; filename="#{filename}"] if filename
+          body << "Content-Disposition: #{disposition}\r\n"
+          body << "Content-Type: #{content_type}\r\n" if content_type
           body << "\r\n"
-        end
-
-        def append_multipart_file(body, boundary, name, path)
-          body << "--#{boundary}\r\n"
-          if path.nil? || path.empty?
-            body << %[Content-Disposition: form-data; name="#{name}"; filename=""\r\n]
-            body << "Content-Type: application/octet-stream\r\n\r\n\r\n"
-            return
-          end
-          filename = File.basename(path)
-          content  = File.binread(path)
-          body << %[Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\r\n]
-          body << "Content-Type: #{file_content_type(path)}\r\n\r\n"
-          body << content
+          body << content.to_s.b
           body << "\r\n"
-        end
-
-        def serialize_form(form, submitter)
-          out = []
-          form.css('input, textarea, select, button').each do |field|
-            name = field['name']
-            next if name.nil? || name.empty?
-            next if field['disabled']
-            type = (field['type'] || (field.name == 'button' ? 'submit' : nil) || field.name).downcase
-            case type
-            when 'submit', 'image', 'button', 'reset'
-              # Only the clicked submitter contributes its name/value pair.
-              next unless field == submitter
-              out << [name, field['value'].to_s]
-            when 'checkbox', 'radio'
-              out << [name, field['value'] || 'on'] if field['checked']
-            when 'select'
-              field.css('option').each do |opt|
-                out << [name, opt['value'] || opt.text] if opt['selected']
-              end
-            when 'textarea'
-              out << [name, field.text]
-            when 'file'
-              # Non-multipart forms submit only the basename of any picked
-              # file (browsers can't actually upload through urlencoded).
-              paths = field[FILE_PATHS_ATTR].to_s.split("\n").reject(&:empty?)
-              out << [name, paths.empty? ? '' : File.basename(paths.first)]
-            else
-              out << [name, field['value'].to_s]
-            end
-          end
-          out
-        end
-
-        def file_content_type(path)
-          ext = File.extname(path).downcase
-          {
-            '.txt'  => 'text/plain',
-            '.html' => 'text/html',
-            '.htm'  => 'text/html',
-            '.css'  => 'text/css',
-            '.js'   => 'application/javascript',
-            '.json' => 'application/json',
-            '.xml'  => 'application/xml',
-            '.pdf'  => 'application/pdf',
-            '.png'  => 'image/png',
-            '.jpg'  => 'image/jpeg',
-            '.jpeg' => 'image/jpeg',
-            '.gif'  => 'image/gif',
-            '.svg'  => 'image/svg+xml',
-            '.csv'  => 'text/csv'
-          }.fetch(ext, 'application/octet-stream')
         end
 
         def enclosing_form(node)
@@ -730,9 +703,8 @@ module Capybara
 
         def label_target(label)
           if (target_id = label['for']) && !target_id.empty?
-            return @document.at_css("##{target_id}")
+            return @document.at_xpath('.//*[@id=$id]', nil, id: target_id.to_s)
           end
-          # Implicit label: first descendant input/select/textarea/button.
           label.css('input,select,textarea,button').first
         end
 
@@ -745,23 +717,34 @@ module Capybara
           0
         end
 
-        def collect_visible_text(node, out)
+        # `root:` flag walks ancestors via style_hidden? once at the call
+        # site; descendants only check their *own* hidden / style attrs,
+        # turning visible_text from O(N×depth) into O(N).
+        def collect_visible_text(node, out, root:)
           return if node.nil?
           if node.is_a?(Nokogiri::XML::Text)
-            out << node.text.gsub(INLINE_WHITESPACE_RE, ' ').tr("\n", ' ')
+            out << node.text.gsub(INLINE_WHITESPACE_RE, ' ')
             return
           end
           return unless node.respond_to?(:children)
           return if VISIBLE_TEXT_SKIP_TAGS.include?(node.name)
-          return if node.respond_to?(:[]) && style_hidden?(node)
+          if node.respond_to?(:[])
+            return if root ? style_hidden?(node) : self_hidden?(node)
+          end
           if node.name == 'br'
             out << "\n"
             return
           end
           block = BLOCK_TAGS.include?(node.name)
           out << "\n" if block && !out.empty? && !out.end_with?("\n")
-          node.children.each { |c| collect_visible_text(c, out) }
+          node.children.each { |c| collect_visible_text(c, out, root: false) }
           out << "\n" if block && !out.end_with?("\n")
+        end
+
+        def self_hidden?(node)
+          return true if node['hidden']
+          style = node['style'].to_s
+          style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
         end
 
         DISPLAY_NONE_RE       = /display\s*:\s*none/i
