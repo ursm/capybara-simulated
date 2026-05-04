@@ -1987,6 +1987,12 @@
   // Custom DOM facade for fontoxpath that uses childNodes-based traversal
   // so happy-dom quirks around sibling links don't break root-anchored
   // queries. Mirrors the helper we built for linkedom.
+  // fontoxpath calls into this facade tens of thousands of times per
+  // traversal, so each method needs to delegate to happy-dom's native
+  // pointers rather than reconstructing them. Earlier revisions of
+  // getNextSibling / getPreviousSibling rebuilt childNodes via
+  // Array.from(parent.childNodes) and then indexOf'd the node — quadratic
+  // in tree size, and the dominant cost on any non-trivial page.
   const xpathDomFacade = {
     getAllAttributes(node) {
       if (!node || node.nodeType !== 1 || !node.attributes) return [];
@@ -2006,31 +2012,30 @@
       if (node.nodeType === 2) return node.value || '';
       return node.data || '';
     },
+    // happy-dom 20 has a quirk on `<template>`: `template.childNodes` is
+    // empty (the parsed content lives in `template.content`) but
+    // `template.firstChild` / `template.lastChild` still return the first
+    // text node of `template.content`. Walking into that ghost child
+    // makes fontoxpath traverse content as if it were a regular descendant,
+    // which scrambles every predicate downstream. Verify against
+    // childNodes.length before trusting firstChild / lastChild.
     getFirstChild(node) {
-      const cs = this.getChildNodes(node);
-      return cs.length ? cs[0] : null;
+      const fc = node?.firstChild ?? null;
+      if (!fc) return null;
+      const cs = node.childNodes;
+      if (cs && cs.length === 0) return null;
+      return fc;
     },
     getLastChild(node) {
-      const cs = this.getChildNodes(node);
-      return cs.length ? cs[cs.length - 1] : null;
+      const lc = node?.lastChild ?? null;
+      if (!lc) return null;
+      const cs = node.childNodes;
+      if (cs && cs.length === 0) return null;
+      return lc;
     },
-    getNextSibling(node) {
-      const parent = this.getParentNode(node);
-      if (!parent) return null;
-      const cs = this.getChildNodes(parent);
-      const i = cs.indexOf(node);
-      return (i >= 0 && i + 1 < cs.length) ? cs[i + 1] : null;
-    },
-    getPreviousSibling(node) {
-      const parent = this.getParentNode(node);
-      if (!parent) return null;
-      const cs = this.getChildNodes(parent);
-      const i = cs.indexOf(node);
-      return (i > 0) ? cs[i - 1] : null;
-    },
-    getParentNode(node) {
-      return node ? node.parentNode || null : null;
-    }
+    getNextSibling(node)     { return node?.nextSibling     ?? null; },
+    getPreviousSibling(node) { return node?.previousSibling ?? null; },
+    getParentNode(node)      { return node?.parentNode      ?? null; }
   };
 
   function findViaXPathFallback(xpath, root) {
