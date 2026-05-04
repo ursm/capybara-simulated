@@ -21,6 +21,18 @@ module Capybara
           @vm.eval_code(code.to_s)
         end
 
+        # Advance the virtual clock until the timer queue is empty (or the
+        # cap trips). Called by Browser after every user-driven action so
+        # that setTimeout / requestAnimationFrame work has settled before
+        # the next assertion.
+        def drain_timers
+          @vm.eval_code('__drainTimers()')
+        end
+
+        def reset_timers
+          @vm.eval_code('__resetTimers()')
+        end
+
         # Run every inline `<script>` in document order. External `src`
         # scripts and `type="module"` are skipped here — those land in
         # later phases.

@@ -236,6 +236,54 @@ RSpec.describe 'Simulated V2 (Nokogiri + QuickJS) — smoke' do
     expect(s.title).to eq('About')
   end
 
+  it 'drains setTimeout / setInterval / requestAnimationFrame on the virtual clock' do
+    timer_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <button id="b">Go</button>
+            <div id="out">init</div>
+            <div id="ticks">0</div>
+            <script>
+              const out   = document.querySelector('#out');
+              const ticks = document.querySelector('#ticks');
+              // Initial setTimeout(0) — must run after page load drain.
+              setTimeout(() => { out.textContent = 'ready'; }, 0);
+
+              document.querySelector('#b').addEventListener('click', () => {
+                out.textContent = 'A';
+                setTimeout(() => { out.textContent += 'B'; }, 50);
+                setTimeout(() => { out.textContent += 'C'; }, 100);
+                requestAnimationFrame(() => { out.textContent += 'R'; });
+
+                let n = 0;
+                const id = setInterval(() => {
+                  n++;
+                  ticks.textContent = String(n);
+                  if (n >= 3) clearInterval(id);
+                }, 30);
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v2, timer_app)
+    s.visit '/'
+    expect(s.find('#out').text).to eq('ready')
+
+    s.click_button 'Go'
+    # Virtual clock order from t=0 click:
+    #   t=16  raf  → 'AR'
+    #   t=30  int  → ticks=1
+    #   t=50  to50 → 'ARB'
+    #   t=60  int  → ticks=2
+    #   t=90  int  → ticks=3 (clears)
+    #   t=100 to100→ 'ARBC'
+    expect(s.find('#out').text).to eq('ARBC')
+    expect(s.find('#ticks').text).to eq('3')
+  end
+
   it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
     session.visit '/'
     session.fill_in 'Name', with: 'Daisy'

@@ -43,6 +43,7 @@ module Capybara
           @handles.reset!(@document)
           @current_url = nil
           @cookies.clear
+          @js&.reset_timers
         end
 
         # ── reads ──────────────────────────────────────────────────
@@ -223,7 +224,9 @@ module Capybara
         def dispatch_event(handle, type, bubbles: true, cancelable: true)
           return true unless @js && handle
           init = {bubbles: bubbles, cancelable: cancelable}
-          js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
+          result = js.eval("__dispatchFromRuby(#{handle}, #{type.to_json}, #{init.to_json})")
+          js.drain_timers
+          result
         end
 
         # Single dispatch entry called from JS via `__dom(handle, op, args)`.
@@ -350,8 +353,16 @@ module Capybara
           @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
           # Run inline `<script>` tags only when the page actually has any —
-          # avoids paying QuickJS cold-start on rack_test-style flows.
-          js.run_inline_scripts(@document) if @document.css('script').any? { |s| !s['src'] }
+          # avoids paying QuickJS cold-start on rack_test-style flows. Reset
+          # the virtual clock so timers from the previous page can't fire on
+          # this one, and drain afterwards to settle initial setTimeout(0)s.
+          if @document.css('script').any? { |s| !s['src'] }
+            js.reset_timers
+            js.run_inline_scripts(@document)
+            js.drain_timers
+          elsif @js
+            @js.reset_timers
+          end
           status
         end
 

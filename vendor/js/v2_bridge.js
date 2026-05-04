@@ -271,6 +271,65 @@
     return __dispatch(new Element(handle), new Event(type, init));
   };
 
+  // ── Virtual clock + timer queue ─────────────────────────────
+  // Real test runs don't sleep; instead Ruby calls __drainTimers after
+  // each user action, advancing __virtualNow until the queue is empty
+  // (or the cap kicks in to break runaway setInterval / chains).
+  const __timers = new Map();  // id -> {handler, args, due, period?}
+  let __nextTimerId = 1;
+  let __virtualNow = 0;
+
+  function scheduleTimer(handler, ms, args, period) {
+    if (typeof handler !== 'function') return 0;
+    const id = __nextTimerId++;
+    const delay = Math.max(0, +ms || 0);
+    __timers.set(id, {handler, args, due: __virtualNow + delay, period});
+    return id;
+  }
+
+  globalThis.setTimeout    = function (h, ms, ...a) { return scheduleTimer(h, ms, a, null); };
+  globalThis.setInterval   = function (h, ms, ...a) { return scheduleTimer(h, ms, a, Math.max(1, +ms || 0)); };
+  globalThis.clearTimeout  = function (id) { __timers.delete(id); };
+  globalThis.clearInterval = globalThis.clearTimeout;
+  globalThis.requestAnimationFrame = function (cb) { return scheduleTimer(() => cb(__virtualNow), 16, [], null); };
+  globalThis.cancelAnimationFrame  = globalThis.clearTimeout;
+  // queueMicrotask: collapse to setTimeout(0). Real microtasks run before
+  // the next macrotask, but with virtual time it's near-equivalent.
+  globalThis.queueMicrotask = function (cb) { scheduleTimer(cb, 0, [], null); };
+
+  globalThis.__drainTimers = function (maxMs, maxIter) {
+    if (typeof maxMs   !== 'number') maxMs   = 2000;
+    if (typeof maxIter !== 'number') maxIter = 10000;
+    const limit = __virtualNow + maxMs;
+    let iter = 0;
+    while (iter++ < maxIter && __timers.size > 0) {
+      let nextId = null, nextDue = Infinity;
+      for (const [id, t] of __timers) {
+        if (t.due < nextDue) { nextDue = t.due; nextId = id; }
+      }
+      if (nextId === null || nextDue > limit) break;
+      __virtualNow = nextDue;
+      const t = __timers.get(nextId);
+      if (t.period != null) {
+        t.due = __virtualNow + t.period;
+      } else {
+        __timers.delete(nextId);
+      }
+      try {
+        t.handler.apply(null, t.args || []);
+      } catch (e) {
+        try { console.error('timer threw:', e && e.message ? e.message : e); } catch (_) {}
+      }
+    }
+  };
+
+  // Reset between sessions / pages so leftover timers from a prior page
+  // don't fire on the next one.
+  globalThis.__resetTimers = function () {
+    __timers.clear();
+    __virtualNow = 0;
+  };
+
   globalThis.Element = Element;
   globalThis.document = new Element(0);
 
