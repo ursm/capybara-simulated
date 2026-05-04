@@ -15,15 +15,18 @@ module Capybara
       # lazy QuickJS runtime. Capybara DSL queries hit Nokogiri directly;
       # user JS (when present) sees a thin DOM proxy backed by `dom_op`.
       class Browser
-        attr_reader :app, :current_url
+        attr_reader :app, :current_url, :status_code, :response_headers
         attr_accessor :mutation_recording, :timers_active
 
         def initialize(app)
           @app          = app
           @current_url  = nil
+          @status_code     = nil
+          @response_headers = {}
+          @last_request    = nil   # [method, url, body, content_type]
           @document     = Nokogiri::HTML5(BLANK_DOCUMENT)
           @handles      = HandleTable.new(@document)
-          @cookies      = []
+          @cookies      = {}       # name -> value (single-domain cookie jar)
           @js           = nil  # lazy — only spin up QuickJS on first script
           @mutations    = []
           @mutation_recording = false
@@ -51,13 +54,18 @@ module Capybara
         end
 
         def refresh
-          navigate(:get, @current_url) if @current_url
+          return unless @last_request
+          method, url, body, content_type = @last_request
+          navigate(method, url, body: body, content_type: content_type, replay: true)
         end
 
         def reset!
           @document    = Nokogiri::HTML5(BLANK_DOCUMENT)
           @handles.reset!(@document)
           @current_url = nil
+          @status_code = nil
+          @response_headers = {}
+          @last_request = nil
           @cookies.clear
           @js&.reset_page
           reset_per_page_state
@@ -478,12 +486,14 @@ module Capybara
 
         private
 
-        def navigate(method, url, body: nil, content_type: nil)
+        def navigate(method, url, body: nil, content_type: nil, replay: false)
+          @last_request = [method, url, body, content_type] unless replay
           uri  = URI.parse(url)
           path = uri.request_uri
           opts = {method: method.to_s.upcase}
           opts[:input] = body if body
           opts['CONTENT_TYPE'] = content_type if content_type
+          opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
           env  = Rack::MockRequest.env_for(path, **opts)
           status, headers, body_iter = @app.call(env)
           response_body = +''
@@ -494,12 +504,16 @@ module Capybara
           end
           body_iter.close if body_iter.respond_to?(:close)
 
+          ingest_set_cookie(headers)
+
           if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
             @current_url = resolve(loc, base: url)
             return navigate(:get, @current_url)
           end
 
-          @current_url = url
+          @status_code      = status
+          @response_headers = headers
+          @current_url      = url
           @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
           # Run inline `<script>` tags only when the page actually has any —
@@ -521,6 +535,24 @@ module Capybara
         def resolve(url, base: @current_url)
           return url if url =~ %r{\A[a-z]+://}i
           URI.join(base || DEFAULT_HOST, url).to_s
+        end
+
+        def cookie_header_value
+          @cookies.map { |k, v| "#{k}=#{v}" }.join('; ')
+        end
+
+        # Parse Set-Cookie response header(s) and stash name=value pairs.
+        # We don't honour Path / Domain / Expires — single-session, single-
+        # domain cookie jar matches what rack_test does for spec purposes.
+        def ingest_set_cookie(headers)
+          raw = headers['set-cookie'] || headers['Set-Cookie']
+          return if raw.nil? || raw.empty?
+          (raw.is_a?(Array) ? raw : raw.split("\n")).each do |line|
+            pair, * = line.split(';', 2)
+            name, value = pair.to_s.split('=', 2)
+            next if name.nil? || name.empty?
+            @cookies[name.strip] = value.to_s.strip
+          end
         end
 
         def click_form_control(node)

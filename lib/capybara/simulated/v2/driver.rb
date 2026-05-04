@@ -26,6 +26,8 @@ module Capybara
         def current_url      = browser.current_url || ''
         def html             = browser.html
         def title            = browser.title
+        def status_code      = browser.status_code
+        def response_headers = browser.response_headers
 
         def find_xpath(query, **_)
           browser.find_xpath(query).map { |id| Node.new(self, id) }
