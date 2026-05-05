@@ -84,6 +84,7 @@
     get text()         { return __dom(this.__h, 'textContent', []); }
     set text(v)        { __dom(this.__h, 'setTextContent', [String(v)]); }
     get innerText()   { return __dom(this.__h, 'innerText',   []); }
+    set innerText(v)  { __dom(this.__h, 'setTextContent', [String(v)]); }
     get innerHTML()   { return __dom(this.__h, 'innerHTML',   []); }
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
     get outerHTML()   { return __dom(this.__h, 'outerHTML',   []); }
