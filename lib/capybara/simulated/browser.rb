@@ -183,6 +183,26 @@ module Capybara
         ArgumentError
       ].freeze
 
+      CHECKABLE_INPUT_TYPES = %w[checkbox radio].freeze
+
+      # Write or remove an attribute on `node` (nil value removes).
+      # Returns the previous attribute value so the JS side can decide
+      # whether to fire CE attributeChangedCallback. No-ops when the
+      # value would be unchanged — matches real-browser semantics and
+      # spares observers a redundant notification.
+      def write_attribute(node, handle, name, value)
+        return nil unless node.element?
+        old = node[name]
+        return old if old == value
+        if value.nil?
+          node.delete(name)
+        else
+          node[name] = value
+        end
+        record_mutation('attributes', handle, attributeName: name, oldValue: old)
+        old
+      end
+
       # Try the whole selector first, then fall back to per-branch
       # evaluation only if Nokogiri rejects it — Turbo's
       # `a[href], a[xlink\:href]` would otherwise drop the leading
@@ -728,10 +748,7 @@ module Capybara
           return was_checked unless dispatch_event(handle, 'click')
           set_value(handle, value)
           if now_checked != was_checked
-            # Real browsers fire 'input' before 'change' on user toggle.
-            # Stimulus's default event for radio / checkbox is 'input'
-            # (not 'change'), so handlers wired with `data-action` on
-            # those controls only see this if we fire input too.
+            # Stimulus's default action event for radio / checkbox is 'input', not 'change'.
             dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
             dispatch_event(handle, 'change', bubbles: true, cancelable: false)
           end
@@ -1123,32 +1140,17 @@ module Capybara
         when 'validationMessage'  then validation_message(node)
         when 'focus' then focus(handle); nil
         when 'blur'  then blur(handle);  nil
-        when 'setAttribute'
-          if node.element?
-            old = node[args[0]]
-            node[args[0]] = args[1].to_s
-            record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
-          end
-          nil
-        when 'removeAttribute'
-          if node.element?
-            old = node[args[0]]
-            node.delete(args[0])
-            record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
-          end
-          nil
+        when 'setAttribute'   then write_attribute(node, handle, args[0], args[1].to_s)
+        when 'removeAttribute' then write_attribute(node, handle, args[0], nil)
         when 'setValue'
-          # JS-side `el.value = 'x'` writes the value attribute. For
-          # checkbox/radio this distinct from `el.checked = true/false`,
-          # which goes through `setChecked` below. Capybara's
-          # fill_in/choose flows use `set_value` directly via
-          # `set_value_with_events`, so dom_op never confuses the two.
-          if node.name == 'input' && %w[checkbox radio].include?((node['type'] || '').downcase)
-            node['value'] = args[0].to_s
+          # `el.value=` on a checkbox/radio writes the value attribute;
+          # `.checked=` toggles state via setChecked.
+          if node.name == 'input' && CHECKABLE_INPUT_TYPES.include?((node['type'] || '').downcase)
+            write_attribute(node, handle, 'value', args[0].to_s)
           else
             set_value(handle, args[0])
+            nil
           end
-          nil
         when 'setChecked'      then set_value(handle, !!args[0]); nil
         when 'setTextContent'
           node.content = args[0].to_s if node.respond_to?(:content=)
@@ -1159,15 +1161,11 @@ module Capybara
           record_mutation('childList', handle, addedNodes: [], removedNodes: [])
           nil
         when 'setOuterHTML'
-          # Stimulus's `target.outerHTML = newHtml` flow: parse a fragment,
-          # splice it in where the target sat, then drop the target. The
-          # mutation is reported against the parent so observers walking
-          # the parent's subtree see the new nodes.
-          parent = node.respond_to?(:parent) ? node.parent : nil
+          # Mutation reported against the parent so subtree observers see the new nodes.
+          parent = node.parent
           if parent
             fragment      = Nokogiri::HTML5.fragment(args[0].to_s)
-            added         = fragment.children.to_a
-            added_handles = added.map {|n| @handles.track(n) }
+            added_handles = fragment.children.map {|n| @handles.track(n) }
             node.replace(fragment)
             record_mutation('childList', @handles.track(parent), addedNodes: added_handles, removedNodes: [handle])
           end
@@ -1496,10 +1494,7 @@ module Capybara
         # nuked and dispatch_event would early-out for those types.
         reset_per_page_state
         js.reset_page
-        # Sync location BEFORE scripts run — Turbo's top-level `start()`
-        # captures `window.location.href` to seed its history; reading
-        # the stale value from the previous page would replaceState the
-        # wrong URL and corrupt Ruby's @current_url via __setCurrentUrl.
+        # Must precede run_scripts: Turbo's start() seeds history from window.location.href.
         js.call('__syncLocation', @current_url.to_s) if @current_url
         ingest_importmaps
         js.run_scripts(self, @document)

@@ -78,18 +78,16 @@
     get nodeType()    { return __dom(this.__h, 'nodeType',    []); }
     get nodeName()    { return __dom(this.__h, 'nodeName',    []); }
     get tagName()     { return __dom(this.__h, 'tagName',     []); }
-    // True iff descended from the live document. Turbo's `dispatch`
-    // routes events to documentElement when the requested target is
-    // NOT connected, so a missing getter would re-target every
-    // turbo:click etc. and break LinkInterceptor's frame-scope check.
+    // Turbo's `dispatch` retargets events to documentElement when the
+    // requested target isn't connected.
     get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
     get textContent() { return __dom(this.__h, 'textContent', []); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
     // IDL alias for textContent on script / title / style elements.
     get text()         { return __dom(this.__h, 'textContent', []); }
-    set text(v)        { __dom(this.__h, 'setTextContent', [String(v)]); }
+    set text(v)        { this.textContent = v; }
     get innerText()   { return __dom(this.__h, 'innerText',   []); }
-    set innerText(v)  { __dom(this.__h, 'setTextContent', [String(v)]); }
+    set innerText(v)  { this.textContent = v; }
     get innerHTML()   { return __dom(this.__h, 'innerHTML',   []); }
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
     get outerHTML()   { return __dom(this.__h, 'outerHTML',   []); }
@@ -99,14 +97,14 @@
     getAttribute(name)        { return __dom(this.__h, 'getAttribute', [String(name)]); }
     hasAttribute(name)        { return !!__dom(this.__h, 'hasAttribute', [String(name)]); }
     setAttribute(name, value) {
-      const oldVal = __dom(this.__h, 'getAttribute', [String(name)]);
-      __dom(this.__h, 'setAttribute', [String(name), String(value)]);
-      ceMaybeAttributeChanged(this, String(name), oldVal, String(value));
+      const n = String(name), v = String(value);
+      const oldVal = __dom(this.__h, 'setAttribute', [n, v]);
+      if (__ceInstances.has(this.__h)) ceMaybeAttributeChanged(this, n, oldVal, v);
     }
     removeAttribute(name) {
-      const oldVal = __dom(this.__h, 'getAttribute', [String(name)]);
-      __dom(this.__h, 'removeAttribute', [String(name)]);
-      ceMaybeAttributeChanged(this, String(name), oldVal, null);
+      const n = String(name);
+      const oldVal = __dom(this.__h, 'removeAttribute', [n]);
+      if (__ceInstances.has(this.__h)) ceMaybeAttributeChanged(this, n, oldVal, null);
     }
     // NamedNodeMap-shaped: array-iterable AND name-indexable. jQuery
     // does `el.attributes[name].expando` for feature detection, so we
@@ -132,15 +130,9 @@
     get checked()   { return !!__dom(this.__h, 'checked', []); }
     set checked(v)  { __dom(this.__h, 'setChecked', [!!v]); }
     get disabled()  { return !!__dom(this.__h, 'disabled', []); }
-    set disabled(v) {
-      if (v) this.setAttribute('disabled', '');
-      else   this.removeAttribute('disabled');
-    }
+    set disabled(v) { setBoolAttr(this, 'disabled', v); }
     get hidden()    { return !!__dom(this.__h, 'hidden', []); }
-    set hidden(v)   {
-      if (v) this.setAttribute('hidden', '');
-      else   this.removeAttribute('hidden');
-    }
+    set hidden(v)   { setBoolAttr(this, 'hidden', v); }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as
@@ -435,6 +427,11 @@
   // `el.style.backgroundColor` (camelCase) and `el.style['background-color']`
   // (kebab) both flow through getPropertyValue / setProperty against the
   // underlying `style` attribute.
+  function setBoolAttr(el, name, on) {
+    if (on) el.setAttribute(name, '');
+    else    el.removeAttribute(name);
+  }
+
   function camelToKebab(s) {
     return String(s).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
   }
@@ -1789,31 +1786,29 @@
       }
       rewriteTmpRefs(el, tmp, el);
     } catch (e) {
-      try { console.error('CE constructor threw:', e && e.message ? e.message : e); } catch (_) {}
+      logCallbackError('CE constructor', e);
     }
     __ceInstances.set(el.__h, el);
-    if (typeof el.connectedCallback === 'function') {
-      try { el.connectedCallback.call(el); } catch (e) {
-        try { console.error('connectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
-      }
-    }
+    invokeCECallback(el, 'connectedCallback');
   }
 
-  // Notify a CE that one of its observedAttributes changed. Real
-  // browsers fire this callback synchronously after setAttribute /
-  // removeAttribute / property setters that delegate to attributes.
-  // Turbo's FrameElement observes 'src' so `frame.src = url` triggers
-  // delegate.sourceURLChanged() which fetches the new content.
+  function invokeCECallback(el, name, ...args) {
+    if (typeof el[name] !== 'function') return;
+    try { el[name].apply(el, args); } catch (e) { logCallbackError(name, e); }
+  }
+
+  function logCallbackError(label, e) {
+    try { console.error(label + ' threw:', e && e.message ? e.message : e); } catch (_) {}
+  }
+
+  // Notify a CE that an observedAttribute changed. Turbo's FrameElement
+  // observes `src`, so `frame.src = url` triggers sourceURLChanged().
   function ceMaybeAttributeChanged(el, name, oldVal, newVal) {
-    if (!__ceInstances.has(el.__h)) return;
+    if (oldVal === newVal) return;
     const ctor = ceCtorFor(el.tagName);
     const observed = ctor && ctor.observedAttributes;
     if (!observed || observed.indexOf(name) === -1) return;
-    if (typeof el.attributeChangedCallback !== 'function') return;
-    if (oldVal === newVal) return;
-    try { el.attributeChangedCallback.call(el, name, oldVal, newVal); } catch (e) {
-      try { console.error('attributeChangedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
-    }
+    invokeCECallback(el, 'attributeChangedCallback', name, oldVal, newVal);
   }
 
   function ceUpgradeTree(el) {
@@ -1833,11 +1828,7 @@
     if (!el || el.nodeType !== 1) return;
     if (!__ceInstances.has(el.__h)) return;
     __ceInstances.delete(el.__h);
-    if (typeof el.disconnectedCallback === 'function') {
-      try { el.disconnectedCallback.call(el); } catch (e) {
-        try { console.error('disconnectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
-      }
-    }
+    invokeCECallback(el, 'disconnectedCallback');
   }
 
   function ceDisconnectTree(el) {
