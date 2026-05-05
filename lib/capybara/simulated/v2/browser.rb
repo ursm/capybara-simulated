@@ -100,7 +100,10 @@ module Capybara
           (lookup_node(handle)&.text || '').to_s
         end
 
-        VISIBLE_TEXT_SKIP_TAGS = %w[script style head template noscript].to_set.freeze
+        # Tags whose contents are not part of the rendered document — used by
+        # both `visible?` (the element itself reports invisible) and
+        # `collect_visible_text` (subtree contributes no text).
+        INVISIBLE_TAGS = %w[head script style template noscript title].to_set.freeze
 
         # Block-level tags that produce a line break at boundaries (browser
         # `innerText` semantics). Inline whitespace in text nodes is collapsed
@@ -263,35 +266,33 @@ module Capybara
           # multiple <select>s.
           unless select['multiple']
             raise Capybara::UnselectNotAllowed,
-              'Cannot unselect option from a non-multiple select box.'
+              'Cannot unselect option from single select box.'
           end
           opt.delete('selected')
           true
         end
 
-        ALWAYS_HIDDEN_TAGS = %w[head script style template noscript title].to_set.freeze
-
+        # Walks the ancestor chain once, checking style/[hidden]/closed-details
+        # in a single pass. visible? is called per matched element on every
+        # selector evaluation, so fusing the walk halves ancestor iterations.
+        # `summary_seen` tracks whether the starting node sits inside a
+        # `<summary>` subtree — a closed-details ancestor only hides us if
+        # we don't (HTML spec).
         def visible?(handle)
           node = lookup_node(handle)
           return false if node.nil?
-          return false if ALWAYS_HIDDEN_TAGS.include?(node.name)
-          # `<input type="hidden">` is invisible regardless of style.
+          return false if INVISIBLE_TAGS.include?(node.name)
           return false if node.name == 'input' && (node['type'] || '').downcase == 'hidden'
-          # Inside a closed `<details>`, only `<summary>` (and its descendants)
-          # are rendered. Walk ancestors to detect a containing closed details.
-          return false if hidden_inside_closed_details?(node)
-          !style_hidden?(node)
-        end
-
-        def hidden_inside_closed_details?(node)
           summary_seen = node.name == 'summary'
-          cur = node.respond_to?(:parent) ? node.parent : nil
-          while cur.respond_to?(:element?) && cur.element?
-            return true if cur.name == 'details' && !cur['open'] && !summary_seen
+          cur = node
+          while cur.respond_to?(:[])
+            return true  if cur.is_a?(Nokogiri::XML::Document)
+            return false if self_hidden?(cur)
+            return false if cur.name == 'details' && !cur['open'] && !summary_seen
             summary_seen = true if cur.name == 'summary'
-            cur = cur.parent
+            cur = cur.respond_to?(:parent) ? cur.parent : nil
           end
-          false
+          true
         end
 
         # `<option>` is disabled if any ancestor `<optgroup>`/`<select>` is
@@ -356,7 +357,11 @@ module Capybara
             # Clicking <summary> toggles the parent <details>'s open state.
             details = node.parent
             if details.respond_to?(:name) && details.name == 'details'
-              details['open'] ? details.delete('open') : details['open'] = ''
+              if details['open']
+                details.delete('open')
+              else
+                details['open'] = ''
+              end
               dispatch_event(@handles.track(details), 'toggle', bubbles: false)
             end
             true
@@ -382,19 +387,26 @@ module Capybara
           submit_after = should_submit_on_enter?(lookup_node(handle), value)
           changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
           return changed unless changed && @js
-          dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
-          dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          dispatch_input_change(handle)
           submit_form(handle) if submit_after
           changed
         end
+
+        TEXT_LIKE_INPUT_TYPES = Set['text', 'email', 'password', 'search', 'tel', 'url'].freeze
 
         def should_submit_on_enter?(node, value)
           return false if node.nil? || !value.is_a?(String) || !value.end_with?("\n")
           return false unless node.name == 'input'
           form = enclosing_form(node) or return false
-          # Only submits when the form has a single text-like input (HTML5
-          # implicit-submission rule).
-          form.css('input').count { |i| %w[text email password search tel url].include?((i['type'] || 'text').downcase) } == 1
+          # HTML5 implicit submission: form has *exactly one* text-like input.
+          # Short-circuit at 2 instead of materialising the whole list.
+          count = 0
+          form.xpath('.//input').each do |i|
+            next unless TEXT_LIKE_INPUT_TYPES.include?((i['type'] || 'text').downcase)
+            count += 1
+            return false if count > 1
+          end
+          count == 1
         end
 
         # Best-effort send_keys: appends each printable key to the field's
@@ -422,8 +434,7 @@ module Capybara
             end
           end
           set_value(handle, current)
-          dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
-          dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          dispatch_input_change(handle)
           true
         end
 
@@ -438,6 +449,14 @@ module Capybara
           when Hash                   then arg.transform_values { |v| marshal_script_arg(v) }
           else arg
           end
+        end
+
+        # The "user typed into a field" event pair. Both bubble, neither is
+        # cancelable — matches what real browsers fire after a value change
+        # via keyboard or driver `set` / `send_keys`.
+        def dispatch_input_change(handle)
+          dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+          dispatch_event(handle, 'change', bubbles: true, cancelable: false)
         end
 
         # Fire a JS event at `handle`. Returns true unless a listener called
@@ -1012,7 +1031,7 @@ module Capybara
             return
           end
           return unless node.respond_to?(:children)
-          return if VISIBLE_TEXT_SKIP_TAGS.include?(node.name)
+          return if INVISIBLE_TAGS.include?(node.name)
           if node.respond_to?(:[])
             return if root ? style_hidden?(node) : self_hidden?(node)
           end
