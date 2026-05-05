@@ -135,7 +135,11 @@ module Capybara
 
         def attr(handle, name)
           node = lookup_node(handle)
-          node && node[name]
+          return nil if node.nil?
+          # validationMessage is a DOM property, not an HTML attribute —
+          # Capybara's `validation_message:` field filter reads it via `[]`.
+          return validation_message(node) if name == 'validationMessage'
+          node[name]
         end
 
         def value(handle)
@@ -543,6 +547,9 @@ module Capybara
           when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
           when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
           when 'form'            then @handles.track(enclosing_form(node))
+          when 'validity'           then compute_validity(node)
+          when 'validationMessage'  then validation_message(node)
+          when 'checkValidity'      then compute_validity(node)['valid']
           when 'setAttribute'
             if node.element?
               old = node[args[0]]
@@ -983,6 +990,63 @@ module Capybara
           cur = node.respond_to?(:parent) ? node.parent : nil
           cur = cur.parent while cur.respond_to?(:parent) && cur.name != 'form'
           cur if cur.respond_to?(:name) && cur.name == 'form'
+        end
+
+        EMAIL_RE = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/.freeze
+        URL_RE   = %r{\A[a-z][a-z0-9+\-.]*://}i.freeze
+
+        # Best-effort HTML5 ValidityState. Real browsers have richer
+        # behaviour (locale-aware number parsing, IDN URL handling) but
+        # this covers the constraints Capybara's `valid:` filter exercises.
+        def compute_validity(node)
+          return validity_states(true) unless node.respond_to?(:[])
+          type = (node['type'] || 'text').downcase
+          # Selects / buttons / static elements aren't constraint-validated.
+          if !%w[input textarea].include?(node.name) || %w[hidden button submit reset image].include?(type)
+            return validity_states(true)
+          end
+          value = (node.name == 'textarea' ? node.text : node['value']).to_s
+          missing  = node['required'] && value.empty?
+          pattern  = node['pattern']
+          ml       = node['maxlength'] && Integer(node['maxlength'], exception: false)
+          minl     = node['minlength'] && Integer(node['minlength'], exception: false)
+          mn       = node['min'] && (Float(node['min'], exception: false) || nil)
+          mx       = node['max'] && (Float(node['max'], exception: false) || nil)
+          numeric  = !value.empty? && type == 'number' ? Float(value, exception: false) : nil
+          {
+            'valueMissing'    => missing,
+            'typeMismatch'    => !value.empty? && ((type == 'email' && !value.match?(EMAIL_RE)) ||
+                                                   (type == 'url'   && !value.match?(URL_RE))),
+            'patternMismatch' => !value.empty? && pattern && !value.match?(/\A(?:#{pattern})\z/),
+            'tooLong'         => ml && value.length > ml,
+            'tooShort'        => !value.empty? && minl && value.length < minl,
+            'rangeUnderflow'  => numeric && mn && numeric < mn,
+            'rangeOverflow'   => numeric && mx && numeric > mx,
+            'stepMismatch'    => false,
+            'badInput'        => false,
+            'customError'     => false
+          }.tap { |s| s['valid'] = s.values.none? }
+        end
+
+        def validity_states(valid)
+          {'valueMissing' => false, 'typeMismatch' => false, 'patternMismatch' => false,
+           'tooLong' => false, 'tooShort' => false, 'rangeUnderflow' => false,
+           'rangeOverflow' => false, 'stepMismatch' => false, 'badInput' => false,
+           'customError' => false, 'valid' => valid}
+        end
+
+        def validation_message(node)
+          v = compute_validity(node)
+          return ''                                       if v['valid']
+          return 'Please fill out this field.'            if v['valueMissing']
+          return 'Please match the requested format.'     if v['patternMismatch']
+          return 'Please use a valid email address.'      if v['typeMismatch'] && (node['type'] || '').downcase == 'email'
+          return 'Please use a valid URL.'                if v['typeMismatch'] && (node['type'] || '').downcase == 'url'
+          return "Please shorten this text to #{node['maxlength']} characters or less." if v['tooLong']
+          return "Please lengthen this text to #{node['minlength']} characters or more." if v['tooShort']
+          return "Value must be greater than or equal to #{node['min']}." if v['rangeUnderflow']
+          return "Value must be less than or equal to #{node['max']}."    if v['rangeOverflow']
+          'Please match the requested format.'
         end
 
         def label_target(label)

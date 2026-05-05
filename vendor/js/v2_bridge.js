@@ -76,6 +76,14 @@
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form', [])); }
 
+    // HTML5 form validation. Constraint computation lives on the Ruby
+    // side (see Browser#compute_validity); these proxy through.
+    get validity()           { return __dom(this.__h, 'validity', []); }
+    get validationMessage()  { return __dom(this.__h, 'validationMessage', []); }
+    checkValidity()          { return !!__dom(this.__h, 'checkValidity', []); }
+    reportValidity()         { return this.checkValidity(); }
+    setCustomValidity()      {}
+
     // Library boot-time probes — ownerDocument is the Document any node
     // belongs to; we model a single document so it's always the global.
     get ownerDocument() { return globalThis.document; }
