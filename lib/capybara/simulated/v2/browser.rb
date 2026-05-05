@@ -560,6 +560,32 @@ module Capybara
           shift: 16, control: 17, alt: 18, meta: 91
         }.freeze
 
+        # HTML5 drag-and-drop simulation. Builds a dataTransfer payload
+        # from the supplied arguments (file paths → file items, hashes →
+        # string items per mime type) and fires dragenter / dragover /
+        # drop on the target. Page handlers walk dataTransfer.items /
+        # files / getData() to read the dropped content.
+        def drop(handle, args)
+          items = args.flat_map { |arg| drop_items(arg) }
+          js.call('__dropOnto', handle, items)
+          settle
+          true
+        end
+
+        def drop_items(arg)
+          case arg
+          when Hash
+            arg.map { |type, value| {'kind' => 'string', 'type' => type.to_s, 'value' => value.to_s} }
+          when ->(x) { x.respond_to?(:to_path) }
+            path = arg.to_path
+            [{'kind' => 'file', 'name' => File.basename(path), 'path' => path}]
+          when String
+            [{'kind' => 'file', 'name' => File.basename(arg), 'path' => arg}]
+          else
+            []
+          end
+        end
+
         # Best-effort send_keys. Handles literal Strings, special tokens
         # (:space, :enter, :backspace, :delete, :left, :right, :home, :end,
         # arrow keys), modifier-style tokens (:shift) that fold subsequent

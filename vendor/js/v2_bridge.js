@@ -450,6 +450,45 @@
     }));
   };
 
+  // HTML5 drag-and-drop synthesis. Ruby#drop builds an items array
+  // ([{kind:'file',name,path} | {kind:'string',type,value}]); we wrap
+  // it in a DataTransfer-shaped object and fire the dragenter / dragover
+  // / drop sequence at the target.
+  function makeDataTransfer(items) {
+    const dtItems = items.map(it => {
+      if (it.kind === 'file') {
+        const file = {name: it.name, type: '', size: 0};
+        return {kind: 'file', type: 'application/octet-stream', getAsFile: () => file};
+      }
+      return {
+        kind: 'string', type: it.type,
+        getAsString: cb => { try { cb(it.value); } catch (_) {} }
+      };
+    });
+    const files = items.filter(it => it.kind === 'file').map(it => ({name: it.name, type: '', size: 0}));
+    const types = items.map(it => it.kind === 'file' ? 'Files' : it.type);
+    return {
+      items:    dtItems,
+      files:    files,
+      types:    types,
+      effectAllowed: 'all',
+      dropEffect:    'none',
+      getData: t => { const i = items.find(x => x.type === t); return i ? i.value : ''; },
+      setData: () => {},
+      clearData: () => {},
+      setDragImage: () => {}
+    };
+  }
+
+  globalThis.__dropOnto = function (handle, items) {
+    const target = new Element(handle);
+    const dt     = makeDataTransfer(items || []);
+    const init   = {bubbles: true, cancelable: true, dataTransfer: dt};
+    __dispatch(target, new Event('dragenter', init));
+    __dispatch(target, new Event('dragover',  init));
+    __dispatch(target, new Event('drop',      init));
+  };
+
   // Called from Ruby#fire_lifecycle_events. Dispatches DOMContentLoaded /
   // load on document AND window — libraries listen on either.
   globalThis.__fireLifecycle = function (type) {

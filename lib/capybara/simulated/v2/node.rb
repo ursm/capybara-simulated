@@ -77,6 +77,16 @@ module Capybara
           true
         end
 
+        # Element#drop — Capybara's HTML5 drag-and-drop entry point.
+        # Accepts file paths (Strings / Pathnames) and / or one Hash
+        # `{mime_type => value}` for non-file dataTransfer items. Forwards
+        # to Browser#drop which fires the drag event sequence with a
+        # dataTransfer payload constructed from the args.
+        def drop(*args)
+          browser.drop(handle_id, args)
+          true
+        end
+
         def set(value, **_opts)
           browser.set_value_with_events(handle_id, value)
         end
