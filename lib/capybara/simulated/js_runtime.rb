@@ -132,11 +132,10 @@ module Capybara
 
       # `await null` resumes via a microtask, and JS_EVAL_FLAG_ASYNC's
       # js_std_await pumps the QuickJS pending-job queue between each
-      # one. 256 rounds drain Turbo Drive's POST→redirect→fetch→parse
-      # →swap chain (~50 hops at peak) plus headroom — quiet pages
-      # exit early because the awaited Promise resolves regardless,
-      # so empty pumps are cheap.
-      MICROTASK_PUMP_CODE = (('await null;' * 256) + 'void 0').freeze
+      # one. 64 rounds is comfortable headroom over the ~50 hops Turbo
+      # Drive's POST→redirect→fetch→parse→swap chain produces at peak;
+      # empty pumps still cost ~30µs / call so larger isn't free.
+      MICROTASK_PUMP_CODE = (('await null;' * 64) + 'void 0').freeze
       def pump_microtasks
         @vm.eval_code(MICROTASK_PUMP_CODE)
       end
