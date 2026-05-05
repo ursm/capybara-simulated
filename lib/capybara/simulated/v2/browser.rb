@@ -244,9 +244,10 @@ module Capybara
 
         # HTML spec: readonly only blocks user input on text-y inputs and
         # textareas. checkbox / radio / range / file / etc. ignore it.
-        READONLY_BLOCKS_TYPES = Set['text', 'search', 'url', 'tel', 'email',
-                                   'password', 'date', 'month', 'week',
-                                   'time', 'datetime-local', 'number'].freeze
+        READONLY_BLOCKS_TYPES = %w[
+          text search url tel email password
+          date month week time datetime-local number
+        ].to_set.freeze
 
         def readonly_exempt?(node)
           return false if node.name == 'textarea'
@@ -448,6 +449,12 @@ module Capybara
 
         MODIFIER_KEYS = %i[shift control alt meta command].to_set.freeze
 
+        # `<a>` href schemes that don't trigger a Rack navigation. data:
+        # and blob: would 404 against the in-process app; the others
+        # are real browser pseudo-protocols (open mail client, dial,
+        # run JS) that have no Rack-side equivalent.
+        NON_NAVIGABLE_SCHEMES = %w[javascript: mailto: tel: data: blob:].freeze
+
         def click(handle, modifiers = nil)
           node = lookup_node(handle)
           return false if node.nil?
@@ -462,7 +469,7 @@ module Capybara
           when 'a'
             href = node['href']
             return true if href.nil? || href.empty?
-            return true if href.start_with?('javascript:', 'mailto:', 'tel:')
+            return true if NON_NAVIGABLE_SCHEMES.any? { |s| href.start_with?(s) }
             target = resolve(href)
             # Pure-fragment / same-document anchor — browsers don't navigate.
             return true if same_document_fragment?(target)
@@ -508,11 +515,12 @@ module Capybara
           if node && node.name == 'input' &&
              %w[checkbox radio].include?((node['type'] || '').downcase)
             was_checked = !!node['checked']
+            now_checked = !!value
             # preventDefault on click suppresses the toggle. The state
             # before vs after determines whether 'change' fires.
             return was_checked unless dispatch_event(handle, 'click')
             set_value(handle, value)
-            dispatch_event(handle, 'change', bubbles: true, cancelable: false) if !!value != was_checked
+            dispatch_event(handle, 'change', bubbles: true, cancelable: false) if now_checked != was_checked
             return true
           end
           # Focus the field first — fill_in / set on a real browser implies
@@ -529,7 +537,7 @@ module Capybara
           changed
         end
 
-        TEXT_LIKE_INPUT_TYPES = Set['text', 'email', 'password', 'search', 'tel', 'url'].freeze
+        TEXT_LIKE_INPUT_TYPES = %w[text email password search tel url].to_set.freeze
 
         def should_submit_on_enter?(node, value)
           return false if node.nil? || !value.is_a?(String) || !value.end_with?("\n")
@@ -1130,23 +1138,22 @@ module Capybara
         # this single walk so the field-selection rules stay in one place.
         # Walks fields in document order across descendants AND any field
         # outside the form that opts in via `form="<id>"`.
+        ADOPTED_FIELD_XPATH = '//*[(self::input or self::textarea or ' \
+                              "self::select or self::button) and @form=$fid]".freeze
+
         def each_form_field(form, submitter)
-          form_id    = form['id']
-          associated = if form_id && !form_id.empty?
-            # Two sources: descendants of the form, plus any field outside
-            # the form that opts in via `form="<id>"`. The descendant query
-            # is rooted at `form`, the form="id" query at the document.
-            descendants = form.css(FORM_FIELD_CSS)
-            adopted     = @document.xpath(
-              %w[input textarea select button]
-                .map { |t| "//#{t}[@form=$fid]" }
-                .join(' | '),
-              nil, fid: form_id.to_s
-            )
-            (descendants.to_a + adopted.to_a).uniq.sort_by { |n| n.path }
+          form_id      = form['id']
+          descendants  = form.css(FORM_FIELD_CSS)
+          adopted      = if form_id && !form_id.empty?
+            @document.xpath(ADOPTED_FIELD_XPATH, nil, fid: form_id.to_s).to_a
           else
-            form.css(FORM_FIELD_CSS)
+            []
           end
+          # Common case (no `form="<id>"` opt-ins on the page) skips the
+          # merge / sort / uniq — descendants are already in doc order
+          # from form.css. Otherwise sort via Nokogiri's Node#<=> which
+          # is libxml2-backed (cheaper than building per-node n.path).
+          associated = adopted.empty? ? descendants : (descendants.to_a + adopted).uniq.sort
           associated.each do |field|
             name = field['name']
             next if name.nil? || name.empty? || field['disabled']
