@@ -163,6 +163,11 @@ module Capybara
             (selected.first || options.first)&.then { |o| o['value'] || o.text }
           when 'textarea'
             node.text
+          when 'input'
+            type = (node['type'] || 'text').downcase
+            # checkbox / radio default to 'on' when no value attribute is set.
+            return node['value'] || 'on' if %w[checkbox radio].include?(type)
+            node['value']
           else
             node['value']
           end
@@ -1097,10 +1102,17 @@ module Capybara
         def each_form_field(form, submitter)
           form_id    = form['id']
           associated = if form_id && !form_id.empty?
-            xpath = %w[input textarea select button]
-              .flat_map { |t| ["descendant::#{t}", "//#{t}[@form=$fid]"] }
-              .join(' | ')
-            @document.xpath(xpath, nil, fid: form_id.to_s)
+            # Two sources: descendants of the form, plus any field outside
+            # the form that opts in via `form="<id>"`. The descendant query
+            # is rooted at `form`, the form="id" query at the document.
+            descendants = form.css(FORM_FIELD_CSS)
+            adopted     = @document.xpath(
+              %w[input textarea select button]
+                .map { |t| "//#{t}[@form=$fid]" }
+                .join(' | '),
+              nil, fid: form_id.to_s
+            )
+            (descendants.to_a + adopted.to_a).uniq.sort_by { |n| n.path }
           else
             form.css(FORM_FIELD_CSS)
           end

@@ -69,6 +69,14 @@ module Capybara
           true
         end
 
+        # Capybara's Element#trigger surfaces here with a String/Symbol
+        # event name. Bubbling matches what Capybara's selenium driver
+        # produces for synthesised events.
+        def trigger(event)
+          browser.dispatch_event(handle_id, event.to_s)
+          true
+        end
+
         def set(value, **_opts)
           browser.set_value_with_events(handle_id, value)
         end
