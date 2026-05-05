@@ -88,6 +88,7 @@
     get innerHTML()   { return __dom(this.__h, 'innerHTML',   []); }
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
     get outerHTML()   { return __dom(this.__h, 'outerHTML',   []); }
+    set outerHTML(v)  { __dom(this.__h, 'setOuterHTML', [String(v)]); }
 
     // Attributes
     getAttribute(name)        { return __dom(this.__h, 'getAttribute', [String(name)]); }

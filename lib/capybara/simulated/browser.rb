@@ -1147,6 +1147,20 @@ module Capybara
           node.inner_html = args[0].to_s if node.respond_to?(:inner_html=)
           record_mutation('childList', handle, addedNodes: [], removedNodes: [])
           nil
+        when 'setOuterHTML'
+          # Stimulus's `target.outerHTML = newHtml` flow: parse a fragment,
+          # splice it in where the target sat, then drop the target. The
+          # mutation is reported against the parent so observers walking
+          # the parent's subtree see the new nodes.
+          parent = node.respond_to?(:parent) ? node.parent : nil
+          if parent
+            fragment      = Nokogiri::HTML5.fragment(args[0].to_s)
+            added         = fragment.children.to_a
+            added_handles = added.map {|n| @handles.track(n) }
+            node.replace(fragment)
+            record_mutation('childList', @handles.track(parent), addedNodes: added_handles, removedNodes: [handle])
+          end
+          nil
         when 'appendChild'
           child = lookup_node(args[0])
           if child && node.respond_to?(:add_child)
