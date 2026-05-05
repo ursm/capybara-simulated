@@ -183,23 +183,46 @@ module Capybara
         ArgumentError
       ].freeze
 
+      # CSS selector groups (`a, b`) need per-part fallback because
+      # Nokogiri parses the whole group up-front: a single bad branch
+      # (e.g. Turbo's `a[xlink\:href]`) would otherwise drop the entire
+      # selector even when the leading branch is well-formed. Split,
+      # try each, swallow per-part errors.
       def safe_at_css(node, selector)
-        node.at_css(selector.to_s) if node.respond_to?(:at_css)
-      rescue *SELECTOR_ERRORS
+        return nil unless node.respond_to?(:at_css)
+        css_split(selector).each do |s|
+          begin
+            hit = node.at_css(s)
+            return hit if hit
+          rescue *SELECTOR_ERRORS
+            next
+          end
+        end
         nil
       end
 
       def safe_css(node, selector)
         return [] unless node.respond_to?(:css)
-        node.css(selector.to_s)
-      rescue *SELECTOR_ERRORS
-        []
+        css_split(selector).flat_map do |s|
+          node.css(s)
+        rescue *SELECTOR_ERRORS
+          []
+        end
       end
 
       def safe_matches?(node, selector)
-        node.matches?(selector.to_s)
-      rescue *SELECTOR_ERRORS
-        false
+        css_split(selector).any? do |s|
+          node.matches?(s)
+        rescue *SELECTOR_ERRORS
+          false
+        end
+      end
+
+      def css_split(selector)
+        # Top-level comma split — bracket-content / parens are safe to
+        # ignore for the kinds of selectors we see (Turbo / Stimulus
+        # don't nest comma selector groups inside attribute predicates).
+        selector.to_s.split(',').map(&:strip).reject(&:empty?)
       end
 
       ID_SAFE_RE  = /\A[A-Za-z0-9_-]+\z/.freeze
@@ -1358,10 +1381,16 @@ module Capybara
         if handler
           handler.call(type, message, default_value)
         else
-          # No handler installed — match Capybara's auto-dismiss
-          # behaviour for stray dialogs: confirm/prompt → cancel,
-          # alert → ignored.
-          type == 'prompt' ? nil : false
+          # No handler installed — accept by default. Tests that need
+          # the negative branch wrap the action in `dismiss_confirm`.
+          # Matches the v1 driver / Rails system-test Selenium default,
+          # under which Turbo's `data-turbo-confirm` flow proceeds when
+          # the test doesn't explicitly handle the dialog.
+          case type
+          when 'alert'   then nil
+          when 'confirm' then true
+          when 'prompt'  then default_value.to_s
+          end
         end
       end
 
@@ -1475,6 +1504,12 @@ module Capybara
       # absolute on a prior rewrite pass, so we just fetch + rewrite +
       # cache.
       def load_module(url)
+        # Static-import / inline-module specifiers are pre-rewritten to
+        # absolute URLs before the loader sees them, but `import(path)`
+        # with a non-literal `path` (stimulus-loading's eager loader does
+        # this) reaches the loader as the raw bare specifier. Resolve it
+        # through the importmap here so dynamic-loaded controllers work.
+        url = resolve_module_specifier(url, @current_url || DEFAULT_HOST) unless url =~ %r{\A[a-z]+://}i
         @module_cache[url] ||= begin
           body = rack_get(url)
           body.nil? ? nil : rewrite_module_imports(body, url)
@@ -1723,7 +1758,11 @@ module Capybara
 
       def submit(form, submitter)
         form_handle = @handles.track(form)
-        return true unless dispatch_event(form_handle, 'submit')
+        # `event.submitter` lets Turbo's FormSubmitObserver honour
+        # `data-turbo="false"` on the clicked button — without it Turbo
+        # treats every form-inside-a-frame submission as navigatable
+        # and intercepts it.
+        return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
         # `formaction` / `formmethod` on the submitter override the form's
         # own action / method (HTML5).
         method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'

@@ -80,6 +80,12 @@
     get tagName()     { return __dom(this.__h, 'tagName',     []); }
     get textContent() { return __dom(this.__h, 'textContent', []); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
+    // HTMLScriptElement / HTMLTitleElement / HTMLStyleElement expose `text`
+    // as an IDL alias for textContent. stimulus-loading reads
+    // `script.text` to parse the importmap; without this it gets undefined
+    // and JSON.parse throws → no controllers register.
+    get text()         { return __dom(this.__h, 'textContent', []); }
+    set text(v)        { __dom(this.__h, 'setTextContent', [String(v)]); }
     get innerText()   { return __dom(this.__h, 'innerText',   []); }
     get innerHTML()   { return __dom(this.__h, 'innerHTML',   []); }
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
@@ -397,6 +403,17 @@
     dispatchEvent(event) {
       return __dispatch(this, event);
     }
+    // HTMLFormElement.requestSubmit fires a cancelable submit event with
+    // the given button as `event.submitter`, then submits if no listener
+    // calls preventDefault. Turbo's link-as-DELETE flow synthesises a
+    // hidden form and calls `form.requestSubmit()` to drive its
+    // FormSubmitObserver — without this method the submission silently
+    // never happens and the link falls through to a regular GET.
+    requestSubmit(submitter) {
+      const ev = new Event('submit', {bubbles: true, cancelable: true});
+      if (submitter) ev.submitter = submitter;
+      __dispatch(this, ev);
+    }
   }
 
   // CSSStyleDeclaration shim. Wraps a Proxy so libraries that touch
@@ -674,7 +691,32 @@
   // listener prevented the default action — Ruby uses that to decide
   // whether to navigate, submit, etc.
   globalThis.__dispatchFromRuby = function (handle, type, init) {
-    return __dispatch(wrap(handle), new Event(type, init));
+    const i = init || {};
+    // Ruby passes integer handles for any node references (e.g. the
+    // `submitter` on a submit event). Wrap them so listeners see the
+    // same Element instances they'd get in a real browser — Turbo's
+    // FormSubmitObserver reads `event.submitter` to decide whether
+    // `data-turbo="false"` on the button should bail out.
+    if (typeof i.submitter === 'number') i.submitter = wrap(i.submitter);
+    // Use the typed subclass so libraries that gate on
+    // `event instanceof MouseEvent` (Turbo's LinkClickObserver) see the
+    // event they expect for click / pointer / mouse interactions.
+    const Ctor = EVENT_CTOR_BY_TYPE[type] || Event;
+    return __dispatch(wrap(handle), new Ctor(type, i));
+  };
+  const EVENT_CTOR_BY_TYPE = {
+    click:       MouseEvent,
+    dblclick:    MouseEvent,
+    mousedown:   MouseEvent,
+    mouseup:     MouseEvent,
+    mousemove:   MouseEvent,
+    mouseover:   MouseEvent,
+    mouseout:    MouseEvent,
+    mouseenter:  MouseEvent,
+    mouseleave:  MouseEvent,
+    contextmenu: MouseEvent,
+    submit:      SubmitEvent,
+    input:       InputEvent
   };
   // Send a keyboard event with the right shape for the page-level
   // listeners that read e.keyCode / e.which (legacy but still common).
@@ -906,11 +948,26 @@
   // dropped — `ceUpgrade` rewrites a wrapper's [[Prototype]] to the CE
   // class, and that prototype chain mustn't outlive the page.
   globalThis.__resetPage = function () {
-    __listeners.clear();
-    __windowListeners.clear();
+    // Window listeners stay attached — Turbo's LinkClickObserver and
+    // any global event hooks set up once at init must still fire after
+    // a same-realm "navigation". Per-element __listeners are mostly
+    // stale though (handles get reassigned), so they get cleared with
+    // a remap of just the document-anchor entries below.
     __styleFacades.clear();
-    for (const t of __listenerCounts.keys()) __setListenedType(t, false);
-    __listenerCounts.clear();
+    // Capture OLD anchor handles + their listener slots so we can
+    // re-key them onto the NEW document's anchor handles. Without this,
+    // every fresh page loses Turbo's FormSubmitObserver / FormLinkClickObserver
+    // listeners (attached to document / documentElement at init time).
+    const docEl = globalThis.document.documentElement;
+    const body  = globalThis.document.body;
+    const head  = globalThis.document.head;
+    const anchorListeners = [
+      ['documentElement', docEl && __listeners.get(docEl.__h)],
+      ['body',            body  && __listeners.get(body.__h)],
+      ['head',            head  && __listeners.get(head.__h)],
+      ['document',        __listeners.get(0)]
+    ].filter(([_, v]) => v);
+    __listeners.clear();
     // Custom-element registrations are SET globally by Turbo's ESM
     // bundle, which loads once via vm.import and never re-runs across
     // navigations. Clearing __ceDefs would orphan the registry — new
@@ -919,6 +976,12 @@
     // mutation observer against the freshly-parsed document.
     __ceInstances.clear();
     __ceWaiters.clear();
+    // Drop the old CE-upgrade observer from __observers BEFORE snapshotting
+    // — ceEnsureObserver() below re-creates a fresh one, and replaying a
+    // synthetic initial-scan record into the old instance would walk every
+    // descendant of the new body via ceUpgradeTree (O(N) Ruby↔JS hops),
+    // tripping the QuickJS 5s timeout on large pages.
+    if (__ceObserver) __observers.delete(__ceObserver);
     __ceObserver = null;
     // Snapshot observers BEFORE wiping __wrappers — their _observed
     // entries reference the old wrappers, which we'll re-resolve below.
@@ -937,6 +1000,27 @@
       for (const [tag] of __ceDefs) {
         for (const el of document.querySelectorAll(tag)) ceUpgrade(el);
       }
+    }
+    // Re-key the captured anchor listeners onto the new document's
+    // documentElement / body / head handles, then rebuild
+    // __listenerCounts + Ruby's @listened_types from the survivors so
+    // dispatch_event continues to qualify these event types.
+    __listenerCounts.clear();
+    for (const [ref, byType] of anchorListeners) {
+      const tgt = ref === 'document' ? globalThis.document : resolveLogicalAnchor(ref);
+      if (!tgt) continue;
+      __listeners.set(tgt.__h, byType);
+      for (const [type, arr] of byType) {
+        __listenerCounts.set(type, (__listenerCounts.get(type) || 0) + arr.length);
+      }
+    }
+    for (const [type, count] of __listenerCounts) {
+      if (count > 0) __setListenedType(type, true);
+    }
+    // Window listeners survive across navigation — fold their types
+    // into the listened set too.
+    for (const [type, arr] of __windowListeners) {
+      if (arr.length > 0) __setListenedType(type, true);
     }
     rebindObservers(stashedObservers);
   };
@@ -1134,6 +1218,11 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
+  // querySelectorAll / Element.children return plain arrays in our model;
+  // pages that probe `instanceof NodeList` or `NodeList.prototype` (e.g.
+  // for-of polyfills) just need the constructor to exist.
+  globalThis.NodeList            = Array;
+  globalThis.HTMLCollection      = Array;
   // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
   // ElementObserver gates its mutation-record processing on
   // `node.nodeType == Node.ELEMENT_NODE` — without these constants set,
