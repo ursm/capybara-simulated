@@ -1127,8 +1127,19 @@ module Capybara
         when 'appendChild'
           child = lookup_node(args[0])
           if child && node.respond_to?(:add_child)
-            node.add_child(child)
-            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
+            # DocumentFragment unwraps on insertion (the fragment ends
+            # up empty, its children move to `node`). Record the
+            # actual children as addedNodes so MutationObserver
+            # callbacks (incl. our ceObserver) walk the right tree.
+            added = if child.is_a?(Nokogiri::XML::DocumentFragment)
+              kids = child.children.to_a
+              node.add_child(child)
+              kids.map { |c| @handles.track(c) }
+            else
+              node.add_child(child)
+              [args[0]]
+            end
+            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
           end
           args[0]
         when 'appendChildrenOf'
@@ -1172,8 +1183,15 @@ module Capybara
           new_child = lookup_node(args[0])
           ref_child = lookup_node(args[1])
           if new_child
-            ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
-            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
+            added = if new_child.is_a?(Nokogiri::XML::DocumentFragment)
+              kids = new_child.children.to_a
+              ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+              kids.map { |c| @handles.track(c) }
+            else
+              ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+              [args[0]]
+            end
+            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
           end
           args[0]
         when 'replaceChild'
@@ -1416,8 +1434,16 @@ module Capybara
       # with the same handler / library state the previous one had.
       def bootstrap_page
         return unless @document.at_css('script')
-        js.reset_page
+        # Order matters: reset Ruby-side listener trackers BEFORE
+        # `js.reset_page` re-arms the CE registry. The re-arm walks
+        # existing custom elements and runs their connectedCallback —
+        # for Turbo's <turbo-frame>, that fires
+        # FormSubmitObserver.start which calls addEventListener →
+        # bumpListenerCount → __setListenedType. If we cleared
+        # @listened_types AFTER that, those re-registrations would be
+        # nuked and dispatch_event would early-out for those types.
         reset_per_page_state
+        js.reset_page
         ingest_importmaps
         js.run_scripts(self, @document)
         fire_lifecycle_events

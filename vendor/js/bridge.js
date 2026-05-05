@@ -913,7 +913,12 @@
     __listenerCounts.clear();
     __observers.clear();
     __notifyMutationActive(false);
-    __ceDefs.clear();
+    // Custom-element registrations are SET globally by Turbo's ESM
+    // bundle, which loads once via vm.import and never re-runs across
+    // navigations. Clearing __ceDefs would orphan the registry — new
+    // pages' <turbo-frame> elements would never upgrade. We keep the
+    // registry but drop all per-element instance state and re-arm the
+    // mutation observer against the freshly-parsed document.
     __ceInstances.clear();
     __ceWaiters.clear();
     __ceObserver = null;
@@ -923,6 +928,14 @@
     __wrappers.set(0, globalThis.document);
     globalThis.document.readyState = 'loading';
     __resetTimers();
+    // Re-attach the CE observer + upgrade existing matches in the
+    // freshly-parsed document.
+    if (__ceDefs.size > 0) {
+      ceEnsureObserver();
+      for (const [tag] of __ceDefs) {
+        for (const el of document.querySelectorAll(tag)) ceUpgrade(el);
+      }
+    }
   };
 
   // ── MutationObserver ────────────────────────────────────────
@@ -1576,8 +1589,13 @@
   function ceUpgradeTree(el) {
     if (!el) return;
     ceUpgrade(el);
-    if (el.nodeType === 1) {
-      for (const c of el.children) ceUpgradeTree(c);
+    // DocumentFragment (11) is opaque to ceUpgrade itself but its
+    // children must still be walked — Turbo's FrameRenderer moves new
+    // content into the live document via a fragment from
+    // Range.extractContents, and the new <turbo-frame> sits inside.
+    // Without descending into the fragment its CE never upgrades.
+    if (el.nodeType === 1 || el.nodeType === 11) {
+      for (const c of el.childNodes) ceUpgradeTree(c);
     }
   }
 
