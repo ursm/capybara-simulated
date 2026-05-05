@@ -1137,7 +1137,18 @@ module Capybara
             record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
           end
           nil
-        when 'setValue'        then set_value(handle, args[0]); nil
+        when 'setValue'
+          # JS-side `el.value = 'x'` writes the value attribute. For
+          # checkbox/radio this distinct from `el.checked = true/false`,
+          # which goes through `setChecked` below. Capybara's
+          # fill_in/choose flows use `set_value` directly via
+          # `set_value_with_events`, so dom_op never confuses the two.
+          if node.name == 'input' && %w[checkbox radio].include?((node['type'] || '').downcase)
+            node['value'] = args[0].to_s
+          else
+            set_value(handle, args[0])
+          end
+          nil
         when 'setChecked'      then set_value(handle, !!args[0]); nil
         when 'setTextContent'
           node.content = args[0].to_s if node.respond_to?(:content=)
