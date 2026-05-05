@@ -1,3 +1,4 @@
+require 'digest'
 require 'json'
 require 'nokogiri'
 require 'rack/mime'
@@ -53,6 +54,8 @@ module Capybara
         @file_picks         = {}   # handle -> [path, ...] for <input type="file">
         @modal_handlers     = []   # innermost handler matches the next modal, pops, then bubbles outward
         @resource_cache     = {}   # URL -> response body for <script src=...> etc.
+        @importmap          = empty_importmap
+        @module_cache       = {}   # URL -> rewritten module source (cleared on reset!)
         @shadow_roots       = {}   # host_handle -> Nokogiri::HTML5::DocumentFragment
         @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
         @focused_handle     = nil  # currently-focused element handle
@@ -114,6 +117,8 @@ module Capybara
         @cookies.clear
         @file_picks.clear
         @resource_cache.clear
+        @importmap = empty_importmap
+        @module_cache.clear
         @shadow_roots.clear
         @shadow_root_set.clear
         @focused_handle = nil
@@ -165,6 +170,44 @@ module Capybara
           "[#{name}]"
         end
         [stripped, predicates]
+      end
+
+      # Namespace-prefixed attributes like Turbo's `a[xlink\:href]` trip
+      # Nokogiri's CSS-to-XPath converter (libxml2's XPath 1.0 doesn't
+      # grok the `*:name` form). Catch those rather than letting the
+      # error bubble into JS — the SVG-namespaced cases never match in
+      # our documents anyway.
+      SELECTOR_ERRORS = [
+        Nokogiri::CSS::SyntaxError,
+        Nokogiri::XML::XPath::SyntaxError,
+        ArgumentError
+      ].freeze
+
+      def safe_at_css(node, selector)
+        node.at_css(selector.to_s) if node.respond_to?(:at_css)
+      rescue *SELECTOR_ERRORS
+        nil
+      end
+
+      def safe_css(node, selector)
+        return [] unless node.respond_to?(:css)
+        node.css(selector.to_s)
+      rescue *SELECTOR_ERRORS
+        []
+      end
+
+      def safe_matches?(node, selector)
+        node.matches?(selector.to_s)
+      rescue *SELECTOR_ERRORS
+        false
+      end
+
+      ID_SAFE_RE  = /\A[A-Za-z0-9_-]+\z/.freeze
+      ID_ESCAPE_RE = /[^A-Za-z0-9_-]/.freeze
+
+      def escape_id_selector(id)
+        return id if ID_SAFE_RE.match?(id)
+        id.gsub(ID_ESCAPE_RE) { |c| "\\#{c}" }
       end
 
       def ci_attr_match?(node, p)
@@ -983,25 +1026,24 @@ module Capybara
         node = lookup_node(handle) || @document
         case op
         when 'querySelector'
-          @handles.track(node.respond_to?(:at_css) ? node.at_css(args[0]) : nil)
+          @handles.track(safe_at_css(node, args[0]))
         when 'querySelectorAll'
-          (node.respond_to?(:css) ? node.css(args[0]) : []).map { |n| @handles.track(n) }
+          safe_css(node, args[0]).map { |n| @handles.track(n) }
         when 'getElementById'
-          # Scope to receiver so shadow roots and fragments find their
-          # own descendants. CSS instead of `.//*[@id=...]` because the
-          # XPath form skips direct children of a DocumentFragment.
+          # CSS rather than `.//*[@id=...]` because the XPath form
+          # skips direct children of a DocumentFragment, which would
+          # break shadow-root lookups.
           scope = node.respond_to?(:at_css) ? node : @document
-          id = args[0].to_s.gsub(/[^A-Za-z0-9_-]/) { |c| "\\#{c}" }
-          @handles.track(scope.at_css("##{id}"))
+          @handles.track(scope.at_css("##{escape_id_selector(args[0].to_s)}"))
         when 'closest'
           cur = node
           while cur && cur.element?
-            return @handles.track(cur) if cur.matches?(args[0])
+            return @handles.track(cur) if safe_matches?(cur, args[0])
             cur = cur.parent
           end
           nil
         when 'matches'
-          node.element? && node.matches?(args[0])
+          node.element? && safe_matches?(node, args[0])
         when 'contains'
           other = lookup_node(args[0])
           other && (node == other || other.ancestors.include?(node))
@@ -1122,8 +1164,10 @@ module Capybara
           root = @shadow_roots[handle]
           root && @handles.track(root)
         when 'getElementsByTagName'
+          # Always scoped to the receiver. `*` matches every descendant
+          # element; jQuery's `getAll(elem, false)` relies on this for
+          # `cleanData` and `empty()` not to chew through the document.
           tag = args[0].to_s.downcase
-          return @document.css('*').map { |n| @handles.track(n) } if tag == '*'
           (node.respond_to?(:css) ? node.css(tag) : []).map { |n| @handles.track(n) }
         when 'getElementsByClassName'
           tokens = args[0].to_s.split
@@ -1253,33 +1297,21 @@ module Capybara
       def current_request = @history[@history_idx]
 
       def replay(req)
-        uri  = URI.parse(req.url)
-        opts = {method: req.method.to_s.upcase}
-        opts[:input]         = req.body if req.body
-        opts['CONTENT_TYPE'] = req.content_type if req.content_type
-        opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
-        opts['HTTP_REFERER'] = req.referer if req.referer
-        # Hand env_for the full absolute URL — Rack derives HTTP_HOST /
-        # SERVER_NAME / SERVER_PORT / rack.url_scheme from it so server-
-        # side request.host etc. reflect the visit URL, not Rack's
-        # default example.org:80. Same shape v1 uses.
-        env  = Rack::MockRequest.env_for(req.url, **opts)
-        status, headers, body_iter = @app.call(env)
-        response_body = read_rack_body(body_iter)
+        status, headers, response_body = rack_request(
+          method:       req.method,
+          url:          req.url,
+          body:         req.body,
+          content_type: req.content_type,
+          referer:      req.referer
+        )
 
-        ingest_set_cookie(headers)
-
-        if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
-          # Don't bump @current_url here — keep the pre-redirect URL so
-          # the recursive replay sends the original page as Referer
-          # (matches Capybara's #visit-with-redirect contract).
-          # 307/308 preserve the original method + body; 301/302/303 fall
-          # back to GET (browser convention).
+        if (loc = redirect_location(status, headers))
           # Browsers carry the request's fragment through redirects when
           # the redirect Location doesn't itself have one (RFC 7231 §7.1.2).
           preserve = status == 307 || status == 308
           target   = resolve(loc, base: req.url)
-          target   = "#{target}##{uri.fragment}" if uri.fragment && !target.include?('#')
+          fragment = URI.parse(req.url).fragment
+          target   = "#{target}##{fragment}" if fragment && !target.include?('#')
           return replay(Request.new(
             method:       preserve ? req.method : :get,
             url:          target,
@@ -1313,22 +1345,94 @@ module Capybara
         status
       end
 
-      # Replay the current document's `<script>` tags + lifecycle events.
-      # Called on initial page load AND after a JsRuntime VM recycle so
-      # the fresh VM ends up with the same handlers / library state the
-      # previous one had — without it, mid-test recycles silently lose
-      # all addEventListener / setTimeout closures and subsequent
-      # clicks dispatch into nothing.
+      # Re-runs `<script>` tags + lifecycle events. Called on every page
+      # load AND after a JsRuntime VM recycle so the fresh VM ends up
+      # with the same handler / library state the previous one had.
       def bootstrap_page
         return unless @document.at_css('script')
         js.reset_page
         reset_per_page_state
-        js.run_scripts(@document) { |src| fetch_resource(resolve(src)) }
-        # Fire DOMContentLoaded + load so libraries that queue work
-        # behind those events (jQuery's $(fn) ready queue, Stimulus's
-        # connectedCallback wiring) actually run.
+        ingest_importmaps
+        js.run_scripts(self, @document)
         fire_lifecycle_events
         settle
+      end
+
+      def empty_importmap = {'imports' => {}, 'scopes' => {}}
+
+      # Per HTML spec only the first importmap wins, but importmap-rails
+      # can ship multi-pin output as separate tags — later maps just
+      # override earlier keys, matching that.
+      def ingest_importmaps
+        @document.css('script[type="importmap"]').each do |tag|
+          src = importmap_source(tag)
+          next if src.nil? || src.empty?
+          parsed = JSON.parse(src) rescue nil
+          next unless parsed.is_a?(Hash)
+          @importmap['imports'].merge!(parsed['imports']) if parsed['imports'].is_a?(Hash)
+          @importmap['scopes'].merge!(parsed['scopes'])   if parsed['scopes'].is_a?(Hash)
+        end
+      end
+
+      def importmap_source(tag)
+        return tag.text if tag['src'].nil? || tag['src'].empty?
+        fetch_resource(resolve(tag['src']))
+      end
+
+      # quickjs.rb's module-loader callback. The URL was already made
+      # absolute on a prior rewrite pass, so we just fetch + rewrite +
+      # cache.
+      def load_module(url)
+        @module_cache[url] ||= begin
+          body = rack_get(url)
+          body.nil? ? nil : rewrite_module_imports(body, url)
+        end
+      end
+
+      # Inline modules have no URL, but the loader keys by URL.
+      # Synthesise a deterministic one so a re-evaluated body (after
+      # VM recycle) hits the cached rewrite.
+      def cache_inline_module(url, source)
+        @module_cache[url] ||= rewrite_module_imports(source, @current_url || url)
+        url
+      end
+
+      # HTML module-script resolution: bare specifiers via importmap,
+      # everything else URL-relative to the importer.
+      def resolve_module_specifier(specifier, base_url)
+        if (mapped = @importmap['imports'][specifier])
+          return resolve(mapped, base: base_url)
+        end
+        if specifier.start_with?('/', './', '../') || specifier.match?(%r{\A[a-z]+://}i)
+          return resolve(specifier, base: base_url)
+        end
+        # Bare specifier with no importmap entry — pass through so the
+        # loader surfaces a useful error.
+        specifier
+      end
+
+      # The leading anchor (start of line OR non-identifier char) keeps
+      # `import`/`export` substrings inside words from matching.
+      # Template-literal specifiers (`import \`./${x}.js\``) aren't
+      # handled and aren't valid static-import syntax anyway.
+      MODULE_IMPORT_RE = %r{
+        (?<lead>(?:^|[^\w$.]))
+        (?:
+          (?<static>(?:import|export)(?:\s+(?:[\w*${},\s]+)\s+from)?\s*) (?<q1>['"])(?<spec1>[^'"\n]+)\k<q1>
+          |
+          (?<dynamic>import\s*\(\s*) (?<q2>['"])(?<spec2>[^'"\n]+)\k<q2>
+        )
+      }x.freeze
+
+      def rewrite_module_imports(source, base_url)
+        source.gsub(MODULE_IMPORT_RE) do
+          m        = Regexp.last_match
+          spec     = m[:spec1] || m[:spec2]
+          quote    = m[:q1]    || m[:q2]
+          resolved = resolve_module_specifier(spec, base_url)
+          prefix   = m[:static] || m[:dynamic]
+          "#{m[:lead]}#{prefix}#{quote}#{resolved}#{quote}"
+        end
       end
 
       # In-page resolution — link href, form action, <script src>. Honours
@@ -1375,20 +1479,103 @@ module Capybara
       end
 
       def rack_get(url)
-        uri  = URI.parse(url)
-        opts = {method: 'GET'}
-        opts['HTTP_COOKIE'] = cookie_header_value unless @cookies.empty?
-        env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
-        status, _headers, body_iter = @app.call(env)
-        body = read_rack_body(body_iter)
+        status, _headers, body = rack_request(method: :get, url: url)
         return body if (200..299).cover?(status)
         warn "[capybara-simulated] script src #{url} returned #{status}" if ENV['CSIM_DEBUG']
         nil
       end
 
+      # window.fetch entry point. Routes through Rack like rack_get /
+      # replay but doesn't touch @current_url / @document — `fetch` is
+      # a data round-trip, not navigation. Follows redirects internally
+      # so `Response.redirected` is meaningful.
+      MAX_FETCH_REDIRECTS = 20
+      def rack_fetch(method, url, body, headers, redirect_mode)
+        target     = resolve(url.to_s)
+        method     = (method || 'GET').to_s.upcase
+        redirected = false
+        MAX_FETCH_REDIRECTS.times do
+          status, response_headers, response_body = rack_request(
+            method:  method,
+            url:     target,
+            body:    body,
+            headers: headers,
+            referer: @current_url
+          )
+
+          if redirect_mode != 'manual' && (loc = redirect_location(status, response_headers))
+            raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            redirected = true
+            preserve   = status == 307 || status == 308
+            target     = resolve(loc, base: target)
+            method     = 'GET' unless preserve
+            body       = nil   unless preserve
+            next
+          end
+
+          return {
+            'status'     => status,
+            'headers'    => response_headers.flat_map { |k, v| Array(v).map { |val| [k.to_s, val.to_s] } },
+            'body'       => response_body,
+            'url'        => target,
+            'redirected' => redirected,
+            'type'       => 'basic'
+          }
+        end
+        raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
+      end
+
+      # Single-shot Rack call. Builds env from cookies / referer / body /
+      # headers, ingests Set-Cookie on the response, returns the parsed
+      # body alongside status + headers. Doesn't follow redirects —
+      # callers do that with `redirect_location` (replay recurses,
+      # rack_fetch loops).
+      def rack_request(method:, url:, body: nil, content_type: nil, headers: nil, referer: nil)
+        opts = {method: method.to_s.upcase}
+        opts[:input]         = body                  if body
+        opts['CONTENT_TYPE'] = content_type          if content_type
+        opts['HTTP_COOKIE']  = cookie_header_value   unless @cookies.empty?
+        opts['HTTP_REFERER'] = referer               if referer
+        merge_request_headers(opts, headers)
+        # env_for accepts an absolute URL and derives HTTP_HOST /
+        # SERVER_NAME / SERVER_PORT / rack.url_scheme from it.
+        env = Rack::MockRequest.env_for(url, **opts)
+        status, response_headers, body_iter = @app.call(env)
+        response_body = read_rack_body(body_iter)
+        ingest_set_cookie(response_headers)
+        [status, response_headers, response_body]
+      end
+
+      # Merge JS-side fetch headers into a Rack env-shaped opts hash.
+      # CONTENT_TYPE / CONTENT_LENGTH aren't HTTP_-prefixed in env_for.
+      def merge_request_headers(opts, headers)
+        return unless headers
+        headers.each do |k, v|
+          case k.to_s.downcase
+          when 'content-type'   then opts['CONTENT_TYPE']   = v.to_s
+          when 'content-length' then opts['CONTENT_LENGTH'] = v.to_s
+          else opts["HTTP_#{k.to_s.upcase.tr('-', '_')}"] = v.to_s
+          end
+        end
+      end
+
+      # Case-insensitive header lookup. Rack-3 apps return lowercase keys
+      # but rack_test / test harnesses still hand back classic-cased
+      # headers, so we accept both.
+      def header_value(headers, name)
+        headers[name.downcase] || headers[name]
+      end
+
+      def redirect_location(status, headers)
+        return nil unless (300..399).cover?(status)
+        loc = header_value(headers, 'Location')
+        loc unless loc.nil? || loc.empty?
+      end
+
       def read_rack_body(iter)
+        return '' unless iter.respond_to?(:each)
         body = +''
-        iter.each { |c| body << c.to_s } if iter.respond_to?(:each)
+        iter.each { |c| body << c.to_s }
         iter.close if iter.respond_to?(:close)
         body
       end
@@ -1408,11 +1595,10 @@ module Capybara
         @cookies.map { |k, v| "#{k}=#{v}" }.join('; ')
       end
 
-      # Parse Set-Cookie response header(s) and stash name=value pairs.
-      # We don't honour Path / Domain / Expires — single-session, single-
-      # domain cookie jar matches what rack_test does for spec purposes.
+      # We don't honour Path / Domain / Expires — single-session,
+      # single-domain cookie jar matches what rack_test does.
       def ingest_set_cookie(headers)
-        raw = headers['set-cookie'] || headers['Set-Cookie']
+        raw = header_value(headers, 'Set-Cookie')
         return if raw.nil? || raw.empty?
         (raw.is_a?(Array) ? raw : raw.split("\n")).each do |line|
           pair, * = line.split(';', 2)
@@ -1759,6 +1945,12 @@ module Capybara
         end
         false
       end
+
+      # JsRuntime#run_scripts / #run_module_script reach into these
+      # directly. Re-publishing here (after every method has been
+      # defined under `private`) keeps the rest of the surface area
+      # private without splitting the file in half.
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module
     end
   end
 end

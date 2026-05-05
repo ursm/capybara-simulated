@@ -136,6 +136,42 @@ puts page.text
 - `lib/capybara/simulated/{driver,node}.rb` — Capybara `Driver::Base`
   and `Driver::Node` implementations.
 
+## ES modules + importmap
+
+`<script type="module">` and `<script type="importmap">` work the same
+way they do in a real browser: bare specifiers resolve through the
+importmap, relative paths resolve against the importer's URL, and every
+load (including dynamic `import(...)`) routes back through the in-process
+Rack app. No bundling step. No Node toolchain. Module sources are
+parsed by QuickJS in module mode; nested imports are pre-rewritten to
+absolute URLs before the loader callback fires, so the bridge sees one
+URL→source resolution per module.
+
+The standard importmap-rails layout works as-is:
+
+```erb
+<%= javascript_importmap_tags %>
+<!-- emits:
+  <script type="importmap">{ "imports": { "application": "/assets/application-...js", ... } }</script>
+  <script type="module">import "application"</script>
+-->
+```
+
+## Hotwire (Stimulus + Turbo)
+
+Stimulus and Turbo work both via UMD (classic `<script src>`) and via
+the standard ESM bundles imported through importmap. For
+importmap-rails apps:
+
+```ruby
+# config/importmap.rb (no changes needed for :simulated)
+pin '@hotwired/stimulus'
+pin '@hotwired/turbo'
+```
+
+`window.fetch` is shimmed to route through Rack, so Turbo's frame
+fetch + link-action POSTs round-trip the test app.
+
 ## Known limits
 
 - Without a layout engine: `visible?` is heuristic (`display:none`,
@@ -144,11 +180,16 @@ puts page.text
   are passed through verbatim. Tests that rely on positional click
   resolution (e.g. Dragula-style drag drops, table-cell clicks based on
   `elementFromPoint`) need a real browser.
-- No `fetch`/XHR. `<script src>` is inlined via `Rack::MockRequest`. Real
-  navigation only happens on link click, form submit, and JS `location`
-  assigns / `history.pushState`.
-- No `<script type="module">` / importmap module resolution. Classic
-  `<script>` tags work.
+- `fetch` is synchronous-via-Rack — works for HTML/JSON round-trips but
+  there is no real network, no streaming, no `Request#body` ReadableStream,
+  and no concurrent requests. XHR is not implemented.
+- Real navigation only happens on link click, form submit, and JS
+  `location` assigns / `history.pushState`.
+- ES modules are loaded via Rack, but `import.meta.url` is set from the
+  module specifier — there's no fully-spec-compliant URL parsing (no
+  `import.meta.resolve`, no integrity attribute checking). Top-level
+  template-literal specifiers (`import \`./${name}.js\``) aren't
+  rewritten and will fail to load.
 - Frames, multi-window, WebSocket, EventSource, file uploads beyond
   `Element#drop`, screenshots, CSS computed-style filters, and scroll /
   drag pixel coordinates are out of scope — use Selenium / Cuprite.

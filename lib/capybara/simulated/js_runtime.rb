@@ -4,23 +4,19 @@ require 'set'
 module Capybara
   module Simulated
     # QuickJS context wrapper. Owns the bridge that lets user JS read /
-    # write the Nokogiri-backed DOM owned by `Browser`. Each ↔ DOM op
+    # write the Nokogiri-backed DOM owned by `Browser`. Each DOM op
     # crosses into Ruby once; the JS side carries no DOM state of its
     # own — everything is a thin proxy keyed on integer handles.
     class JsRuntime
-      # Pull in the polyfills the quickjs gem ships that real browser
-      # environments expect — URL / URLSearchParams, TextEncoder /
-      # TextDecoder, crypto.getRandomValues / randomUUID / subtle. Cheap
-      # at boot, removes "X is not defined" failures during library load.
       VM_FEATURES = [
         Quickjs::POLYFILL_URL,
         Quickjs::POLYFILL_ENCODING,
         Quickjs::POLYFILL_CRYPTO
       ].freeze
 
-      # 100 ms is too tight for cold jQuery boot under GC pressure (~ 200 ms
-      # observed when the heap is under stress). Bump high enough that a
-      # legitimately runaway timer loop still surfaces as InterruptedError.
+      # 100 ms was too tight for cold jQuery boot under GC pressure
+      # (~ 200 ms observed). 5_000 ms still surfaces a runaway timer
+      # loop as InterruptedError.
       VM_TIMEOUT_MSEC = 5_000
 
       def initialize(browser)
@@ -30,34 +26,25 @@ module Capybara
 
       BRIDGE_JS = File.expand_path('../../../vendor/js/bridge.js', __dir__).freeze
 
-      # When QuickJS hits an unrecoverable OOM, quickjs.rb (>= the OOM-
-      # poison patch) marks the VM as poisoned — every subsequent call
-      # raises Quickjs::RuntimeError. `with_recycle` catches that, and
-      # if `vm.oom_poisoned?` confirms the cause it rebuilds the VM and
-      # re-runs the operation once. Browser fully re-bootstraps the JS
-      # side on the next navigate (reset_page + run_scripts), so the
-      # caller doesn't lose state. Long Capybara suites (~hundreds of
-      # /with_js visits each loading ~200 KB of scripts) trip this
-      # without the recycle.
       def eval(code)
         with_recycle { @vm.eval_code(code.to_s) }
       end
 
-      # Direct call into a globalThis function — quickjs.rb 0.13+ added
-      # this; cheaper than building a JS source string and re-parsing,
-      # arguments cross natively without JSON.dump.
+      # Pumping microtasks after every call is needed because js_std_await
+      # only drains while the awaited Promise is pending — synchronous
+      # JS functions (__fireLifecycle, etc.) leave .then callbacks queued
+      # otherwise.
       def call(name, *args)
-        with_recycle { @vm.call(name, *args) }
+        with_recycle do
+          result = @vm.call(name, *args)
+          pump_microtasks
+          result
+        end
       end
 
-      # Advance the virtual clock until the timer queue is empty (or the
-      # cap trips). Called by Browser after every user-driven action so
-      # that setTimeout / requestAnimationFrame work has settled before
-      # the next assertion.
-      # `max_ms` caps how far the virtual clock advances per call. Pass
-      # 0 to fire only currently-due timers (microtasks); pass an
-      # elapsed-wall-time value to advance the clock and let
-      # setTimeout(N) fire as N ms of real time accumulate.
+      # `max_ms = 0` fires only currently-due timers (microtasks);
+      # passing the elapsed wall time lets `setTimeout(N)` fire as N ms
+      # of real time accumulate.
       def drain_timers(max_ms = nil)
         arg = max_ms.nil? ? '' : max_ms.to_i.to_s
         with_recycle { @vm.eval_code("__drainTimers(#{arg})") }
@@ -67,32 +54,61 @@ module Capybara
         with_recycle { @vm.eval_code('__resetTimers()') }
       end
 
-      # Wipe all per-page state — listeners, observers, custom-element
-      # instances, timer queue. Handle integers get reused across docs,
-      # so leftover JS state would alias the wrong nodes after navigate.
       def reset_page
         with_recycle { @vm.eval_code('__resetPage()') }
       end
 
-      SCRIPT_TYPES_RUNNABLE = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
+      SCRIPT_TYPES_CLASSIC = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
 
-      # Run every classic `<script>` in document order — both inline and
-      # external `src=...`. The caller supplies a fetcher block that
-      # resolves a `src` attr to its body text (or nil to skip). Async /
-      # defer hints are honoured implicitly because everything runs
-      # synchronously in document order. `type="module"` is skipped.
-      def run_scripts(document)
+      def run_scripts(browser, document)
         document.css('script').each do |script|
-          type = script['type'].to_s
-          next unless SCRIPT_TYPES_RUNNABLE.include?(type)
-          if (src = script['src']) && !src.empty?
-            body = yield(src)
-            next if body.nil?
-            eval_safely(body, src)
+          case script['type'].to_s
+          when 'module'    then run_module_script(browser, script)
+          when 'importmap' then next # consumed by Browser#ingest_importmaps
           else
-            eval_safely(script.text, '<inline>')
+            run_classic_script(browser, script) if SCRIPT_TYPES_CLASSIC.include?(script['type'].to_s)
           end
         end
+      end
+
+      def run_classic_script(browser, script)
+        src = script['src']
+        if src && !src.empty?
+          body = browser.fetch_resource(browser.resolve(src))
+          eval_safely(body, src) if body
+        else
+          eval_safely(script.text, '<inline>')
+        end
+      end
+
+      def run_module_script(browser, script)
+        src = script['src']
+        if src && !src.empty?
+          url = browser.resolve(src)
+          # Pre-warm the cache so the loader callback doesn't re-fetch.
+          browser.load_module(url) or return
+          eval_module_entry(url)
+        else
+          inline = script.text.to_s
+          return if inline.strip.empty?
+          # Synthesise a deterministic URL so re-evaluating the same body
+          # (after a VM recycle) hits the cached rewrite.
+          url = browser.resolve('inline-module-' + Digest::SHA256.hexdigest(inline)[0, 16] + '.mjs')
+          browser.cache_inline_module(url, inline)
+          eval_module_entry(url)
+        end
+      end
+
+      # Side-effect-only `import "URL"` as the module body — vm.import's
+      # loader callback fetches the URL and runs it; the wrapper's empty
+      # namespace export is unused.
+      def eval_module_entry(url)
+        with_recycle do
+          @vm.import('* as __csim_unused', from: %[import #{url.to_json};])
+          pump_microtasks
+        end
+      rescue Quickjs::RuntimeError, ArgumentError => e
+        warn "[capybara-simulated] module #{url} failed: #{e.message[0, 200]}"
       end
 
       private
@@ -100,7 +116,22 @@ module Capybara
       def boot_vm
         @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC)
         attach_dom_bridge
+        # Receives the already-absolute, importmap-resolved URL we
+        # rewrote into the source on a prior pass. Browser#load_module
+        # fetches via Rack and rewrites this module's own nested
+        # specifiers so they come back here as URLs too.
+        @vm.module_loader = ->(name) { @browser.load_module(name) }
         @vm.eval_code(File.read(BRIDGE_JS))
+      end
+
+      # `await null` resumes via a microtask, and JS_EVAL_FLAG_ASYNC's
+      # js_std_await pumps the QuickJS pending-job queue between each
+      # one. 32 rounds drain typical Promise.then chains (Stimulus's
+      # domReady → router.start → scopeObserver.start ≈ 4 deep) without
+      # paying for thousands of empty pumps on quiet pages.
+      MICROTASK_PUMP_CODE = (('await null;' * 32) + 'void 0').freeze
+      def pump_microtasks
+        @vm.eval_code(MICROTASK_PUMP_CODE)
       end
 
       # Detect the OOM-poisoned state from PR hmsk/quickjs.rb#23 (typed
@@ -122,21 +153,19 @@ module Capybara
         yield
       end
 
+      # Wrap in `new Function` so `let`/`const` at the script's top
+      # level land in a fresh function scope per invocation — re-running
+      # the same body across page loads otherwise trips redeclaration
+      # errors (QuickJS shares the eval scope across calls). The
+      # `new Function` form also parses fewer wrapper nodes than
+      # `eval('(function(){...})()')` and is gentler on QuickJS's
+      # recursive-descent parser stack.
+      # `;void 0` ensures the eval completion value is primitive —
+      # to_rb_return_value raises ArgumentError on some object shapes
+      # (e.g. jQuery's array-like wrappers).
       def eval_safely(code, label)
         return if code.nil? || code.empty?
-        # Wrap with `new Function` so `let`/`const` at the script's top
-        # level land in a fresh function scope per invocation — without
-        # it, successive page loads that re-evaluate the same script
-        # body (e.g. `let shadowRoot = ...`) trip "redeclaration" errors
-        # because QuickJS shares the eval scope across calls. The
-        # Function constructor parses fewer wrapper nodes than the
-        # equivalent `eval('(function(){...})()')` and is friendlier to
-        # QuickJS's recursive-descent parser stack on large bundles.
-        # Append `;void 0` so the completion value is primitive — the
-        # quickjs gem's to_rb_return_value raises ArgumentError ("NULL
-        # pointer given") on some object shapes (e.g. jQuery's
-        # array-like wrappers). We don't use the return value anyway.
-        eval("new Function(#{code.to_json}).call(globalThis);void 0")
+        eval("new Function(#{code.to_json}).call(globalThis);#{MICROTASK_PUMP_CODE}")
       rescue Quickjs::RuntimeError, ArgumentError => e
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
       end
@@ -165,6 +194,9 @@ module Capybara
         end
         @vm.define_function('__locationReload') do
           @browser.refresh
+        end
+        @vm.define_function('__rackFetch') do |method, url, body, headers, redirect_mode|
+          @browser.rack_fetch(method, url, body, headers, redirect_mode)
         end
         @vm.on_log do |level, *parts|
           warn "[capybara-simulated console.#{level}] #{parts.map(&:to_s).join(' ')}"

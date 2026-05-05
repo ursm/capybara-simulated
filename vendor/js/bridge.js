@@ -4,13 +4,25 @@
 // Browser#dom_op too.
 
 (function () {
+  // Identity is per-handle — Stimulus's `this.element === event.target`
+  // would otherwise fail because each access creates a fresh wrapper.
+  // Cleared in __resetPage (handle reuse + ceUpgrade prototype swaps).
+  const __wrappers = new Map();
   function wrap(h) {
-    return h == null ? null : new Element(h);
+    if (h == null) return null;
+    let w = __wrappers.get(h);
+    if (!w) { w = new Element(h); __wrappers.set(h, w); }
+    return w;
   }
 
   class Element {
     constructor(h) {
-      Object.defineProperty(this, '__h', {value: h, writable: false});
+      // No-arg call lets a CE subclass's `super()` reach this ctor
+      // without clobbering the wrapper's pre-existing __h (ceUpgrade
+      // swaps the prototype on a wrapper whose handle is already pinned).
+      if (h !== undefined) {
+        Object.defineProperty(this, '__h', {value: h, writable: false});
+      }
     }
 
     // Tree queries
@@ -98,6 +110,13 @@
     // Library boot-time probes — ownerDocument is the Document any node
     // belongs to; we model a single document so it's always the global.
     get ownerDocument() { return globalThis.document; }
+    // getRootNode walks to the tree root (document or shadow root).
+    // Turbo's findClosestRecursively walks up via this when reaching
+    // the top of the tree, so a missing implementation surfaces as
+    // "not a function" mid-event-dispatch.
+    getRootNode(_opts)   { return globalThis.document; }
+    // No slot system — we don't model a layout-aware shadow tree.
+    get assignedSlot()   { return null; }
     get nodeValue()     { return null; }
     get prefix()        { return null; }
     get namespaceURI()  { return null; }
@@ -405,12 +424,7 @@
     for (const l of snapshot) {
       if (event._immediate) break;
       if (!atTarget && l.capture !== capture) continue;
-      try {
-        l.handler.call(el, event);
-      } catch (e) {
-        // Browsers report listener errors but keep dispatching the rest.
-        try { console.error('listener threw:', e && e.message ? e.message : e); } catch (_) {}
-      }
+      callListener(l.handler, el, event);
       if (l.once) {
         const i = arr.indexOf(l);
         if (i >= 0) {
@@ -418,6 +432,21 @@
           bumpListenerCount(event.type, -1);
         }
       }
+    }
+  }
+
+  // EventListenerObject support: the spec accepts either a function
+  // or `{handleEvent(event)}` (Stimulus's Action class uses the latter).
+  // Browsers swallow listener errors so dispatch continues — match that.
+  function callListener(handler, thisArg, event) {
+    try {
+      if (typeof handler === 'function') {
+        handler.call(thisArg, event);
+      } else if (handler && typeof handler.handleEvent === 'function') {
+        handler.handleEvent(event);
+      }
+    } catch (e) {
+      try { console.error('listener threw:', e && e.message ? e.message : e); } catch (_) {}
     }
   }
 
@@ -475,12 +504,12 @@
   // listener prevented the default action — Ruby uses that to decide
   // whether to navigate, submit, etc.
   globalThis.__dispatchFromRuby = function (handle, type, init) {
-    return __dispatch(new Element(handle), new Event(type, init));
+    return __dispatch(wrap(handle), new Event(type, init));
   };
   // Send a keyboard event with the right shape for the page-level
   // listeners that read e.keyCode / e.which (legacy but still common).
   globalThis.__dispatchKeyFromRuby = function (handle, type, keyCode) {
-    return __dispatch(new Element(handle), new KeyboardEvent(type, {
+    return __dispatch(wrap(handle), new KeyboardEvent(type, {
       bubbles: true, cancelable: true,
       keyCode: keyCode, which: keyCode, charCode: type === 'keypress' ? keyCode : 0
     }));
@@ -517,7 +546,7 @@
   }
 
   globalThis.__dropOnto = function (handle, items) {
-    const target = new Element(handle);
+    const target = wrap(handle);
     const dt     = makeDataTransfer(items || []);
     const init   = {bubbles: true, cancelable: true, dataTransfer: dt};
     __dispatch(target, new Event('dragenter', init));
@@ -560,9 +589,7 @@
   globalThis.dispatchEvent = function (event) {
     const arr = __windowListeners.get(event.type);
     if (!arr) return true;
-    for (const h of arr.slice()) {
-      try { h.call(globalThis, event); } catch (_) {}
-    }
+    for (const h of arr.slice()) callListener(h, globalThis, event);
     return !event.defaultPrevented;
   };
 
@@ -574,7 +601,7 @@
   // they round-trip through JSON on both bridge directions.
   function rehydrateArg(a) {
     if (a == null || typeof a !== 'object') return a;
-    if (a.__elementHandle != null) return new Element(a.__elementHandle);
+    if (a.__elementHandle != null) return wrap(a.__elementHandle);
     if (Array.isArray(a)) return a.map(rehydrateArg);
     const out = {};
     for (const k of Object.keys(a)) out[k] = rehydrateArg(a[k]);
@@ -703,12 +730,11 @@
     if (had) __setTimersActive(false);
   };
 
-  // Wipe per-page JS state on navigate / reset!. Handle integers from the
-  // old document end up reassigned to fresh nodes after the document
-  // re-parses, so listeners / observers / CE instances keyed on those
-  // handles would silently fire against the wrong nodes (and accumulate
-  // every visit). customElement *definitions* clear too — registry is
-  // window-scoped, and our tests treat each visit as a fresh window.
+  // Handle integers get reassigned across documents, so listeners /
+  // observers / CE instances keyed on those handles would silently fire
+  // against the wrong nodes after a navigate. `__wrappers` is also
+  // dropped — `ceUpgrade` rewrites a wrapper's [[Prototype]] to the CE
+  // class, and that prototype chain mustn't outlive the page.
   globalThis.__resetPage = function () {
     __listeners.clear();
     __windowListeners.clear();
@@ -721,6 +747,12 @@
     __ceInstances.clear();
     __ceWaiters.clear();
     __ceObserver = null;
+    __wrappers.clear();
+    // Re-pin the document wrapper so globalThis.document keeps its
+    // decorations (location proxy, defaultView, readyState, etc.).
+    __wrappers.set(0, globalThis.document);
+    refreshDocumentShortcuts();
+    globalThis.document.readyState = 'loading';
     __resetTimers();
   };
 
@@ -817,22 +849,22 @@
   Node.DOCUMENT_POSITION_CONTAINS                = 8;
   Node.DOCUMENT_POSITION_CONTAINED_BY            = 16;
   Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
-  globalThis.document = new Element(0);
+  globalThis.document = wrap(0);
 
-  // Convenience top-level shortcuts.
-  globalThis.document.body            = globalThis.document.querySelector('body');
-  globalThis.document.head            = globalThis.document.querySelector('head');
-  globalThis.document.documentElement = globalThis.document.querySelector('html');
-  // jQuery and friends sniff for these — define them as best-effort
-  // no-ops so library load time doesn't ReferenceError.
-  // Start as 'loading'; Browser bumps us through interactive → complete
-  // around the lifecycle-event firing.
+  // Body / head / documentElement re-resolve every navigate — the
+  // underlying Nokogiri document is replaced and the previous page's
+  // wrappers point at dead nodes. Called from __resetPage too.
+  function refreshDocumentShortcuts() {
+    globalThis.document.body            = globalThis.document.querySelector('body');
+    globalThis.document.head            = globalThis.document.querySelector('head');
+    globalThis.document.documentElement = globalThis.document.querySelector('html');
+  }
+  refreshDocumentShortcuts();
   globalThis.document.readyState  = 'loading';
   globalThis.document.compatMode  = 'CSS1Compat';
-  // location.href / pathname / hash / search assignments navigate.
-  // Backed by a real URL instance (POLYFILL_URL); reads return the
-  // current URL's components, writes synthesise the new href via
-  // URL's spec-defined component setters and hand it to Ruby.
+  // location.{href,pathname,hash,search} assignments navigate.
+  // Backed by a real URL (POLYFILL_URL); writes synthesise the new
+  // href via URL's component setters and hand it to Ruby.
   // __syncLocation rebuilds the URL after every navigate.
   let __locationUrl = new URL('http://placeholder/');
   globalThis.document.location = new Proxy({}, {
@@ -883,6 +915,199 @@
   globalThis.getComputedStyle = function () { return {getPropertyValue: () => '', length: 0}; };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
+  // Layout-driven observers — libraries probe these via constructor
+  // existence (Turbo's FrameController constructs an IntersectionObserver
+  // eagerly), so the spec method shape is enough.
+  class StubObserver {
+    constructor(_cb)         {}
+    observe(_target)         {}
+    unobserve(_target)       {}
+    disconnect()             {}
+    takeRecords()            { return []; }
+  }
+  globalThis.IntersectionObserver = StubObserver;
+  globalThis.ResizeObserver       = StubObserver;
+  globalThis.PerformanceObserver  = StubObserver;
+
+  // ── fetch / Headers / Response / DOMParser ──────────────────
+  // Synchronous Rack round-trip wrapped in Promise.resolve. There's
+  // no real event loop; AbortSignal is honoured at start time only.
+  class Headers {
+    constructor(init) {
+      this._map = new Map();
+      if (!init) return;
+      if (init instanceof Headers) {
+        for (const [k, v] of init._map) this._map.set(k, v.slice());
+        return;
+      }
+      if (Array.isArray(init)) {
+        for (const [k, v] of init) this.append(k, v);
+        return;
+      }
+      for (const k of Object.keys(init)) this.append(k, init[k]);
+    }
+    _key(name)  { return String(name).toLowerCase(); }
+    // WHATWG: comma-space joins repeats. Single source of truth so it
+    // doesn't drift across get/forEach/entries/values.
+    _join(a)    { return a.join(', '); }
+    append(name, value) {
+      const k = this._key(name);
+      const arr = this._map.get(k);
+      if (arr) arr.push(String(value));
+      else     this._map.set(k, [String(value)]);
+    }
+    delete(name)      { this._map.delete(this._key(name)); }
+    get(name)         { const a = this._map.get(this._key(name)); return a ? this._join(a) : null; }
+    has(name)         { return this._map.has(this._key(name)); }
+    set(name, value)  { this._map.set(this._key(name), [String(value)]); }
+    forEach(cb, thisArg) {
+      for (const [k, a] of this._map) cb.call(thisArg, this._join(a), k, this);
+    }
+    *entries() { for (const [k, a] of this._map) yield [k, this._join(a)]; }
+    *keys()    { for (const k of this._map.keys())  yield k; }
+    *values()  { for (const [, a] of this._map)     yield this._join(a); }
+    [Symbol.iterator]() { return this.entries(); }
+  }
+  globalThis.Headers = Headers;
+
+  class Response {
+    constructor(body, init) {
+      const i = init || {};
+      this._body       = body == null ? '' : String(body);
+      this.status      = i.status != null ? i.status : 200;
+      this.statusText  = i.statusText || '';
+      this.headers     = i.headers instanceof Headers ? i.headers : new Headers(i.headers);
+      this.url         = i.url || '';
+      this.redirected  = !!i.redirected;
+      this.type        = i.type || 'basic';
+      this.ok          = this.status >= 200 && this.status < 300;
+      this.bodyUsed    = false;
+    }
+    _consume() {
+      if (this.bodyUsed) {
+        return Promise.reject(new TypeError('Already read'));
+      }
+      this.bodyUsed = true;
+      return Promise.resolve(this._body);
+    }
+    text() { return this._consume(); }
+    json() { return this._consume().then(t => JSON.parse(t)); }
+    arrayBuffer() {
+      return this._consume().then(t => {
+        const buf = new ArrayBuffer(t.length);
+        const view = new Uint8Array(buf);
+        for (let i = 0; i < t.length; i++) view[i] = t.charCodeAt(i) & 0xff;
+        return buf;
+      });
+    }
+    blob() {
+      return this._consume().then(t => ({
+        size: t.length, type: '',
+        text: () => Promise.resolve(t),
+        arrayBuffer: () => Promise.resolve(t)
+      }));
+    }
+    clone() {
+      return new Response(this._body, {
+        status:     this.status,
+        statusText: this.statusText,
+        headers:    new Headers(this.headers),
+        url:        this.url,
+        redirected: this.redirected,
+        type:       this.type
+      });
+    }
+  }
+  globalThis.Response = Response;
+
+  class Request {
+    constructor(input, init) {
+      const i = init || {};
+      if (typeof input === 'object' && input != null && 'url' in input) {
+        this.url    = input.url;
+        this.method = (i.method || input.method || 'GET').toUpperCase();
+        this.headers = new Headers(i.headers || input.headers);
+        this._body   = i.body != null ? i.body : input._body;
+      } else {
+        this.url     = String(input);
+        this.method  = (i.method || 'GET').toUpperCase();
+        this.headers = new Headers(i.headers);
+        this._body   = i.body == null ? null : i.body;
+      }
+      this.credentials = i.credentials || 'same-origin';
+      this.mode        = i.mode        || 'cors';
+      this.redirect    = i.redirect    || 'follow';
+      this.signal      = i.signal      || null;
+    }
+  }
+  globalThis.Request = Request;
+
+  globalThis.fetch = function (input, init) {
+    const req = (input instanceof Request) ? input : new Request(input, init || {});
+    if (req.signal && req.signal.aborted) {
+      return Promise.reject(new Error('aborted'));
+    }
+    // Headers cross to Ruby as a flat object — duplicate names get
+    // joined with comma per HTTP, which matches what `Headers.get` does.
+    const hdrs = {};
+    for (const [k, v] of req.headers.entries()) hdrs[k] = v;
+    let body = req._body;
+    // Serialise common body shapes Turbo / Stimulus produce. FormData /
+    // URLSearchParams aren't fully shimmed; a `toString()`-able body is
+    // enough for x-www-form-urlencoded round-trips.
+    if (body != null && typeof body !== 'string') {
+      if (body instanceof URLSearchParams) {
+        body = body.toString();
+        if (!hdrs['content-type']) hdrs['content-type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+      } else if (typeof body.toString === 'function') {
+        body = body.toString();
+      }
+    }
+    let raw;
+    try {
+      raw = __rackFetch(req.method, req.url, body, hdrs, req.redirect);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    if (!raw) return Promise.reject(new TypeError('fetch: no response'));
+    const headers = new Headers();
+    for (const [k, v] of (raw.headers || [])) headers.append(k, v);
+    return Promise.resolve(new Response(raw.body || '', {
+      status:     raw.status,
+      statusText: '',
+      headers:    headers,
+      url:        raw.url,
+      redirected: raw.redirected,
+      type:       raw.type || 'basic'
+    }));
+  };
+
+  // ── DOMParser ───────────────────────────────────────────────
+  // Backed by an off-screen <template>, so innerHTML round-trips
+  // through Nokogiri's HTML5 fragment parser. Turbo's frame swap
+  // depends on this for partial fragments.
+  class ParsedDocument {
+    constructor(host, head, body) {
+      this._host = host;
+      this.head  = head;
+      this.body  = body;
+      this.documentElement = host.querySelector('html') || host;
+    }
+    querySelector(s)    { return this._host.querySelector(s); }
+    querySelectorAll(s) { return this._host.querySelectorAll(s); }
+    getElementById(id)  { return this._host.getElementById(id); }
+    getElementsByTagName(t)  { return this._host.getElementsByTagName(t); }
+  }
+  globalThis.DOMParser = class DOMParser {
+    parseFromString(input, _type) {
+      const host = document.createElement('template');
+      host.innerHTML = String(input == null ? '' : input);
+      const head = host.querySelector('head') || host;
+      const body = host.querySelector('body') || host;
+      return new ParsedDocument(host, head, body);
+    }
+  };
+
   // Modal dialogs — alert / confirm / prompt route through Ruby-side
   // __modalDialog (a define_function callback). Ruby decides what to
   // return based on the active accept_modal / dismiss_modal handler;
@@ -920,11 +1145,26 @@
     if (__ceInstances.has(el.__h)) return;
     const ctor = ceCtorFor(el.tagName);
     if (!ctor) return;
-    const inst = Object.create(ctor.prototype);
-    Object.defineProperty(inst, '__h', {value: el.__h, writable: false});
-    __ceInstances.set(el.__h, inst);
-    if (typeof inst.connectedCallback === 'function') {
-      try { inst.connectedCallback.call(inst); } catch (e) {
+    // Real browsers upgrade in place; we lack the [[Construct]] hook,
+    // so we swap the prototype, run the ctor against a throwaway
+    // (sharing __h so side-effects like `new FrameController(this)`
+    // operate on the right node), then copy own props onto the wrapper.
+    Object.setPrototypeOf(el, ctor.prototype);
+    try {
+      const tmp = Reflect.construct(ctor, [], ctor);
+      try { Object.defineProperty(tmp, '__h', {value: el.__h, writable: false}); } catch (_) {}
+      for (const k of Object.getOwnPropertyNames(tmp)) {
+        if (k === '__h') continue;
+        try {
+          Object.defineProperty(el, k, Object.getOwnPropertyDescriptor(tmp, k));
+        } catch (_) {}
+      }
+    } catch (e) {
+      try { console.error('CE constructor threw:', e && e.message ? e.message : e); } catch (_) {}
+    }
+    __ceInstances.set(el.__h, el);
+    if (typeof el.connectedCallback === 'function') {
+      try { el.connectedCallback.call(el); } catch (e) {
         try { console.error('connectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
       }
     }
@@ -940,11 +1180,10 @@
 
   function ceDisconnect(el) {
     if (!el || el.nodeType !== 1) return;
-    const inst = __ceInstances.get(el.__h);
-    if (!inst) return;
+    if (!__ceInstances.has(el.__h)) return;
     __ceInstances.delete(el.__h);
-    if (typeof inst.disconnectedCallback === 'function') {
-      try { inst.disconnectedCallback.call(inst); } catch (e) {
+    if (typeof el.disconnectedCallback === 'function') {
+      try { el.disconnectedCallback.call(el); } catch (e) {
         try { console.error('disconnectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
       }
     }
