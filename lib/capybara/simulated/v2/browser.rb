@@ -462,6 +462,7 @@ module Capybara
           when 'a'
             href = node['href']
             return true if href.nil? || href.empty?
+            return true if href.start_with?('javascript:', 'mailto:', 'tel:')
             target = resolve(href)
             # Pure-fragment / same-document anchor — browsers don't navigate.
             return true if same_document_fragment?(target)
