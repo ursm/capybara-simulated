@@ -172,6 +172,28 @@ pin '@hotwired/turbo'
 `window.fetch` is shimmed to route through Rack, so Turbo's frame
 fetch + link-action POSTs round-trip the test app.
 
+## Bench
+
+`bench/` ships a small Rack app shaped like a Hotwire-on-Rails screen
+(navigation, Stimulus actions, classic POST→302→GET, Turbo Frame fetch
++ swap, Turbo Stream append/replace) and a 21-example RSpec suite that
+drives it. `bench/run.rb` runs the suite under each driver in its own
+subprocess and prints a comparison table:
+
+```
+$ BENCH_RUNS=3 bundle exec ruby bench/run.rb
+
+| driver        | wall time (median) | per-test  | examples | failures |
+|---------------|--------------------|-----------|----------|----------|
+| simulated     |     2.94s   1.00x |  0.140s   |       21 |        0 |
+| selenium      |     8.69s   2.96x |  0.414s   |       21 |        0 |
+```
+
+Numbers above are from a quiet desktop, headless Chrome 148. rack_test
+isn't included because the suite exercises Stimulus and Turbo Stream —
+those need a JS runtime. The bench is the recommended starting point
+when comparing this driver against your own setup; clone, run, read.
+
 ## Known limits
 
 - Without a layout engine: `visible?` is heuristic (`display:none`,
