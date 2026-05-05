@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'capybara/node/base'
 require 'capybara/node/whitespace_normalizer'
 

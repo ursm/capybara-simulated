@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'digest'
 require 'json'
 require 'nokogiri'
@@ -199,7 +201,7 @@ module Capybara
         else
           node[name] = value
         end
-        record_mutation('attributes', handle, attributeName: name, oldValue: old)
+        record_attribute(handle, name, old)
         old
       end
 
@@ -1005,9 +1007,20 @@ module Capybara
       # Push a buffered MutationRecord. No-op when no observer is active —
       # the JS side flips @mutation_recording via the __notifyMutationActive
       # callback so dom_op writes pay nothing on observer-less pages.
-      def record_mutation(type, target_handle, **extra)
+      EMPTY_HANDLES = [].freeze
+
+      # Avoid allocating the kwargs hash + per-key empty arrays on the
+      # majority of dom_op writes that hit no observer (the common case
+      # for tests that don't actively use MutationObserver). Pass the
+      # already-built record hash directly.
+      def record_childlist(target_handle, added = EMPTY_HANDLES, removed = EMPTY_HANDLES)
         return unless @mutation_recording && target_handle
-        @mutations << {type: type, target: target_handle, **extra}
+        @mutations << {type: 'childList', target: target_handle, addedNodes: added, removedNodes: removed}
+      end
+
+      def record_attribute(target_handle, name, old_value)
+        return unless @mutation_recording && target_handle
+        @mutations << {type: 'attributes', target: target_handle, attributeName: name, oldValue: old_value}
       end
 
       # Drain microtasks + scheduled timers (setTimeout(0), rAF) and
@@ -1154,11 +1167,11 @@ module Capybara
         when 'setChecked'      then set_value(handle, !!args[0]); nil
         when 'setTextContent'
           node.content = args[0].to_s if node.respond_to?(:content=)
-          record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+          record_childlist(handle)
           nil
         when 'setInnerHTML'
           node.inner_html = args[0].to_s if node.respond_to?(:inner_html=)
-          record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+          record_childlist(handle)
           nil
         when 'setOuterHTML'
           # Mutation reported against the parent so subtree observers see the new nodes.
@@ -1167,7 +1180,7 @@ module Capybara
             fragment      = Nokogiri::HTML5.fragment(args[0].to_s)
             added_handles = fragment.children.map {|n| @handles.track(n) }
             node.replace(fragment)
-            record_mutation('childList', @handles.track(parent), addedNodes: added_handles, removedNodes: [handle])
+            record_childlist(@handles.track(parent), added_handles, [handle])
           end
           nil
         when 'appendChild'
@@ -1185,7 +1198,7 @@ module Capybara
               node.add_child(child)
               [args[0]]
             end
-            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+            record_childlist(handle, added)
           end
           args[0]
         when 'appendChildrenOf'
@@ -1201,7 +1214,7 @@ module Capybara
               node.add_child(c)
               added << @handles.track(c)
             end
-            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+            record_childlist(handle, added)
           end
           nil
         when 'insertChildrenOfBefore'
@@ -1214,7 +1227,7 @@ module Capybara
               if ref then ref.add_previous_sibling(c) else node.add_child(c) end
               added << @handles.track(c)
             end
-            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+            record_childlist(handle, added)
           end
           nil
         when 'removeChild'
@@ -1222,7 +1235,7 @@ module Capybara
           if child && child.parent
             parent_handle = @handles.track(child.parent)
             child.unlink
-            record_mutation('childList', parent_handle, addedNodes: [], removedNodes: [args[0]])
+            record_childlist(parent_handle, EMPTY_HANDLES, [args[0]])
           end
           args[0]
         when 'insertBefore'
@@ -1237,7 +1250,7 @@ module Capybara
               ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
               [args[0]]
             end
-            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+            record_childlist(handle, added)
           end
           args[0]
         when 'replaceChild'
@@ -1245,7 +1258,7 @@ module Capybara
           old_child = lookup_node(args[1])
           if new_child && old_child
             old_child.replace(new_child)
-            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [args[1]])
+            record_childlist(handle, [args[0]], [args[1]])
           end
           args[1]
         when 'createElement'

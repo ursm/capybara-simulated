@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'capybara/driver/base'
 require_relative 'browser'
 require_relative 'node'

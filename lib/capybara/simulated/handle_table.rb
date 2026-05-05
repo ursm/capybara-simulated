@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Capybara
   module Simulated
     # Two-way mapping between Nokogiri nodes and integer handles. Handles

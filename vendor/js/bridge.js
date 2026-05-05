@@ -65,14 +65,14 @@
     get firstChild()      { return wrap(__dom(this.__h, 'firstChild',      [])); }
     get lastChild()       { return wrap(__dom(this.__h, 'lastChild',       [])); }
     get nextSibling()     { return wrap(__dom(this.__h, 'nextSibling',     [])); }
-    get previousSibling() { return wrap(__dom(this.__h, 'previousSibling', [])); }
+    get previousSibling() { return wrap(__dom(this.__h, 'previousSibling')); }
     get children()        { return __dom(this.__h, 'children',   []).map(wrap); }
-    get childNodes()      { return __dom(this.__h, 'childNodes', []).map(wrap); }
+    get childNodes()      { return __dom(this.__h, 'childNodes').map(wrap); }
     get firstElementChild()    { return wrap(__dom(this.__h, 'firstElementChild',    [])); }
     get lastElementChild()     { return wrap(__dom(this.__h, 'lastElementChild',     [])); }
     get nextElementSibling()   { return wrap(__dom(this.__h, 'nextElementSibling',   [])); }
-    get previousElementSibling() { return wrap(__dom(this.__h, 'previousElementSibling', [])); }
-    get childElementCount()    { return __dom(this.__h, 'childElementCount', []); }
+    get previousElementSibling() { return wrap(__dom(this.__h, 'previousElementSibling')); }
+    get childElementCount()    { return __dom(this.__h, 'childElementCount'); }
 
     // Identity / shape
     get nodeType()    { return __dom(this.__h, 'nodeType',    []); }
@@ -81,10 +81,10 @@
     // Turbo's `dispatch` retargets events to documentElement when the
     // requested target isn't connected.
     get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
-    get textContent() { return __dom(this.__h, 'textContent', []); }
+    get textContent() { return __dom(this.__h, 'textContent'); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
     // IDL alias for textContent on script / title / style elements.
-    get text()         { return __dom(this.__h, 'textContent', []); }
+    get text()         { return __dom(this.__h, 'textContent'); }
     set text(v)        { this.textContent = v; }
     get innerText()   { return __dom(this.__h, 'innerText',   []); }
     set innerText(v)  { this.textContent = v; }
@@ -110,7 +110,7 @@
     // does `el.attributes[name].expando` for feature detection, so we
     // return Attr-like records on each named slot.
     get attributes() {
-      const pairs = __dom(this.__h, 'attributes', []);
+      const pairs = __dom(this.__h, 'attributes');
       const out = [];
       for (const p of pairs) {
         const attr = {name: p[0], value: p[1], specified: true, expando: false};
@@ -125,13 +125,13 @@
     set id(v)       { this.setAttribute('id', v); }
     get className() { return this.getAttribute('class') || ''; }
     set className(v) { this.setAttribute('class', v); }
-    get value()     { return __dom(this.__h, 'value', []); }
+    get value()     { return __dom(this.__h, 'value'); }
     set value(v)    { __dom(this.__h, 'setValue', [v == null ? '' : String(v)]); }
-    get checked()   { return !!__dom(this.__h, 'checked', []); }
+    get checked()   { return !!__dom(this.__h, 'checked'); }
     set checked(v)  { __dom(this.__h, 'setChecked', [!!v]); }
-    get disabled()  { return !!__dom(this.__h, 'disabled', []); }
+    get disabled()  { return !!__dom(this.__h, 'disabled'); }
     set disabled(v) { setBoolAttr(this, 'disabled', v); }
-    get hidden()    { return !!__dom(this.__h, 'hidden', []); }
+    get hidden()    { return !!__dom(this.__h, 'hidden'); }
     set hidden(v)   { setBoolAttr(this, 'hidden', v); }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
@@ -184,19 +184,19 @@
     }
 
     // <form> ergonomics
-    get form() { return wrap(__dom(this.__h, 'form', [])); }
+    get form() { return wrap(__dom(this.__h, 'form')); }
 
     // <input list="...">'s referenced <datalist>, plus its options. Used
     // by Capybara's datalist-option resolver via element.evaluate_script.
-    get list()    { return wrap(__dom(this.__h, 'list', [])); }
-    get options() { return __dom(this.__h, 'options', []).map(wrap); }
+    get list()    { return wrap(__dom(this.__h, 'list')); }
+    get options() { return __dom(this.__h, 'options').map(wrap); }
     // <option>.label — falls back to text content when no label attr.
-    get label()   { return __dom(this.__h, 'label', []); }
+    get label()   { return __dom(this.__h, 'label'); }
 
     // HTML5 form validation. Constraint computation lives on the Ruby
     // side (see Browser#compute_validity); these proxy through.
-    get validity()           { return __dom(this.__h, 'validity', []); }
-    get validationMessage()  { return __dom(this.__h, 'validationMessage', []); }
+    get validity()           { return __dom(this.__h, 'validity'); }
+    get validationMessage()  { return __dom(this.__h, 'validationMessage'); }
     checkValidity()          { return !!this.validity.valid; }
     reportValidity()         { return this.checkValidity(); }
     setCustomValidity()      {}
@@ -241,7 +241,7 @@
     set scrollTop(v)         {}
     scrollIntoView()         {}
     scrollTo()               {}
-    focus()                  { __dom(this.__h, 'focus', []); }
+    focus()                  { __dom(this.__h, 'focus'); }
     blur()                   { __dom(this.__h, 'blur',  []); }
     select()                 {}
     setSelectionRange()      {}
@@ -282,13 +282,13 @@
     createElement(tag)        { return wrap(__dom(this.__h, 'createElement',         [String(tag)])); }
     createTextNode(text)      { return wrap(__dom(this.__h, 'createTextNode',        [String(text)])); }
     createComment(text)       { return wrap(__dom(this.__h, 'createComment',         [String(text)])); }
-    createDocumentFragment()  { return wrap(__dom(this.__h, 'createDocumentFragment', [])); }
+    createDocumentFragment()  { return wrap(__dom(this.__h, 'createDocumentFragment')); }
 
     // Shadow DOM. Ruby keeps the shadow tree as a DocumentFragment in
     // Browser#shadow_roots, keyed by host handle; the wrapper reads
     // through the same dom_op surface as any other element.
-    attachShadow(_init)  { return wrap(__dom(this.__h, 'attachShadow', [])); }
-    get shadowRoot()     { return wrap(__dom(this.__h, 'shadowRoot', [])); }
+    attachShadow(_init)  { return wrap(__dom(this.__h, 'attachShadow')); }
+    get shadowRoot()     { return wrap(__dom(this.__h, 'shadowRoot')); }
     // Attribute object isn't really used by libraries except for
     // existence-checks; return a plain shape with name/value.
     createAttribute(name)     { return {name: String(name), value: '', specified: true}; }
