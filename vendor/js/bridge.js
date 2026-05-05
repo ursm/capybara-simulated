@@ -1516,10 +1516,15 @@
         if (type === 'submit' || type === 'reset' || type === 'button' || type === 'image') continue;
         if ((type === 'checkbox' || type === 'radio') && !f.checked) continue;
         if (f.tagName === 'SELECT') {
-          for (const opt of f.querySelectorAll('option')) {
-            if (opt.getAttribute('selected') != null) {
-              this.append(name, opt.getAttribute('value') || opt.textContent || '');
-            }
+          const opts     = f.querySelectorAll('option');
+          const explicit = Array.from(opts).filter(o => o.getAttribute('selected') != null);
+          // Single-select with nothing explicitly selected: browsers
+          // submit the first non-disabled option's value.
+          const chosen = explicit.length > 0
+            ? explicit
+            : (f.hasAttribute('multiple') ? [] : Array.from(opts).filter(o => !o.disabled).slice(0, 1));
+          for (const opt of chosen) {
+            this.append(name, opt.getAttribute('value') || opt.textContent || '');
           }
           continue;
         }
