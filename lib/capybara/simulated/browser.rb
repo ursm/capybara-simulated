@@ -724,10 +724,17 @@ module Capybara
           was_checked = !!node['checked']
           now_checked = !!value
           # preventDefault on click suppresses the toggle. The state
-          # before vs after determines whether 'change' fires.
+          # before vs after determines whether input / change fire.
           return was_checked unless dispatch_event(handle, 'click')
           set_value(handle, value)
-          dispatch_event(handle, 'change', bubbles: true, cancelable: false) if now_checked != was_checked
+          if now_checked != was_checked
+            # Real browsers fire 'input' before 'change' on user toggle.
+            # Stimulus's default event for radio / checkbox is 'input'
+            # (not 'change'), so handlers wired with `data-action` on
+            # those controls only see this if we fire input too.
+            dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+            dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          end
           return true
         end
         # Focus the field first — fill_in / set on a real browser implies
