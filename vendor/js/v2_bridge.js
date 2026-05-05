@@ -340,6 +340,12 @@
       this.defaultPrevented = false;
       this._stopped = false;
       this._immediate = false;
+      // Spread remaining init keys (shiftKey / ctrlKey / detail / key /
+      // keyCode / clientX / ...) so both Event and any subclass carry
+      // the modifier and mouse / keyboard fields page handlers read.
+      for (const k of Object.keys(i)) {
+        if (!(k in this)) this[k] = i[k];
+      }
     }
     preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
     stopPropagation() { this._stopped = true; }

@@ -20,23 +20,27 @@ module Capybara
         def tag_name     = browser.tag_name(handle_id)
         def [](name)     = browser.attr(handle_id, name.to_s)
 
-        def click(*_args, **_opts)
-          browser.click(handle_id)
+        # Capybara::Node::Element forwards click / right_click / double_click
+        # as `base.click(keys_array, **opts)` — keys is one positional Array,
+        # not a splat. Treat the same way for all three.
+        def click(keys = [], **_opts)
+          browser.click(handle_id, keys)
         end
 
         # right_click and double_click fire the matching event but skip the
         # default action for click — there's no synthesized "open native menu"
         # behaviour to dispatch, and tests typically just look at the JS
         # handler the event triggers.
-        def right_click(*_args, **_opts)
-          browser.dispatch_event(handle_id, 'contextmenu')
+        def right_click(keys = [], **_opts)
+          browser.dispatch_event(handle_id, 'contextmenu', **browser.modifier_init(keys))
           true
         end
 
-        def double_click(*_args, **_opts)
-          browser.dispatch_event(handle_id, 'click')
-          browser.dispatch_event(handle_id, 'click')
-          browser.dispatch_event(handle_id, 'dblclick')
+        def double_click(keys = [], **_opts)
+          mods = browser.modifier_init(keys)
+          browser.dispatch_event(handle_id, 'click',    **mods)
+          browser.dispatch_event(handle_id, 'click',    **mods)
+          browser.dispatch_event(handle_id, 'dblclick', **mods)
           true
         end
 

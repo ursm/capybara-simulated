@@ -408,7 +408,9 @@ module Capybara
           @document.at('head > title')&.text || ''
         end
 
-        def click(handle)
+        MODIFIER_KEYS = %i[shift control alt meta command].to_set.freeze
+
+        def click(handle, modifiers = nil)
           node = lookup_node(handle)
           return false if node.nil?
           # Click on a focusable element steals focus first — matches what
@@ -417,7 +419,7 @@ module Capybara
           focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
           # Fire 'click' before the default action — handlers may
           # preventDefault() to suppress navigation / form submit.
-          return true unless dispatch_event(handle, 'click')
+          return true unless dispatch_event(handle, 'click', **modifier_init(modifiers))
           case node.name
           when 'a'
             href = node['href']
@@ -603,13 +605,28 @@ module Capybara
         # listener is registered for this event type, *and* no observer is
         # watching for the side-effects — the cheap path covers the bulk of
         # plain rack_test-style flows where most events are nobody's problem.
-        def dispatch_event(handle, type, bubbles: true, cancelable: true)
+        # Extra init keys (shiftKey / ctrlKey / etc.) flow through to the
+        # JS-side Event constructor.
+        def dispatch_event(handle, type, bubbles: true, cancelable: true, **init_extras)
           return true unless @js && handle
           return true unless @listened_types.include?(type) || @mutation_recording
           result = js.call('__dispatchFromRuby', handle, type.to_s,
-                           {bubbles: bubbles, cancelable: cancelable})
+                           {bubbles: bubbles, cancelable: cancelable, **init_extras})
           settle
           result
+        end
+
+        # Build the MouseEvent init slice from Capybara modifier symbols.
+        # `:command` is the macOS alias for `:meta` per Capybara's docs.
+        def modifier_init(modifiers)
+          return {} if modifiers.nil? || modifiers.empty?
+          flags = Array(modifiers).select { |m| MODIFIER_KEYS.include?(m) }
+          {
+            shiftKey: flags.include?(:shift),
+            ctrlKey:  flags.include?(:control),
+            altKey:   flags.include?(:alt),
+            metaKey:  flags.include?(:meta) || flags.include?(:command)
+          }
         end
 
         # Push a buffered MutationRecord. No-op when no observer is active —
