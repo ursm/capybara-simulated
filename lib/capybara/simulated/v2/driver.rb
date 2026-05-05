@@ -34,6 +34,12 @@ module Capybara
           handle ? Node.new(self, handle) : nil
         end
 
+        # Session-level send_keys: routes :tab / :shift+:tab through the
+        # focus order, otherwise targets the active element.
+        def send_keys(*keys)
+          browser.session_send_keys(keys)
+        end
+
         def accept_modal(type, **options, &block)
           run_modal(type, accept: true, **options, &block)
         end

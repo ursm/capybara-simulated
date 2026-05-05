@@ -35,6 +35,7 @@ module Capybara
           @file_picks         = {}   # handle -> [path, ...] for <input type="file">
           @modal_handler      = nil  # Proc(type, message, default) → response
           @resource_cache     = {}   # URL -> response body for <script src=...> etc.
+          @focused_handle     = nil  # currently-focused element handle
           @mutations          = []
           @mutation_recording = false
           @timers_active      = false
@@ -75,6 +76,7 @@ module Capybara
           @cookies.clear
           @file_picks.clear
           @resource_cache.clear
+          @focused_handle = nil
           @js&.reset_page
           reset_per_page_state
         end
@@ -223,11 +225,80 @@ module Capybara
           @file_picks[handle] || []
         end
 
-        # Without focus tracking we fall back to <body>, mirroring the spec:
-        # "if there is no focused element, return the body element".
+        # Mirrors document.activeElement: the focused element, or body
+        # when nothing has focus (HTML spec).
         def active_element_handle
+          return @focused_handle if @focused_handle
           body = @document.at_css('body')
           body && @handles.track(body)
+        end
+
+        FOCUSABLE_TAGS = %w[input textarea select button a].to_set.freeze
+
+        def focus(handle)
+          node = lookup_node(handle)
+          return unless node && (FOCUSABLE_TAGS.include?(node.name) || node['tabindex'])
+          return if @focused_handle == handle
+          if @focused_handle
+            blur_handle = @focused_handle
+            @focused_handle = nil
+            dispatch_event(blur_handle, 'blur', bubbles: false, cancelable: false)
+          end
+          @focused_handle = handle
+          dispatch_event(handle, 'focus', bubbles: false, cancelable: false)
+        end
+
+        def blur(handle)
+          return unless @focused_handle == handle
+          @focused_handle = nil
+          dispatch_event(handle, 'blur', bubbles: false, cancelable: false)
+        end
+
+        # Session#send_keys: walks the document's focus order on :tab /
+        # :shift+:tab; other tokens just forward to the active element.
+        # Tab order = document order over inputs / textareas / selects /
+        # buttons / links-with-href / [tabindex>=0], skipping disabled
+        # / hidden ones.
+        def session_send_keys(keys)
+          forward = []
+          shift = false
+          keys.each do |k|
+            if k == :shift
+              shift = true
+            elsif k == :tab
+              advance_focus(shift ? -1 : 1)
+              shift = false
+            else
+              forward << k
+              shift = false
+            end
+          end
+          if forward.any? && (h = active_element_handle)
+            send_keys(h, forward)
+          end
+        end
+
+        def advance_focus(direction)
+          tabbables = focus_order
+          return if tabbables.empty?
+          if @focused_handle.nil?
+            target = direction.positive? ? tabbables.first : tabbables.last
+            focus(@handles.track(target))
+            return
+          end
+          current = lookup_node(@focused_handle)
+          idx = tabbables.index(current) || -1
+          next_idx = (idx + direction) % tabbables.length
+          focus(@handles.track(tabbables[next_idx]))
+        end
+
+        FOCUSABLE_CSS = 'input:not([type="hidden"]), textarea, select, button, a[href], [tabindex]'.freeze
+
+        def focus_order
+          return [] if @document.nil?
+          @document.css(FOCUSABLE_CSS).reject do |n|
+            n['disabled'] || n['tabindex'].to_s == '-1' || !visible?(@handles.track(n))
+          end
         end
 
         def apply_maxlength(node, str)
@@ -340,6 +411,10 @@ module Capybara
         def click(handle)
           node = lookup_node(handle)
           return false if node.nil?
+          # Click on a focusable element steals focus first — matches what
+          # browsers do (focus event fires before click for synthetic
+          # element.click() / user clicks).
+          focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
           # Fire 'click' before the default action — handlers may
           # preventDefault() to suppress navigation / form submit.
           return true unless dispatch_event(handle, 'click')
@@ -385,6 +460,9 @@ module Capybara
         # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
         # via `setValue` dom_op skip this — that path is the JS author's call.
         def set_value_with_events(handle, value)
+          # Focus the field first — fill_in / set on a real browser implies
+          # clicking into the field, which fires focus before input/change.
+          focus(handle)
           # Trailing \n on a single-input text form submits the form (browser
           # default behaviour for Enter in a single-field form). Strip the \n
           # before storing the value so the submitted body doesn't carry it.
@@ -550,6 +628,8 @@ module Capybara
           when 'validity'           then compute_validity(node)
           when 'validationMessage'  then validation_message(node)
           when 'checkValidity'      then compute_validity(node)['valid']
+          when 'focus' then focus(handle); nil
+          when 'blur'  then blur(handle);  nil
           when 'setAttribute'
             if node.element?
               old = node[args[0]]
@@ -724,7 +804,9 @@ module Capybara
           @current_url      = req.url
           # Handle integers get reused across documents, so the old file-pick
           # map would silently re-attach to whatever now lives at those ints.
+          # Same goes for focus state.
           @file_picks.clear
+          @focused_handle = nil
           @document    = Nokogiri::HTML5(response_body)
           @handles.reset!(@document)
           # Run inline `<script>` tags only when the page actually has any —

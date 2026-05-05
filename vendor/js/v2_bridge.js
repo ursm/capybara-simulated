@@ -113,8 +113,8 @@
     set scrollTop(v)         {}
     scrollIntoView()         {}
     scrollTo()               {}
-    focus()                  {}
-    blur()                   {}
+    focus()                  { __dom(this.__h, 'focus', []); }
+    blur()                   { __dom(this.__h, 'blur',  []); }
     select()                 {}
     setSelectionRange()      {}
     setRangeText()           {}
