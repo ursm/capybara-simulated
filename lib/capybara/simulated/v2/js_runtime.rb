@@ -18,17 +18,30 @@ module Capybara
           Quickjs::POLYFILL_CRYPTO
         ].freeze
 
+        # 100 ms is too tight for cold jQuery boot under GC pressure (~ 200 ms
+        # observed when the heap is under stress). Bump high enough that a
+        # legitimately runaway timer loop still surfaces as InterruptedError.
+        VM_TIMEOUT_MSEC = 5_000
+
         def initialize(browser)
           @browser = browser
-          @vm      = Quickjs::VM.new(features: VM_FEATURES)
-          attach_dom_bridge
-          @vm.eval_code(File.read(BRIDGE_JS))
+          boot_vm
         end
 
         BRIDGE_JS = File.expand_path('../../../../vendor/js/v2_bridge.js', __dir__).freeze
 
+        # When QuickJS hits an unrecoverable OOM, quickjs.rb (>= the OOM-
+        # poison patch) marks the VM as poisoned — every subsequent call
+        # raises Quickjs::RuntimeError("VM is poisoned: ..."). We catch
+        # that and rebuild the VM transparently for the next operation.
+        # Long Capybara suites (~hundreds of /with_js visits each loading
+        # ~200 KB of jQuery into the same VM) eventually trip this; the
+        # rebuild keeps the suite running instead of failing all remaining
+        # tests on a dead VM.
         def eval(code)
           @vm.eval_code(code.to_s)
+        rescue Quickjs::RuntimeError => e
+          retry_after_recycle(e) { @vm.eval_code(code.to_s) }
         end
 
         # Direct call into a globalThis function — quickjs.rb 0.13+ added
@@ -36,6 +49,8 @@ module Capybara
         # arguments cross natively without JSON.dump.
         def call(name, *args)
           @vm.call(name, *args)
+        rescue Quickjs::RuntimeError => e
+          retry_after_recycle(e) { @vm.call(name, *args) }
         end
 
         # Advance the virtual clock until the timer queue is empty (or the
@@ -44,10 +59,14 @@ module Capybara
         # the next assertion.
         def drain_timers
           @vm.eval_code('__drainTimers()')
+        rescue Quickjs::RuntimeError => e
+          retry_after_recycle(e) { @vm.eval_code('__drainTimers()') }
         end
 
         def reset_timers
           @vm.eval_code('__resetTimers()')
+        rescue Quickjs::RuntimeError => e
+          retry_after_recycle(e) { @vm.eval_code('__resetTimers()') }
         end
 
         # Wipe all per-page state — listeners, observers, custom-element
@@ -55,6 +74,8 @@ module Capybara
         # so leftover JS state would alias the wrong nodes after navigate.
         def reset_page
           @vm.eval_code('__resetPage()')
+        rescue Quickjs::RuntimeError => e
+          retry_after_recycle(e) { @vm.eval_code('__resetPage()') }
         end
 
         SCRIPT_TYPES_RUNNABLE = ['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
@@ -80,6 +101,27 @@ module Capybara
 
         private
 
+        def boot_vm
+          @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC)
+          attach_dom_bridge
+          @vm.eval_code(File.read(BRIDGE_JS))
+        end
+
+        # Detect the OOM-poisoned state from PR hmsk/quickjs.rb#23 and
+        # rebuild the VM. The rebuilt VM has no listeners / observers /
+        # ce defs — Browser will fully re-bootstrap on the next navigate
+        # via reset_page + run_scripts, so resetting the JS side here
+        # matches that lifecycle.
+        def retry_after_recycle(error)
+          if error.message.include?('VM is poisoned')
+            warn '[capybara-simulated/v2] QuickJS VM hit OOM — recycling'
+            boot_vm
+            yield
+          else
+            raise
+          end
+        end
+
         def eval_safely(code, label)
           return if code.nil? || code.empty?
           # Append `;void 0` so the expression-statement's completion value
@@ -87,7 +129,7 @@ module Capybara
           # raises ArgumentError("NULL pointer given") on some object shapes
           # (e.g. jQuery's array-like wrappers). We don't use the return
           # value of a `<script>` block anyway.
-          @vm.eval_code("#{code}\n;void 0")
+          eval("#{code}\n;void 0")
         rescue Quickjs::RuntimeError, ArgumentError => e
           warn "[capybara-simulated/v2] script #{label} failed: #{e.message[0, 200]}"
         end
