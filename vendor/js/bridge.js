@@ -1077,6 +1077,50 @@
   globalThis.document.createEvent = function (_type) {
     return new Event('', {bubbles: false, cancelable: false});
   };
+  // Range: minimal shim. Turbo's FrameRenderer uses
+  // selectNodeContents + deleteContents + extractContents to swap
+  // frame bodies, which is the only flow we model — no offsets, no
+  // partial-text selection, no boundary-point semantics.
+  class Range {
+    constructor() { this._node = null; }
+    selectNodeContents(node)   { this._node = node; }
+    selectNode(node)           { this._node = node && node.parentNode; }
+    setStart()                 {}
+    setEnd()                   {}
+    collapse()                 {}
+    deleteContents() {
+      if (!this._node) return;
+      const children = this._node.childNodes;
+      for (const c of Array.from(children)) this._node.removeChild(c);
+    }
+    extractContents() {
+      const frag = document.createDocumentFragment();
+      if (!this._node) return frag;
+      const children = Array.from(this._node.childNodes);
+      for (const c of children) {
+        this._node.removeChild(c);
+        frag.appendChild(c);
+      }
+      return frag;
+    }
+    cloneContents() {
+      const frag = document.createDocumentFragment();
+      if (!this._node) return frag;
+      for (const c of this._node.childNodes) frag.appendChild(c.cloneNode(true));
+      return frag;
+    }
+    cloneRange()   { const r = new Range; r._node = this._node; return r; }
+    detach()       {}
+  }
+  globalThis.Range = Range;
+  globalThis.document.createRange = function () { return new Range; };
+  // CSS.escape — Turbo's extractForeignFrameElement passes the frame
+  // id through it before constructing a `turbo-frame#<id>` selector.
+  globalThis.CSS = {
+    escape(str) {
+      return String(str).replace(/[^A-Za-z0-9_-]/g, c => '\\' + c);
+    }
+  };
   globalThis.document.readyState  = 'loading';
   globalThis.document.compatMode  = 'CSS1Compat';
   // location.{href,pathname,hash,search} assignments navigate.
@@ -1474,6 +1518,24 @@
     return __ceDefs.get(String(tagName || '').toLowerCase());
   }
 
+  // Walk an object graph rooted at `root` and replace every direct
+  // reference to `tmp` with `el`. Limited depth + WeakSet visited
+  // guard keep the cost bounded for delegate / view / observer
+  // hierarchies (Turbo's FrameController's depth is ~3).
+  function rewriteTmpRefs(root, tmp, el, depth = 4, seen = new WeakSet()) {
+    if (depth <= 0 || !root || typeof root !== 'object' || seen.has(root)) return;
+    seen.add(root);
+    for (const k of Object.getOwnPropertyNames(root)) {
+      let v;
+      try { v = root[k]; } catch (_) { continue; }
+      if (v === tmp) {
+        try { root[k] = el; } catch (_) {}
+      } else if (v && typeof v === 'object') {
+        rewriteTmpRefs(v, tmp, el, depth - 1, seen);
+      }
+    }
+  }
+
   function ceUpgrade(el) {
     if (!el || el.nodeType !== 1) return;
     if (__ceInstances.has(el.__h)) return;
@@ -1481,8 +1543,14 @@
     if (!ctor) return;
     // Real browsers upgrade in place; we lack the [[Construct]] hook,
     // so we swap the prototype, run the ctor against a throwaway
-    // (sharing __h so side-effects like `new FrameController(this)`
-    // operate on the right node), then copy own props onto the wrapper.
+    // `tmp` (sharing __h so DOM ops target the same node), then copy
+    // own props onto the wrapper. Turbo's `class FrameElement` does
+    // `this.delegate = new FrameController(this)` in its ctor — the
+    // FrameController stashes `this.element = tmp`, so after copy
+    // `el.delegate.element === tmp` (NOT `=== el`). FrameController's
+    // willSubmitForm then does `form.closest('turbo-frame') === this.element`
+    // and the strict-equality check fails (tmp ≠ el). Fix: walk the
+    // copied subtree once and rewrite any `tmp` reference to `el`.
     Object.setPrototypeOf(el, ctor.prototype);
     try {
       const tmp = Reflect.construct(ctor, [], ctor);
@@ -1493,6 +1561,7 @@
           Object.defineProperty(el, k, Object.getOwnPropertyDescriptor(tmp, k));
         } catch (_) {}
       }
+      rewriteTmpRefs(el, tmp, el);
     } catch (e) {
       try { console.error('CE constructor threw:', e && e.message ? e.message : e); } catch (_) {}
     }
