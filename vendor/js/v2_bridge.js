@@ -107,6 +107,9 @@
     scrollTo()               {}
     focus()                  {}
     blur()                   {}
+    select()                 {}
+    setSelectionRange()      {}
+    setRangeText()           {}
 
     // Mutations
     appendChild(child) {

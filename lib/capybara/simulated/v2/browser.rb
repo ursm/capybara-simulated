@@ -162,6 +162,8 @@ module Capybara
         def set_value(handle, value)
           node = lookup_node(handle)
           return false if node.nil?
+          # readonly fields silently reject writes, matching browser behaviour.
+          return false if node['readonly']
           case node.name
           when 'input'
             type = (node['type'] || 'text').downcase
@@ -238,6 +240,8 @@ module Capybara
         def select_option(handle)
           opt = lookup_node(handle)
           return false unless opt && opt.name == 'option'
+          # Browsers don't let users select a disabled option.
+          return false if opt['disabled']
           select = opt.ancestors('select').first
           return false unless select
           if select['multiple']
@@ -253,7 +257,14 @@ module Capybara
           opt = lookup_node(handle)
           return false unless opt && opt.name == 'option'
           select = opt.ancestors('select').first
-          return false unless select && select['multiple']
+          return false unless select
+          # Single-select can't be unselected — surface as the typed
+          # exception Capybara expects for `session.unselect` on non-
+          # multiple <select>s.
+          unless select['multiple']
+            raise Capybara::UnselectNotAllowed,
+              'Cannot unselect option from a non-multiple select box.'
+          end
           opt.delete('selected')
           true
         end
@@ -338,11 +349,25 @@ module Capybara
         # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
         # via `setValue` dom_op skip this — that path is the JS author's call.
         def set_value_with_events(handle, value)
-          changed = set_value(handle, value)
+          # Trailing \n on a single-input text form submits the form (browser
+          # default behaviour for Enter in a single-field form). Strip the \n
+          # before storing the value so the submitted body doesn't carry it.
+          submit_after = should_submit_on_enter?(lookup_node(handle), value)
+          changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
           return changed unless changed && @js
           dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
           dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+          submit_form(handle) if submit_after
           changed
+        end
+
+        def should_submit_on_enter?(node, value)
+          return false if node.nil? || !value.is_a?(String) || !value.end_with?("\n")
+          return false unless node.name == 'input'
+          form = enclosing_form(node) or return false
+          # Only submits when the form has a single text-like input (HTML5
+          # implicit-submission rule).
+          form.css('input').count { |i| %w[text email password search tel url].include?((i['type'] || 'text').downcase) } == 1
         end
 
         # Best-effort send_keys: appends each printable key to the field's
