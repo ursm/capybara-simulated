@@ -370,6 +370,10 @@
     // dedicated dom_op cases isn't worth the surface-area cost.
     get classList() { return new ClassList(this); }
 
+    // DOMStringMap-shaped dataset. Stimulus reads `event.currentTarget.dataset.id`
+    // for `<button data-id="...">`; without this it gets undefined.
+    get dataset() { return makeDataset(this); }
+
     // EventTarget — listeners live in JS, keyed by handle. Ruby-driven
     // actions (click, submit) call into __dispatchFromRuby below to fire
     // an event before performing the default action.
@@ -461,6 +465,38 @@
       },
       has(t, p) {
         return (p in t) || t.getPropertyValue(camelToKebab(p)) !== '';
+      }
+    });
+  }
+
+  // DOMStringMap. dataset.fooBar reads `data-foo-bar`; assignments
+  // write through to the attribute. Naming conversion follows the HTML
+  // spec: lowercase ASCII after `-` becomes uppercase on read; uppercase
+  // on write becomes `-` + lowercase. Symbols / inherited keys fall
+  // through so JS engines that probe Symbol.toPrimitive etc. don't trip.
+  function camelToDataAttr(name) {
+    return 'data-' + String(name).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+  }
+  function makeDataset(el) {
+    return new Proxy({__el: el}, {
+      get(t, p) {
+        if (typeof p === 'symbol' || p === '__el') return t[p];
+        const v = el.getAttribute(camelToDataAttr(p));
+        return v == null ? undefined : v;
+      },
+      set(_t, p, v) {
+        if (typeof p === 'symbol') return false;
+        el.setAttribute(camelToDataAttr(p), String(v));
+        return true;
+      },
+      deleteProperty(_t, p) {
+        if (typeof p === 'symbol') return false;
+        el.removeAttribute(camelToDataAttr(p));
+        return true;
+      },
+      has(_t, p) {
+        if (typeof p === 'symbol') return false;
+        return el.hasAttribute(camelToDataAttr(p));
       }
     });
   }
