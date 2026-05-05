@@ -78,6 +78,11 @@
     get nodeType()    { return __dom(this.__h, 'nodeType',    []); }
     get nodeName()    { return __dom(this.__h, 'nodeName',    []); }
     get tagName()     { return __dom(this.__h, 'tagName',     []); }
+    // True iff descended from the live document. Turbo's `dispatch`
+    // routes events to documentElement when the requested target is
+    // NOT connected, so a missing getter would re-target every
+    // turbo:click etc. and break LinkInterceptor's frame-scope check.
+    get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
     get textContent() { return __dom(this.__h, 'textContent', []); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
     // IDL alias for textContent on script / title / style elements.
@@ -93,8 +98,16 @@
     // Attributes
     getAttribute(name)        { return __dom(this.__h, 'getAttribute', [String(name)]); }
     hasAttribute(name)        { return !!__dom(this.__h, 'hasAttribute', [String(name)]); }
-    setAttribute(name, value) { __dom(this.__h, 'setAttribute', [String(name), String(value)]); }
-    removeAttribute(name)     { __dom(this.__h, 'removeAttribute', [String(name)]); }
+    setAttribute(name, value) {
+      const oldVal = __dom(this.__h, 'getAttribute', [String(name)]);
+      __dom(this.__h, 'setAttribute', [String(name), String(value)]);
+      ceMaybeAttributeChanged(this, String(name), oldVal, String(value));
+    }
+    removeAttribute(name) {
+      const oldVal = __dom(this.__h, 'getAttribute', [String(name)]);
+      __dom(this.__h, 'removeAttribute', [String(name)]);
+      ceMaybeAttributeChanged(this, String(name), oldVal, null);
+    }
     // NamedNodeMap-shaped: array-iterable AND name-indexable. jQuery
     // does `el.attributes[name].expando` for feature detection, so we
     // return Attr-like records on each named slot.
@@ -124,6 +137,10 @@
       else   this.removeAttribute('disabled');
     }
     get hidden()    { return !!__dom(this.__h, 'hidden', []); }
+    set hidden(v)   {
+      if (v) this.setAttribute('hidden', '');
+      else   this.removeAttribute('hidden');
+    }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as
@@ -1779,6 +1796,23 @@
       try { el.connectedCallback.call(el); } catch (e) {
         try { console.error('connectedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
       }
+    }
+  }
+
+  // Notify a CE that one of its observedAttributes changed. Real
+  // browsers fire this callback synchronously after setAttribute /
+  // removeAttribute / property setters that delegate to attributes.
+  // Turbo's FrameElement observes 'src' so `frame.src = url` triggers
+  // delegate.sourceURLChanged() which fetches the new content.
+  function ceMaybeAttributeChanged(el, name, oldVal, newVal) {
+    if (!__ceInstances.has(el.__h)) return;
+    const ctor = ceCtorFor(el.tagName);
+    const observed = ctor && ctor.observedAttributes;
+    if (!observed || observed.indexOf(name) === -1) return;
+    if (typeof el.attributeChangedCallback !== 'function') return;
+    if (oldVal === newVal) return;
+    try { el.attributeChangedCallback.call(el, name, oldVal, newVal); } catch (e) {
+      try { console.error('attributeChangedCallback threw:', e && e.message ? e.message : e); } catch (_) {}
     }
   }
 
