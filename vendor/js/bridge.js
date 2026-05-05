@@ -15,6 +15,20 @@
     return w;
   }
 
+  // Resolve a URL-bearing IDL attribute (href / src / action / ...)
+  // against the document's location. `fallbackToDoc` mirrors
+  // `form.action` semantics: missing / empty resolves to the document
+  // URL rather than ''. Invalid URL → return raw so callers see what
+  // they wrote.
+  function resolveUrlAttr(raw, fallbackToDoc) {
+    const base = globalThis.location && globalThis.location.href;
+    if (raw == null || raw === '') {
+      return fallbackToDoc ? (base || '') : '';
+    }
+    try { return new URL(raw, base).href; }
+    catch (_) { return raw; }
+  }
+
   class Element {
     constructor(h) {
       // No-arg call lets a CE subclass's `super()` reach this ctor
@@ -89,6 +103,38 @@
     }
     get hidden()    { return !!__dom(this.__h, 'hidden', []); }
 
+    // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
+    // against the document) — Turbo / Stimulus consume `link.href` as
+    // a fully-qualified URL and `new URL(...)` would throw on the raw
+    // relative attribute value.
+    get href()       { return resolveUrlAttr(this.getAttribute('href')); }
+    set href(v)      { this.setAttribute('href', v); }
+    get src()        { return resolveUrlAttr(this.getAttribute('src')); }
+    set src(v)       { this.setAttribute('src', v); }
+    // form.action falls back to the document URL when missing /
+    // empty (HTML spec), so it's always a parseable absolute URL.
+    get action()     { return resolveUrlAttr(this.getAttribute('action'), true); }
+    set action(v)    { this.setAttribute('action', v); }
+    get formAction() { return resolveUrlAttr(this.getAttribute('formaction'), true); }
+    set formAction(v){ this.setAttribute('formaction', v); }
+    // form.method / form.enctype / form.target — these IDL attributes
+    // default to spec-defined values, never undefined, so Turbo can
+    // do `form.method.toLowerCase()` without a guard.
+    get method()       { return (this.getAttribute('method') || 'get').toLowerCase(); }
+    set method(v)      { this.setAttribute('method', v); }
+    get formMethod()   { const v = this.getAttribute('formmethod'); return v ? v.toLowerCase() : ''; }
+    set formMethod(v)  { this.setAttribute('formmethod', v); }
+    get enctype()      { return this.getAttribute('enctype') || 'application/x-www-form-urlencoded'; }
+    set enctype(v)     { this.setAttribute('enctype', v); }
+    get formEnctype()  { return this.getAttribute('formenctype') || ''; }
+    set formEnctype(v) { this.setAttribute('formenctype', v); }
+    get target()       { return this.getAttribute('target') || ''; }
+    set target(v)      { this.setAttribute('target', v); }
+    get name()         { return this.getAttribute('name') || ''; }
+    set name(v)        { this.setAttribute('name', v); }
+    get type()         { return this.getAttribute('type') || ''; }
+    set type(v)        { this.setAttribute('type', v); }
+
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form', [])); }
 
@@ -110,6 +156,10 @@
     // Library boot-time probes — ownerDocument is the Document any node
     // belongs to; we model a single document so it's always the global.
     get ownerDocument() { return globalThis.document; }
+    // baseURI: the document's URL (or `<base href>` if present, but we
+    // ignore that for now). Turbo passes this as the base when
+    // constructing a URL from form action — it must be parseable.
+    get baseURI()       { return (globalThis.location && globalThis.location.href) || 'http://placeholder/'; }
     // getRootNode walks to the tree root (document or shadow root).
     // Turbo's findClosestRecursively walks up via this when reaching
     // the top of the tree, so a missing implementation surfaces as
@@ -194,6 +244,56 @@
 
     cloneNode(deep)              { return wrap(__dom(this.__h, 'cloneNode', [!!deep])); }
     compareDocumentPosition(o)   { return __dom(this.__h, 'compareDocumentPosition', [o && o.__h]); }
+    isEqualNode(o)               { return !!__dom(this.__h, 'isEqualNode', [o && o.__h]); }
+    isSameNode(o)                { return o != null && this.__h === o.__h; }
+
+    // Mutation: replace `this` with one or more nodes via the parent.
+    // Strings get text-node-coerced to match the spec.
+    replaceWith(...nodes) {
+      const parent = this.parentNode;
+      if (!parent) return;
+      for (const n of nodes) {
+        const node = (n && n.__h != null) ? n : globalThis.document.createTextNode(String(n));
+        parent.insertBefore(node, this);
+      }
+      parent.removeChild(this);
+    }
+    // Append-self family — required by libraries that move elements
+    // into document.head (PageRenderer.copyNewHeadStylesheetElements).
+    before(...nodes) {
+      const parent = this.parentNode;
+      if (!parent) return;
+      for (const n of nodes) {
+        const node = (n && n.__h != null) ? n : globalThis.document.createTextNode(String(n));
+        parent.insertBefore(node, this);
+      }
+    }
+    after(...nodes) {
+      const parent = this.parentNode;
+      if (!parent) return;
+      const ref = this.nextSibling;
+      for (const n of nodes) {
+        const node = (n && n.__h != null) ? n : globalThis.document.createTextNode(String(n));
+        if (ref) parent.insertBefore(node, ref); else parent.appendChild(node);
+      }
+    }
+    remove() {
+      const parent = this.parentNode;
+      if (parent) parent.removeChild(this);
+    }
+    append(...nodes) {
+      for (const n of nodes) {
+        const node = (n && n.__h != null) ? n : globalThis.document.createTextNode(String(n));
+        this.appendChild(node);
+      }
+    }
+    prepend(...nodes) {
+      const ref = this.firstChild;
+      for (const n of nodes) {
+        const node = (n && n.__h != null) ? n : globalThis.document.createTextNode(String(n));
+        if (ref) this.insertBefore(node, ref); else this.appendChild(node);
+      }
+    }
 
     // CSSStyleDeclaration-shaped: cssText round-trips through the style
     // attribute; getPropertyValue / setProperty / removeProperty edit
@@ -751,7 +851,6 @@
     // Re-pin the document wrapper so globalThis.document keeps its
     // decorations (location proxy, defaultView, readyState, etc.).
     __wrappers.set(0, globalThis.document);
-    refreshDocumentShortcuts();
     globalThis.document.readyState = 'loading';
     __resetTimers();
   };
@@ -837,10 +936,41 @@
   };
 
   globalThis.Element = Element;
-  // HTMLElement is the conventional base for `class Foo extends HTMLElement`
-  // — we don't model an HTML/SVG split, so it's just an alias for Element.
-  globalThis.HTMLElement = Element;
-  globalThis.Node        = Element;
+  // The HTML* hierarchy is alias-mapped to Element since we don't model
+  // an HTML/SVG/MathML split; libraries do `class Foo extends
+  // HTMLFormElement` or `obj instanceof HTMLInputElement` against these.
+  globalThis.HTMLElement         = Element;
+  globalThis.HTMLBodyElement     = Element;
+  globalThis.HTMLHeadElement     = Element;
+  globalThis.HTMLHtmlElement     = Element;
+  globalThis.HTMLAnchorElement   = Element;
+  globalThis.HTMLAreaElement     = Element;
+  globalThis.HTMLButtonElement   = Element;
+  globalThis.HTMLCanvasElement   = Element;
+  globalThis.HTMLDialogElement   = Element;
+  globalThis.HTMLDivElement      = Element;
+  globalThis.HTMLDocument        = Element;
+  globalThis.HTMLFormElement     = Element;
+  globalThis.HTMLIFrameElement   = Element;
+  globalThis.HTMLImageElement    = Element;
+  globalThis.HTMLInputElement    = Element;
+  globalThis.HTMLLabelElement    = Element;
+  globalThis.HTMLLinkElement     = Element;
+  globalThis.HTMLMetaElement     = Element;
+  globalThis.HTMLOptionElement   = Element;
+  globalThis.HTMLScriptElement   = Element;
+  globalThis.HTMLSelectElement   = Element;
+  globalThis.HTMLSpanElement     = Element;
+  globalThis.HTMLStyleElement    = Element;
+  globalThis.HTMLTableElement    = Element;
+  globalThis.HTMLTemplateElement = Element;
+  globalThis.HTMLTextAreaElement = Element;
+  globalThis.HTMLUListElement    = Element;
+  globalThis.SVGElement          = Element;
+  globalThis.Document            = Element;
+  globalThis.DocumentFragment    = Element;
+  globalThis.ShadowRoot          = Element;
+  globalThis.Node                = Element;
   // DOM compareDocumentPosition bitmask values. Selector-engine sort
   // routines (jQuery's Sizzle) probe these on the `Node` constructor.
   Node.DOCUMENT_POSITION_DISCONNECTED            = 1;
@@ -851,15 +981,32 @@
   Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
   globalThis.document = wrap(0);
 
-  // Body / head / documentElement re-resolve every navigate — the
-  // underlying Nokogiri document is replaced and the previous page's
-  // wrappers point at dead nodes. Called from __resetPage too.
-  function refreshDocumentShortcuts() {
-    globalThis.document.body            = globalThis.document.querySelector('body');
-    globalThis.document.head            = globalThis.document.querySelector('head');
-    globalThis.document.documentElement = globalThis.document.querySelector('html');
-  }
-  refreshDocumentShortcuts();
+  // Body / head / documentElement are live getters: in real browsers
+  // they re-resolve to whatever currently occupies the slot, even
+  // after Turbo's `document.body.replaceWith(newBody)` swaps the
+  // body element.
+  Object.defineProperty(globalThis.document, 'body', {
+    configurable: true,
+    get() { return this.querySelector('body'); }
+  });
+  Object.defineProperty(globalThis.document, 'head', {
+    configurable: true,
+    get() { return this.querySelector('head'); }
+  });
+  Object.defineProperty(globalThis.document, 'documentElement', {
+    configurable: true,
+    get() { return this.querySelector('html'); }
+  });
+  // adoptNode / importNode are pass-through — Nokogiri's
+  // insertBefore / replaceChild already span documents transparently.
+  globalThis.document.adoptNode   = function (node) { return node; };
+  globalThis.document.importNode  = function (node, _deep) { return node; };
+  globalThis.document.contains    = function (other) {
+    return !!(other && other.__h != null && __dom(0, 'contains', [other.__h]));
+  };
+  globalThis.document.createEvent = function (_type) {
+    return new Event('', {bubbles: false, cancelable: false});
+  };
   globalThis.document.readyState  = 'loading';
   globalThis.document.compatMode  = 'CSS1Compat';
   // location.{href,pathname,hash,search} assignments navigate.
@@ -900,11 +1047,21 @@
   // accepted but ignored — we only mirror the URL.
   globalThis.history = {
     length: 0,
-    pushState: function (_state, _title, url) {
-      if (url != null) __setCurrentUrl(String(url));
+    state: null,
+    scrollRestoration: 'auto',
+    pushState: function (state, _title, url) {
+      this.state = state == null ? null : state;
+      if (url == null) return;
+      const next = new URL(String(url), __locationUrl.href).href;
+      __locationUrl = new URL(next);
+      __setCurrentUrl(next);
     },
-    replaceState: function (_state, _title, url) {
-      if (url != null) __setCurrentUrl(String(url));
+    replaceState: function (state, _title, url) {
+      this.state = state == null ? null : state;
+      if (url == null) return;
+      const next = new URL(String(url), __locationUrl.href).href;
+      __locationUrl = new URL(next);
+      __setCurrentUrl(next);
     },
     back:    function () {},
     forward: function () {},
@@ -928,6 +1085,60 @@
   globalThis.IntersectionObserver = StubObserver;
   globalThis.ResizeObserver       = StubObserver;
   globalThis.PerformanceObserver  = StubObserver;
+
+  // AbortController is shape-only — the fetch shim is synchronous so
+  // there's nothing to actually abort, but Turbo / consumers
+  // construct one eagerly per request and read .signal off it.
+  class AbortSignal {
+    constructor() { this.aborted = false; this.reason = undefined; this._cb = []; }
+    addEventListener(type, h) { if (type === 'abort') this._cb.push(h); }
+    removeEventListener(type, h) {
+      if (type !== 'abort') return;
+      const i = this._cb.indexOf(h);
+      if (i >= 0) this._cb.splice(i, 1);
+    }
+    dispatchEvent(_ev) { return true; }
+    throwIfAborted() { if (this.aborted) throw this.reason || new Error('aborted'); }
+  }
+  AbortSignal.abort  = (reason) => { const s = new AbortSignal(); s.aborted = true; s.reason = reason; return s; };
+  AbortSignal.timeout = (_ms)  => new AbortSignal();
+  globalThis.AbortSignal = AbortSignal;
+  // Blob / File are stubbed for `instanceof` and constructor-shape
+  // checks. Real binary-data round-trips aren't supported (no fetch
+  // streaming, no FileReader); test apps that need real file uploads
+  // should use Capybara's `attach_file` instead.
+  class Blob {
+    constructor(parts, opts) {
+      const i = opts || {};
+      this._parts = parts || [];
+      this.size = (parts || []).reduce((s, p) => s + (p && p.length || 0), 0);
+      this.type = i.type || '';
+    }
+    text()        { return Promise.resolve((this._parts || []).join('')); }
+    arrayBuffer() { return this.text().then(t => { const b = new ArrayBuffer(t.length); const v = new Uint8Array(b); for (let i = 0; i < t.length; i++) v[i] = t.charCodeAt(i) & 0xff; return b; }); }
+    slice()       { return new Blob(this._parts, {type: this.type}); }
+  }
+  globalThis.Blob = Blob;
+  globalThis.File = class File extends Blob {
+    constructor(parts, name, opts) {
+      super(parts, opts);
+      const i = opts || {};
+      this.name = String(name);
+      this.lastModified = i.lastModified || 0;
+    }
+  };
+
+  globalThis.AbortController = class AbortController {
+    constructor() { this.signal = new AbortSignal(); }
+    abort(reason) {
+      if (this.signal.aborted) return;
+      this.signal.aborted = true;
+      this.signal.reason  = reason || new Error('aborted');
+      for (const h of this.signal._cb.slice()) {
+        try { h.call(this.signal, {type: 'abort'}); } catch (_) {}
+      }
+    }
+  };
 
   // ── fetch / Headers / Response / DOMParser ──────────────────
   // Synchronous Rack round-trip wrapped in Promise.resolve. There's
@@ -969,6 +1180,60 @@
     [Symbol.iterator]() { return this.entries(); }
   }
   globalThis.Headers = Headers;
+
+  // FormData: minimal shim. `new FormData(formElement)` scrapes the
+  // form's submittable controls so Turbo / consumers that POST forms
+  // via fetch can serialise them. File inputs surface their handle's
+  // file picks (path stubs); reading the body is left to consumers
+  // that toString it (urlencoded) or iterate entries (multipart).
+  class FormData {
+    constructor(form) {
+      this._entries = [];
+      if (!form) return;
+      const fields = form.querySelectorAll('input, select, textarea, button');
+      for (const f of fields) {
+        const name = f.getAttribute('name');
+        if (!name || f.disabled) continue;
+        const type = (f.getAttribute('type') || (f.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase();
+        if (type === 'submit' || type === 'reset' || type === 'button' || type === 'image') continue;
+        if ((type === 'checkbox' || type === 'radio') && !f.checked) continue;
+        if (f.tagName === 'SELECT') {
+          for (const opt of f.querySelectorAll('option')) {
+            if (opt.getAttribute('selected') != null) {
+              this.append(name, opt.getAttribute('value') || opt.textContent || '');
+            }
+          }
+          continue;
+        }
+        if (f.tagName === 'TEXTAREA') {
+          this.append(name, f.textContent || '');
+          continue;
+        }
+        this.append(name, f.value == null ? '' : String(f.value));
+      }
+    }
+    append(name, value)  { this._entries.push([String(name), value]); }
+    delete(name)         { this._entries = this._entries.filter(e => e[0] !== String(name)); }
+    get(name)            { const e = this._entries.find(e => e[0] === String(name)); return e ? e[1] : null; }
+    getAll(name)         { return this._entries.filter(e => e[0] === String(name)).map(e => e[1]); }
+    has(name)            { return this._entries.some(e => e[0] === String(name)); }
+    set(name, value)     { this.delete(name); this.append(name, value); }
+    forEach(cb, thisArg) { for (const [k, v] of this._entries) cb.call(thisArg, v, k, this); }
+    *entries()           { for (const e of this._entries) yield e.slice(); }
+    *keys()              { for (const e of this._entries) yield e[0]; }
+    *values()            { for (const e of this._entries) yield e[1]; }
+    [Symbol.iterator]()  { return this.entries(); }
+    toString() {
+      // Default x-www-form-urlencoded serialisation — used by fetch's
+      // body-shape handling when a FormData lands as the body.
+      const params = new URLSearchParams();
+      for (const [k, v] of this._entries) {
+        params.append(k, typeof v === 'string' ? v : (v && v.name) || '');
+      }
+      return params.toString();
+    }
+  }
+  globalThis.FormData = FormData;
 
   class Response {
     constructor(body, init) {
@@ -1083,28 +1348,27 @@
   };
 
   // ── DOMParser ───────────────────────────────────────────────
-  // Backed by an off-screen <template>, so innerHTML round-trips
-  // through Nokogiri's HTML5 fragment parser. Turbo's frame swap
-  // depends on this for partial fragments.
+  // Full HTML5 document parsing happens Ruby-side (Nokogiri::HTML5);
+  // the bridge returns handles for documentElement / head / body of
+  // the parsed tree. Nodes round-trip through `insertBefore` to land
+  // in the live document — Turbo's `document.body.replaceWith(newBody)`
+  // therefore actually swaps the live body.
   class ParsedDocument {
-    constructor(host, head, body) {
-      this._host = host;
-      this.head  = head;
-      this.body  = body;
-      this.documentElement = host.querySelector('html') || host;
+    constructor(handles) {
+      this.documentElement = wrap(handles.documentElement);
+      this.head = wrap(handles.head);
+      this.body = wrap(handles.body);
+      this._root = this.documentElement || this.body;
     }
-    querySelector(s)    { return this._host.querySelector(s); }
-    querySelectorAll(s) { return this._host.querySelectorAll(s); }
-    getElementById(id)  { return this._host.getElementById(id); }
-    getElementsByTagName(t)  { return this._host.getElementsByTagName(t); }
+    querySelector(s)        { return this._root ? this._root.querySelector(s) : null; }
+    querySelectorAll(s)     { return this._root ? this._root.querySelectorAll(s) : []; }
+    getElementById(id)      { return this._root ? this._root.getElementById(id) : null; }
+    getElementsByTagName(t) { return this._root ? this._root.getElementsByTagName(t) : []; }
   }
   globalThis.DOMParser = class DOMParser {
     parseFromString(input, _type) {
-      const host = document.createElement('template');
-      host.innerHTML = String(input == null ? '' : input);
-      const head = host.querySelector('head') || host;
-      const body = host.querySelector('body') || host;
-      return new ParsedDocument(host, head, body);
+      const handles = __dom(0, 'parseHTML5Document', [String(input == null ? '' : input)]);
+      return new ParsedDocument(handles || {});
     }
   };
 

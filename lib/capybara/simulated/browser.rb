@@ -970,13 +970,18 @@ module Capybara
         @mutations << {type: type, target: target_handle, **extra}
       end
 
-      # Drain microtasks (setTimeout(0)) and deliver pending mutations.
-      # Inside an `accept_alert do ... end` block we widen the drain so
+      # Drain microtasks + scheduled timers (setTimeout(0), rAF) and
+      # deliver pending mutations. Default drain advances virtual time
+      # by SETTLE_DRAIN_MS — enough to fire requestAnimationFrame
+      # callbacks (Turbo's `Visit#render` awaits one before swapping
+      # the body, so omitting this leaves form-submission renders
+      # stuck). Inside `accept_alert do ... end` we widen further so
       # `setTimeout(N) → alert(...)` reaches the modal handler — there
       # is no Capybara polling around that block to walk virtual time.
+      SETTLE_DRAIN_MS = 32
       def settle
         return unless @js
-        drain_max = @modal_handlers.empty? ? 0 : SYNC_DRAIN_MS
+        drain_max = @modal_handlers.empty? ? SETTLE_DRAIN_MS : SYNC_DRAIN_MS
         10.times do
           js.drain_timers(drain_max) if @timers_active
           break if @mutations.empty?
@@ -1184,6 +1189,27 @@ module Capybara
         when 'compareDocumentPosition'
           other = lookup_node(args[0])
           compare_positions(node, other)
+        when 'isEqualNode'
+          other = lookup_node(args[0])
+          # Structural equality via libxml2's serialised form. Cheap,
+          # not spec-perfect (won't catch namespace differences) but
+          # matches what Turbo's tracked-element check needs.
+          !!(other && node.respond_to?(:to_html) && other.respond_to?(:to_html) && node.to_html == other.to_html)
+        when 'parseHTML5Document'
+          # DOMParser support: parse a full HTML5 document into a
+          # standalone Nokogiri tree, register its nodes, and return
+          # handles for the spec-shaped accessors. Nodes round-trip
+          # through `insertBefore` etc. to land in the live document
+          # (Nokogiri's `add_*_sibling` works across docs).
+          parsed = Nokogiri::HTML5(args[0].to_s)
+          html_node = parsed.at_xpath('/html')
+          head_node = parsed.at_xpath('/html/head')
+          body_node = parsed.at_xpath('/html/body')
+          {
+            'documentElement' => html_node && @handles.track(html_node),
+            'head'            => head_node && @handles.track(head_node),
+            'body'            => body_node && @handles.track(body_node)
+          }
         else
           warn "[capybara-simulated] unsupported dom op: #{op}" if ENV['CSIM_DEBUG']
           nil
@@ -1946,11 +1972,10 @@ module Capybara
         false
       end
 
-      # JsRuntime#run_scripts / #run_module_script reach into these
-      # directly. Re-publishing here (after every method has been
-      # defined under `private`) keeps the rest of the surface area
-      # private without splitting the file in half.
-      public :fetch_resource, :resolve, :load_module, :cache_inline_module
+      # Methods JsRuntime reaches into directly. Re-publishing here
+      # (after every method has been defined under `private`) keeps the
+      # rest of the surface area private without splitting the file.
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch
     end
   end
 end
