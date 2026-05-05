@@ -1464,6 +1464,11 @@ module Capybara
         # nuked and dispatch_event would early-out for those types.
         reset_per_page_state
         js.reset_page
+        # Sync location BEFORE scripts run — Turbo's top-level `start()`
+        # captures `window.location.href` to seed its history; reading
+        # the stale value from the previous page would replaceState the
+        # wrong URL and corrupt Ruby's @current_url via __setCurrentUrl.
+        js.call('__syncLocation', @current_url.to_s) if @current_url
         ingest_importmaps
         js.run_scripts(self, @document)
         fire_lifecycle_events
@@ -1698,7 +1703,6 @@ module Capybara
 
       def fire_lifecycle_events
         return unless @js
-        js.call('__syncLocation', @current_url.to_s) if @current_url
         # readyState transitions: loading → interactive (just before
         # DOMContentLoaded) → complete (after window load).
         js.call('__setReadyState', 'interactive')
