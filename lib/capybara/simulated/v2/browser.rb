@@ -269,10 +269,29 @@ module Capybara
           true
         end
 
+        ALWAYS_HIDDEN_TAGS = %w[head script style template noscript title].to_set.freeze
+
         def visible?(handle)
           node = lookup_node(handle)
           return false if node.nil?
-          %w[head script style].include?(node.name) ? false : !style_hidden?(node)
+          return false if ALWAYS_HIDDEN_TAGS.include?(node.name)
+          # `<input type="hidden">` is invisible regardless of style.
+          return false if node.name == 'input' && (node['type'] || '').downcase == 'hidden'
+          # Inside a closed `<details>`, only `<summary>` (and its descendants)
+          # are rendered. Walk ancestors to detect a containing closed details.
+          return false if hidden_inside_closed_details?(node)
+          !style_hidden?(node)
+        end
+
+        def hidden_inside_closed_details?(node)
+          summary_seen = node.name == 'summary'
+          cur = node.respond_to?(:parent) ? node.parent : nil
+          while cur.respond_to?(:element?) && cur.element?
+            return true if cur.name == 'details' && !cur['open'] && !summary_seen
+            summary_seen = true if cur.name == 'summary'
+            cur = cur.parent
+          end
+          false
         end
 
         # `<option>` is disabled if any ancestor `<optgroup>`/`<select>` is
@@ -333,6 +352,14 @@ module Capybara
           when 'label'
             target = label_target(node)
             target ? click(@handles.track(target)) : false
+          when 'summary'
+            # Clicking <summary> toggles the parent <details>'s open state.
+            details = node.parent
+            if details.respond_to?(:name) && details.name == 'details'
+              details['open'] ? details.delete('open') : details['open'] = ''
+              dispatch_event(@handles.track(details), 'toggle', bubbles: false)
+            end
+            true
           else
             false
           end
