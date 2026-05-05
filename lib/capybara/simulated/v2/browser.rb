@@ -103,7 +103,49 @@ module Capybara
 
         def find_css(css, context = nil)
           root = lookup_node(context) || @document
-          root.css(css).filter_map { |n| @handles.track(n) }
+          root.css(css, CssPseudoHandlers.new(self)).filter_map { |n| @handles.track(n) }
+        end
+
+        # Nokogiri's CSS parser routes unknown pseudo-classes
+        # (`:disabled`, `:checked`, `:enabled`, etc.) through
+        # `nokogiri:<name>(.)` custom XPath calls. We register handlers
+        # here so common HTML form pseudo-selectors work in find_css.
+        # `:disabled` honours fieldset / select / optgroup propagation
+        # via Browser#disabled?.
+        class CssPseudoHandlers
+          def initialize(browser)
+            @browser = browser
+          end
+
+          def disabled(node_set)
+            node_set.select { |n| @browser.disabled?(@browser.handles_track(n)) }
+          end
+
+          def enabled(node_set)
+            node_set.reject { |n| @browser.disabled?(@browser.handles_track(n)) }
+          end
+
+          def checked(node_set)
+            node_set.select { |n| n.respond_to?(:[]) && n['checked'] }
+          end
+
+          def selected(node_set)
+            node_set.select { |n| n.respond_to?(:[]) && n['selected'] }
+          end
+
+          def required(node_set)
+            node_set.select { |n| n.respond_to?(:[]) && n['required'] }
+          end
+
+          def optional(node_set)
+            node_set.reject { |n| n.respond_to?(:[]) && n['required'] }
+          end
+        end
+
+        # Exposed for CssPseudoHandlers — Browser#disabled? takes a handle,
+        # so handlers translate Nokogiri nodes back through the table.
+        def handles_track(node)
+          @handles.track(node)
         end
 
         def all_text(handle)
