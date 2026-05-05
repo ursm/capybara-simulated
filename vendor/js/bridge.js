@@ -11,9 +11,21 @@
   function wrap(h) {
     if (h == null) return null;
     let w = __wrappers.get(h);
-    if (!w) { w = new Element(h); __wrappers.set(h, w); }
+    if (!w) {
+      w = new Element(h);
+      __wrappers.set(h, w);
+      // Custom elements are normally upgraded when inserted into the
+      // live document (ceEnsureObserver's MutationObserver). DOMParser
+      // / template-innerHTML parses don't trigger that observer
+      // because the nodes start detached, so eagerly upgrade on first
+      // wrapper access — matches the real-browser parse-time semantics
+      // Turbo's importStreamElements relies on. `__lazyUpgrade` is
+      // populated below once the CE registry is in scope.
+      if (__lazyUpgrade) __lazyUpgrade(w);
+    }
     return w;
   }
+  let __lazyUpgrade = null;
 
   // Resolve a URL-bearing IDL attribute (href / src / action / ...)
   // against the document's location. `fallbackToDoc` mirrors
@@ -56,6 +68,11 @@
     get previousSibling() { return wrap(__dom(this.__h, 'previousSibling', [])); }
     get children()        { return __dom(this.__h, 'children',   []).map(wrap); }
     get childNodes()      { return __dom(this.__h, 'childNodes', []).map(wrap); }
+    get firstElementChild()    { return wrap(__dom(this.__h, 'firstElementChild',    [])); }
+    get lastElementChild()     { return wrap(__dom(this.__h, 'lastElementChild',     [])); }
+    get nextElementSibling()   { return wrap(__dom(this.__h, 'nextElementSibling',   [])); }
+    get previousElementSibling() { return wrap(__dom(this.__h, 'previousElementSibling', [])); }
+    get childElementCount()    { return __dom(this.__h, 'childElementCount', []); }
 
     // Identity / shape
     get nodeType()    { return __dom(this.__h, 'nodeType',    []); }
@@ -135,6 +152,23 @@
     get type()         { return this.getAttribute('type') || ''; }
     set type(v)        { this.setAttribute('type', v); }
 
+    // <template>.content: a real DocumentFragment in browsers; we
+    // expose a fragment-view proxy that shares the template's handle
+    // for read-side ops (querySelector / children) but signals to
+    // appendChild / insertBefore that the children — not the
+    // template element itself — should be moved.
+    get content() {
+      if (this.tagName !== 'TEMPLATE') return this;
+      let f = this.__contentView;
+      if (!f) {
+        f = Object.create(Element.prototype);
+        Object.defineProperty(f, '__h', {value: this.__h});
+        Object.defineProperty(f, '__isContent', {value: true});
+        this.__contentView = f;
+      }
+      return f;
+    }
+
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form', [])); }
 
@@ -202,7 +236,11 @@
     // Mutations
     appendChild(child) {
       if (child == null) return null;
-      __dom(this.__h, 'appendChild', [child.__h]);
+      if (child.__isContent) {
+        __dom(this.__h, 'appendChildrenOf', [child.__h]);
+      } else {
+        __dom(this.__h, 'appendChild', [child.__h]);
+      }
       return child;
     }
     removeChild(child) {
@@ -212,7 +250,11 @@
     }
     insertBefore(newChild, refChild) {
       if (newChild == null) return null;
-      __dom(this.__h, 'insertBefore', [newChild.__h, refChild && refChild.__h]);
+      if (newChild.__isContent) {
+        __dom(this.__h, 'insertChildrenOfBefore', [newChild.__h, refChild && refChild.__h]);
+      } else {
+        __dom(this.__h, 'insertBefore', [newChild.__h, refChild && refChild.__h]);
+      }
       return newChild;
     }
     replaceChild(newChild, oldChild) {
@@ -242,7 +284,20 @@
     getElementsByClassName(cls) { return __dom(this.__h, 'getElementsByClassName', [String(cls)]).map(wrap); }
     getElementsByName(name)     { return __dom(this.__h, 'getElementsByName',      [String(name)]).map(wrap); }
 
-    cloneNode(deep)              { return wrap(__dom(this.__h, 'cloneNode', [!!deep])); }
+    cloneNode(deep) {
+      const cloned = wrap(__dom(this.__h, 'cloneNode', [!!deep]));
+      // Preserve fragment-view semantics across clone — `templateContent`
+      // does `template.content.cloneNode(true)` and then appends the
+      // result, expecting the children (not a wrapping template) to
+      // land in the target.
+      if (cloned && this.__isContent) {
+        const view = Object.create(Element.prototype);
+        Object.defineProperty(view, '__h', {value: cloned.__h});
+        Object.defineProperty(view, '__isContent', {value: true});
+        return view;
+      }
+      return cloned;
+    }
     compareDocumentPosition(o)   { return __dom(this.__h, 'compareDocumentPosition', [o && o.__h]); }
     isEqualNode(o)               { return !!__dom(this.__h, 'isEqualNode', [o && o.__h]); }
     isSameNode(o)                { return o != null && this.__h === o.__h; }
@@ -595,9 +650,24 @@
         event.eventPhase = 3;
         invokeListeners(path[i], event, false, false);
       }
+      // After document, the bubble continues to the window — Turbo's
+      // StreamObserver listens for `turbo:before-fetch-response` here
+      // and `event.preventDefault()`s to short-circuit the normal
+      // form-submission flow before it errors on a 200-without-redirect.
+      if (!event._stopped) invokeWindowListeners(event);
     }
     event.eventPhase = 0;
     return !event.defaultPrevented;
+  }
+
+  function invokeWindowListeners(event) {
+    const arr = __windowListeners.get(event.type);
+    if (!arr) return;
+    event.currentTarget = globalThis;
+    for (const h of arr.slice()) {
+      if (event._immediate) break;
+      callListener(h, globalThis, event);
+    }
   }
 
   // Called from Ruby (`browser.dispatch_event`). Returns true if no
@@ -1518,5 +1588,20 @@
         arr.push(cb);
       }};
     }
+  };
+
+  // Wire up wrap()'s lazy CE upgrade — DOMParser / innerHTML produces
+  // detached subtrees that the live-document observer never sees, so
+  // we upgrade on first wrap() access *if* the element is part of a
+  // parsed tree. Skip elements that came from createElement (no
+  // parent yet): browsers upgrade those on insertion via the
+  // observer, and upgrading too early loses post-creation property
+  // assignments like `el.id = 'foo'`.
+  __lazyUpgrade = function (el) {
+    if (__ceDefs.size === 0) return;
+    if (__ceInstances.has(el.__h)) return;
+    if (!ceCtorFor(el.tagName)) return;
+    if (!el.parentNode) return;
+    ceUpgrade(el);
   };
 })();

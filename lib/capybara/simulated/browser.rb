@@ -1061,6 +1061,17 @@ module Capybara
         when 'previousSibling' then @handles.track(node.previous)
         when 'children'        then node.element_children.map { |n| @handles.track(n) }
         when 'childNodes'      then node.children.map { |n| @handles.track(n) }
+        when 'firstElementChild' then @handles.track(node.respond_to?(:element_children) ? node.element_children.first : nil)
+        when 'lastElementChild'  then @handles.track(node.respond_to?(:element_children) ? node.element_children.last  : nil)
+        when 'nextElementSibling'
+          cur = node.next
+          cur = cur.next while cur && !cur.element?
+          @handles.track(cur)
+        when 'previousElementSibling'
+          cur = node.previous
+          cur = cur.previous while cur && !cur.element?
+          @handles.track(cur)
+        when 'childElementCount' then node.respond_to?(:element_children) ? node.element_children.size : 0
         when 'nodeType'        then node_type_for(node)
         when 'nodeName'        then (node.name || '').upcase
         when 'tagName'         then (node.element? ? node.name.upcase : '')
@@ -1120,6 +1131,35 @@ module Capybara
             record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
           end
           args[0]
+        when 'appendChildrenOf'
+          # DocumentFragment append semantics: drain children of the
+          # source into `node`. Used by template.content insertions —
+          # the fragment "view" wraps a template handle, but appending
+          # the fragment must move only its children, not the template.
+          source = lookup_node(args[0])
+          if source && node.respond_to?(:add_child)
+            added = []
+            source.children.to_a.each do |c|
+              c.unlink
+              node.add_child(c)
+              added << @handles.track(c)
+            end
+            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+          end
+          nil
+        when 'insertChildrenOfBefore'
+          source = lookup_node(args[0])
+          ref    = lookup_node(args[1])
+          if source
+            added = []
+            source.children.to_a.each do |c|
+              c.unlink
+              if ref then ref.add_previous_sibling(c) else node.add_child(c) end
+              added << @handles.track(c)
+            end
+            record_mutation('childList', handle, addedNodes: added, removedNodes: [])
+          end
+          nil
         when 'removeChild'
           child = lookup_node(args[0])
           if child && child.parent
