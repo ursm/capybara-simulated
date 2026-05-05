@@ -1,4 +1,5 @@
 require 'quickjs'
+require 'set'
 
 module Capybara
   module Simulated
@@ -32,25 +33,22 @@ module Capybara
 
         # When QuickJS hits an unrecoverable OOM, quickjs.rb (>= the OOM-
         # poison patch) marks the VM as poisoned — every subsequent call
-        # raises Quickjs::RuntimeError("VM is poisoned: ..."). We catch
-        # that and rebuild the VM transparently for the next operation.
-        # Long Capybara suites (~hundreds of /with_js visits each loading
-        # ~200 KB of jQuery into the same VM) eventually trip this; the
-        # rebuild keeps the suite running instead of failing all remaining
-        # tests on a dead VM.
+        # raises Quickjs::RuntimeError. `with_recycle` catches that, and
+        # if `vm.oom_poisoned?` confirms the cause it rebuilds the VM and
+        # re-runs the operation once. Browser fully re-bootstraps the JS
+        # side on the next navigate (reset_page + run_scripts), so the
+        # caller doesn't lose state. Long Capybara suites (~hundreds of
+        # /with_js visits each loading ~200 KB of scripts) trip this
+        # without the recycle.
         def eval(code)
-          @vm.eval_code(code.to_s)
-        rescue Quickjs::RuntimeError => e
-          retry_after_recycle(e) { @vm.eval_code(code.to_s) }
+          with_recycle { @vm.eval_code(code.to_s) }
         end
 
         # Direct call into a globalThis function — quickjs.rb 0.13+ added
         # this; cheaper than building a JS source string and re-parsing,
         # arguments cross natively without JSON.dump.
         def call(name, *args)
-          @vm.call(name, *args)
-        rescue Quickjs::RuntimeError => e
-          retry_after_recycle(e) { @vm.call(name, *args) }
+          with_recycle { @vm.call(name, *args) }
         end
 
         # Advance the virtual clock until the timer queue is empty (or the
@@ -58,27 +56,21 @@ module Capybara
         # that setTimeout / requestAnimationFrame work has settled before
         # the next assertion.
         def drain_timers
-          @vm.eval_code('__drainTimers()')
-        rescue Quickjs::RuntimeError => e
-          retry_after_recycle(e) { @vm.eval_code('__drainTimers()') }
+          with_recycle { @vm.eval_code('__drainTimers()') }
         end
 
         def reset_timers
-          @vm.eval_code('__resetTimers()')
-        rescue Quickjs::RuntimeError => e
-          retry_after_recycle(e) { @vm.eval_code('__resetTimers()') }
+          with_recycle { @vm.eval_code('__resetTimers()') }
         end
 
         # Wipe all per-page state — listeners, observers, custom-element
         # instances, timer queue. Handle integers get reused across docs,
         # so leftover JS state would alias the wrong nodes after navigate.
         def reset_page
-          @vm.eval_code('__resetPage()')
-        rescue Quickjs::RuntimeError => e
-          retry_after_recycle(e) { @vm.eval_code('__resetPage()') }
+          with_recycle { @vm.eval_code('__resetPage()') }
         end
 
-        SCRIPT_TYPES_RUNNABLE = ['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
+        SCRIPT_TYPES_RUNNABLE = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
 
         # Run every classic `<script>` in document order — both inline and
         # external `src=...`. The caller supplies a fetcher block that
@@ -107,19 +99,16 @@ module Capybara
           @vm.eval_code(File.read(BRIDGE_JS))
         end
 
-        # Detect the OOM-poisoned state from PR hmsk/quickjs.rb#23 and
-        # rebuild the VM. The rebuilt VM has no listeners / observers /
-        # ce defs — Browser will fully re-bootstrap on the next navigate
-        # via reset_page + run_scripts, so resetting the JS side here
-        # matches that lifecycle.
-        def retry_after_recycle(error)
-          if error.message.include?('VM is poisoned')
-            warn '[capybara-simulated/v2] QuickJS VM hit OOM — recycling'
-            boot_vm
-            yield
-          else
-            raise
-          end
+        # Detect the OOM-poisoned state from PR hmsk/quickjs.rb#23 (typed
+        # via `vm.oom_poisoned?`) and rebuild the VM. Other Quickjs errors
+        # propagate — Browser handles JS-runtime exceptions per call site.
+        def with_recycle
+          yield
+        rescue Quickjs::RuntimeError
+          raise unless @vm.respond_to?(:oom_poisoned?) && @vm.oom_poisoned?
+          warn '[capybara-simulated/v2] QuickJS VM hit OOM — recycling'
+          boot_vm
+          yield
         end
 
         def eval_safely(code, label)

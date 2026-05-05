@@ -34,6 +34,7 @@ module Capybara
           @cookies            = {}
           @file_picks         = {}   # handle -> [path, ...] for <input type="file">
           @modal_handler      = nil  # Proc(type, message, default) → response
+          @resource_cache     = {}   # URL -> response body for <script src=...> etc.
           @mutations          = []
           @mutation_recording = false
           @timers_active      = false
@@ -73,6 +74,7 @@ module Capybara
           @last_request     = nil
           @cookies.clear
           @file_picks.clear
+          @resource_cache.clear
           @js&.reset_page
           reset_per_page_state
         end
@@ -538,8 +540,11 @@ module Capybara
             return @document.css('*').map { |n| @handles.track(n) } if tag == '*'
             (node.respond_to?(:css) ? node.css(tag) : []).map { |n| @handles.track(n) }
           when 'getElementsByClassName'
-            cls = args[0].to_s
-            (node.respond_to?(:css) ? node.css(".#{cls.split.first}") : []).map { |n| @handles.track(n) }
+            tokens = args[0].to_s.split
+            return [] if tokens.empty? || !node.respond_to?(:css)
+            # AND-match every class token (`getElementsByClassName('a b')`
+            # = elements with `class` containing both `a` and `b`).
+            node.css(tokens.map { |t| ".#{t}" }.join).map { |n| @handles.track(n) }
           when 'getElementsByName'
             @document.xpath('.//*[@name=$n]', nil, n: args[0].to_s).map { |n| @handles.track(n) }
           when 'cloneNode'
@@ -600,13 +605,7 @@ module Capybara
           opts['HTTP_REFERER'] = @current_url if @current_url
           env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
           status, headers, body_iter = @app.call(env)
-          response_body = +''
-          if body_iter.respond_to?(:each)
-            body_iter.each { |chunk| response_body << chunk.to_s }
-          else
-            response_body << body_iter.to_s
-          end
-          body_iter.close if body_iter.respond_to?(:close)
+          response_body = read_rack_body(body_iter)
 
           ingest_set_cookie(headers)
 
@@ -637,7 +636,7 @@ module Capybara
           # avoids paying QuickJS cold-start on rack_test-style flows. Reset
           # the virtual clock so timers from the previous page can't fire on
           # this one, and drain afterwards to settle initial setTimeout(0)s.
-          if @document.at_xpath('.//script')
+          if @document.at_css('script')
             js.reset_page
             reset_per_page_state
             js.run_scripts(@document) { |src| fetch_resource(resolve(src)) }
@@ -688,22 +687,31 @@ module Capybara
         # Fetch a static resource through the same Rack app (e.g. an
         # external <script src="...">). Returns the body string, or nil on
         # non-200. Doesn't update navigation state — the document, current
-        # URL, and last-request tuple stay put.
+        # URL, and last-request tuple stay put. Cached per-URL across
+        # visits and cleared on reset! — test-app static assets (jQuery
+        # etc.) don't change between requests, and skipping the Rack
+        # round-trip is a meaningful win on JS-heavy pages.
         def fetch_resource(url)
+          @resource_cache.fetch(url) { @resource_cache[url] = rack_get(url) }
+        end
+
+        def rack_get(url)
           uri  = URI.parse(url)
           opts = {method: 'GET'}
           opts['HTTP_COOKIE'] = cookie_header_value unless @cookies.empty?
           env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
           status, _headers, body_iter = @app.call(env)
-          if (200..299).cover?(status)
-            body = +''
-            body_iter.each { |c| body << c.to_s } if body_iter.respond_to?(:each)
-            body_iter.close if body_iter.respond_to?(:close)
-            return body
-          end
+          body = read_rack_body(body_iter)
+          return body if (200..299).cover?(status)
           warn "[capybara-simulated/v2] script src #{url} returned #{status}" if ENV['CSIM_V2_DEBUG']
-          body_iter.close if body_iter.respond_to?(:close)
           nil
+        end
+
+        def read_rack_body(iter)
+          body = +''
+          iter.each { |c| body << c.to_s } if iter.respond_to?(:each)
+          iter.close if iter.respond_to?(:close)
+          body
         end
 
         def fire_lifecycle_events
@@ -783,6 +791,8 @@ module Capybara
           form['enctype'].to_s.downcase == 'multipart/form-data'
         end
 
+        FORM_FIELD_CSS = 'input, textarea, select, button'.freeze
+
         # Yields each submittable form-control entry as
         # `[name, type, value, picks]` — `picks` is the array of paths for a
         # file input, otherwise nil. serialize_form / build_multipart consume
@@ -790,17 +800,14 @@ module Capybara
         # Walks fields in document order across descendants AND any field
         # outside the form that opts in via `form="<id>"`.
         def each_form_field(form, submitter)
-          form_id = form['id']
-          xpath_parts = ['descendant::input', 'descendant::textarea',
-                         'descendant::select', 'descendant::button']
-          if form_id && !form_id.empty?
-            esc = form_id.to_s
-            %w[input textarea select button].each do |tag|
-              xpath_parts << "//#{tag}[@form=$fid]"
-            end
-            associated = @document.xpath(xpath_parts.join(' | '), nil, fid: esc)
+          form_id    = form['id']
+          associated = if form_id && !form_id.empty?
+            xpath = %w[input textarea select button]
+              .flat_map { |t| ["descendant::#{t}", "//#{t}[@form=$fid]"] }
+              .join(' | ')
+            @document.xpath(xpath, nil, fid: form_id.to_s)
           else
-            associated = form.xpath(xpath_parts.join(' | '))
+            form.css(FORM_FIELD_CSS)
           end
           associated.each do |field|
             name = field['name']
@@ -897,9 +904,8 @@ module Capybara
           label.css('input,select,textarea,button').first
         end
 
-        # DOM compareDocumentPosition bitmask, restricted to the cases
-        # libraries actually branch on (DISCONNECTED / FOLLOWING / PRECEDING
-        # / CONTAINS / CONTAINED_BY).
+        # DOM compareDocumentPosition bitmask. Cases libraries branch on:
+        # DISCONNECTED / FOLLOWING / PRECEDING / CONTAINS / CONTAINED_BY.
         DOC_POS_DISCONNECTED = 1
         DOC_POS_PRECEDING    = 2
         DOC_POS_FOLLOWING    = 4
@@ -907,16 +913,15 @@ module Capybara
         DOC_POS_CONTAINED_BY = 16
 
         def compare_positions(a, b)
-          return DOC_POS_DISCONNECTED if a.nil? || b.nil? || a.document != b.document
+          return DOC_POS_DISCONNECTED if a.nil? || b.nil?
           return 0 if a == b
           return DOC_POS_CONTAINS     if b.ancestors.include?(a)
           return DOC_POS_CONTAINED_BY if a.ancestors.include?(b)
-          # Linear walk in document order: whichever appears first PRECEDES.
-          a.document.traverse do |n|
-            return DOC_POS_FOLLOWING if n == a
-            return DOC_POS_PRECEDING if n == b
-          end
-          DOC_POS_DISCONNECTED
+          # Nokogiri::XML::Node#<=> walks via libxml2 (cheaper than a Ruby
+          # traverse), returning -1/0/1 within a document or nil across.
+          cmp = (a <=> b)
+          return DOC_POS_DISCONNECTED if cmp.nil?
+          cmp.negative? ? DOC_POS_PRECEDING : DOC_POS_FOLLOWING
         end
 
         def node_type_for(node)

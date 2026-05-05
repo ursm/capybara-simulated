@@ -154,7 +154,9 @@
     // wired — would need a Proxy, which adds cost most callers don't
     // need. Libraries that boot-probe via cssText (jQuery 1.12) work.
     get style() {
-      return CSSStyleFacade(this);
+      let f = __styleFacades.get(this.__h);
+      if (!f) { f = CSSStyleFacade(this); __styleFacades.set(this.__h, f); }
+      return f;
     }
 
     // classList — implemented in JS atop get/setAttribute. Two round-trips
@@ -295,6 +297,11 @@
   // Keyed by handle rather than Element because each JS access wraps the same
   // node in a fresh Element object — the integer handle is the stable identity.
   const __listeners = new Map();
+  // CSSStyleDeclaration cache, keyed by handle. jQuery `.css(prop, val)`
+  // reads `el.style.X` repeatedly per element; caching avoids rebuilding
+  // the Proxy / target each call. Cleared in __resetPage along with the
+  // listener / observer maps.
+  const __styleFacades = new Map();
   // Per-type listener counts so Ruby can short-circuit dispatch when no
   // one's listening for a given event type. Notified via __setListenedType.
   const __listenerCounts = new Map();
@@ -561,6 +568,8 @@
   // window-scoped, and our tests treat each visit as a fresh window.
   globalThis.__resetPage = function () {
     __listeners.clear();
+    __windowListeners.clear();
+    __styleFacades.clear();
     for (const t of __listenerCounts.keys()) __setListenedType(t, false);
     __listenerCounts.clear();
     __observers.clear();
@@ -657,6 +666,14 @@
   // — we don't model an HTML/SVG split, so it's just an alias for Element.
   globalThis.HTMLElement = Element;
   globalThis.Node        = Element;
+  // DOM compareDocumentPosition bitmask values. Selector-engine sort
+  // routines (jQuery's Sizzle) probe these on the `Node` constructor.
+  Node.DOCUMENT_POSITION_DISCONNECTED            = 1;
+  Node.DOCUMENT_POSITION_PRECEDING               = 2;
+  Node.DOCUMENT_POSITION_FOLLOWING               = 4;
+  Node.DOCUMENT_POSITION_CONTAINS                = 8;
+  Node.DOCUMENT_POSITION_CONTAINED_BY            = 16;
+  Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 32;
   globalThis.document = new Element(0);
 
   // Convenience top-level shortcuts.
