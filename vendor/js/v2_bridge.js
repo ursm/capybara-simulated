@@ -433,6 +433,14 @@
   globalThis.__dispatchFromRuby = function (handle, type, init) {
     return __dispatch(new Element(handle), new Event(type, init));
   };
+  // Send a keyboard event with the right shape for the page-level
+  // listeners that read e.keyCode / e.which (legacy but still common).
+  globalThis.__dispatchKeyFromRuby = function (handle, type, keyCode) {
+    return __dispatch(new Element(handle), new KeyboardEvent(type, {
+      bubbles: true, cancelable: true,
+      keyCode: keyCode, which: keyCode, charCode: type === 'keypress' ? keyCode : 0
+    }));
+  };
 
   // Called from Ruby#fire_lifecycle_events. Dispatches DOMContentLoaded /
   // load on document AND window — libraries listen on either.

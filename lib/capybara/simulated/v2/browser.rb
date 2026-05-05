@@ -491,33 +491,90 @@ module Capybara
           count == 1
         end
 
-        # Best-effort send_keys: appends each printable key to the field's
-        # current value, fires keydown / keypress / keyup per key, then
-        # input + change. Special tokens (:enter, :tab, :backspace, etc.)
-        # are passed as the event's `key` field but produce no value change
-        # except :backspace which trims one trailing char.
+        SPECIAL_KEY_CODES = {
+          backspace: 8, tab: 9, enter: 13, return: 13, escape: 27, space: 32,
+          left: 37, up: 38, right: 39, down: 40, delete: 46, home: 36, end: 35,
+          shift: 16, control: 17, alt: 18, meta: 91
+        }.freeze
+
+        # Best-effort send_keys. Handles literal Strings, special tokens
+        # (:space, :enter, :backspace, :delete, :left, :right, :home, :end,
+        # arrow keys), modifier-style tokens (:shift) that fold subsequent
+        # input to upper-case, and array bursts ([:shift, 'o']) that scope
+        # the modifier to the burst. Maintains a per-call caret position
+        # so :left / :right insert at the right offset.
         def send_keys(handle, keys)
           node = lookup_node(handle)
           return false if node.nil?
-          current = (node.name == 'textarea' ? node.text : node['value']).to_s
-          keys.each do |k|
-            case k
-            when Symbol
-              current = current[0...-1] if k == :backspace && !current.empty?
-              dispatch_event(handle, 'keydown')
-              dispatch_event(handle, 'keyup')
-            when String
-              k.each_char do |c|
-                current << c
-                dispatch_event(handle, 'keydown')
-                dispatch_event(handle, 'keypress')
-                dispatch_event(handle, 'keyup')
-              end
-            end
-          end
-          set_value(handle, current)
+          start  = (node.name == 'textarea' ? node.text : node['value']).to_s
+          state  = {value: start.dup, caret: start.length, shift: false}
+          keys.each { |k| apply_send_key(handle, state, k) }
+          set_value(handle, state[:value])
           dispatch_input_change(handle)
           true
+        end
+
+        def apply_send_key(handle, state, key)
+          case key
+          when Array
+            saved = state[:shift]
+            key.each { |sub| apply_send_key(handle, state, sub) }
+            state[:shift] = saved
+          when Symbol
+            apply_special_key(handle, state, key)
+          when String
+            text = state[:shift] ? key.upcase : key
+            text.each_char { |c| insert_char(handle, state, c) }
+          end
+        end
+
+        def apply_special_key(handle, state, key)
+          case key
+          when :shift, :control, :alt, :meta
+            state[:shift] = true if key == :shift
+            dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
+          when :space
+            insert_char(handle, state, ' ')
+          when :enter, :return
+            dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
+            dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key])
+          when :backspace
+            if state[:caret] > 0
+              state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
+              state[:caret] -= 1
+            end
+            dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:backspace])
+            dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:backspace])
+          when :delete
+            if state[:caret] < state[:value].length
+              state[:value] = state[:value][0, state[:caret]] + state[:value][state[:caret] + 1..]
+            end
+            dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:delete])
+            dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:delete])
+          when :left  then state[:caret] = [state[:caret] - 1, 0].max
+          when :right then state[:caret] = [state[:caret] + 1, state[:value].length].min
+          when :home  then state[:caret] = 0
+          when :end   then state[:caret] = state[:value].length
+          else
+            code = SPECIAL_KEY_CODES[key] || 0
+            dispatch_key_event(handle, 'keydown', code)
+            dispatch_key_event(handle, 'keyup',   code)
+          end
+        end
+
+        def insert_char(handle, state, char)
+          state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
+          state[:caret] += char.length
+          code = char.upcase.bytes.first || 0
+          dispatch_key_event(handle, 'keydown',  code)
+          dispatch_key_event(handle, 'keypress', code)
+          dispatch_key_event(handle, 'keyup',    code)
+        end
+
+        def dispatch_key_event(handle, type, key_code)
+          return unless @js && @listened_types.include?(type)
+          js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code)
+          settle
         end
 
         def evaluate_script(code, args = [])
