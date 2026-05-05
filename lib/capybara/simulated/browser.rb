@@ -183,45 +183,38 @@ module Capybara
         ArgumentError
       ].freeze
 
-      # CSS selector groups (`a, b`) need per-part fallback because
-      # Nokogiri parses the whole group up-front: a single bad branch
-      # (e.g. Turbo's `a[xlink\:href]`) would otherwise drop the entire
-      # selector even when the leading branch is well-formed. Split,
-      # try each, swallow per-part errors.
+      # Try the whole selector first, then fall back to per-branch
+      # evaluation only if Nokogiri rejects it — Turbo's
+      # `a[href], a[xlink\:href]` would otherwise drop the leading
+      # branch when the namespaced second branch fails CSS-to-XPath.
       def safe_at_css(node, selector)
         return nil unless node.respond_to?(:at_css)
-        css_split(selector).each do |s|
-          begin
-            hit = node.at_css(s)
-            return hit if hit
-          rescue *SELECTOR_ERRORS
-            next
-          end
-        end
+        node.at_css(selector.to_s)
+      rescue *SELECTOR_ERRORS
+        css_split(selector).each {|s|
+          hit = node.at_css(s) rescue next
+          return hit if hit
+        }
         nil
       end
 
       def safe_css(node, selector)
         return [] unless node.respond_to?(:css)
-        css_split(selector).flat_map do |s|
-          node.css(s)
-        rescue *SELECTOR_ERRORS
-          []
-        end
+        node.css(selector.to_s)
+      rescue *SELECTOR_ERRORS
+        css_split(selector).flat_map {|s| node.css(s) rescue [] }
       end
 
       def safe_matches?(node, selector)
-        css_split(selector).any? do |s|
-          node.matches?(s)
-        rescue *SELECTOR_ERRORS
-          false
-        end
+        node.matches?(selector.to_s)
+      rescue *SELECTOR_ERRORS
+        css_split(selector).any? {|s| node.matches?(s) rescue false }
       end
 
+      # Top-level comma split — bracket-content / parens are safe to
+      # ignore for the kinds of selectors we see (Turbo / Stimulus
+      # don't nest comma selector groups inside attribute predicates).
       def css_split(selector)
-        # Top-level comma split — bracket-content / parens are safe to
-        # ignore for the kinds of selectors we see (Turbo / Stimulus
-        # don't nest comma selector groups inside attribute predicates).
         selector.to_s.split(',').map(&:strip).reject(&:empty?)
       end
 
@@ -1381,11 +1374,9 @@ module Capybara
         if handler
           handler.call(type, message, default_value)
         else
-          # No handler installed — accept by default. Tests that need
-          # the negative branch wrap the action in `dismiss_confirm`.
-          # Matches the v1 driver / Rails system-test Selenium default,
-          # under which Turbo's `data-turbo-confirm` flow proceeds when
-          # the test doesn't explicitly handle the dialog.
+          # No handler — accept, matching v1 / Rails system-test defaults
+          # so Turbo's `data-turbo-confirm` proceeds when the test
+          # doesn't explicitly dismiss.
           case type
           when 'alert'   then nil
           when 'confirm' then true
@@ -1504,12 +1495,10 @@ module Capybara
       # absolute on a prior rewrite pass, so we just fetch + rewrite +
       # cache.
       def load_module(url)
-        # Static-import / inline-module specifiers are pre-rewritten to
-        # absolute URLs before the loader sees them, but `import(path)`
-        # with a non-literal `path` (stimulus-loading's eager loader does
-        # this) reaches the loader as the raw bare specifier. Resolve it
-        # through the importmap here so dynamic-loaded controllers work.
-        url = resolve_module_specifier(url, @current_url || DEFAULT_HOST) unless url =~ %r{\A[a-z]+://}i
+        # `import(path)` with a non-literal specifier (stimulus-loading's
+        # eager loader) bypasses the static rewrite, so the loader needs
+        # to consult the importmap itself.
+        url = resolve_module_specifier(url, @current_url || DEFAULT_HOST)
         @module_cache[url] ||= begin
           body = rack_get(url)
           body.nil? ? nil : rewrite_module_imports(body, url)

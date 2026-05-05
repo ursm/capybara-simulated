@@ -80,10 +80,7 @@
     get tagName()     { return __dom(this.__h, 'tagName',     []); }
     get textContent() { return __dom(this.__h, 'textContent', []); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
-    // HTMLScriptElement / HTMLTitleElement / HTMLStyleElement expose `text`
-    // as an IDL alias for textContent. stimulus-loading reads
-    // `script.text` to parse the importmap; without this it gets undefined
-    // and JSON.parse throws → no controllers register.
+    // IDL alias for textContent on script / title / style elements.
     get text()         { return __dom(this.__h, 'textContent', []); }
     set text(v)        { __dom(this.__h, 'setTextContent', [String(v)]); }
     get innerText()   { return __dom(this.__h, 'innerText',   []); }
@@ -403,16 +400,11 @@
     dispatchEvent(event) {
       return __dispatch(this, event);
     }
-    // HTMLFormElement.requestSubmit fires a cancelable submit event with
-    // the given button as `event.submitter`, then submits if no listener
-    // calls preventDefault. Turbo's link-as-DELETE flow synthesises a
-    // hidden form and calls `form.requestSubmit()` to drive its
-    // FormSubmitObserver — without this method the submission silently
-    // never happens and the link falls through to a regular GET.
+    // Turbo's link-as-DELETE flow synthesises a hidden form and drives
+    // its FormSubmitObserver via this; without it the submission never
+    // happens and the link falls through to a regular GET.
     requestSubmit(submitter) {
-      const ev = new Event('submit', {bubbles: true, cancelable: true});
-      if (submitter) ev.submitter = submitter;
-      __dispatch(this, ev);
+      __dispatch(this, new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter}));
     }
   }
 
@@ -687,23 +679,9 @@
     }
   }
 
-  // Called from Ruby (`browser.dispatch_event`). Returns true if no
-  // listener prevented the default action — Ruby uses that to decide
-  // whether to navigate, submit, etc.
-  globalThis.__dispatchFromRuby = function (handle, type, init) {
-    const i = init || {};
-    // Ruby passes integer handles for any node references (e.g. the
-    // `submitter` on a submit event). Wrap them so listeners see the
-    // same Element instances they'd get in a real browser — Turbo's
-    // FormSubmitObserver reads `event.submitter` to decide whether
-    // `data-turbo="false"` on the button should bail out.
-    if (typeof i.submitter === 'number') i.submitter = wrap(i.submitter);
-    // Use the typed subclass so libraries that gate on
-    // `event instanceof MouseEvent` (Turbo's LinkClickObserver) see the
-    // event they expect for click / pointer / mouse interactions.
-    const Ctor = EVENT_CTOR_BY_TYPE[type] || Event;
-    return __dispatch(wrap(handle), new Ctor(type, i));
-  };
+  // Typed subclass for click / submit / input so libraries that gate on
+  // `event instanceof MouseEvent` (Turbo's LinkClickObserver) see what
+  // they expect. Other types fall back to plain Event.
   const EVENT_CTOR_BY_TYPE = {
     click:       MouseEvent,
     dblclick:    MouseEvent,
@@ -717,6 +695,17 @@
     contextmenu: MouseEvent,
     submit:      SubmitEvent,
     input:       InputEvent
+  };
+
+  // Called from Ruby (`browser.dispatch_event`). Returns true if no
+  // listener prevented the default action — Ruby uses that to decide
+  // whether to navigate, submit, etc. Integer-handle fields on init
+  // (e.g. `submitter`) get wrapped so listeners see Element instances.
+  globalThis.__dispatchFromRuby = function (handle, type, init) {
+    const i = init || {};
+    if (typeof i.submitter === 'number') i.submitter = wrap(i.submitter);
+    const Ctor = EVENT_CTOR_BY_TYPE[type] || Event;
+    return __dispatch(wrap(handle), new Ctor(type, i));
   };
   // Send a keyboard event with the right shape for the page-level
   // listeners that read e.keyCode / e.which (legacy but still common).
@@ -954,19 +943,14 @@
     // stale though (handles get reassigned), so they get cleared with
     // a remap of just the document-anchor entries below.
     __styleFacades.clear();
-    // Capture OLD anchor handles + their listener slots so we can
-    // re-key them onto the NEW document's anchor handles. Without this,
-    // every fresh page loses Turbo's FormSubmitObserver / FormLinkClickObserver
-    // listeners (attached to document / documentElement at init time).
-    const docEl = globalThis.document.documentElement;
-    const body  = globalThis.document.body;
-    const head  = globalThis.document.head;
-    const anchorListeners = [
-      ['documentElement', docEl && __listeners.get(docEl.__h)],
-      ['body',            body  && __listeners.get(body.__h)],
-      ['head',            head  && __listeners.get(head.__h)],
-      ['document',        __listeners.get(0)]
-    ].filter(([_, v]) => v);
+    // Without this, every fresh page loses Turbo's
+    // FormSubmitObserver / FormLinkClickObserver listeners (attached to
+    // document / documentElement once at init time).
+    const anchorListeners = ANCHOR_REFS.flatMap(ref => {
+      const tgt = resolveLogicalAnchor(ref);
+      const byType = tgt && __listeners.get(tgt.__h);
+      return byType ? [[ref, byType]] : [];
+    });
     __listeners.clear();
     // Custom-element registrations are SET globally by Turbo's ESM
     // bundle, which loads once via vm.import and never re-runs across
@@ -1001,13 +985,9 @@
         for (const el of document.querySelectorAll(tag)) ceUpgrade(el);
       }
     }
-    // Re-key the captured anchor listeners onto the new document's
-    // documentElement / body / head handles, then rebuild
-    // __listenerCounts + Ruby's @listened_types from the survivors so
-    // dispatch_event continues to qualify these event types.
     __listenerCounts.clear();
     for (const [ref, byType] of anchorListeners) {
-      const tgt = ref === 'document' ? globalThis.document : resolveLogicalAnchor(ref);
+      const tgt = resolveLogicalAnchor(ref);
       if (!tgt) continue;
       __listeners.set(tgt.__h, byType);
       for (const [type, arr] of byType) {
@@ -1017,21 +997,18 @@
     for (const [type, count] of __listenerCounts) {
       if (count > 0) __setListenedType(type, true);
     }
-    // Window listeners survive across navigation — fold their types
-    // into the listened set too.
     for (const [type, arr] of __windowListeners) {
       if (arr.length > 0) __setListenedType(type, true);
     }
-    rebindObservers(stashedObservers);
+    return rebindObservers(stashedObservers);
   };
 
-  // Re-bind observers whose targets were tagged as document anchors
-  // (document/documentElement/body/head) to the fresh wrappers, drop
-  // entries we can't resolve, then emit a synthetic childList record
-  // so each observer does an initial scan of the new tree (matching
-  // the moment the page's body was parsed). Stimulus's BindingObserver
-  // and ResizeObserver-style watchers rely on this to discover
-  // `data-controller` / `data-action` attributes on every page.
+  const ANCHOR_REFS = ['document', 'documentElement', 'body', 'head'];
+
+  // Re-bind observers whose targets were tagged as document anchors to
+  // the fresh wrappers, then emit a synthetic childList record so they
+  // re-discover the new tree's `data-controller` / `data-action` —
+  // Stimulus's BindingObserver attaches once and never re-runs.
   function rebindObservers(observers) {
     const initialScans = [];
     for (const obs of observers) {
@@ -1050,6 +1027,7 @@
     }
     __notifyMutationActive(__observers.size > 0);
     for (const {obs, entry} of initialScans) emitInitialScan(obs, entry);
+    return initialScans.length;
   }
 
   function emitInitialScan(obs, entry) {
@@ -1064,6 +1042,10 @@
       previousSibling:null,
       nextSibling:    null
     });
+    scheduleObserverFlush(obs);
+  }
+
+  function scheduleObserverFlush(obs) {
     if (obs._scheduled) return;
     obs._scheduled = true;
     queueMicrotask(() => {
@@ -1168,17 +1150,7 @@
       }
       if (matched.length === 0) continue;
       for (const rec of matched) obs._records.push(rec);
-      if (obs._scheduled) continue;
-      obs._scheduled = true;
-      queueMicrotask(() => {
-        obs._scheduled = false;
-        const out = obs._records;
-        if (out.length === 0) return;
-        obs._records = [];
-        try { obs._cb(out, obs); } catch (e) {
-          try { console.error('MO threw:', e && e.message ? e.message : e); } catch (_) {}
-        }
-      });
+      scheduleObserverFlush(obs);
     }
   };
 
@@ -1219,10 +1191,10 @@
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
   // querySelectorAll / Element.children return plain arrays in our model;
-  // pages that probe `instanceof NodeList` or `NodeList.prototype` (e.g.
-  // for-of polyfills) just need the constructor to exist.
-  globalThis.NodeList            = Array;
-  globalThis.HTMLCollection      = Array;
+  // distinct subclasses keep `[] instanceof NodeList` false the way real
+  // browsers do, while libraries that probe the constructor still find one.
+  globalThis.NodeList            = class NodeList extends Array {};
+  globalThis.HTMLCollection      = class HTMLCollection extends Array {};
   // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
   // ElementObserver gates its mutation-record processing on
   // `node.nodeType == Node.ELEMENT_NODE` — without these constants set,

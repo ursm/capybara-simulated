@@ -55,13 +55,12 @@ module Capybara
       end
 
       def reset_page
+        # Pump microtasks only when __resetPage actually queued an
+        # initial-scan record — fresh-page bootstrap doesn't need a
+        # 256-round drain otherwise.
         with_recycle do
-          @vm.eval_code('__resetPage()')
-          # Pump microtasks so the synthetic initial-scan records emitted
-          # to surviving MutationObservers (Stimulus's BindingObserver
-          # etc.) flush before the next page-bootstrap step runs. Without
-          # this, controllers stay bound to the previous page's wrappers.
-          pump_microtasks
+          pending = @vm.eval_code('__resetPage()')
+          pump_microtasks if pending && pending > 0
         end
       end
 
