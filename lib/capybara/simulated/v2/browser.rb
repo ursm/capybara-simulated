@@ -12,6 +12,12 @@ require_relative 'js_runtime'
 module Capybara
   module Simulated
     module V2
+      # Raised when a Nokogiri node held by a Node has been removed from
+      # the document (e.g. via `el.replaceWith(...)` from JS). Driver
+      # exposes this as an `invalid_element_error`, so Capybara's
+      # synchronize wrapper catches it and reloads the cached element.
+      class StaleElement < Capybara::ElementNotFound; end
+
       DEFAULT_HOST    = 'http://www.example.com'
       BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
 
@@ -805,6 +811,29 @@ module Capybara
 
         def lookup_node(handle)
           handle && @handles.lookup(handle)
+        end
+
+        # True if the handle's node has been detached from the document
+        # (parent chain no longer reaches @document). DOM mutations from
+        # JS (replaceWith, removeChild, innerHTML reset) all leave the old
+        # node detached but still alive in Ruby — Capybara needs us to
+        # signal that so its automatic-reload retry kicks in.
+        def stale?(handle)
+          node = lookup_node(handle)
+          return false if node.nil? || node.is_a?(Nokogiri::XML::Document)
+          # Walk parents until we either reach the document (alive) or run
+          # out (detached). Document itself doesn't respond_to?(:parent),
+          # so checking is_a?(Document) on each step is the termination.
+          cur = node
+          loop do
+            return true  if cur.nil?
+            return false if cur.is_a?(Nokogiri::XML::Document)
+            cur = cur.respond_to?(:parent) ? cur.parent : nil
+          end
+        end
+
+        def check_stale(handle)
+          raise StaleElement, 'element is no longer attached to the document' if stale?(handle)
         end
 
         # Wire a one-shot modal handler. The block receives [type, message,

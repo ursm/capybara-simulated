@@ -13,12 +13,32 @@ module Capybara
 
         def handle_id = native
 
-        def all_text     = normalize_spacing(browser.all_text(handle_id))
-        def visible_text = normalize_visible_spacing(browser.visible_text(handle_id))
-        def value        = browser.value(handle_id)
-        def visible?     = browser.visible?(handle_id)
-        def tag_name     = browser.tag_name(handle_id)
-        def [](name)     = browser.attr(handle_id, name.to_s)
+        def all_text
+          browser.check_stale(handle_id)
+          normalize_spacing(browser.all_text(handle_id))
+        end
+
+        def visible_text
+          browser.check_stale(handle_id)
+          normalize_visible_spacing(browser.visible_text(handle_id))
+        end
+
+        def value
+          browser.check_stale(handle_id)
+          browser.value(handle_id)
+        end
+
+        def visible?
+          browser.check_stale(handle_id)
+          browser.visible?(handle_id)
+        end
+
+        def tag_name = browser.tag_name(handle_id)
+
+        def [](name)
+          browser.check_stale(handle_id)
+          browser.attr(handle_id, name.to_s)
+        end
 
         # Capybara::Node::Element forwards click / right_click / double_click
         # as `base.click(keys_array, **opts)` — keys is one positional Array,

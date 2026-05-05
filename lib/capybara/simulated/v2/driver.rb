@@ -108,8 +108,12 @@ module Capybara
           browser.find_css(query).map { |id| Node.new(self, id) }
         end
 
+        # Capybara's synchronize wrapper catches anything in this list and
+        # retries the action after `reload` if automatic_reload is on. We
+        # expose the v2 stale-element class so a node detached by a JS
+        # `replaceWith` / `removeChild` triggers Capybara's reload path.
         def invalid_element_errors
-          []
+          [Capybara::Simulated::V2::StaleElement]
         end
 
         def no_such_window_error
