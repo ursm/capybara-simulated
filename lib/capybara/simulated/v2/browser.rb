@@ -857,6 +857,16 @@ module Capybara
           nil
         end
 
+        # JS `location.href = ...` / `location.pathname = ...` /
+        # `location.assign(...)`. Browsers tear the page down and load
+        # the new URL — we navigate, which re-runs scripts and resets
+        # the JS-side state.
+        def location_assign(url)
+          return if url.nil? || url.empty?
+          navigate(:get, resolve(url.to_s))
+          nil
+        end
+
         def handle_modal(type, message, default_value)
           if @modal_handler
             @modal_handler.call(type, message, default_value)
@@ -1006,6 +1016,7 @@ module Capybara
 
         def fire_lifecycle_events
           return unless @js
+          js.call('__syncLocation', @current_url.to_s) if @current_url
           # readyState transitions: loading → interactive (just before
           # DOMContentLoaded) → complete (after window load).
           js.call('__setReadyState', 'interactive')

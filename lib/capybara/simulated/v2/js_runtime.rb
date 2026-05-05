@@ -142,6 +142,12 @@ module Capybara
           @vm.define_function('__setCurrentUrl') do |url|
             @browser.history_state(url)
           end
+          @vm.define_function('__locationAssign') do |url|
+            @browser.location_assign(url)
+          end
+          @vm.define_function('__locationReload') do
+            @browser.refresh
+          end
           @vm.on_log do |level, *parts|
             warn "[capybara-simulated/v2 console.#{level}] #{parts.map(&:to_s).join(' ')}"
           end
