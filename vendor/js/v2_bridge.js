@@ -80,7 +80,7 @@
     // side (see Browser#compute_validity); these proxy through.
     get validity()           { return __dom(this.__h, 'validity', []); }
     get validationMessage()  { return __dom(this.__h, 'validationMessage', []); }
-    checkValidity()          { return !!__dom(this.__h, 'checkValidity', []); }
+    checkValidity()          { return !!this.validity.valid; }
     reportValidity()         { return this.checkValidity(); }
     setCustomValidity()      {}
 
@@ -352,17 +352,12 @@
     stopImmediatePropagation() { this._stopped = true; this._immediate = true; }
   }
   globalThis.Event = Event;
-  // Subtypes get a permissive shim: every field on `init` becomes a property
-  // so handlers reading e.detail / e.key / e.button find what they expect.
+  // Subtypes are aliases — base Event already spreads init keys, so every
+  // field on `init` (e.detail / e.key / e.button) is already a property.
+  // The named subclasses exist only because library boot does `instanceof
+  // MouseEvent` / `new KeyboardEvent(...)`-style construction.
   function makeEventSubclass(name) {
-    const C = class extends Event {
-      constructor(type, init) {
-        super(type, init);
-        if (init) for (const k of Object.keys(init)) {
-          if (!(k in this)) this[k] = init[k];
-        }
-      }
-    };
+    const C = class extends Event {};
     Object.defineProperty(C, 'name', {value: name});
     return C;
   }

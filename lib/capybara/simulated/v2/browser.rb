@@ -4,6 +4,8 @@ require 'rack/mime'
 require 'rack/mock'
 require 'securerandom'
 require 'set'
+require 'uri'
+require 'uri/mailto'
 require_relative 'handle_table'
 require_relative 'js_runtime'
 
@@ -235,9 +237,18 @@ module Capybara
 
         FOCUSABLE_TAGS = %w[input textarea select button a].to_set.freeze
 
+        # Programmatic focus accepts anything with a tabindex attribute,
+        # including `tabindex="-1"` (which is excluded only from sequential
+        # tab order, not from `.focus()`). focus_order applies the stricter
+        # check.
+        def focusable?(node)
+          return false unless node.respond_to?(:[])
+          FOCUSABLE_TAGS.include?(node.name) || !node['tabindex'].nil?
+        end
+
         def focus(handle)
           node = lookup_node(handle)
-          return unless node && (FOCUSABLE_TAGS.include?(node.name) || node['tabindex'])
+          return unless focusable?(node)
           return if @focused_handle == handle
           if @focused_handle
             blur_handle = @focused_handle
@@ -701,7 +712,6 @@ module Capybara
           when 'form'            then @handles.track(enclosing_form(node))
           when 'validity'           then compute_validity(node)
           when 'validationMessage'  then validation_message(node)
-          when 'checkValidity'      then compute_validity(node)['valid']
           when 'focus' then focus(handle); nil
           when 'blur'  then blur(handle);  nil
           when 'setAttribute'
@@ -1148,31 +1158,36 @@ module Capybara
           cur if cur.respond_to?(:name) && cur.name == 'form'
         end
 
-        EMAIL_RE = /\A[^\s@]+@[^\s@]+\.[^\s@]+\z/.freeze
-        URL_RE   = %r{\A[a-z][a-z0-9+\-.]*://}i.freeze
+        URL_RE = %r{\A[a-z][a-z0-9+\-.]*://}i.freeze
+
+        VALIDITY_KEYS = %w[
+          valueMissing typeMismatch patternMismatch tooLong tooShort
+          rangeUnderflow rangeOverflow stepMismatch badInput customError
+        ].freeze
+
+        ALL_VALID = (VALIDITY_KEYS.zip([false] * VALIDITY_KEYS.size).to_h.merge('valid' => true)).freeze
 
         # Best-effort HTML5 ValidityState. Real browsers have richer
         # behaviour (locale-aware number parsing, IDN URL handling) but
         # this covers the constraints Capybara's `valid:` filter exercises.
         def compute_validity(node)
-          return validity_states(true) unless node.respond_to?(:[])
+          return ALL_VALID unless node.respond_to?(:[])
           type = (node['type'] || 'text').downcase
           # Selects / buttons / static elements aren't constraint-validated.
           if !%w[input textarea].include?(node.name) || %w[hidden button submit reset image].include?(type)
-            return validity_states(true)
+            return ALL_VALID
           end
-          value = (node.name == 'textarea' ? node.text : node['value']).to_s
-          missing  = node['required'] && value.empty?
-          pattern  = node['pattern']
-          ml       = node['maxlength'] && Integer(node['maxlength'], exception: false)
-          minl     = node['minlength'] && Integer(node['minlength'], exception: false)
-          mn       = node['min'] && (Float(node['min'], exception: false) || nil)
-          mx       = node['max'] && (Float(node['max'], exception: false) || nil)
-          numeric  = !value.empty? && type == 'number' ? Float(value, exception: false) : nil
+          value   = (node.name == 'textarea' ? node.text : node['value']).to_s
+          pattern = node['pattern']
+          ml      = node['maxlength'] && Integer(node['maxlength'], exception: false)
+          minl    = node['minlength'] && Integer(node['minlength'], exception: false)
+          mn      = node['min']       && Float(node['min'], exception: false)
+          mx      = node['max']       && Float(node['max'], exception: false)
+          numeric = !value.empty? && type == 'number' ? Float(value, exception: false) : nil
           {
-            'valueMissing'    => missing,
-            'typeMismatch'    => !value.empty? && ((type == 'email' && !value.match?(EMAIL_RE)) ||
-                                                   (type == 'url'   && !value.match?(URL_RE))),
+            'valueMissing'    => node['required'] && value.empty?,
+            'typeMismatch'    => !value.empty? && ((type == 'email' && !URI::MailTo::EMAIL_REGEXP.match?(value)) ||
+                                                   (type == 'url'   && !URL_RE.match?(value))),
             'patternMismatch' => !value.empty? && pattern && !value.match?(/\A(?:#{pattern})\z/),
             'tooLong'         => ml && value.length > ml,
             'tooShort'        => !value.empty? && minl && value.length < minl,
@@ -1184,15 +1199,7 @@ module Capybara
           }.tap { |s| s['valid'] = s.values.none? }
         end
 
-        def validity_states(valid)
-          {'valueMissing' => false, 'typeMismatch' => false, 'patternMismatch' => false,
-           'tooLong' => false, 'tooShort' => false, 'rangeUnderflow' => false,
-           'rangeOverflow' => false, 'stepMismatch' => false, 'badInput' => false,
-           'customError' => false, 'valid' => valid}
-        end
-
-        def validation_message(node)
-          v = compute_validity(node)
+        def validation_message(node, v = compute_validity(node))
           return ''                                       if v['valid']
           return 'Please fill out this field.'            if v['valueMissing']
           return 'Please match the requested format.'     if v['patternMismatch']
