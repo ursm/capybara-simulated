@@ -76,6 +76,13 @@
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form', [])); }
 
+    // <input list="...">'s referenced <datalist>, plus its options. Used
+    // by Capybara's datalist-option resolver via element.evaluate_script.
+    get list()    { return wrap(__dom(this.__h, 'list', [])); }
+    get options() { return __dom(this.__h, 'options', []).map(wrap); }
+    // <option>.label — falls back to text content when no label attr.
+    get label()   { return __dom(this.__h, 'label', []); }
+
     // HTML5 form validation. Constraint computation lives on the Ruby
     // side (see Browser#compute_validity); these proxy through.
     get validity()           { return __dom(this.__h, 'validity', []); }
@@ -517,6 +524,24 @@
     // uniformly — selenium's "return <expr>" wrapping can't.
     const fn = new Function('return eval(' + JSON.stringify(code) + ');');
     return marshalResult(fn.apply(null, a));
+  };
+
+  // evaluate_async_script: the last argument the script receives is a
+  // callback; the result is whatever the callback is invoked with. We
+  // start the script (which typically schedules a setTimeout / fetch /
+  // etc.), Ruby then drains the virtual clock via settle, and reads
+  // the result via __pollAsyncResult. If the callback never fires
+  // (script hung), Ruby raises.
+  let __asyncResult = null;
+  globalThis.__evalAsyncScript = function (code, args) {
+    __asyncResult = null;
+    const a = (args || []).map(rehydrateArg);
+    a.push(function (v) { __asyncResult = {value: marshalResult(v)}; });
+    const fn = new Function('return eval(' + JSON.stringify(code) + ');');
+    fn.apply(null, a);
+  };
+  globalThis.__pollAsyncResult = function () {
+    return __asyncResult;
   };
 
   // ── Virtual clock + timer queue ─────────────────────────────

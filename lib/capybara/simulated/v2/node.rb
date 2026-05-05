@@ -109,7 +109,7 @@ module Capybara
 
         def synchronize(*) = yield
         def style(*)       = {}
-        def path           = browser.find_xpath('.', handle_id).first.to_s
+        def path           = browser.node_path(handle_id)
 
         def ==(other)
           other.is_a?(Node) && other.handle_id == handle_id

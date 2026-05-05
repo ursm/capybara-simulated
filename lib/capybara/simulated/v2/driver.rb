@@ -99,9 +99,7 @@ module Capybara
         end
 
         def evaluate_async_script(script, *args)
-          # No async runtime yet — fall back to sync eval so simple cases
-          # (scripts that don't actually wait) keep working.
-          evaluate_script(script, *args)
+          unwrap_script_result(browser.evaluate_async_script(script, args))
         end
 
         def find_css(query, **_)

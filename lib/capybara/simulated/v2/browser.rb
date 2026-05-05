@@ -644,6 +644,19 @@ module Capybara
           js.call('__evalScript', code, args.map { |a| marshal_script_arg(a) })
         end
 
+        # Capybara's async-script contract: the last `arguments[N]` is a
+        # callback the script invokes with the resolved value. We start
+        # the script, drain the virtual clock so any setTimeout-driven
+        # work runs, then read whatever the callback received.
+        def evaluate_async_script(code, args = [])
+          marshalled = args.map { |a| marshal_script_arg(a) }
+          js.call('__evalAsyncScript', code, marshalled)
+          settle
+          result = js.call('__pollAsyncResult')
+          raise 'evaluate_async_script: callback was not invoked within virtual time' if result.nil?
+          result['value']
+        end
+
         def marshal_script_arg(arg)
           case arg
           when Capybara::Driver::Node then {'__elementHandle' => arg.native}
@@ -747,7 +760,7 @@ module Capybara
           when 'nodeName'        then (node.name || '').upcase
           when 'tagName'         then (node.element? ? node.name.upcase : '')
           when 'textContent'     then node.text
-          when 'innerText'       then visible_text(handle)
+          when 'innerText'       then visible_text(handle).strip
           when 'innerHTML'       then node.respond_to?(:inner_html) ? node.inner_html : node.to_html
           when 'outerHTML'       then node.to_html
           when 'getAttribute'    then node.respond_to?(:[]) ? node[args[0]] : nil
@@ -760,6 +773,13 @@ module Capybara
           when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
           when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
           when 'form'            then @handles.track(enclosing_form(node))
+          when 'list'
+            list_id = node.respond_to?(:[]) && node['list']
+            list_id ? @handles.track(@document.at_xpath('.//datalist[@id=$id]', nil, id: list_id.to_s)) : nil
+          when 'options'
+            (node.respond_to?(:css) ? node.css('option') : []).map { |n| @handles.track(n) }
+          when 'label'
+            node.respond_to?(:[]) ? (node['label'] || node.text) : ''
           when 'validity'           then compute_validity(node)
           when 'validationMessage'  then validation_message(node)
           when 'focus' then focus(handle); nil
@@ -855,6 +875,12 @@ module Capybara
 
         def lookup_node(handle)
           handle && @handles.lookup(handle)
+        end
+
+        # Nokogiri's Node#path returns an absolute XPath that re-locates
+        # the same node, e.g. /html[1]/body[1]/div[2]/a[3].
+        def node_path(handle)
+          (lookup_node(handle)&.path || '').to_s
         end
 
         # True if the handle's node has been detached from the document
