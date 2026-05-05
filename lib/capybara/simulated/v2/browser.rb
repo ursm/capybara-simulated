@@ -184,8 +184,12 @@ module Capybara
         def set_value(handle, value)
           node = lookup_node(handle)
           return false if node.nil?
-          # readonly fields silently reject writes, matching browser behaviour.
-          return false if node['readonly']
+          # readonly text inputs / textareas silently reject writes; the
+          # `readonly` attribute does NOT apply to checkboxes / radios /
+          # range / etc. per the HTML spec, so don't short-circuit those.
+          if node['readonly'] && !readonly_exempt?(node)
+            return false
+          end
           case node.name
           when 'input'
             type = (node['type'] || 'text').downcase
@@ -236,6 +240,18 @@ module Capybara
 
         def file_picks_for(handle)
           @file_picks[handle] || []
+        end
+
+        # HTML spec: readonly only blocks user input on text-y inputs and
+        # textareas. checkbox / radio / range / file / etc. ignore it.
+        READONLY_BLOCKS_TYPES = Set['text', 'search', 'url', 'tel', 'email',
+                                   'password', 'date', 'month', 'week',
+                                   'time', 'datetime-local', 'number'].freeze
+
+        def readonly_exempt?(node)
+          return false if node.name == 'textarea'
+          return true  unless node.name == 'input'
+          !READONLY_BLOCKS_TYPES.include?((node['type'] || 'text').downcase)
         end
 
         # Mirrors document.activeElement: the focused element, or body
@@ -484,13 +500,27 @@ module Capybara
         # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
         # via `setValue` dom_op skip this — that path is the JS author's call.
         def set_value_with_events(handle, value)
+          node = lookup_node(handle)
+          # Checkbox / radio: real browsers fire click → change on user
+          # toggle. Capybara's `check` / `choose` route here for the JS
+          # case, expecting click handlers to run.
+          if node && node.name == 'input' &&
+             %w[checkbox radio].include?((node['type'] || '').downcase)
+            was_checked = !!node['checked']
+            # preventDefault on click suppresses the toggle. The state
+            # before vs after determines whether 'change' fires.
+            return was_checked unless dispatch_event(handle, 'click')
+            set_value(handle, value)
+            dispatch_event(handle, 'change', bubbles: true, cancelable: false) if !!value != was_checked
+            return true
+          end
           # Focus the field first — fill_in / set on a real browser implies
           # clicking into the field, which fires focus before input/change.
           focus(handle)
           # Trailing \n on a single-input text form submits the form (browser
           # default behaviour for Enter in a single-field form). Strip the \n
           # before storing the value so the submitted body doesn't carry it.
-          submit_after = should_submit_on_enter?(lookup_node(handle), value)
+          submit_after = should_submit_on_enter?(node, value)
           changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
           return changed unless changed && @js
           dispatch_input_change(handle)
