@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'capybara'
 require 'capybara/simulated/version'
 require 'capybara/simulated/driver'

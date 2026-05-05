@@ -134,9 +134,8 @@ module Capybara
 
       # `await null` resumes via a microtask, and JS_EVAL_FLAG_ASYNC's
       # js_std_await pumps the QuickJS pending-job queue between each
-      # one. 64 rounds is comfortable headroom over the ~50 hops Turbo
-      # Drive's POST→redirect→fetch→parse→swap chain produces at peak;
-      # empty pumps still cost ~30µs / call so larger isn't free.
+      # one. 64 rounds covers Turbo Drive's deepest observed chain (~50)
+      # with headroom; empty pumps still cost ~30µs, so don't oversize.
       MICROTASK_PUMP_CODE = (('await null;' * 64) + 'void 0').freeze
       def pump_microtasks
         @vm.eval_code(MICROTASK_PUMP_CODE)
@@ -178,9 +177,11 @@ module Capybara
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
       end
 
+      EMPTY_ARGS = [].freeze
+
       def attach_dom_bridge
         @vm.define_function('__dom') do |handle, op, args|
-          @browser.dom_op(handle, op, args || [])
+          @browser.dom_op(handle, op, args || EMPTY_ARGS)
         end
         @vm.define_function('__notifyMutationActive') do |active|
           @browser.mutation_recording = !!active

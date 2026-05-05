@@ -60,24 +60,24 @@
     contains(other)     { return !!__dom(this.__h, 'contains', [other && other.__h]); }
 
     // Tree pointers
-    get parentNode()      { return wrap(__dom(this.__h, 'parentNode',      [])); }
-    get parentElement()   { return wrap(__dom(this.__h, 'parentElement',   [])); }
-    get firstChild()      { return wrap(__dom(this.__h, 'firstChild',      [])); }
-    get lastChild()       { return wrap(__dom(this.__h, 'lastChild',       [])); }
-    get nextSibling()     { return wrap(__dom(this.__h, 'nextSibling',     [])); }
-    get previousSibling() { return wrap(__dom(this.__h, 'previousSibling')); }
-    get children()        { return __dom(this.__h, 'children',   []).map(wrap); }
-    get childNodes()      { return __dom(this.__h, 'childNodes').map(wrap); }
-    get firstElementChild()    { return wrap(__dom(this.__h, 'firstElementChild',    [])); }
-    get lastElementChild()     { return wrap(__dom(this.__h, 'lastElementChild',     [])); }
-    get nextElementSibling()   { return wrap(__dom(this.__h, 'nextElementSibling',   [])); }
+    get parentNode()             { return wrap(__dom(this.__h, 'parentNode')); }
+    get parentElement()          { return wrap(__dom(this.__h, 'parentElement')); }
+    get firstChild()             { return wrap(__dom(this.__h, 'firstChild')); }
+    get lastChild()              { return wrap(__dom(this.__h, 'lastChild')); }
+    get nextSibling()            { return wrap(__dom(this.__h, 'nextSibling')); }
+    get previousSibling()        { return wrap(__dom(this.__h, 'previousSibling')); }
+    get children()               { return __dom(this.__h, 'children').map(wrap); }
+    get childNodes()             { return __dom(this.__h, 'childNodes').map(wrap); }
+    get firstElementChild()      { return wrap(__dom(this.__h, 'firstElementChild')); }
+    get lastElementChild()       { return wrap(__dom(this.__h, 'lastElementChild')); }
+    get nextElementSibling()     { return wrap(__dom(this.__h, 'nextElementSibling')); }
     get previousElementSibling() { return wrap(__dom(this.__h, 'previousElementSibling')); }
-    get childElementCount()    { return __dom(this.__h, 'childElementCount'); }
+    get childElementCount()      { return __dom(this.__h, 'childElementCount'); }
 
     // Identity / shape
-    get nodeType()    { return __dom(this.__h, 'nodeType',    []); }
-    get nodeName()    { return __dom(this.__h, 'nodeName',    []); }
-    get tagName()     { return __dom(this.__h, 'tagName',     []); }
+    get nodeType()    { return __dom(this.__h, 'nodeType'); }
+    get nodeName()    { return __dom(this.__h, 'nodeName'); }
+    get tagName()     { return __dom(this.__h, 'tagName'); }
     // Turbo's `dispatch` retargets events to documentElement when the
     // requested target isn't connected.
     get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
@@ -86,11 +86,11 @@
     // IDL alias for textContent on script / title / style elements.
     get text()         { return __dom(this.__h, 'textContent'); }
     set text(v)        { this.textContent = v; }
-    get innerText()   { return __dom(this.__h, 'innerText',   []); }
+    get innerText()   { return __dom(this.__h, 'innerText'); }
     set innerText(v)  { this.textContent = v; }
-    get innerHTML()   { return __dom(this.__h, 'innerHTML',   []); }
+    get innerHTML()   { return __dom(this.__h, 'innerHTML'); }
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
-    get outerHTML()   { return __dom(this.__h, 'outerHTML',   []); }
+    get outerHTML()   { return __dom(this.__h, 'outerHTML'); }
     set outerHTML(v)  { __dom(this.__h, 'setOuterHTML', [String(v)]); }
 
     // Attributes
@@ -242,7 +242,7 @@
     scrollIntoView()         {}
     scrollTo()               {}
     focus()                  { __dom(this.__h, 'focus'); }
-    blur()                   { __dom(this.__h, 'blur',  []); }
+    blur()                   { __dom(this.__h, 'blur'); }
     select()                 {}
     setSelectionRange()      {}
     setRangeText()           {}

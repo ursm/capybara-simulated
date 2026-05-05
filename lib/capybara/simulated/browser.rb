@@ -1005,14 +1005,12 @@ module Capybara
       end
 
       # Push a buffered MutationRecord. No-op when no observer is active —
-      # the JS side flips @mutation_recording via the __notifyMutationActive
-      # callback so dom_op writes pay nothing on observer-less pages.
+      # the JS side flips @mutation_recording via __notifyMutationActive,
+      # so dom_op writes pay nothing on observer-less pages. Split into
+      # two specialised methods (instead of one `**extra`) to skip the
+      # kwargs hash + per-key empty-array allocations on the hot path.
       EMPTY_HANDLES = [].freeze
 
-      # Avoid allocating the kwargs hash + per-key empty arrays on the
-      # majority of dom_op writes that hit no observer (the common case
-      # for tests that don't actively use MutationObserver). Pass the
-      # already-built record hash directly.
       def record_childlist(target_handle, added = EMPTY_HANDLES, removed = EMPTY_HANDLES)
         return unless @mutation_recording && target_handle
         @mutations << {type: 'childList', target: target_handle, addedNodes: added, removedNodes: removed}
