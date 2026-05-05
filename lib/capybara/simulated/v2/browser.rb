@@ -577,6 +577,15 @@ module Capybara
           @modal_handler = prev
         end
 
+        # JS history.pushState / replaceState passes the URL here. Resolves
+        # against the current page (so SPA-style "/foo" updates the path
+        # only) and updates @current_url; no fetch happens — the document
+        # stays. nil URL is a no-op (history.pushState({}, '') is valid).
+        def history_state(url)
+          @current_url = resolve(url.to_s) if url
+          nil
+        end
+
         def handle_modal(type, message, default_value)
           if @modal_handler
             @modal_handler.call(type, message, default_value)
@@ -603,7 +612,11 @@ module Capybara
           opts['CONTENT_TYPE'] = req.content_type if req.content_type
           opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
           opts['HTTP_REFERER'] = @current_url if @current_url
-          env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
+          # Hand env_for the full absolute URL — Rack derives HTTP_HOST /
+          # SERVER_NAME / SERVER_PORT / rack.url_scheme from it so server-
+          # side request.host etc. reflect the visit URL, not Rack's
+          # default example.org:80. Same shape v1 uses.
+          env  = Rack::MockRequest.env_for(req.url, **opts)
           status, headers, body_iter = @app.call(env)
           response_body = read_rack_body(body_iter)
 
@@ -615,10 +628,14 @@ module Capybara
             # (matches Capybara's #visit-with-redirect contract).
             # 307/308 preserve the original method + body; 301/302/303 fall
             # back to GET (browser convention).
+            # Browsers carry the request's fragment through redirects when
+            # the redirect Location doesn't itself have one (RFC 7231 §7.1.2).
             preserve = status == 307 || status == 308
+            target   = resolve(loc, base: req.url)
+            target   = "#{target}##{uri.fragment}" if uri.fragment && !target.include?('#')
             return replay(Request.new(
               method:       preserve ? req.method : :get,
-              url:          resolve(loc, base: req.url),
+              url:          target,
               body:         preserve ? req.body : nil,
               content_type: preserve ? req.content_type : nil
             ))

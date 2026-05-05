@@ -139,6 +139,9 @@ module Capybara
           @vm.define_function('__modalDialog') do |type, message, default_value|
             @browser.handle_modal(type, message, default_value)
           end
+          @vm.define_function('__setCurrentUrl') do |url|
+            @browser.history_state(url)
+          end
           @vm.on_log do |level, *parts|
             warn "[capybara-simulated/v2 console.#{level}] #{parts.map(&:to_s).join(' ')}"
           end
