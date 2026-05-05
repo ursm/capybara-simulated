@@ -209,12 +209,17 @@ module Capybara
       # evaluation only if Nokogiri rejects it — Turbo's
       # `a[href], a[xlink\:href]` would otherwise drop the leading
       # branch when the namespaced second branch fails CSS-to-XPath.
+      # CssPseudoHandlers is passed through so JS-side queries
+      # (`document.querySelector('input:checked')`, Stimulus action
+      # validators using `:disabled` / `:checked`, etc.) match the
+      # same pseudo-classes find_css supports on the Ruby DSL side.
       def safe_at_css(node, selector)
         return nil unless node.respond_to?(:at_css)
-        node.at_css(selector.to_s)
+        node.at_css(selector.to_s, CssPseudoHandlers.new(self))
       rescue *SELECTOR_ERRORS
+        h = CssPseudoHandlers.new(self)
         css_split(selector).each {|s|
-          hit = node.at_css(s) rescue next
+          hit = node.at_css(s, h) rescue next
           return hit if hit
         }
         nil
@@ -222,15 +227,29 @@ module Capybara
 
       def safe_css(node, selector)
         return [] unless node.respond_to?(:css)
-        node.css(selector.to_s)
+        node.css(selector.to_s, CssPseudoHandlers.new(self))
       rescue *SELECTOR_ERRORS
-        css_split(selector).flat_map {|s| node.css(s) rescue [] }
+        h = CssPseudoHandlers.new(self)
+        css_split(selector).flat_map {|s| node.css(s, h) rescue [] }
       end
 
+      # Nokogiri's `matches?` doesn't accept a custom-pseudo handler the
+      # way `css` does, so we route through the parent's css() lookup
+      # (which does accept handlers) and check inclusion. The plain
+      # matches? fast path is kept for the common selector-without-
+      # pseudo-class case so we avoid building a result set.
       def safe_matches?(node, selector)
-        node.matches?(selector.to_s)
-      rescue *SELECTOR_ERRORS
-        css_split(selector).any? {|s| node.matches?(s) rescue false }
+        return node.matches?(selector.to_s) unless selector.to_s.include?(':')
+        parent = node.respond_to?(:parent) ? node.parent : nil
+        return false unless parent.respond_to?(:css)
+        h = CssPseudoHandlers.new(self)
+        begin
+          parent.css(selector.to_s, h).any? { |n| n.equal?(node) }
+        rescue *SELECTOR_ERRORS
+          css_split(selector).any? {|s|
+            (parent.css(s, h) rescue []).any? { |n| n.equal?(node) }
+          }
+        end
       end
 
       # Top-level comma split — bracket-content / parens are safe to
@@ -1377,7 +1396,15 @@ module Capybara
       end
 
       def check_stale(handle, captured = nil)
-        tick_real_time
+        # Intentionally no tick_real_time here. Stale-checking just walks
+        # the Nokogiri parent chain to confirm `handle` is still in the
+        # tree — no JS timers need to fire. Calling drain_timers from a
+        # hot path (every Node access) would keep advancing virtual time
+        # mid-assertion, which let deeply-recursive MutationObserver
+        # delivery chains accumulate enough QuickJS C stack to trip the
+        # parser-stack guard during eval. tick_real_time is still called
+        # on the user-action paths (click / fill_in / visit) that can
+        # legitimately advance time.
         raise StaleElement, 'element is no longer attached to the document' if stale?(handle, captured)
       end
 

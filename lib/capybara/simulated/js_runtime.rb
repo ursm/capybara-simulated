@@ -21,6 +21,14 @@ module Capybara
       # loop as InterruptedError.
       VM_TIMEOUT_MSEC = 5_000
 
+      # QuickJS's default 4 MiB runtime stack overflows on deeply nested
+      # Hotwire dispatch chains: a Stimulus action handler synchronously
+      # dispatches an event whose handler dispatches another, and so on
+      # ~80 frames deep through Turbo + the page's own handlers.
+      # 16 MiB is comfortable headroom and still forces a recycle on
+      # genuinely runaway recursion.
+      VM_MAX_STACK_SIZE = 16 * 1024 * 1024
+
       def initialize(browser)
         @browser = browser
         boot_vm
@@ -122,7 +130,7 @@ module Capybara
       private
 
       def boot_vm
-        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC)
+        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC, max_stack_size: VM_MAX_STACK_SIZE)
         attach_dom_bridge
         # Receives the already-absolute, importmap-resolved URL we
         # rewrote into the source on a prior pass. Browser#load_module
