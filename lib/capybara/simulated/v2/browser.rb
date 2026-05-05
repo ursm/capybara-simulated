@@ -814,22 +814,16 @@ module Capybara
         end
 
         # True if the handle's node has been detached from the document
-        # (parent chain no longer reaches @document). DOM mutations from
-        # JS (replaceWith, removeChild, innerHTML reset) all leave the old
-        # node detached but still alive in Ruby — Capybara needs us to
-        # signal that so its automatic-reload retry kicks in.
+        # (no longer in the live tree). DOM mutations from JS (replaceWith,
+        # removeChild, innerHTML reset) all leave the old node detached but
+        # still alive in Ruby — Capybara needs us to signal that so its
+        # automatic-reload retry kicks in. Nokogiri's `node.document`
+        # pointer survives detachment, so we walk ancestors and check the
+        # current document is among them.
         def stale?(handle)
           node = lookup_node(handle)
           return false if node.nil? || node.is_a?(Nokogiri::XML::Document)
-          # Walk parents until we either reach the document (alive) or run
-          # out (detached). Document itself doesn't respond_to?(:parent),
-          # so checking is_a?(Document) on each step is the termination.
-          cur = node
-          loop do
-            return true  if cur.nil?
-            return false if cur.is_a?(Nokogiri::XML::Document)
-            cur = cur.respond_to?(:parent) ? cur.parent : nil
-          end
+          !node.ancestors.include?(@document)
         end
 
         def check_stale(handle)

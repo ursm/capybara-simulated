@@ -459,18 +459,7 @@
   // Browser bumps this on every navigate / pushState / replaceState so
   // location.href / pathname etc. reflect the current URL on read.
   globalThis.__syncLocation = function (url) {
-    try {
-      const u = new URL(url);
-      __locationProps.href     = u.href;
-      __locationProps.protocol = u.protocol;
-      __locationProps.host     = u.host;
-      __locationProps.hostname = u.hostname;
-      __locationProps.port     = u.port;
-      __locationProps.pathname = u.pathname;
-      __locationProps.search   = u.search;
-      __locationProps.hash     = u.hash;
-      __locationProps.origin   = u.origin;
-    } catch (_) {}
+    try { __locationUrl = new URL(url); } catch (_) {}
   };
   // Window-level event listener API — jQuery binds `load` on window.
   // Reuses the document's listener machinery so __dispatch routes there.
@@ -723,40 +712,26 @@
   globalThis.document.readyState  = 'loading';
   globalThis.document.compatMode  = 'CSS1Compat';
   // location.href / pathname / hash / search assignments navigate.
-  // Reads return the current URL components (last-known to JS, kept
-  // in sync via __setCurrentUrl). Wrapped in a Proxy so any write to
-  // a navigation-affecting field reaches the Ruby driver.
-  const __locationProps = {href: '', host: '', protocol: 'http:', pathname: '/', hash: '', search: ''};
-  globalThis.document.location = new Proxy(__locationProps, {
-    get(t, p) {
+  // Backed by a real URL instance (POLYFILL_URL); reads return the
+  // current URL's components, writes synthesise the new href via
+  // URL's spec-defined component setters and hand it to Ruby.
+  // __syncLocation rebuilds the URL after every navigate.
+  let __locationUrl = new URL('http://placeholder/');
+  globalThis.document.location = new Proxy({}, {
+    get(_, p) {
       if (p === 'assign' || p === 'replace') return url => __locationAssign(String(url));
-      if (p === 'reload') return () => __locationReload();
-      if (p === 'toString') return () => t.href;
-      return t[p];
+      if (p === 'reload')                    return () => __locationReload();
+      if (p === 'toString')                  return () => __locationUrl.href;
+      return __locationUrl[p];
     },
-    set(t, p, v) {
-      const before = {...t};
-      t[p] = String(v);
-      // Compose a URL from the patched components and hand to Ruby —
-      // it figures out the absolute URL and navigates.
-      __locationAssign(t[p] != null ? composeLocation(t, p, before) : t.href);
+    set(_, p, v) {
+      if (p === 'href') { __locationAssign(String(v)); return true; }
+      const next = new URL(__locationUrl.href);
+      next[p] = String(v);
+      __locationAssign(next.href);
       return true;
     }
   });
-  function composeLocation(t, _changedKey, before) {
-    // Simple synthesis: assigning href / pathname / search / hash all
-    // produce a usable URL. For a partial component change, use the
-    // previous href as the base and overlay the new piece.
-    if (t.href && t.href !== before.href) return t.href;
-    const base = before.href || (before.protocol + '//' + before.host);
-    try {
-      const u = new URL(base || 'http://example.org/');
-      if (t.pathname !== before.pathname) u.pathname = t.pathname;
-      if (t.search   !== before.search)   u.search   = t.search;
-      if (t.hash     !== before.hash)     u.hash     = t.hash;
-      return u.toString();
-    } catch (_) { return t.href || base; }
-  }
   globalThis.document.cookie      = '';
   globalThis.document.implementation = {createHTMLDocument: () => globalThis.document};
   // window === defaultView is the canonical relationship; libraries
