@@ -911,8 +911,6 @@
     __styleFacades.clear();
     for (const t of __listenerCounts.keys()) __setListenedType(t, false);
     __listenerCounts.clear();
-    __observers.clear();
-    __notifyMutationActive(false);
     // Custom-element registrations are SET globally by Turbo's ESM
     // bundle, which loads once via vm.import and never re-runs across
     // navigations. Clearing __ceDefs would orphan the registry — new
@@ -922,6 +920,10 @@
     __ceInstances.clear();
     __ceWaiters.clear();
     __ceObserver = null;
+    // Snapshot observers BEFORE wiping __wrappers — their _observed
+    // entries reference the old wrappers, which we'll re-resolve below.
+    const stashedObservers = Array.from(__observers);
+    __observers.clear();
     __wrappers.clear();
     // Re-pin the document wrapper so globalThis.document keeps its
     // decorations (location proxy, defaultView, readyState, etc.).
@@ -936,7 +938,79 @@
         for (const el of document.querySelectorAll(tag)) ceUpgrade(el);
       }
     }
+    rebindObservers(stashedObservers);
   };
+
+  // Re-bind observers whose targets were tagged as document anchors
+  // (document/documentElement/body/head) to the fresh wrappers, drop
+  // entries we can't resolve, then emit a synthetic childList record
+  // so each observer does an initial scan of the new tree (matching
+  // the moment the page's body was parsed). Stimulus's BindingObserver
+  // and ResizeObserver-style watchers rely on this to discover
+  // `data-controller` / `data-action` attributes on every page.
+  function rebindObservers(observers) {
+    const initialScans = [];
+    for (const obs of observers) {
+      const fresh = [];
+      for (const o of obs._observed) {
+        const target = o.logicalRef ? resolveLogicalAnchor(o.logicalRef) : null;
+        if (!target) continue;
+        const entry = {target, options: o.options, logicalRef: o.logicalRef};
+        fresh.push(entry);
+        if (entry.options.childList) initialScans.push({obs, entry});
+      }
+      obs._observed = fresh;
+      obs._records  = [];
+      obs._scheduled = false;
+      if (fresh.length > 0) __observers.add(obs);
+    }
+    __notifyMutationActive(__observers.size > 0);
+    for (const {obs, entry} of initialScans) emitInitialScan(obs, entry);
+  }
+
+  function emitInitialScan(obs, entry) {
+    const kids = entry.target.children ? Array.from(entry.target.children) : [];
+    if (kids.length === 0) return;
+    obs._records.push({
+      type:           'childList',
+      target:         entry.target,
+      addedNodes:     kids,
+      removedNodes:   [],
+      attributeName:  null,
+      previousSibling:null,
+      nextSibling:    null
+    });
+    if (obs._scheduled) return;
+    obs._scheduled = true;
+    queueMicrotask(() => {
+      obs._scheduled = false;
+      const out = obs._records;
+      if (out.length === 0) return;
+      obs._records = [];
+      try { obs._cb(out, obs); } catch (e) {
+        try { console.error('MO threw:', e && e.message ? e.message : e); } catch (_) {}
+      }
+    });
+  }
+
+  function logicalAnchorOf(target) {
+    if (!target) return null;
+    if (target === globalThis.document) return 'document';
+    if (target === globalThis.document.documentElement) return 'documentElement';
+    if (target === globalThis.document.body) return 'body';
+    if (target === globalThis.document.head) return 'head';
+    return null;
+  }
+
+  function resolveLogicalAnchor(ref) {
+    switch (ref) {
+      case 'document':        return globalThis.document;
+      case 'documentElement': return globalThis.document.documentElement;
+      case 'body':            return globalThis.document.body;
+      case 'head':            return globalThis.document.head;
+      default:                return null;
+    }
+  }
 
   // ── MutationObserver ────────────────────────────────────────
   // Observer storage lives in JS; Ruby buffers records during DOM
@@ -965,7 +1039,13 @@
     }
     observe(target, options) {
       if (!target) return;
-      this._observed.push({target, options: options || {}});
+      // Tag known document anchors so __resetPage can re-bind the
+      // observer to the freshly-parsed document. Stimulus's
+      // BindingObserver runs once at Application.start() against
+      // documentElement and never re-attaches across full-page
+      // navigations — without this hint we'd lose all controllers
+      // after the first nav.
+      this._observed.push({target, options: options || {}, logicalRef: logicalAnchorOf(target)});
       const wasEmpty = __observers.size === 0;
       __observers.add(this);
       if (wasEmpty) __notifyMutationActive(true);
@@ -1054,8 +1134,20 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
-  // DOM compareDocumentPosition bitmask values. Selector-engine sort
-  // routines (jQuery's Sizzle) probe these on the `Node` constructor.
+  // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
+  // ElementObserver gates its mutation-record processing on
+  // `node.nodeType == Node.ELEMENT_NODE` — without these constants set,
+  // every childList mutation silently bails. Sizzle / jQuery probe the
+  // DOCUMENT_POSITION_* values too.
+  Node.ELEMENT_NODE                  = 1;
+  Node.ATTRIBUTE_NODE                = 2;
+  Node.TEXT_NODE                     = 3;
+  Node.CDATA_SECTION_NODE            = 4;
+  Node.PROCESSING_INSTRUCTION_NODE   = 7;
+  Node.COMMENT_NODE                  = 8;
+  Node.DOCUMENT_NODE                 = 9;
+  Node.DOCUMENT_TYPE_NODE            = 10;
+  Node.DOCUMENT_FRAGMENT_NODE        = 11;
   Node.DOCUMENT_POSITION_DISCONNECTED            = 1;
   Node.DOCUMENT_POSITION_PRECEDING               = 2;
   Node.DOCUMENT_POSITION_FOLLOWING               = 4;

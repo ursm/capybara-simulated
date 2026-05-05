@@ -55,7 +55,14 @@ module Capybara
       end
 
       def reset_page
-        with_recycle { @vm.eval_code('__resetPage()') }
+        with_recycle do
+          @vm.eval_code('__resetPage()')
+          # Pump microtasks so the synthetic initial-scan records emitted
+          # to surviving MutationObservers (Stimulus's BindingObserver
+          # etc.) flush before the next page-bootstrap step runs. Without
+          # this, controllers stay bound to the previous page's wrappers.
+          pump_microtasks
+        end
       end
 
       SCRIPT_TYPES_CLASSIC = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze

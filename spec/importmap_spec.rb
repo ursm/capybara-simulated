@@ -22,33 +22,37 @@ RSpec.describe 'ESM via importmap' do
 
   let(:hello_app) {
     src = stimulus_src
+    page = ->(extra) {
+      <<~HTML
+        <!doctype html><html><head>
+          <script type="importmap">
+          {
+            "imports": {
+              "@hotwired/stimulus":            "/js/stimulus.js",
+              "controllers/hello_controller":  "/js/hello_controller.js"
+            }
+          }
+          </script>
+        </head><body>
+          <div data-controller="hello">
+            <span data-hello-target="output"></span>
+            <button data-action="click->hello#greet" id="go">Go</button>
+          </div>
+          #{extra}
+          <script type="module">
+            import { Application } from "@hotwired/stimulus";
+            import HelloController from "controllers/hello_controller";
+            const app = Application.start();
+            app.register("hello", HelloController);
+            window.__app = app;
+          </script>
+        </body></html>
+      HTML
+    }
     lambda do |env|
       case env['PATH_INFO']
-      when '/'
-        [200, {'content-type' => 'text/html'}, [<<~HTML]]
-          <!doctype html><html><head>
-            <script type="importmap">
-            {
-              "imports": {
-                "@hotwired/stimulus":            "/js/stimulus.js",
-                "controllers/hello_controller":  "/js/hello_controller.js"
-              }
-            }
-            </script>
-          </head><body>
-            <div data-controller="hello">
-              <span data-hello-target="output"></span>
-              <button data-action="click->hello#greet" id="go">Go</button>
-            </div>
-            <script type="module">
-              import { Application } from "@hotwired/stimulus";
-              import HelloController from "controllers/hello_controller";
-              const app = Application.start();
-              app.register("hello", HelloController);
-              window.__app = app;
-            </script>
-          </body></html>
-        HTML
+      when '/'      then [200, {'content-type' => 'text/html'}, [page.call('<a href="/page2" id="nav">page2</a>')]]
+      when '/page2' then [200, {'content-type' => 'text/html'}, [page.call('<p>page2</p>')]]
       when '/js/stimulus.js'
         [200, {'content-type' => 'application/javascript'}, [src]]
       when '/js/hello_controller.js'
@@ -77,6 +81,14 @@ RSpec.describe 'ESM via importmap' do
 
   it 'wires a Stimulus action through ESM-pinned controller module' do
     session.visit '/'
+    session.find('#go').click
+    expect(session).to have_css('span[data-hello-target="output"]', text: 'hello from stimulus')
+  end
+
+  it 'fires Stimulus actions on a freshly-navigated page (cached ESM modules)' do
+    session.visit '/'
+    session.find('#nav').click
+    expect(session).to have_current_path('/page2')
     session.find('#go').click
     expect(session).to have_css('span[data-hello-target="output"]', text: 'hello from stimulus')
   end

@@ -24,28 +24,34 @@ RSpec.describe 'Hotwire (Stimulus + Turbo) via UMD' do
 
   let(:hello_app) {
     src = stimulus_src
+    page_html = ->(extra) {
+      <<~HTML
+        <!doctype html><html><head>
+          <script src="/js/stimulus.umd.js"></script>
+        </head><body>
+          <div data-controller="hello">
+            <span data-hello-target="output"></span>
+            <button data-action="click->hello#greet" id="go">Go</button>
+          </div>
+          #{extra}
+          <script>
+            const { Application, Controller } = window.Stimulus;
+            const app = Application.start();
+            app.register('hello', class extends Controller {
+              static targets = ['output'];
+              greet() { this.outputTarget.textContent = 'hello from stimulus'; }
+            });
+            window.__app = app;
+          </script>
+        </body></html>
+      HTML
+    }
     lambda do |env|
       case env['PATH_INFO']
       when '/'
-        [200, {'content-type' => 'text/html'}, [<<~HTML]]
-          <!doctype html><html><head>
-            <script src="/js/stimulus.umd.js"></script>
-          </head><body>
-            <div data-controller="hello">
-              <span data-hello-target="output"></span>
-              <button data-action="click->hello#greet" id="go">Go</button>
-            </div>
-            <script>
-              const { Application, Controller } = window.Stimulus;
-              const app = Application.start();
-              app.register('hello', class extends Controller {
-                static targets = ['output'];
-                greet() { this.outputTarget.textContent = 'hello from stimulus'; }
-              });
-              window.__app = app;
-            </script>
-          </body></html>
-        HTML
+        [200, {'content-type' => 'text/html'}, [page_html.call('<a href="/page2" id="nav">page2</a>')]]
+      when '/page2'
+        [200, {'content-type' => 'text/html'}, [page_html.call('<p>page2</p>')]]
       when '/js/stimulus.umd.js'
         [200, {'content-type' => 'application/javascript'}, [src]]
       else
@@ -82,6 +88,14 @@ RSpec.describe 'Hotwire (Stimulus + Turbo) via UMD' do
     JS
     session.find('#late-go').click
     expect(session).to have_css('#late span[data-hello-target="output"]', text: 'hello from stimulus')
+  end
+
+  it 'fires Stimulus actions on a freshly-navigated page' do
+    session.visit '/'
+    session.find('#nav').click
+    expect(session).to have_current_path('/page2')
+    session.find('#go').click
+    expect(session).to have_css('span[data-hello-target="output"]', text: 'hello from stimulus')
   end
 
   describe 'Turbo frame fetch + swap' do
