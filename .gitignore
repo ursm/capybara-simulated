@@ -2,11 +2,8 @@
 /.memsearch/
 /.ruby-lsp/
 /Gemfile.lock
-/node_modules/
 /pkg/
 /save_path_tmp/
 /screenshots/
 /tmp/
-/vendor/esbuild-wasm/
-/vendor/js/csim.bundle.js
 *.gem

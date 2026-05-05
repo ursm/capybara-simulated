@@ -1,5 +1,5 @@
-// v2 bridge: thin DOM proxy backed by Ruby callbacks via `__dom(handle, op, args)`.
-// Every method delegates straight through to Capybara::Simulated::V2::Browser#dom_op.
+// bridge: thin DOM proxy backed by Ruby callbacks via `__dom(handle, op, args)`.
+// Every method delegates straight through to Capybara::Simulated::Browser#dom_op.
 // Keep the implementation small — adding a method here means adding a case in
 // Browser#dom_op too.
 
@@ -71,6 +71,10 @@
     get checked()   { return !!__dom(this.__h, 'checked', []); }
     set checked(v)  { __dom(this.__h, 'setChecked', [!!v]); }
     get disabled()  { return !!__dom(this.__h, 'disabled', []); }
+    set disabled(v) {
+      if (v) this.setAttribute('disabled', '');
+      else   this.removeAttribute('disabled');
+    }
     get hidden()    { return !!__dom(this.__h, 'hidden', []); }
 
     // <form> ergonomics
@@ -154,6 +158,12 @@
     createTextNode(text)      { return wrap(__dom(this.__h, 'createTextNode',        [String(text)])); }
     createComment(text)       { return wrap(__dom(this.__h, 'createComment',         [String(text)])); }
     createDocumentFragment()  { return wrap(__dom(this.__h, 'createDocumentFragment', [])); }
+
+    // Shadow DOM. Ruby keeps the shadow tree as a DocumentFragment in
+    // Browser#shadow_roots, keyed by host handle; the wrapper reads
+    // through the same dom_op surface as any other element.
+    attachShadow(_init)  { return wrap(__dom(this.__h, 'attachShadow', [])); }
+    get shadowRoot()     { return wrap(__dom(this.__h, 'shadowRoot', [])); }
     // Attribute object isn't really used by libraries except for
     // existence-checks; return a plain shape with name/value.
     createAttribute(name)     { return {name: String(name), value: '', specified: true}; }
@@ -382,11 +392,14 @@
   }
 
   function invokeListeners(el, event, capture, atTarget) {
+    event.currentTarget = el;
+    // Inline `on<type>` HTML attribute — only fires in the bubble phase
+    // at non-capture, matches what real browsers do for `onclick="..."`.
+    if (atTarget || !capture) invokeInlineHandler(el, event);
     const byType = __listeners.get(el.__h);
     if (!byType) return;
     const arr = byType.get(event.type);
     if (!arr || arr.length === 0) return;
-    event.currentTarget = el;
     // Snapshot — handlers may add/remove during dispatch.
     const snapshot = arr.slice();
     for (const l of snapshot) {
@@ -405,6 +418,29 @@
           bumpListenerCount(event.type, -1);
         }
       }
+    }
+  }
+
+  // Compile-once cache for inline handler bodies — same attribute text
+  // hits the same Function across dispatches. Intentionally NOT cleared
+  // in __resetPage: the key is the body string (handle-independent) and
+  // the same `onclick="..."` recurs across pages, so surviving the reset
+  // is a real win.
+  const __inlineCache = new Map();
+  function invokeInlineHandler(el, event) {
+    const body = el.getAttribute('on' + event.type);
+    if (body == null || body === '') return;
+    let fn = __inlineCache.get(body);
+    if (!fn) {
+      try { fn = new Function('event', body); } catch (_) { __inlineCache.set(body, false); return; }
+      __inlineCache.set(body, fn);
+    }
+    if (fn === false) return;
+    try {
+      const ret = fn.call(el, event);
+      if (ret === false) event.preventDefault();
+    } catch (e) {
+      try { console.error('inline handler threw:', e && e.message ? e.message : e); } catch (_) {}
     }
   }
 
@@ -555,14 +591,27 @@
     }
     return out;
   }
+  // Compile-once cache — Capybara's matchers re-issue the same
+  // evaluate_script bodies across polling iterations and across tests
+  // (e.g. `this.validity.valid`), and `new Function(body)` allocates a
+  // fresh compiled function each call. Repeated parsing under polling
+  // pressure was tripping QuickJS's parser stack on long suites.
+  const __evalCache = new Map();
+  function compileScript(code) {
+    let fn = __evalCache.get(code);
+    if (!fn) {
+      fn = new Function('return eval(' + JSON.stringify(code) + ');');
+      __evalCache.set(code, fn);
+    }
+    return fn;
+  }
   globalThis.__evalScript = function (code, args) {
     const a = (args || []).map(rehydrateArg);
     // `eval` inside the function body sees the function's `arguments`,
     // so user code referencing `arguments[i]` works the same as in
     // selenium / chrome. eval also handles statements / expressions
     // uniformly — selenium's "return <expr>" wrapping can't.
-    const fn = new Function('return eval(' + JSON.stringify(code) + ');');
-    return marshalResult(fn.apply(null, a));
+    return marshalResult(compileScript(code).apply(null, a));
   };
 
   // evaluate_async_script: the last argument the script receives is a
@@ -576,8 +625,7 @@
     __asyncResult = null;
     const a = (args || []).map(rehydrateArg);
     a.push(function (v) { __asyncResult = {value: marshalResult(v)}; });
-    const fn = new Function('return eval(' + JSON.stringify(code) + ');');
-    fn.apply(null, a);
+    compileScript(code).apply(null, a);
   };
   globalThis.__pollAsyncResult = function () {
     return __asyncResult;
@@ -624,6 +672,8 @@
         if (t.due < nextDue) { nextDue = t.due; nextId = id; }
       }
       if (nextId === null || nextDue > limit) break;
+      // Step the clock to the timer's due time so timers it schedules
+      // anchor on the right moment.
       __virtualNow = nextDue;
       const t = __timers.get(nextId);
       if (t.period != null) {
@@ -637,6 +687,10 @@
         try { console.error('timer threw:', e && e.message ? e.message : e); } catch (_) {}
       }
     }
+    // Pin the clock at `limit` even when nothing fired, so a later
+    // __drainTimers(N) reflects cumulative elapsed time and any
+    // setTimeout queued *after* this call anchors on the new "now".
+    if (__virtualNow < limit) __virtualNow = limit;
     if (__timers.size === 0) __setTimersActive(false);
   };
 
@@ -807,9 +861,9 @@
   globalThis.window     = globalThis;
   globalThis.self       = globalThis;
   globalThis.location   = globalThis.document.location;
-  globalThis.navigator  = {userAgent: 'capybara-simulated/v2', language: 'en-US', languages: ['en-US']};
+  globalThis.navigator  = {userAgent: 'capybara-simulated', language: 'en-US', languages: ['en-US']};
   globalThis.screen     = {width: 1024, height: 768};
-  // history.pushState / replaceState route to Ruby so the v2 driver's
+  // history.pushState / replaceState route to Ruby so this driver's
   // current_url tracks SPA-style URL changes. State + title are
   // accepted but ignored — we only mirror the URL.
   globalThis.history = {

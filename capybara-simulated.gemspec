@@ -5,8 +5,8 @@ Gem::Specification.new do |spec|
   spec.version     = Capybara::Simulated::VERSION
   spec.authors     = ['Keita Urashima']
   spec.email       = ['ursm@ursm.jp']
-  spec.summary     = 'Lightweight Capybara driver powered by V8 (mini_racer) + happy-dom'
-  spec.description = 'A Capybara driver that runs JavaScript in a long-lived mini_racer V8 context against a happy-dom DOM, sitting between rack-test and full headless browsers.'
+  spec.summary     = 'Lightweight Capybara driver powered by Nokogiri + QuickJS'
+  spec.description = 'A Capybara driver that runs JavaScript in a long-lived QuickJS context against a Nokogiri-backed DOM, sitting between rack-test and full headless browsers.'
   spec.homepage    = 'https://github.com/ursm/capybara-simulated'
   spec.license     = 'MIT'
 
@@ -21,19 +21,13 @@ Gem::Specification.new do |spec|
   spec.files = Dir[
     'lib/**/*.rb',
     'vendor/js/*.js',
-    'vendor/js/*.mjs',
-    'vendor/esbuild-wasm/lib/main.js',
-    'vendor/esbuild-wasm/bin/esbuild',
-    'vendor/esbuild-wasm/esbuild.wasm',
-    'vendor/esbuild-wasm/wasm_exec.js',
-    'vendor/esbuild-wasm/wasm_exec_node.js',
-    'vendor/esbuild-wasm/LICENSE.md',
     'README.md',
     'LICENSE'
   ]
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'capybara',   '>= 3.40'
-  spec.add_dependency 'mini_racer', '>= 0.18'
-  spec.add_dependency 'rack',       '>= 2.2'
+  spec.add_dependency 'capybara', '>= 3.40'
+  spec.add_dependency 'nokogiri', '>= 1.18'
+  spec.add_dependency 'quickjs',  '>= 0.15'
+  spec.add_dependency 'rack',     '>= 2.2'
 end

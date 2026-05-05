@@ -1,1017 +1,1763 @@
-require 'date'
-require 'digest'
 require 'json'
-require 'mini_racer'
-require 'open3'
+require 'nokogiri'
+require 'rack/mime'
 require 'rack/mock'
 require 'securerandom'
-require 'time'
+require 'set'
 require 'uri'
+require 'uri/mailto'
+require_relative 'handle_table'
+require_relative 'js_runtime'
 
 module Capybara
   module Simulated
+    # Raised when a Nokogiri node held by a Node has been removed from
+    # the document (e.g. via `el.replaceWith(...)` from JS). Driver
+    # exposes this as an `invalid_element_error`, so Capybara's
+    # synchronize wrapper catches it and reloads the cached element.
+    class StaleElement < Capybara::ElementNotFound; end
+
+    DEFAULT_HOST    = 'http://www.example.com'
+    BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
+
+    Request = Data.define(:method, :url, :body, :content_type, :referer)
+
+    # Owns the Nokogiri document, the in-process Rack client, and the
+    # lazy QuickJS runtime. Capybara DSL queries hit Nokogiri directly;
+    # user JS (when present) sees a thin DOM proxy backed by `dom_op`.
     class Browser
-      VENDOR_DIR   = File.expand_path('../../../../vendor/js', __FILE__)
-      DEFAULT_HOST = 'http://www.example.com'.freeze
+      attr_reader   :app, :status_code, :response_headers
+      attr_accessor :mutation_recording, :timers_active
 
-      # The V8 isolate is shared across the lifetime of a Browser instance —
-      # only the happy-dom Window is recreated per visit. Reset between
-      # specs is via `reset!` on the Driver, which closes the Window and
-      # clears tracked DOM handles, but keeps the (expensive) isolate alive.
-      # On mini_racer + happy-dom the previously-denylisted scripts (notably
-      # jQuery UI) load without hanging the runtime, and ready callbacks
-      # depend on them succeeding so we no longer skip anything by default.
-      EXTERNAL_SCRIPT_DENYLIST = /\A\z/.freeze
-
-      attr_reader :app, :status_code, :response_headers
-
-      # window.history.pushState/replaceState only updates the JS-side
-      # location; mirror it onto the Ruby @current_url so Capybara reads
-      # the new path. Before any real visit (or after reset_session!), we
-      # have no @current_url, in which case we report `nil` rather than
-      # leaking the synthetic happy-dom Window URL.
       def current_url
-        return '' unless @current_url
-        # Capybara's synchronize loop calls current_path/current_url while
-        # waiting for navigation. Drive the virtual clock so timer-based
-        # location updates (window.location.pathname = '...') eventually
-        # fire under the wait budget.
-        advance_virtual_clock
-        check_location_change unless @in_navigate
-        loc = (@ctx.eval('window && window.location ? window.location.href : null') rescue nil)
-        loc && !loc.empty? ? loc.to_s : @current_url
+        tick_real_time
+        @current_url
       end
-      attr_accessor :driver_for_results
 
       def initialize(app)
-        @app = app
-        @ctx = MiniRacer::Context.new
-        @ctx.eval(File.read(File.join(VENDOR_DIR, 'prelude.js')))
-        @ctx.eval(File.read(File.join(VENDOR_DIR, 'csim.bundle.js')))
-        @ctx.eval(File.read(File.join(VENDOR_DIR, 'runtime.js')))
-        @ctx.attach('__csim_fetch', method(:js_fetch))
-
-        @history          = []
-        @history_index    = -1
-        @current_url      = nil
-        @status_code      = nil
-        @response_headers = {}
-        @modal_responses  = {alert: [], confirm: [], prompt: []}
-        @cookie_jar       = []
+        @app                = app
+        @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
+        @handles            = HandleTable.new(@document)
+        @js                 = nil
+        @current_url        = nil
+        @status_code        = nil
+        @response_headers   = {}
+        @history            = []
+        @history_idx        = -1
+        # Wall-clock anchor — `tick_real_time` walks the virtual JS clock
+        # forward by Capybara's polling interval so `setTimeout(N)` fires
+        # once a test has actually waited N ms.
+        @last_tick_ts       = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @polling_until      = nil  # sticky window — see Browser#polling?
+        @cookies            = {}
+        @file_picks         = {}   # handle -> [path, ...] for <input type="file">
+        @modal_handlers     = []   # innermost handler matches the next modal, pops, then bubbles outward
+        @resource_cache     = {}   # URL -> response body for <script src=...> etc.
+        @shadow_roots       = {}   # host_handle -> Nokogiri::HTML5::DocumentFragment
+        @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
+        @focused_handle     = nil  # currently-focused element handle
+        @mutations          = []
+        @mutation_recording = false
+        @timers_active      = false
+        # Event types with at least one live listener — JS notifies us
+        # via __setListenedType so dispatch_event can skip the JS hop
+        # for events nobody cares about.
+        @listened_types     = Set.new
       end
 
-      # Tear down all per-page state without throwing away the V8 isolate.
-      # Capybara calls this between specs via Driver#reset!.
-      def reset_state!
-        @history          = []
-        @history_index    = -1
-        @current_url      = nil
-        @status_code      = nil
-        @response_headers = {}
-        @modal_responses  = {alert: [], confirm: [], prompt: []}
-        @last_call_at     = nil
-        @cookie_jar       = []
-        # `loadHTML` clears all tracked node handles and recreates the
-        # happy-dom Window for an empty document.
-        call_runtime('loadHTML', '<!doctype html><html><body></body></html>', DEFAULT_HOST)
-        call_runtime('setModalResponses', stringify_keys(@modal_responses))
+      def set_listened_type(type, active)
+        if active
+          @listened_types << type.to_s
+        else
+          @listened_types.delete(type.to_s)
+        end
       end
 
-      # Explicit `visit` is a new navigation, not a follow-up — drop the
-      # referer the way browsers' address-bar navigation does, and resolve
-      # the URL against the configured app host rather than the current
-      # page (which may have a stale `<base href>`).
+      def js
+        @js ||= JsRuntime.new(self)
+      end
+
       def visit(url)
-        navigate(:get, resolve_visit_url(url), [], referer: false)
+        # Address-bar navigation — no Referer, regardless of where we
+        # were before. Link clicks / form submits / location.assign
+        # take the @current_url default.
+        navigate(:get, resolve_against_current(url), referer: nil)
       end
 
-      def resolve_visit_url(url)
-        return @current_url if !url.nil? && !url.empty? && @current_url && url == @current_url
-        url = '/' if url.nil? || url.empty?
-        return url if url.start_with?('http://', 'https://')
-        # Resolve relative paths against the app host's root (not the
-        # currently displayed page), matching Capybara's `visit` semantics
-        # for rack_test-style drivers.
-        host = Capybara.app_host
-        if host.nil?
-          uri = URI.parse(@current_url || DEFAULT_HOST)
-          host = "#{uri.scheme}://#{uri.host}#{uri.port ? ":#{uri.port}" : ''}/"
-        end
-        URI.join(host, url).to_s
-      end
       def refresh
-        return unless @current_url
-        # Browsers re-issue the previous request as-is on F5 (after a
-        # confirmation prompt for non-GETs, which our driver skips).
-        method = @last_method || :get
-        navigate(method, @current_url, @last_fields || [],
-                 enctype: @last_enctype || 'application/x-www-form-urlencoded',
-                 replace_history: true)
+        req = current_request
+        replay(req) if req
       end
+
       def go_back
-        return if @history_index <= 0
-        @history_index -= 1
-        navigate(:get, @history[@history_index], [], history_move: true)
+        return if @history_idx <= 0
+        @history_idx -= 1
+        replay(current_request)
       end
+
       def go_forward
-        return if @history_index >= @history.size - 1
-        @history_index += 1
-        navigate(:get, @history[@history_index], [], history_move: true)
+        return if @history_idx >= @history.size - 1
+        @history_idx += 1
+        replay(current_request)
       end
 
-      def html  = call_runtime('html')
-      def title = call_runtime('title')
-
-      def find_xpath(xpath, context_id = nil) = Array(call_runtime('findXPath', xpath, context_id))
-      def find_css(css, context_id = nil)     = Array(call_runtime('findCSS', css, context_id))
-
-      def all_text(id)     = call_runtime('allText', id).to_s
-      def visible_text(id) = call_runtime('visibleText', id).to_s
-      def inner_html(id)   = call_runtime('innerHTML', id).to_s
-      def outer_html(id)   = call_runtime('outerHTML', id).to_s
-      def tag_name(id)     = call_runtime('tagName', id).to_s
-      def attr(id, name)   = call_runtime('attr', id, name.to_s)
-      def prop(id, name)   = call_runtime('prop', id, name.to_s)
-      def value(id)        = call_runtime('value', id)
-      def visible?(id)     = !!call_runtime('visible', id)
-      def checked?(id)     = !!call_runtime('checked', id)
-      def selected?(id)    = !!call_runtime('selected', id)
-      def disabled?(id)    = !!call_runtime('disabled', id)
-      def readonly?(id)    = !!call_runtime('readonly', id)
-      def multiple?(id)    = !!call_runtime('multiple', id)
-      def path(id)         = call_runtime('path', id).to_s
-      def rect(id)         = call_runtime('rect', id) || {}
-
-      def set_value(id, value)
-        # setValue may return a submit-descriptor when the user typed `\n`
-        # into the only text input of a form (HTML implicit submission).
-        result = call_runtime('setValue', id, format_set_value(value))
-        follow(result) if result.is_a?(Hash) && result['action']
-        result
+      def reset!
+        @document         = Nokogiri::HTML5(BLANK_DOCUMENT)
+        @handles.reset!(@document)
+        @current_url      = nil
+        @status_code      = nil
+        @response_headers = {}
+        @history.clear
+        @history_idx      = -1
+        @last_tick_ts     = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @polling_until    = nil
+        @cookies.clear
+        @file_picks.clear
+        @resource_cache.clear
+        @shadow_roots.clear
+        @shadow_root_set.clear
+        @focused_handle = nil
+        @js&.reset_page
+        reset_per_page_state
       end
 
-      # Capybara hands Date/DateTime/Time objects through to the driver as-is
-      # but mini_racer can't serialise them. Pre-format them to the strings
-      # an HTML5 input expects so they round-trip via JS.
-      def format_set_value(value)
-        case value
-        when Array      then value.map {|v| format_set_value(v) }
-        when Date       then value.strftime('%Y-%m-%d')
-        when DateTime   then value.strftime('%Y-%m-%dT%H:%M')
-        when Time       then value.strftime('%Y-%m-%dT%H:%M')
-        else                 value
+      def reset_per_page_state
+        @mutations.clear
+        @mutation_recording = false
+        @timers_active      = false
+        @listened_types.clear
+      end
+
+      def find_xpath(xpath, context = nil)
+        tick_real_time
+        root = lookup_node(context) || @document
+        # Capybara emits `(...)[]` (an empty predicate) when `text:` is a
+        # Symbol with `wait? = true` — `xpath_text_conditions` returns
+        # nil and the `[#{nil}]` interpolation collapses. libxml2's
+        # parser rejects the empty predicate; strip it so the rest of
+        # the expression matches as if no text filter was given.
+        xpath = xpath.to_s.sub(/\)\[\]\z/, ')').sub(/\A\((.*)\)\z/, '\1')
+        root.xpath(xpath).filter_map { |n| @handles.track(n) }
+      end
+
+      def find_css(css, context = nil)
+        tick_real_time
+        root = lookup_node(context) || @document
+        stripped, ci_predicates = strip_case_insensitive_attr_flags(css)
+        matches = root.css(stripped, CssPseudoHandlers.new(self))
+        matches = matches.select {|n| ci_predicates.all? {|p| ci_attr_match?(n, p) } } unless ci_predicates.empty?
+        matches.filter_map {|n| @handles.track(n) }
+      end
+
+      # Nokogiri's CSS parser doesn't grok the Selectors-Level-4 case-
+      # insensitive flag (`[class*='X' i]`). Strip the trailing `i`/`s`
+      # so the parser is happy, and remember the predicate so we can
+      # case-fold the comparison ourselves on the result set.
+      CASE_INSENSITIVE_ATTR_RE = /\[\s*([\w-]+)\s*([~|^$*]?=)\s*(['"])(.*?)\3\s+([is])\s*\]/i
+
+      def strip_case_insensitive_attr_flags(css)
+        predicates = []
+        stripped = css.to_s.gsub(CASE_INSENSITIVE_ATTR_RE) do
+          name, op, val, flag = $1, $2, $4, $5
+          predicates << {name: name, op: op, val: val, flag: flag.downcase}
+          # Reduce to attribute-presence; the real predicate runs as a
+          # post-filter below so case-folding is honoured.
+          "[#{name}]"
+        end
+        [stripped, predicates]
+      end
+
+      def ci_attr_match?(node, p)
+        return false unless node.respond_to?(:[])
+        actual = node[p[:name]].to_s
+        # Spec: `s` = case-sensitive (default), `i` = case-insensitive.
+        a, v = p[:flag] == 'i' ? [actual.downcase, p[:val].downcase] : [actual, p[:val]]
+        case p[:op]
+        when '='  then a == v
+        when '*=' then a.include?(v)
+        when '^=' then a.start_with?(v)
+        when '$=' then a.end_with?(v)
+        when '~=' then a.split(/\s+/).include?(v)
+        when '|=' then a == v || a.start_with?("#{v}-")
+        else false
         end
       end
-      def select_option(id)    = call_runtime('selectOption', id)
-      def unselect_option(id)  = call_runtime('unselectOption', id)
 
-      def click(id, modifiers = {})
-        delay = modifiers.delete('delay')
-        if delay&.positive?
-          call_runtime('mouseDown', id, 0, modifiers)
-          sleep(delay)
-          result = follow(call_runtime('click', id, 0, modifiers, true))
+      # Nokogiri's CSS parser routes unknown pseudo-classes
+      # (`:disabled`, `:checked`, `:enabled`, etc.) through
+      # `nokogiri:<name>(.)` custom XPath calls. We register handlers
+      # here so common HTML form pseudo-selectors work in find_css.
+      # `:disabled` honours fieldset / select / optgroup propagation
+      # via Browser#disabled?.
+      class CssPseudoHandlers
+        def initialize(browser)
+          @browser = browser
+        end
+
+        def disabled(node_set)
+          node_set.select { |n| @browser.disabled?(@browser.handles_track(n)) }
+        end
+
+        def enabled(node_set)
+          node_set.reject { |n| @browser.disabled?(@browser.handles_track(n)) }
+        end
+
+        def checked(node_set)
+          node_set.select { |n| n.respond_to?(:[]) && n['checked'] }
+        end
+
+        def selected(node_set)
+          node_set.select { |n| n.respond_to?(:[]) && n['selected'] }
+        end
+
+        def required(node_set)
+          node_set.select { |n| n.respond_to?(:[]) && n['required'] }
+        end
+
+        def optional(node_set)
+          node_set.reject { |n| n.respond_to?(:[]) && n['required'] }
+        end
+      end
+
+      # Exposed for CssPseudoHandlers — Browser#disabled? takes a handle,
+      # so handlers translate Nokogiri nodes back through the table.
+      def handles_track(node)
+        @handles.track(node)
+      end
+
+      def all_text(handle)
+        (lookup_node(handle)&.text || '').to_s
+      end
+
+      # Tags whose contents are not part of the rendered document — used by
+      # both `visible?` (the element itself reports invisible) and
+      # `collect_visible_text` (subtree contributes no text).
+      INVISIBLE_TAGS = %w[head script style template noscript title].to_set.freeze
+
+      # Block-level tags that produce a line break at boundaries (browser
+      # `innerText` semantics). Inline whitespace in text nodes is collapsed
+      # to a single space; explicit `\n`s here survive normalize_visible_spacing
+      # so multi-block content lays out as separate lines.
+      BLOCK_TAGS = %w[
+        address article aside blockquote body div dl dd dt fieldset
+        figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main
+        nav ol p pre section table thead tbody tfoot tr td th ul video
+      ].to_set.freeze
+
+      INLINE_WHITESPACE_RE = /[\s&&[^ ]]+/
+
+      # Concatenate text from this node's subtree, skipping invisible
+      # subtrees and inserting `\n` at block-tag boundaries. Whitespace
+      # normalization is the caller's job (Node mixes in
+      # Capybara::Node::WhitespaceNormalizer).
+      def visible_text(handle)
+        node = lookup_node(handle)
+        return '' if node.nil?
+        out = String.new
+        collect_visible_text(node, out, root: true)
+        out
+      end
+
+      def tag_name(handle)
+        node = lookup_node(handle)
+        return 'ShadowRoot' if @shadow_root_set.include?(node)
+        (node&.name || '').downcase
+      end
+
+      def attr(handle, name)
+        node = lookup_node(handle)
+        return nil if node.nil?
+        # validationMessage is a DOM property, not an HTML attribute —
+        # Capybara's `validation_message:` field filter reads it via `[]`.
+        return validation_message(node) if name == 'validationMessage'
+        node[name]
+      end
+
+      def value(handle)
+        node = lookup_node(handle)
+        return nil if node.nil?
+        case node.name
+        when 'select'
+          options = node.css('option')
+          selected = options.select { |o| o['selected'] }
+          return selected.map { |o| o['value'] || o.text } if node['multiple']
+          (selected.first || options.first)&.then { |o| o['value'] || o.text }
+        when 'textarea'
+          node.text
+        when 'input'
+          type = (node['type'] || 'text').downcase
+          # checkbox / radio default to 'on' when no value attribute is set.
+          return node['value'] || 'on' if %w[checkbox radio].include?(type)
+          # The DOM `.value` property is the empty string when the value
+          # attribute is unset; coerce so callers can rely on String shape.
+          node['value'] || ''
         else
-          result = follow(call_runtime('click', id, 0, modifiers))
+          node['value']
         end
-        drain_async_timers
-        result
       end
-      def right_click(id, modifiers = {})
-        delay = modifiers.delete('delay')
-        if delay&.positive?
-          call_runtime('mouseDown', id, 2, modifiers)
-          sleep(delay)
-          call_runtime('rightClick', id, modifiers, true)
-        else
-          call_runtime('rightClick', id, modifiers)
+
+      def checked?(handle)
+        !!lookup_node(handle)&.[]('checked')
+      end
+
+      def selected?(handle)
+        !!lookup_node(handle)&.[]('selected')
+      end
+
+      def set_value(handle, value)
+        node = lookup_node(handle)
+        return false if node.nil?
+        # readonly text inputs / textareas silently reject writes; the
+        # `readonly` attribute does NOT apply to checkboxes / radios /
+        # range / etc. per the HTML spec, so don't short-circuit those.
+        if node['readonly'] && !readonly_exempt?(node)
+          return false
         end
-        drain_async_timers
-      end
-      def double_click(id, modifiers = {})
-        result = call_runtime('doubleClick', id, modifiers)
-        drain_async_timers
-        result
-      end
-      def hover(id)
-        call_runtime('hover', id).tap { drain_async_timers }
-      end
-      def trigger(id, evt)
-        call_runtime('trigger', id, evt.to_s).tap { drain_async_timers }
-      end
-      def focus(id)        = call_runtime('focus', id)
-      def blur(id)         = call_runtime('blur', id)
-      def active_element   = call_runtime('activeElement')
-
-      def drop(id, items)
-        call_runtime('drop', id, items).tap { drain_async_timers }
-      end
-
-      def submit(id)
-        result = follow(call_runtime('submit', id))
-        drain_async_timers
-        result
-      end
-
-      def shadow_root(id) = call_runtime('shadowRoot', id)
-
-      def send_keys(id, keys)
-        directive = call_runtime('sendKeys', id, encode_keys(keys))
-        follow(directive)
-      end
-
-      def execute_script(code, args = [])
-        call_runtime('executeScript', code.to_s, encode_script_args(args))
-        nil
-      end
-      def evaluate_script(code, args = [])
-        decode_script_result(call_runtime('evaluate', code.to_s, encode_script_args(args)))
-      end
-
-      # Capybara's async-script contract: the user script receives a
-      # callback as its final `arguments[N]` and must invoke it (possibly
-      # after a setTimeout) with the result. We have no real event loop,
-      # so after kicking the script off we drive the virtual clock in
-      # small slices until the callback fires or the wait budget is up.
-      ASYNC_POLL_STEP_MS = 50
-      def evaluate_async_script(code, args = [])
-        call_runtime('startAsync', code.to_s, encode_script_args(args))
-        budget = (Capybara.default_max_wait_time || 2).to_f
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
-        loop do
-          status = @ctx.call('__csim.pollAsync')
-          if status['done']
-            raise MiniRacer::RuntimeError, status['error'] if status['error']
-            return decode_script_result(status['value'])
+        case node.name
+        when 'input'
+          type = (node['type'] || 'text').downcase
+          case type
+          when 'checkbox', 'radio'
+            if value
+              node['checked'] = 'checked'
+            else
+              node.delete('checked')
+            end
+            # Radio buttons clear other members of the same name group.
+            if type == 'radio' && value && (form = enclosing_form(node))
+              form.css(%[input[type="radio"][name="#{node['name']}"]]).each do |peer|
+                peer.delete('checked') unless peer == node
+              end
+            end
+          when 'file'
+            # File picks live in the Browser-side @file_picks map keyed by
+            # handle — keeps them off the live DOM (where they'd leak into
+            # innerHTML / be visible to user JS).
+            @file_picks[handle] = Array(value).map(&:to_s)
+          when 'range', 'number'
+            node['value'] = clamp_numeric_input(node, value).to_s
+          else
+            node['value'] = apply_maxlength(node, value.to_s)
           end
-          break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-          @ctx.call('__csim.drainTimers', ASYNC_POLL_STEP_MS) rescue nil
+        when 'textarea'
+          node.content = value.to_s
+        else
+          # contenteditable: anything else with `contenteditable` (or
+          # whose ancestor has it) accepts text via Node#set the same way
+          # a real WYSIWYG would.
+          node.content = value.to_s if contenteditable?(node)
         end
-        raise Capybara::ScriptTimeoutError, 'evaluate_async_script timed out'
+        true
       end
 
-      def set_modal_responses(alerts: [], confirms: [], prompts: [])
-        @modal_responses = {alert: Array(alerts), confirm: Array(confirms), prompt: Array(prompts)}
-        call_runtime('setModalResponses', stringify_keys(@modal_responses))
+      def contenteditable?(node)
+        each_ancestor(node) do |cur|
+          ce = cur['contenteditable']
+          return true  if ce && ce != 'false'
+          return false if ce == 'false'
+        end
+        false
       end
 
-      # Append a text-matched handler used by `accept_modal` /
-      # `dismiss_modal`. JS-side modal stubs scan the handler stack in
-      # registration order and pick the first whose text predicate
-      # matches the firing message — which is what enables nested
-      # `dismiss_confirm { accept_confirm { ... } }`.
-      def add_modal_handler(type:, text: nil, response: true)
-        encoded = encode_modal_handler(type, text, response)
-        call_runtime('pushModalHandler', encoded)
+      # Walks `node` and its ancestors, yielding each element until the
+      # parent chain runs out (Document doesn't respond_to `[]`). The
+      # Nokogiri `respond_to?(:parent)` guard is what stops detached
+      # nodes from blowing up — `node.parent` on an orphan returns nil
+      # but `nil.parent` would NoMethodError.
+      def each_ancestor(node)
+        cur = node
+        while cur.respond_to?(:[])
+          yield cur
+          cur = cur.respond_to?(:parent) ? cur.parent : nil
+        end
       end
 
-      def remove_modal_handler(type:, text: nil)
-        call_runtime('popModalHandler', type.to_s, encode_modal_text(text))
+      def file_picks_for(handle)
+        @file_picks[handle] || []
       end
 
-      def encode_modal_handler(type, text, response)
+      # HTML spec: readonly only blocks user input on text-y inputs and
+      # textareas. checkbox / radio / range / file / etc. ignore it.
+      READONLY_BLOCKS_TYPES = %w[
+        text search url tel email password
+        date month week time datetime-local number
+      ].to_set.freeze
+
+      def readonly_exempt?(node)
+        return false if node.name == 'textarea'
+        return true  unless node.name == 'input'
+        !READONLY_BLOCKS_TYPES.include?((node['type'] || 'text').downcase)
+      end
+
+      # Mirrors document.activeElement: the focused element, or body
+      # when nothing has focus (HTML spec).
+      def active_element_handle
+        tick_real_time
+        return @focused_handle if @focused_handle
+        body = @document.at_css('body')
+        body && @handles.track(body)
+      end
+
+      FOCUSABLE_TAGS = %w[input textarea select button a].to_set.freeze
+
+      # Programmatic focus accepts anything with a tabindex attribute,
+      # including `tabindex="-1"` (which is excluded only from sequential
+      # tab order, not from `.focus()`). focus_order applies the stricter
+      # check.
+      def focusable?(node)
+        return false unless node.respond_to?(:[])
+        FOCUSABLE_TAGS.include?(node.name) || !node['tabindex'].nil?
+      end
+
+      def focus(handle)
+        node = lookup_node(handle)
+        return unless focusable?(node)
+        return if @focused_handle == handle
+        if @focused_handle
+          blur_handle = @focused_handle
+          @focused_handle = nil
+          dispatch_event(blur_handle, 'blur', bubbles: false, cancelable: false)
+        end
+        @focused_handle = handle
+        dispatch_event(handle, 'focus', bubbles: false, cancelable: false)
+      end
+
+      def blur(handle)
+        return unless @focused_handle == handle
+        @focused_handle = nil
+        dispatch_event(handle, 'blur', bubbles: false, cancelable: false)
+      end
+
+      # Session#send_keys: walks the document's focus order on :tab /
+      # :shift+:tab; other tokens just forward to the active element.
+      # Tab order = document order over inputs / textareas / selects /
+      # buttons / links-with-href / [tabindex>=0], skipping disabled
+      # / hidden ones.
+      def session_send_keys(keys)
+        forward = []
+        shift = false
+        keys.each do |k|
+          if k == :shift
+            shift = true
+          elsif k == :tab
+            advance_focus(shift ? -1 : 1)
+            shift = false
+          else
+            forward << k
+            shift = false
+          end
+        end
+        if forward.any? && (h = active_element_handle)
+          send_keys(h, forward)
+        end
+      end
+
+      def advance_focus(direction)
+        tabbables = focus_order
+        return if tabbables.empty?
+        if @focused_handle.nil?
+          target = direction.positive? ? tabbables.first : tabbables.last
+          focus(@handles.track(target))
+          return
+        end
+        current = lookup_node(@focused_handle)
+        idx = tabbables.index(current) || -1
+        next_idx = (idx + direction) % tabbables.length
+        focus(@handles.track(tabbables[next_idx]))
+      end
+
+      FOCUSABLE_CSS = 'input:not([type="hidden"]), textarea, select, button, a[href], [tabindex]'.freeze
+
+      def focus_order
+        return [] if @document.nil?
+        @document.css(FOCUSABLE_CSS).reject do |n|
+          n['disabled'] || n['tabindex'].to_s == '-1' || !visible?(@handles.track(n))
+        end
+      end
+
+      def apply_maxlength(node, str)
+        ml = Integer(node['maxlength']) rescue nil
+        ml && ml >= 0 ? str[0, ml] : str
+      end
+
+      def clamp_numeric_input(node, value)
+        n    = Float(value) rescue (return value)
+        min  = Float(node['min'])  rescue nil
+        max  = Float(node['max'])  rescue nil
+        step = Float(node['step']) rescue nil
+        n = min if min && n < min
+        n = max if max && n > max
+        # HTML5 step-snapping: ranges are anchored to `min` (default 0)
+        # and round to the nearest valid step. `<input type="range">`
+        # snaps unconditionally — `type="number"` only validates.
+        if step && step > 0 && node['type'].to_s.downcase == 'range'
+          base = min || 0.0
+          n    = base + ((n - base) / step).round * step
+          n    = max if max && n > max
+        end
+        n == n.to_i ? n.to_i : n
+      end
+
+      def select_option(handle)
+        opt = lookup_node(handle)
+        return false unless opt && opt.name == 'option'
+        # Browsers don't let users select a disabled option.
+        return false if opt['disabled']
+        select = opt.ancestors('select').first
+        return false unless select
+        if select['multiple']
+          opt['selected'] = 'selected'
+        else
+          select.css('option').each { |o| o.delete('selected') }
+          opt['selected'] = 'selected'
+        end
+        true
+      end
+
+      def unselect_option(handle)
+        opt = lookup_node(handle)
+        return false unless opt && opt.name == 'option'
+        select = opt.ancestors('select').first
+        return false unless select
+        # Single-select can't be unselected — surface as the typed
+        # exception Capybara expects for `session.unselect` on non-
+        # multiple <select>s.
+        unless select['multiple']
+          raise Capybara::UnselectNotAllowed,
+            'Cannot unselect option from single select box.'
+        end
+        opt.delete('selected')
+        true
+      end
+
+      # Walks the ancestor chain once, checking style/[hidden]/closed-details
+      # in a single pass. visible? is called per matched element on every
+      # selector evaluation, so fusing the walk halves ancestor iterations.
+      # `summary_seen` tracks whether the starting node sits inside a
+      # `<summary>` subtree — a closed-details ancestor only hides us if
+      # we don't (HTML spec).
+      def visible?(handle)
+        node = lookup_node(handle)
+        return false if node.nil?
+        return false if INVISIBLE_TAGS.include?(node.name)
+        return false if node.name == 'input' && (node['type'] || '').downcase == 'hidden'
+        summary_seen = false
+        each_ancestor(node) do |cur|
+          return true  if cur.is_a?(Nokogiri::XML::Document)
+          return false if self_hidden?(cur)
+          return false if cur.name == 'details' && !cur['open'] && !summary_seen
+          summary_seen = true if cur.name == 'summary'
+        end
+        true
+      end
+
+      # `<option>` is disabled if any ancestor `<optgroup>`/`<select>` is
+      # disabled. Other form controls inherit `disabled` from a wrapping
+      # `<fieldset disabled>` *unless* they sit inside its first `<legend>`.
+      def disabled?(handle)
+        node = lookup_node(handle)
+        return false if node.nil? || !node.respond_to?(:[])
+        # HTML spec restricts `disabled` to form-association tags plus
+        # `<fieldset>` — `<a disabled>` etc. stay clickable.
+        return true  if (FORM_CONTROL_TAGS.include?(node.name) || node.name == 'fieldset') && node['disabled']
+        if node.name == 'option'
+          cur = node.parent
+          while cur.respond_to?(:element?) && cur.element? && %w[optgroup select].include?(cur.name)
+            return true if cur['disabled']
+            cur = cur.parent
+          end
+        end
+        if FORM_CONTROL_TAGS.include?(node.name)
+          cur = node.parent
+          while cur.respond_to?(:element?) && cur.element?
+            if cur.name == 'fieldset' && cur['disabled']
+              legend = cur.element_children.find { |c| c.name == 'legend' }
+              return false if legend && (node == legend || node.ancestors.include?(legend))
+              return true
+            end
+            cur = cur.parent
+          end
+        end
+        false
+      end
+
+      FORM_CONTROL_TAGS = %w[input select textarea button optgroup option].to_set.freeze
+
+      def html
+        tick_real_time
+        @document.to_html
+      end
+
+      def title
+        tick_real_time
+        @document.at('head > title')&.text || ''
+      end
+
+      MODIFIER_KEYS = %i[shift control alt meta command].to_set.freeze
+
+      # `<a>` href schemes that don't trigger a Rack navigation. data:
+      # and blob: would 404 against the in-process app; the others
+      # are real browser pseudo-protocols (open mail client, dial,
+      # run JS) that have no Rack-side equivalent.
+      NON_NAVIGABLE_SCHEMES = %w[javascript: mailto: tel: data: blob:].freeze
+
+      def click(handle, modifiers = nil, delay: 0)
+        node = lookup_node(handle)
+        return false if node.nil?
+        # Click on a focusable element steals focus first — matches what
+        # browsers do (focus event fires before click for synthetic
+        # element.click() / user clicks).
+        focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
+        mods = modifier_init(modifiers)
+        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
+        # Fire 'click' before the default action — handlers may
+        # preventDefault() to suppress navigation / form submit.
+        return true unless dispatch_event(handle, 'click', **mods)
+        case node.name
+        when 'a'
+          href = node['href']
+          return true if href.nil? || href.empty?
+          return true if NON_NAVIGABLE_SCHEMES.any? { |s| href.start_with?(s) }
+          target = resolve(href)
+          # Pure-fragment / same-document anchor — browsers don't navigate.
+          return true if same_document_fragment?(target)
+          navigate(:get, target)
+          true
+        when 'button', 'input'
+          click_form_control(node)
+        when 'label'
+          target = label_target(node)
+          target ? click(@handles.track(target)) : false
+        when 'summary'
+          # Clicking <summary> toggles the parent <details>'s open state.
+          details = node.parent
+          if details.respond_to?(:name) && details.name == 'details'
+            if details['open']
+              details.delete('open')
+            else
+              details['open'] = ''
+            end
+            dispatch_event(@handles.track(details), 'toggle', bubbles: false)
+          end
+          true
+        else
+          false
+        end
+      end
+
+      def submit_form(handle)
+        node = lookup_node(handle)
+        return false unless node
+        form = node.name == 'form' ? node : enclosing_form(node)
+        form ? submit(form, nil) : false
+      end
+
+      # Fire input + change after a user-driven value change. Mirrors what
+      # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
+      # via `setValue` dom_op skip this — that path is the JS author's call.
+      def set_value_with_events(handle, value)
+        node = lookup_node(handle)
+        # Checkbox / radio: real browsers fire click → change on user
+        # toggle. Capybara's `check` / `choose` route here for the JS
+        # case, expecting click handlers to run.
+        if node && node.name == 'input' &&
+           %w[checkbox radio].include?((node['type'] || '').downcase)
+          was_checked = !!node['checked']
+          now_checked = !!value
+          # preventDefault on click suppresses the toggle. The state
+          # before vs after determines whether 'change' fires.
+          return was_checked unless dispatch_event(handle, 'click')
+          set_value(handle, value)
+          dispatch_event(handle, 'change', bubbles: true, cancelable: false) if now_checked != was_checked
+          return true
+        end
+        # Focus the field first — fill_in / set on a real browser implies
+        # clicking into the field, which fires focus before input/change.
+        focus(handle)
+        # Trailing \n on a single-input text form submits the form (browser
+        # default behaviour for Enter in a single-field form). Strip the \n
+        # before storing the value so the submitted body doesn't carry it.
+        submit_after = should_submit_on_enter?(node, value)
+        changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
+        return changed unless changed && @js
+        dispatch_input_change(handle)
+        submit_form(handle) if submit_after
+        changed
+      end
+
+      TEXT_LIKE_INPUT_TYPES = %w[text email password search tel url].to_set.freeze
+
+      def should_submit_on_enter?(node, value)
+        return false if node.nil? || !value.is_a?(String) || !value.end_with?("\n")
+        return false unless node.name == 'input'
+        form = enclosing_form(node) or return false
+        # HTML5 implicit submission: form has *exactly one* text-like input.
+        # Short-circuit at 2 instead of materialising the whole list.
+        count = 0
+        form.xpath('.//input').each do |i|
+          next unless TEXT_LIKE_INPUT_TYPES.include?((i['type'] || 'text').downcase)
+          count += 1
+          return false if count > 1
+        end
+        count == 1
+      end
+
+      SPECIAL_KEY_CODES = {
+        backspace: 8, tab: 9, enter: 13, return: 13, escape: 27, space: 32,
+        left: 37, up: 38, right: 39, down: 40, delete: 46, home: 36, end: 35,
+        shift: 16, control: 17, alt: 18, meta: 91
+      }.freeze
+
+      # HTML5 drag-and-drop simulation. Builds a dataTransfer payload
+      # from the supplied arguments (file paths → file items, hashes →
+      # string items per mime type) and fires dragenter / dragover /
+      # drop on the target. Page handlers walk dataTransfer.items /
+      # files / getData() to read the dropped content.
+      def drop(handle, args)
+        items = args.flat_map { |arg| drop_items(arg) }
+        js.call('__dropOnto', handle, items)
+        settle
+        true
+      end
+
+      def drop_items(arg)
+        case arg
+        when Hash
+          arg.map { |type, value| {'kind' => 'string', 'type' => type.to_s, 'value' => value.to_s} }
+        when ->(x) { x.respond_to?(:to_path) }
+          path = arg.to_path
+          [{'kind' => 'file', 'name' => File.basename(path), 'path' => path}]
+        when String
+          [{'kind' => 'file', 'name' => File.basename(arg), 'path' => arg}]
+        else
+          []
+        end
+      end
+
+      # Best-effort send_keys. Handles literal Strings, special tokens
+      # (:space, :enter, :backspace, :delete, :left, :right, :home, :end,
+      # arrow keys), modifier-style tokens (:shift) that fold subsequent
+      # input to upper-case, and array bursts ([:shift, 'o']) that scope
+      # the modifier to the burst. Maintains a per-call caret position
+      # so :left / :right insert at the right offset.
+      def send_keys(handle, keys)
+        node = lookup_node(handle)
+        return false if node.nil?
+        start  = (node.name == 'textarea' ? node.text : node['value']).to_s
+        state  = {value: start.dup, caret: start.length, shift: false}
+        keys.each { |k| apply_send_key(handle, state, k) }
+        set_value(handle, state[:value])
+        dispatch_input_change(handle)
+        true
+      end
+
+      def apply_send_key(handle, state, key)
+        case key
+        when Array
+          saved = state[:shift]
+          key.each { |sub| apply_send_key(handle, state, sub) }
+          state[:shift] = saved
+        when Symbol
+          apply_special_key(handle, state, key)
+        when String
+          text = state[:shift] ? key.upcase : key
+          text.each_char { |c| insert_char(handle, state, c) }
+        end
+      end
+
+      def apply_special_key(handle, state, key)
+        case key
+        when :shift, :control, :alt, :meta
+          state[:shift] = true if key == :shift
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
+        when :space
+          insert_char(handle, state, ' ')
+        when :enter, :return
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key])
+        when :backspace
+          if state[:caret] > 0
+            state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
+            state[:caret] -= 1
+          end
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:backspace])
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:backspace])
+        when :delete
+          if state[:caret] < state[:value].length
+            state[:value] = state[:value][0, state[:caret]] + state[:value][state[:caret] + 1..]
+          end
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:delete])
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:delete])
+        when :left  then state[:caret] = [state[:caret] - 1, 0].max
+        when :right then state[:caret] = [state[:caret] + 1, state[:value].length].min
+        when :home  then state[:caret] = 0
+        when :end   then state[:caret] = state[:value].length
+        else
+          code = SPECIAL_KEY_CODES[key] || 0
+          dispatch_key_event(handle, 'keydown', code)
+          dispatch_key_event(handle, 'keyup',   code)
+        end
+      end
+
+      def insert_char(handle, state, char)
+        state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
+        state[:caret] += char.length
+        code = char.upcase.bytes.first || 0
+        dispatch_key_event(handle, 'keydown',  code)
+        dispatch_key_event(handle, 'keypress', code)
+        dispatch_key_event(handle, 'keyup',    code)
+      end
+
+      def dispatch_key_event(handle, type, key_code)
+        return unless @js && @listened_types.include?(type)
+        js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code)
+        settle
+      end
+
+      def evaluate_script(code, args = [])
+        js.call('__evalScript', code, args.map { |a| marshal_script_arg(a) })
+      end
+
+      # Capybara's async-script contract: the last `arguments[N]` is a
+      # callback the script invokes with the resolved value. We start
+      # the script, drain the virtual clock so any setTimeout-driven
+      # work runs, then read whatever the callback received.
+      def evaluate_async_script(code, args = [])
+        marshalled = args.map { |a| marshal_script_arg(a) }
+        js.call('__evalAsyncScript', code, marshalled)
+        # Push virtual time forward enough for setTimeout-based callbacks
+        # — there's no outer Capybara polling to advance the clock here.
+        js.drain_timers(SYNC_DRAIN_MS) if @timers_active
+        settle
+        result = js.call('__pollAsyncResult')
+        raise 'evaluate_async_script: callback was not invoked within virtual time' if result.nil?
+        result['value']
+      end
+
+      def marshal_script_arg(arg)
+        case arg
+        when Capybara::Driver::Node then {'__elementHandle' => arg.native}
+        when Array                  then arg.map { |x| marshal_script_arg(x) }
+        when Hash                   then arg.transform_values { |v| marshal_script_arg(v) }
+        else arg
+        end
+      end
+
+      # The "user typed into a field" event pair. Both bubble, neither is
+      # cancelable — matches what real browsers fire after a value change
+      # via keyboard or driver `set` / `send_keys`.
+      def dispatch_input_change(handle)
+        dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+        dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+      end
+
+      # Fire a JS event at `handle`. Returns true unless a listener called
+      # `preventDefault()`. Short-circuits when JS isn't booted, when no
+      # listener is registered for this event type, *and* no observer is
+      # watching for the side-effects — the cheap path covers the bulk of
+      # plain rack_test-style flows where most events are nobody's problem.
+      # Extra init keys (shiftKey / ctrlKey / etc.) flow through to the
+      # JS-side Event constructor.
+      def dispatch_event(handle, type, bubbles: true, cancelable: true, **init_extras)
+        return true unless handle
+        # Skip the ancestor walk when an addEventListener / observer
+        # already qualifies the event for dispatch. Inline-handler
+        # detection only matters as a fallback that also boots @js for
+        # script-less pages (e.g. plain `onclick="..."` markup).
+        listened = @listened_types.include?(type) || @mutation_recording
+        return true unless listened || inline_handler_in_path?(handle, type)
+        result = js.call('__dispatchFromRuby', handle, type.to_s,
+                         {bubbles: bubbles, cancelable: cancelable, **init_extras})
+        settle
+        result
+      end
+
+      # Cheap pre-check so the JS bridge stays cold for events nobody
+      # listens to. Walks the bubble path looking for an `on<type>` HTML
+      # attribute — the inline-handler counterpart to addEventListener.
+      def inline_handler_in_path?(handle, type)
+        attr = "on#{type}"
+        each_ancestor(lookup_node(handle)) { |cur| return true if cur[attr] }
+        false
+      end
+
+      # mousedown → sleep(delay) → mouseup. JS handlers that read
+      # Date.now() between the two events see real wall-clock elapsed,
+      # which is what Selenium drivers also do for `click(delay:)`.
+      def right_click(handle, modifiers = nil, delay: 0)
+        mods = modifier_init(modifiers)
+        fire_mouse_sequence(handle, button: 2, delay: delay, modifiers: mods)
+        dispatch_event(handle, 'contextmenu', button: 2, **mods)
+        true
+      end
+
+      def double_click(handle, modifiers = nil, delay: 0)
+        mods = modifier_init(modifiers)
+        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
+        dispatch_event(handle, 'click',    **mods)
+        dispatch_event(handle, 'click',    **mods)
+        dispatch_event(handle, 'dblclick', **mods)
+        true
+      end
+
+      def fire_mouse_sequence(handle, button:, delay:, modifiers:)
+        dispatch_event(handle, 'mousedown', button: button, **modifiers)
+        sleep(delay) if delay && delay > 0
+        dispatch_event(handle, 'mouseup',   button: button, **modifiers)
+      end
+
+      # Build the MouseEvent init slice from Capybara modifier symbols.
+      # `:command` is the macOS alias for `:meta` per Capybara's docs.
+      def modifier_init(modifiers)
+        return {} if modifiers.nil? || modifiers.empty?
+        flags = Array(modifiers).select { |m| MODIFIER_KEYS.include?(m) }
         {
-          'type'     => type.to_s,
-          'text'     => encode_modal_text(text),
-          'response' => response.is_a?(Symbol) ? response.to_s : response
+          shiftKey: flags.include?(:shift),
+          ctrlKey:  flags.include?(:control),
+          altKey:   flags.include?(:alt),
+          metaKey:  flags.include?(:meta) || flags.include?(:command)
         }
       end
 
-      def encode_modal_text(text)
-        case text
-        when nil      then nil
-        when Regexp   then {'regexp' => text.source, 'flags' => text.options}
-        else               text.to_s
+      # Push a buffered MutationRecord. No-op when no observer is active —
+      # the JS side flips @mutation_recording via the __notifyMutationActive
+      # callback so dom_op writes pay nothing on observer-less pages.
+      def record_mutation(type, target_handle, **extra)
+        return unless @mutation_recording && target_handle
+        @mutations << {type: type, target: target_handle, **extra}
+      end
+
+      # Drain microtasks (setTimeout(0)) and deliver pending mutations.
+      # Inside an `accept_alert do ... end` block we widen the drain so
+      # `setTimeout(N) → alert(...)` reaches the modal handler — there
+      # is no Capybara polling around that block to walk virtual time.
+      def settle
+        return unless @js
+        drain_max = @modal_handlers.empty? ? 0 : SYNC_DRAIN_MS
+        10.times do
+          js.drain_timers(drain_max) if @timers_active
+          break if @mutations.empty?
+          records, @mutations = @mutations, []
+          js.call('__deliverMutations', records)
+        end
+        @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @polling_until = nil
+      end
+
+      # Sticky polling decision: stay true for `POLLING_GRACE_S` after
+      # timers fire so a setTimeout firing mid-loop doesn't drop the
+      # synchronize block before Capybara's own `default_max_wait_time`
+      # expires. Capybara's timer caps the actual wait, this is just an
+      # upper bound on how long we lie about there being more work.
+      POLLING_GRACE_S = 10
+      def polling?
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if @timers_active
+          @polling_until = now + POLLING_GRACE_S
+          true
+        elsif @polling_until && now < @polling_until
+          true
+        else
+          @polling_until = nil
+          false
         end
       end
-      def drain_modal_queue
-        captured = @captured_modals
-        @captured_modals = nil
-        out = Array(call_runtime('drainModalQueue'))
-        captured ? captured + out : out
+
+      SYNC_DRAIN_MS = 5_000
+
+      # Advance the virtual JS clock by however much wall-clock time
+      # has actually passed since the last tick. The cap stops a
+      # runaway interval from looping forever in a single tick.
+      TICK_CAP_MS = 5_000
+      def tick_real_time
+        return unless @js && @timers_active
+        now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        elapsed  = ((now - @last_tick_ts) * 1000).to_i
+        @last_tick_ts = now
+        return if elapsed <= 0
+        js.drain_timers([elapsed, TICK_CAP_MS].min)
       end
 
-      # Long-lived inbox shared by nested `accept_modal` /
-      # `dismiss_modal` blocks. Each driver call drains the JS-side queue
-      # once and stashes unmatched modals here so the OUTER block can
-      # still find its message after the inner one consumes its own.
-      def modal_inbox
-        @modal_inbox ||= []
+      # Single dispatch entry called from JS via `__dom(handle, op, args)`.
+      def dom_op(handle, op, args)
+        node = lookup_node(handle) || @document
+        case op
+        when 'querySelector'
+          @handles.track(node.respond_to?(:at_css) ? node.at_css(args[0]) : nil)
+        when 'querySelectorAll'
+          (node.respond_to?(:css) ? node.css(args[0]) : []).map { |n| @handles.track(n) }
+        when 'getElementById'
+          # Scope to receiver so shadow roots and fragments find their
+          # own descendants. CSS instead of `.//*[@id=...]` because the
+          # XPath form skips direct children of a DocumentFragment.
+          scope = node.respond_to?(:at_css) ? node : @document
+          id = args[0].to_s.gsub(/[^A-Za-z0-9_-]/) { |c| "\\#{c}" }
+          @handles.track(scope.at_css("##{id}"))
+        when 'closest'
+          cur = node
+          while cur && cur.element?
+            return @handles.track(cur) if cur.matches?(args[0])
+            cur = cur.parent
+          end
+          nil
+        when 'matches'
+          node.element? && node.matches?(args[0])
+        when 'contains'
+          other = lookup_node(args[0])
+          other && (node == other || other.ancestors.include?(node))
+        when 'parentNode', 'parentElement'
+          parent = node.respond_to?(:parent) ? node.parent : nil
+          parent.respond_to?(:element?) ? @handles.track(parent) : nil
+        when 'firstChild'      then @handles.track(node.children.first)
+        when 'lastChild'       then @handles.track(node.children.last)
+        when 'nextSibling'     then @handles.track(node.next)
+        when 'previousSibling' then @handles.track(node.previous)
+        when 'children'        then node.element_children.map { |n| @handles.track(n) }
+        when 'childNodes'      then node.children.map { |n| @handles.track(n) }
+        when 'nodeType'        then node_type_for(node)
+        when 'nodeName'        then (node.name || '').upcase
+        when 'tagName'         then (node.element? ? node.name.upcase : '')
+        when 'textContent'     then node.text
+        when 'innerText'       then visible_text(handle).strip
+        when 'innerHTML'       then node.respond_to?(:inner_html) ? node.inner_html : node.to_html
+        when 'outerHTML'       then node.to_html
+        when 'getAttribute'    then node.respond_to?(:[]) ? node[args[0]] : nil
+        when 'hasAttribute'    then node.respond_to?(:[]) ? !node[args[0]].nil? : false
+        when 'attributes'
+          (node.respond_to?(:attributes) ? node.attributes : {})
+            .map { |k, v| [k, v.respond_to?(:value) ? v.value : v.to_s] }
+        when 'value'           then value(handle)
+        when 'checked'         then checked?(handle)
+        when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
+        when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
+        when 'form'            then @handles.track(enclosing_form(node))
+        when 'list'
+          list_id = node.respond_to?(:[]) && node['list']
+          list_id ? @handles.track(@document.at_xpath('.//datalist[@id=$id]', nil, id: list_id.to_s)) : nil
+        when 'options'
+          (node.respond_to?(:css) ? node.css('option') : []).map { |n| @handles.track(n) }
+        when 'label'
+          node.respond_to?(:[]) ? (node['label'] || node.text) : ''
+        when 'validity'           then compute_validity(node)
+        when 'validationMessage'  then validation_message(node)
+        when 'focus' then focus(handle); nil
+        when 'blur'  then blur(handle);  nil
+        when 'setAttribute'
+          if node.element?
+            old = node[args[0]]
+            node[args[0]] = args[1].to_s
+            record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
+          end
+          nil
+        when 'removeAttribute'
+          if node.element?
+            old = node[args[0]]
+            node.delete(args[0])
+            record_mutation('attributes', handle, attributeName: args[0], oldValue: old)
+          end
+          nil
+        when 'setValue'        then set_value(handle, args[0]); nil
+        when 'setChecked'      then set_value(handle, !!args[0]); nil
+        when 'setTextContent'
+          node.content = args[0].to_s if node.respond_to?(:content=)
+          record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+          nil
+        when 'setInnerHTML'
+          node.inner_html = args[0].to_s if node.respond_to?(:inner_html=)
+          record_mutation('childList', handle, addedNodes: [], removedNodes: [])
+          nil
+        when 'appendChild'
+          child = lookup_node(args[0])
+          if child && node.respond_to?(:add_child)
+            node.add_child(child)
+            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
+          end
+          args[0]
+        when 'removeChild'
+          child = lookup_node(args[0])
+          if child && child.parent
+            parent_handle = @handles.track(child.parent)
+            child.unlink
+            record_mutation('childList', parent_handle, addedNodes: [], removedNodes: [args[0]])
+          end
+          args[0]
+        when 'insertBefore'
+          new_child = lookup_node(args[0])
+          ref_child = lookup_node(args[1])
+          if new_child
+            ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [])
+          end
+          args[0]
+        when 'replaceChild'
+          new_child = lookup_node(args[0])
+          old_child = lookup_node(args[1])
+          if new_child && old_child
+            old_child.replace(new_child)
+            record_mutation('childList', handle, addedNodes: [args[0]], removedNodes: [args[1]])
+          end
+          args[1]
+        when 'createElement'
+          @handles.track(@document.create_element(args[0].to_s))
+        when 'createTextNode'
+          @handles.track(@document.create_text_node(args[0].to_s))
+        when 'createComment'
+          @handles.track(Nokogiri::XML::Comment.new(@document, args[0].to_s))
+        when 'createDocumentFragment'
+          @handles.track(Nokogiri::XML::DocumentFragment.new(@document))
+        when 'attachShadow'
+          # `host.attachShadow({mode: 'open'})` — set up a shadow tree
+          # rooted at this host. Re-attach is illegal per spec; mirror
+          # by returning the existing root if one is already present.
+          existing = @shadow_roots[handle]
+          if existing
+            @handles.track(existing)
+          else
+            root = Nokogiri::HTML5::DocumentFragment.parse('')
+            @shadow_roots[handle] = root
+            @shadow_root_set << root
+            @handles.track(root)
+          end
+        when 'shadowRoot'
+          root = @shadow_roots[handle]
+          root && @handles.track(root)
+        when 'getElementsByTagName'
+          tag = args[0].to_s.downcase
+          return @document.css('*').map { |n| @handles.track(n) } if tag == '*'
+          (node.respond_to?(:css) ? node.css(tag) : []).map { |n| @handles.track(n) }
+        when 'getElementsByClassName'
+          tokens = args[0].to_s.split
+          return [] if tokens.empty? || !node.respond_to?(:css)
+          # AND-match every class token (`getElementsByClassName('a b')`
+          # = elements with `class` containing both `a` and `b`).
+          node.css(tokens.map { |t| ".#{t}" }.join).map { |n| @handles.track(n) }
+        when 'getElementsByName'
+          @document.xpath('.//*[@name=$n]', nil, n: args[0].to_s).map { |n| @handles.track(n) }
+        when 'cloneNode'
+          deep = !!args[0]
+          cloned = node.dup(deep ? 1 : 0)
+          @handles.track(cloned)
+        when 'compareDocumentPosition'
+          other = lookup_node(args[0])
+          compare_positions(node, other)
+        else
+          warn "[capybara-simulated] unsupported dom op: #{op}" if ENV['CSIM_DEBUG']
+          nil
+        end
       end
 
-      # Snapshot the JS-side modalQueue before a navigate wipes it, so a
-      # subsequent `drain_modal_queue` still sees alerts that fired
-      # synchronously from inside the click handler.
-      def capture_pending_modals
-        pending = Array(@ctx.call('__csim.drainModalQueue')) rescue []
-        return if pending.empty?
-        @captured_modals ||= []
-        @captured_modals.concat(pending)
+
+      def lookup_node(handle)
+        handle && @handles.lookup(handle)
       end
 
-      # Forced advance for callers (e.g. accept_modal) that need to age
-      # out async setTimeout-driven side effects without waiting on the
-      # wall-clock heuristic in advance_virtual_clock.
-      def advance_virtual_clock_step(ms)
-        @ctx.call('__csim.drainTimers', ms.to_i) rescue nil
+      # Nokogiri's Node#path returns an absolute XPath that re-locates
+      # the same node, e.g. /html[1]/body[1]/div[2]/a[3]. Nodes in a
+      # shadow tree have no document-rooted XPath — match Selenium's
+      # placeholder so callers see the same string they would there.
+      SHADOW_PATH = '(: Shadow DOM element - no XPath :)'
+      def node_path(handle)
+        node = lookup_node(handle)
+        return '' if node.nil?
+        each_ancestor(node) { |a| return SHADOW_PATH if @shadow_root_set.include?(a) }
+        node.path.to_s
+      end
+
+      def shadow_root_handle(host_handle)
+        root = @shadow_roots[host_handle]
+        root && @handles.track(root)
+      end
+
+      # Detached-from-document detection so Capybara's automatic-reload
+      # kicks in. Two failure modes exist: the node was removed (handle
+      # gone or the surviving Nokogiri object's ancestors no longer
+      # include @document), or the integer handle was reused after a
+      # reload and now points at a different live node — `captured`
+      # lets the caller pin the original ref so we can spot the rebind.
+      def stale?(handle, captured = nil)
+        node = lookup_node(handle)
+        return true if node.nil?
+        return true if captured && !node.equal?(captured)
+        return false if node.is_a?(Nokogiri::XML::Document) || @shadow_root_set.include?(node)
+        # Walk parents without materialising an ancestors array — this
+        # is the hot path (every Node accessor's check_stale).
+        cur = node.respond_to?(:parent) ? node.parent : nil
+        while cur
+          return false if cur.equal?(@document) || @shadow_root_set.include?(cur)
+          cur = cur.respond_to?(:parent) ? cur.parent : nil
+        end
+        true
+      end
+
+      def check_stale(handle, captured = nil)
+        tick_real_time
+        raise StaleElement, 'element is no longer attached to the document' if stale?(handle, captured)
+      end
+
+      # Push a one-shot handler onto the stack — the next modal that
+      # fires consumes the topmost handler. Nested with_modal calls
+      # therefore pair up with sequential dialogs in dispatch order
+      # (innermost handler matches the first dialog, etc.). Pulled off
+      # again on block exit in case the dialog never fired.
+      def with_modal(handler)
+        @modal_handlers.push(handler)
+        yield
+      ensure
+        @modal_handlers.delete(handler)
+      end
+
+      # JS history.pushState / replaceState passes the URL here. Resolves
+      # against the current page (so SPA-style "/foo" updates the path
+      # only) and updates @current_url; no fetch happens — the document
+      # stays. nil URL is a no-op (history.pushState({}, '') is valid).
+      def history_state(url)
+        @current_url = resolve(url.to_s) if url
+        nil
+      end
+
+      # JS `location.href = ...` / `location.pathname = ...` /
+      # `location.assign(...)`. Browsers tear the page down and load
+      # the new URL — we navigate, which re-runs scripts and resets
+      # the JS-side state.
+      def location_assign(url)
+        return if url.nil? || url.empty?
+        navigate(:get, resolve(url.to_s))
+        nil
+      end
+
+      def handle_modal(type, message, default_value)
+        handler = @modal_handlers.pop
+        if handler
+          handler.call(type, message, default_value)
+        else
+          # No handler installed — match Capybara's auto-dismiss
+          # behaviour for stray dialogs: confirm/prompt → cancel,
+          # alert → ignored.
+          type == 'prompt' ? nil : false
+        end
       end
 
       private
 
-      # Pump only zero-delay timers (microtask-style fallouts of jQuery's
-      # `$(fn)` and similar). Any non-zero setTimeout queued during the
-      # interaction stays pending — Capybara's synchronize loop will
-      # advance the virtual clock as it retries.
-      # After interaction events that may kick off Turbo / Stimulus async
-      # rendering, drain enough virtual-clock to flush a `requestAnimationFrame`
-      # (which our prelude maps to `setTimeout(..., 16)`) plus any chained
-      # microtasks. Without this, `<turbo-stream>`'s async `connectedCallback`
-      # leaves the DOM mid-render until the next call advances the clock.
-      DRAIN_AFTER_INTERACTION_MS = 32
-      def drain_async_timers
-        @ctx.call('__csim.drainTimers', DRAIN_AFTER_INTERACTION_MS) rescue nil
+      def navigate(method, url, body: nil, content_type: nil, referer: @current_url)
+        req = Request.new(method: method, url: url, body: body, content_type: content_type, referer: referer)
+        # Discard forward history — a real browser drops the redo stack
+        # the moment you navigate after a `go_back`. Skip the reslice
+        # when we're already at the tail (the common case).
+        @history = @history[0..@history_idx] if @history_idx < @history.size - 1
+        @history << req
+        @history_idx = @history.size - 1
+        replay(req)
       end
 
-      def advance_virtual_clock
-        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        if @last_call_at
-          ms = ((now - @last_call_at) * 1000).to_i
-          @ctx.call('__csim.drainTimers', ms) rescue nil if ms.positive?
+      def current_request = @history[@history_idx]
+
+      def replay(req)
+        uri  = URI.parse(req.url)
+        opts = {method: req.method.to_s.upcase}
+        opts[:input]         = req.body if req.body
+        opts['CONTENT_TYPE'] = req.content_type if req.content_type
+        opts['HTTP_COOKIE']  = cookie_header_value unless @cookies.empty?
+        opts['HTTP_REFERER'] = req.referer if req.referer
+        # Hand env_for the full absolute URL — Rack derives HTTP_HOST /
+        # SERVER_NAME / SERVER_PORT / rack.url_scheme from it so server-
+        # side request.host etc. reflect the visit URL, not Rack's
+        # default example.org:80. Same shape v1 uses.
+        env  = Rack::MockRequest.env_for(req.url, **opts)
+        status, headers, body_iter = @app.call(env)
+        response_body = read_rack_body(body_iter)
+
+        ingest_set_cookie(headers)
+
+        if (300..399).cover?(status) && (loc = (headers['location'] || headers['Location']))
+          # Don't bump @current_url here — keep the pre-redirect URL so
+          # the recursive replay sends the original page as Referer
+          # (matches Capybara's #visit-with-redirect contract).
+          # 307/308 preserve the original method + body; 301/302/303 fall
+          # back to GET (browser convention).
+          # Browsers carry the request's fragment through redirects when
+          # the redirect Location doesn't itself have one (RFC 7231 §7.1.2).
+          preserve = status == 307 || status == 308
+          target   = resolve(loc, base: req.url)
+          target   = "#{target}##{uri.fragment}" if uri.fragment && !target.include?('#')
+          return replay(Request.new(
+            method:       preserve ? req.method : :get,
+            url:          target,
+            body:         preserve ? req.body : nil,
+            content_type: preserve ? req.content_type : nil,
+            referer:      req.referer
+          ))
         end
-        @last_call_at = now
+
+        @status_code      = status
+        @response_headers = headers
+        @current_url      = req.url
+        # Handle integers get reused across documents, so the old file-pick
+        # map would silently re-attach to whatever now lives at those ints.
+        # Same goes for focus state.
+        @file_picks.clear
+        @focused_handle = nil
+        @document    = Nokogiri::HTML5(response_body)
+        @handles.reset!(@document)
+        # Run inline `<script>` tags only when the page actually has any —
+        # avoids paying QuickJS cold-start on rack_test-style flows. Reset
+        # the virtual clock so timers from the previous page can't fire on
+        # this one, and drain afterwards to settle initial setTimeout(0)s.
+        if @document.at_css('script')
+          bootstrap_page
+        elsif @js
+          @js.reset_page
+          reset_per_page_state
+          @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        end
+        status
       end
 
-      # Per call_runtime, mirror real wall-clock progress into the JS
-      # virtual clock so setTimeout-style handlers fire as Capybara's
-      # synchronize loop ages out the wait budget. Skip the bookkeeping
-      # for the calls that should never trigger user code (timer drain,
-      # page load setup, modal-response wiring).
-      VIRTUAL_TICKLESS = %w[drainTimers loadHTML setModalResponses].freeze
-
-      def call_runtime(method, *args)
-        advance_virtual_clock unless VIRTUAL_TICKLESS.include?(method)
-        result = @ctx.call("__csim.#{method}", *args)
-        # Skip the implicit-navigation pickup when the runtime returned a
-        # navigation directive: `follow` will run the actual visit through
-        # Rack with the right method/body, and we don't want to clobber it
-        # with a GET driven by happy-dom's stale window.location update.
-        if !VIRTUAL_TICKLESS.include?(method) && !@in_navigate &&
-           !(result.is_a?(Hash) && %w[navigate submit].include?(result['action']))
-          check_location_change
-        end
-        result
-      rescue MiniRacer::RuntimeError => e
-        if e.message.to_s.include?('stale or unknown node handle')
-          raise Capybara::Simulated::StaleElementReferenceError, e.message
-        end
-        raise
+      # Replay the current document's `<script>` tags + lifecycle events.
+      # Called on initial page load AND after a JsRuntime VM recycle so
+      # the fresh VM ends up with the same handlers / library state the
+      # previous one had — without it, mid-test recycles silently lose
+      # all addEventListener / setTimeout closures and subsequent
+      # clicks dispatch into nothing.
+      def bootstrap_page
+        return unless @document.at_css('script')
+        js.reset_page
+        reset_per_page_state
+        js.run_scripts(@document) { |src| fetch_resource(resolve(src)) }
+        # Fire DOMContentLoaded + load so libraries that queue work
+        # behind those events (jQuery's $(fn) ready queue, Stimulus's
+        # connectedCallback wiring) actually run.
+        fire_lifecycle_events
+        settle
       end
 
-      # Detect when user JS assigned to window.location and trigger an
-      # actual visit through the Rack stack so subsequent finds operate
-      # on the new page.
-      def check_location_change
-        return unless @current_url
-        loc = (@ctx.eval('window && window.location ? window.location.href : null') rescue nil)
-        return unless loc.is_a?(String) && !loc.empty?
-        return if loc == @current_url
-        # history.pushState / replaceState changed the URL but did not
-        # trigger a fetch — adopt the new URL without re-fetching.
-        if (@ctx.call('__csim.consumeHistoryPushed') rescue false)
-          @current_url = loc
-          return
-        end
-        a = URI.parse(@current_url) rescue nil
-        b = URI.parse(loc) rescue nil
-        return unless a && b
-        # Same scheme/host/path/query → only the fragment changed; no fetch.
-        if a.scheme == b.scheme && a.host == b.host && a.port == b.port &&
-           a.path == b.path && a.query == b.query
-          @current_url = loc
-          return
-        end
-        # Trigger a real navigation under the Rack app.
-        navigate(:get, loc, [], referer: @current_url)
+      # In-page resolution — link href, form action, <script src>. Honours
+      # `<base href="...">` per the HTML spec.
+      def resolve(url, base: nil)
+        return url if url =~ %r{\A[a-z]+://}i
+        URI.join(base || base_for_relative_urls || DEFAULT_HOST, url).to_s
       end
 
-      def follow(directive)
-        return nil unless directive.is_a?(Hash)
-        # Snapshot any modal recorded by the click handler before the
-        # navigate clears the JS-side queue (loadHTML resets state).
-        # Capybara's `accept_alert { click_link 'Alert page change' }`
-        # otherwise loses the alert message because it fires synchronously
-        # from the same click that triggers the navigation.
-        capture_pending_modals if %w[navigate submit].include?(directive['action'])
-        case directive['action']
-        when 'navigate'
-          target = resolve_url(directive['href'])
-          # `<a href="/foo#bar">` from the same /foo page is just an
-          # in-page anchor jump in real browsers — no request, no reload.
-          if @current_url && same_path_anchor?(@current_url, target)
-            @current_url = target
-            return nil
-          end
-          navigate(:get, target)
-        when 'submit'
-          method = (directive['method'] || 'GET').downcase.to_sym
-          target = directive['url'].to_s.empty? ? @current_url : directive['url']
-          navigate(method, resolve_url(target), directive['fields'] || [], enctype: directive['enctype'])
-        end
+      # Top-level navigation (visit). A bare relative path is treated as
+      # path-from-root of the current host — Capybara's `#visit` contract
+      # is "go here under the test app", not browser `location.href` URI
+      # joining (which would carry over the previous page's directory).
+      def resolve_against_current(url)
+        return url if url =~ %r{\A[a-z]+://}i
+        current = URI.parse(@current_url || DEFAULT_HOST)
+        rooted  = url.start_with?('/') ? url : "/#{url}"
+        URI.join("#{current.scheme}://#{current.host}", rooted).to_s
       end
 
-      def navigate(method, url, fields = [], enctype: 'application/x-www-form-urlencoded',
-                   replace_history: false, history_move: false, referer: nil)
-        # Avoid recursive location-change detection while we're in the
-        # middle of installing the new page.
-        outermost = !@in_navigate
-        @in_navigate = true
-        full_url = resolve_url(url)
-        body = nil
-        env_overrides = {}
-
-        if %i[post put patch delete].include?(method)
-          if enctype.to_s.start_with?('multipart/form-data')
-            boundary = "----CapybaraSimulatedBoundary#{SecureRandom.hex(8)}"
-            body = build_multipart_body(fields, boundary)
-            env_overrides['CONTENT_TYPE'] = "multipart/form-data; boundary=#{boundary}"
-          elsif fields.any? { |_, v| v.is_a?(Hash) && v['file'] }
-            # Non-multipart form with a file input: real browsers submit
-            # the file's basename as the field value.
-            cleaned = fields.flat_map do |k, v|
-              if v.is_a?(Hash) && v['file']
-                paths = Array(v['paths'])
-                paths.empty? ? [[k, '']] : paths.map { |p| [k, File.basename(p.to_s)] }
-              else
-                [[k, v]]
-              end
-            end
-            body = URI.encode_www_form(cleaned)
-            env_overrides['CONTENT_TYPE'] = 'application/x-www-form-urlencoded'
-          else
-            body = URI.encode_www_form(fields)
-            env_overrides['CONTENT_TYPE'] = enctype
-          end
-        elsif fields.any?
-          uri = URI.parse(full_url)
-          uri.query = [uri.query.to_s, URI.encode_www_form(fields)].reject(&:empty?).join('&')
-          full_url = uri.to_s
-        end
-
-        ref = referer.nil? ? @current_url : (referer || nil)
-        env_overrides['HTTP_REFERER'] = ref if ref
-
-        cookie_header = build_cookie_header(full_url)
-        env_overrides['HTTP_COOKIE'] = cookie_header unless cookie_header.empty?
-
-        request  = Rack::MockRequest.new(@app)
-        response = request.request(method.to_s.upcase, full_url, env_overrides.merge(input: body || ''))
-
-        ingest_set_cookie(response.headers, full_url)
-
-        @current_url      = full_url
-        @status_code      = response.status
-        @response_headers = response.headers
-        @last_method      = method
-        @last_fields      = fields
-        @last_enctype     = enctype
-
-        unless history_move
-          if replace_history
-            @history[@history_index] = full_url if @history_index >= 0
-            @history[@history_index] = full_url if @history_index < 0
-            @history_index = 0 if @history_index < 0
-          else
-            @history = @history[0..@history_index] + [full_url]
-            @history_index = @history.size - 1
-          end
-        end
-
-        if (300..399).cover?(response.status) && response.headers['location']
-          # Preserve the original fragment across redirects when the target
-          # location does not include one — browsers do this per RFC 7231.
-          target = response.headers['location']
-          orig_frag = URI.parse(full_url).fragment rescue nil
-          if orig_frag && !orig_frag.empty?
-            tgt = URI.parse(target) rescue nil
-            target = "#{target}##{orig_frag}" if tgt && (tgt.fragment.nil? || tgt.fragment.empty?)
-          end
-          if [307, 308].include?(response.status)
-            return navigate(method, target, fields, enctype: enctype, referer: ref)
-          end
-          return navigate(:get, target, referer: ref)
-        end
-
-        load_html(response.body)
-      ensure
-        @in_navigate = false if outermost
+      def same_document_fragment?(target)
+        return true if target.start_with?('#')
+        return false if @current_url.nil?
+        tgt = URI.parse(target) rescue (return false)
+        cur = URI.parse(@current_url) rescue (return false)
+        tgt.scheme == cur.scheme && tgt.host == cur.host && tgt.path == cur.path && !tgt.fragment.nil?
       end
 
-      def load_html(html)
-        # loadHTML rebuilds the happy-dom Window with @current_url so
-        # window.location matches Ruby's view of the page after a real
-        # navigation.
-        call_runtime('loadHTML', wrap_fragment_html(html.to_s), @current_url.to_s)
-        call_runtime('setModalResponses', stringify_keys(@modal_responses))
-        load_external_scripts
-        call_runtime('runInlineScripts')
-        load_module_scripts
-        call_runtime('syncWindowGlobals')
-        # Drain only the immediate (zero-delay) timers queued during page
-        # load — typically jQuery's `$(fn)` ready callbacks. Anything
-        # genuinely delayed waits for the synchronize loop to age it in.
-        call_runtime('drainTimers', 0)
-        @last_call_at = nil
-        nil
+      def base_for_relative_urls
+        base_href = @document&.at_xpath('.//base/@href')&.value
+        return @current_url if base_href.nil? || base_href.empty?
+        base_href.match?(%r{\A[a-z]+://}i) ? base_href : URI.join(@current_url || DEFAULT_HOST, base_href).to_s
       end
 
-      # Rails apps pin module dependencies via `<script type="importmap">`
-      # and load them via `<script type="module">`. mini_racer has no ESM
-      # loader, so we shell out to esbuild (via vendor/js/bundle-modules.mjs)
-      # to compile the entire dependency graph into a single IIFE bundle
-      # that runs in the same isolate as inline scripts. Pre-fetches every
-      # reachable module through Rack so the bundler never makes a real
-      # network call.
-      MODULE_BUNDLER_SCRIPT = File.join(VENDOR_DIR, 'bundle-modules.mjs').freeze
-      MODULE_IMPORT_RX = /(?:^|[\s;{(=])(?:import|export)(?:\s*\(|[^'"\n;]*?\bfrom\s*)?\s*['"]([^'"]+)['"]/m.freeze
-
-      def load_module_scripts
-        details = call_runtime('moduleScriptDetails')
-        return if details.nil?
-        importmap = parse_importmap_from_details(details)
-        entries   = Array(details['entries'])
-        return if importmap.empty? && entries.empty?
-
-        # Importmap + module-script entries are page-content-derived, so
-        # keying on them alone covers different pages of the same Rails app
-        # — the bundle output is identical when the inputs are. Including
-        # `@current_url` only suppressed cache hits across visits without
-        # buying any correctness; build_module_bundle was the single biggest
-        # cost in the suite (52% of wall time on a hot test).
-        cache_key = Digest::SHA256.hexdigest(JSON.dump([importmap, entries]))
-        @module_bundle_cache ||= {}
-        bundle = @module_bundle_cache[cache_key] ||=
-                 build_module_bundle(importmap, entries)
-        return unless bundle
-        @ctx.eval(bundle)
-        # Resolve any dynamic imports queued during the bundle's static
-        # evaluation phase. The registry is populated only after the
-        # bundle body runs, so deferred resolution is the only way to
-        # honour `import("controllers/foo")` calls fired by code like
-        # stimulus-loading's eagerLoad.
-        @ctx.eval('typeof __csim_drain_imports === "function" && __csim_drain_imports()')
-        call_runtime('syncWindowGlobals')
-      end
-
-      def parse_importmap_from_details(details)
-        raw = details['importmap']
-        return {} if raw.nil? || raw.to_s.strip.empty?
-        JSON.parse(raw)
-      rescue JSON::ParserError
-        {}
-      end
-
-      def build_module_bundle(importmap, entries)
-        sources = prefetch_module_sources(importmap, entries)
-        payload = JSON.dump(
-          'importmap' => importmap,
-          'baseUrl'   => @current_url || DEFAULT_HOST,
-          'entries'   => entries,
-          'sources'   => sources
-        )
-        out, err, status = Open3.capture3('node', MODULE_BUNDLER_SCRIPT, stdin_data: payload)
-        unless status.success?
-          warn "[capybara-simulated] module bundler failed: #{err.to_s[0, 400]}"
-          return nil
-        end
-        out
-      end
-
-      # Walk the module graph by fetching each entry/import via Rack and
-      # extracting nested `import`/`export ... from` references with a
-      # regex. We don't try to be clever about live-binding semantics —
-      # esbuild handles that. We just need every reachable URL in the
-      # `sources` map before the bundler runs.
-      def prefetch_module_sources(importmap, entries)
-        base = @current_url || DEFAULT_HOST
-        seen = {}
-        queue = []
-        entries.each do |e|
-          if (src = e['src'] || e[:src])
-            url = resolve_module_specifier(src, base, importmap, base)
-            queue << url if url
-          elsif (inline = e['inline'] || e[:inline])
-            extract_module_specifiers(inline.to_s).each do |spec|
-              url = resolve_module_specifier(spec, base, importmap, base)
-              queue << url if url
-            end
-          end
-        end
-        # Pre-fetch every importmap pin too, even if no static import
-        # reaches it. The bundler statically embeds them all so dynamic
-        # `import("controllers/foo_controller")` calls (rewritten to a
-        # synchronous registry lookup) resolve at runtime.
-        (importmap['imports'] || importmap[:imports] || {}).each do |spec, _|
-          next if spec.to_s.end_with?('/')
-          url = resolve_module_specifier(spec.to_s, base, importmap, base)
-          queue << url if url
-        end
-        until queue.empty?
-          url = queue.shift
-          next if seen.key?(url)
-          body = fetch_resource(url)
-          # Rack hands us ASCII-8BIT strings; the bundler's JSON.dump
-          # trips a "UTF-8 string passed as BINARY" warning under json 2.x
-          # (and is a hard error in json 3). JS source is always Unicode,
-          # so retag without copying bytes.
-          body = body.dup.force_encoding(Encoding::UTF_8) if body
-          seen[url] = body || ''
-          next if body.nil? || body.empty?
-          extract_module_specifiers(body).each do |spec|
-            next_url = resolve_module_specifier(spec, url, importmap, base)
-            queue << next_url if next_url && !seen.key?(next_url)
-          end
-        end
-        seen
-      end
-
-      def extract_module_specifiers(source)
-        source.to_s.scan(MODULE_IMPORT_RX).flatten.compact
-      end
-
-      def resolve_module_specifier(spec, importer, importmap, base)
-        return spec if spec.start_with?('http://', 'https://')
-        if spec.start_with?('/')
-          return URI.join(base, spec).to_s
-        end
-        if spec.start_with?('./', '../')
-          return URI.join(importer, spec).to_s
-        end
-        imports = (importmap['imports'] || importmap[:imports] || {})
-        if imports.key?(spec)
-          return resolve_module_specifier(imports[spec], importer, importmap, base)
-        end
-        # Trailing-slash mapping per the importmap spec.
-        match = imports.keys.find {|k| k.end_with?('/') && spec.start_with?(k) }
-        if match
-          return resolve_module_specifier(imports[match] + spec[match.length..], importer, importmap, base)
-        end
-        nil
-      end
-
-      def load_external_scripts
-        srcs = Array(call_runtime('externalScriptSources'))
-        srcs.each do |src|
-          next if src.nil? || src.empty?
-          next if src.match?(EXTERNAL_SCRIPT_DENYLIST)
-          body = nil
-          begin
-            body = fetch_resource(src)
-          rescue StandardError => e
-            warn "[capybara-simulated] failed to fetch script #{src.inspect}: #{e.class}: #{e.message[0, 120]}"
-            next
-          end
-          next if body.nil?
-          begin
-            @ctx.eval(body)
-            call_runtime('syncWindowGlobals')
-          rescue MiniRacer::RuntimeError => e
-            warn "[capybara-simulated] script #{src.inspect} raised: #{e.class}: #{e.message[0, 200]}"
-          end
-        end
-      end
-
-      def wrap_fragment_html(html)
-        return html if html.empty?
-        return html if html.match?(/\A\s*(?:<!doctype\s|<\?xml|<html\b)/i)
-        "<!doctype html><html><body>#{html}</body></html>"
-      end
-
-      MIME_TYPES = {
-        'txt'  => 'text/plain',
-        'html' => 'text/html',
-        'htm'  => 'text/html',
-        'css'  => 'text/css',
-        'js'   => 'application/javascript',
-        'json' => 'application/json',
-        'xml'  => 'application/xml',
-        'png'  => 'image/png',
-        'jpg'  => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'gif'  => 'image/gif',
-        'svg'  => 'image/svg+xml',
-        'pdf'  => 'application/pdf'
-      }.freeze
-
-      def build_multipart_body(fields, boundary)
-        parts = []
-        fields.each do |name, value|
-          if value.is_a?(Hash) && value['file']
-            paths = Array(value['paths'])
-            if paths.empty?
-              parts << multipart_file_part(name, '', '', 'application/octet-stream', boundary)
-            else
-              paths.each do |path|
-                content = File.binread(path) rescue ''
-                filename = File.basename(path.to_s)
-                ext = File.extname(filename).delete('.').downcase
-                ctype = MIME_TYPES[ext] || 'application/octet-stream'
-                parts << multipart_file_part(name, content, filename, ctype, boundary)
-              end
-            end
-          else
-            parts << multipart_text_part(name, value.to_s, boundary)
-          end
-        end
-        parts.join + "--#{boundary}--\r\n"
-      end
-
-      def multipart_text_part(name, value, boundary)
-        "--#{boundary}\r\n" \
-          "Content-Disposition: form-data; name=\"#{name}\"\r\n\r\n" \
-          "#{value}\r\n"
-      end
-
-      def multipart_file_part(name, content, filename, ctype, boundary)
-        "--#{boundary}\r\n" \
-          "Content-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\n" \
-          "Content-Type: #{ctype}\r\n\r\n" \
-          "#{content}\r\n"
-      end
-
-      # ---- minimal cookie jar -------------------------------------------
-      # Stores Set-Cookie response headers and replays the matching cookies
-      # on subsequent requests. Just enough surface area to satisfy
-      # Capybara specs that probe set/clear/path-scoped behaviour.
-      def build_cookie_header(url)
-        uri = URI.parse(url) rescue nil
-        return '' unless uri
-        now = Time.now
-        @cookie_jar.reject! { |c| c[:expires] && c[:expires] < now }
-        matching = @cookie_jar.select do |c|
-          domain_matches?(c[:domain], uri.host) && path_matches?(c[:path], uri.path)
-        end
-        matching.map { |c| "#{c[:name]}=#{c[:value]}" }.join('; ')
-      end
-
-      def ingest_set_cookie(headers, url)
-        uri = URI.parse(url) rescue nil
-        return unless uri
-        raw = headers['set-cookie'] || headers['Set-Cookie']
-        return unless raw
-        Array(raw).each do |line|
-          line.to_s.split(/\n/).each {|l| absorb_cookie(l, uri) }
-        end
-      end
-
-      def absorb_cookie(line, uri)
-        parts = line.split(/;\s*/)
-        return if parts.empty?
-        name, value = parts.shift.split('=', 2)
-        return unless name && !name.empty?
-        cookie = {
-          name:    name.strip,
-          value:   (value || '').strip,
-          domain:  uri.host,
-          path:    '/',
-          expires: nil,
-          secure:  false,
-          http_only: false
-        }
-        parts.each do |attr|
-          k, v = attr.split('=', 2)
-          case (k || '').downcase
-          when 'domain'   then cookie[:domain] = v.to_s.sub(/\A\./, '')
-          when 'path'     then cookie[:path] = v.to_s
-          when 'expires'  then cookie[:expires] = (Time.parse(v) rescue nil)
-          when 'max-age'
-            secs = v.to_i
-            cookie[:expires] = Time.now + secs if secs.positive?
-            cookie[:expires] = Time.at(0) if secs <= 0
-          when 'secure'   then cookie[:secure] = true
-          when 'httponly' then cookie[:http_only] = true
-          end
-        end
-        cookie[:path] = '/' if cookie[:path].nil? || cookie[:path].empty?
-        # Replace existing cookie with same (name, domain, path).
-        @cookie_jar.reject! do |c|
-          c[:name] == cookie[:name] && c[:domain] == cookie[:domain] && c[:path] == cookie[:path]
-        end
-        if cookie[:expires] && cookie[:expires] < Time.now
-          # already expired — skip storing
-        else
-          @cookie_jar << cookie
-        end
-      end
-
-      def domain_matches?(cookie_domain, host)
-        return true if cookie_domain.nil? || cookie_domain.empty?
-        return true if cookie_domain == host
-        host.to_s.end_with?(".#{cookie_domain}")
-      end
-
-      def path_matches?(cookie_path, request_path)
-        cookie_path = '/' if cookie_path.nil? || cookie_path.empty?
-        return true if cookie_path == '/'
-        return true if request_path == cookie_path
-        return true if request_path.start_with?(cookie_path + '/')
-        return true if cookie_path.end_with?('/') && request_path.start_with?(cookie_path)
-        false
-      end
-
+      # Fetch a static resource through the same Rack app (e.g. an
+      # external <script src="...">). Returns the body string, or nil on
+      # non-200. Doesn't update navigation state — the document, current
+      # URL, and last-request tuple stay put. Cached per-URL across
+      # visits and cleared on reset! — test-app static assets (jQuery
+      # etc.) don't change between requests, and skipping the Rack
+      # round-trip is a meaningful win on JS-heavy pages.
       def fetch_resource(url)
-        full_url = resolve_url(url)
-        request  = Rack::MockRequest.new(@app)
-        response = request.request('GET', full_url, {})
-        return nil unless response.status.between?(200, 299)
-        response.body
+        @resource_cache.fetch(url) { @resource_cache[url] = rack_get(url) }
       end
 
-      # JS-facing `fetch` implementation, attached to the V8 context as
-      # `__csim_fetch`. Routes the request through the configured Rack app
-      # using the active cookie jar and follows up to 20 redirects, mirroring
-      # how `navigate` runs full-page requests. Headers come back joined into
-      # a hash so the JS shim can reconstruct a `Headers` object.
-      FETCH_REDIRECT_LIMIT = 20
-      def js_fetch(method, url, headers, body)
-        method = (method || 'GET').to_s.upcase
-        headers = (headers || {}).each_with_object({}) {|(k, v), m| m[k.to_s] = v.to_s }
-        full_url = resolve_url(url)
-        redirected = false
-        FETCH_REDIRECT_LIMIT.times do
-          env = fetch_env_for(headers, full_url)
-          input = body.to_s
-          request = Rack::MockRequest.new(@app)
-          response = request.request(method, full_url, env.merge(input: input))
-          ingest_set_cookie(response.headers, full_url)
-          if (300..399).cover?(response.status) && response.headers['location']
-            target = response.headers['location']
-            full_url = resolve_url(target)
-            unless [307, 308].include?(response.status)
-              method = 'GET'
-              body = ''
-            end
-            headers = headers.reject {|k, _| %w[content-type content-length].include?(k.downcase) } if method == 'GET'
-            redirected = true
-            next
-          end
-          return {
-            'ok'         => response.status.between?(200, 299),
-            'status'     => response.status,
-            'statusText' => '',
-            'headers'    => normalize_response_headers(response.headers),
-            'body'       => response.body.to_s,
-            'finalUrl'   => full_url,
-            'redirected' => redirected
-          }
+      def rack_get(url)
+        uri  = URI.parse(url)
+        opts = {method: 'GET'}
+        opts['HTTP_COOKIE'] = cookie_header_value unless @cookies.empty?
+        env  = Rack::MockRequest.env_for(uri.request_uri, **opts)
+        status, _headers, body_iter = @app.call(env)
+        body = read_rack_body(body_iter)
+        return body if (200..299).cover?(status)
+        warn "[capybara-simulated] script src #{url} returned #{status}" if ENV['CSIM_DEBUG']
+        nil
+      end
+
+      def read_rack_body(iter)
+        body = +''
+        iter.each { |c| body << c.to_s } if iter.respond_to?(:each)
+        iter.close if iter.respond_to?(:close)
+        body
+      end
+
+      def fire_lifecycle_events
+        return unless @js
+        js.call('__syncLocation', @current_url.to_s) if @current_url
+        # readyState transitions: loading → interactive (just before
+        # DOMContentLoaded) → complete (after window load).
+        js.call('__setReadyState', 'interactive')
+        js.call('__fireLifecycle', 'DOMContentLoaded')
+        js.call('__setReadyState', 'complete')
+        js.call('__fireLifecycle', 'load')
+      end
+
+      def cookie_header_value
+        @cookies.map { |k, v| "#{k}=#{v}" }.join('; ')
+      end
+
+      # Parse Set-Cookie response header(s) and stash name=value pairs.
+      # We don't honour Path / Domain / Expires — single-session, single-
+      # domain cookie jar matches what rack_test does for spec purposes.
+      def ingest_set_cookie(headers)
+        raw = headers['set-cookie'] || headers['Set-Cookie']
+        return if raw.nil? || raw.empty?
+        (raw.is_a?(Array) ? raw : raw.split("\n")).each do |line|
+          pair, * = line.split(';', 2)
+          name, value = pair.to_s.split('=', 2)
+          next if name.nil? || name.empty?
+          @cookies[name.strip] = value.to_s.strip
         end
-        {'error' => 'too many redirects'}
-      rescue StandardError => e
-        {'error' => "#{e.class}: #{e.message}"}
       end
 
-      def fetch_env_for(headers, full_url)
-        env = {}
-        headers.each do |k, v|
-          name = k.to_s
-          if name.downcase == 'content-type'
-            env['CONTENT_TYPE'] = v.to_s
-          elsif name.downcase == 'content-length'
-            env['CONTENT_LENGTH'] = v.to_s
+      def click_form_control(node)
+        type = (node['type'] || (node.name == 'button' ? 'submit' : 'text')).downcase
+        case type
+        when 'submit', 'image'
+          form = enclosing_form(node) or return false
+          submit(form, node)
+        when 'reset'
+          # Stored attributes are the source of truth in this driver — we don't track
+          # an in-memory defaultValue snapshot, so reset is a no-op.
+          true
+        when 'checkbox'
+          set_value(@handles.track(node), !node['checked'])
+          true
+        when 'radio'
+          set_value(@handles.track(node), true)
+          true
+        else
+          false
+        end
+      end
+
+      def submit(form, submitter)
+        form_handle = @handles.track(form)
+        return true unless dispatch_event(form_handle, 'submit')
+        # `formaction` / `formmethod` on the submitter override the form's
+        # own action / method (HTML5).
+        method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
+        action_attr = (submitter && submitter['formaction']) || form['action']
+        method = method_attr.to_s.downcase
+        action = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
+        if method == 'post' && multipart_form?(form)
+          content_type, body = build_multipart(form, submitter)
+          navigate(:post, action, body: body, content_type: content_type)
+        elsif method == 'post'
+          navigate(:post, action,
+                   body:         URI.encode_www_form(serialize_form(form, submitter)),
+                   content_type: 'application/x-www-form-urlencoded')
+        else
+          uri = URI.parse(action)
+          uri.query = URI.encode_www_form(serialize_form(form, submitter))
+          navigate(:get, uri.to_s)
+        end
+        true
+      end
+
+      def multipart_form?(form)
+        form['enctype'].to_s.downcase == 'multipart/form-data'
+      end
+
+      FORM_FIELD_CSS = 'input, textarea, select, button'.freeze
+
+      # Yields each submittable form-control entry as
+      # `[name, type, value, picks]` — `picks` is the array of paths for a
+      # file input, otherwise nil. serialize_form / build_multipart consume
+      # this single walk so the field-selection rules stay in one place.
+      # Walks fields in document order across descendants AND any field
+      # outside the form that opts in via `form="<id>"`.
+      ADOPTED_FIELD_XPATH = '//*[(self::input or self::textarea or ' \
+                            "self::select or self::button) and @form=$fid]".freeze
+
+      def each_form_field(form, submitter)
+        form_id      = form['id']
+        descendants  = form.css(FORM_FIELD_CSS)
+        adopted      = if form_id && !form_id.empty?
+          @document.xpath(ADOPTED_FIELD_XPATH, nil, fid: form_id.to_s).to_a
+        else
+          []
+        end
+        # Common case (no `form="<id>"` opt-ins on the page) skips the
+        # merge / sort / uniq — descendants are already in doc order
+        # from form.css. Otherwise sort via Nokogiri's Node#<=> which
+        # is libxml2-backed (cheaper than building per-node n.path).
+        associated = adopted.empty? ? descendants : (descendants.to_a + adopted).uniq.sort
+        associated.each do |field|
+          name = field['name']
+          next if name.nil? || name.empty? || field['disabled']
+          # If a field declares form="other", skip it for this form.
+          next if (fa = field['form']) && !fa.empty? && fa != form_id
+          type = (field['type'] || (field.name == 'button' ? 'submit' : nil) || field.name).downcase
+          case type
+          when 'submit', 'image', 'button', 'reset'
+            next unless field == submitter
+            yield name, type, field['value'].to_s, nil
+          when 'checkbox', 'radio'
+            yield name, type, (field['value'] || 'on'), nil if field['checked']
+          when 'select'
+            options  = field.css('option')
+            selected = options.select { |o| o['selected'] }
+            # No explicit selection on a single-select → the first option
+            # is the default (HTML4/5 form-submission spec). multiple-
+            # selects with nothing selected submit nothing.
+            selected = [options.first].compact if selected.empty? && !field['multiple']
+            selected.each { |opt| yield name, type, (opt['value'] || opt.text), nil }
+          when 'textarea'
+            # HTML form submission normalises LF → CRLF in textarea content.
+            yield name, type, field.text.gsub(/\r\n|\r|\n/, "\r\n"), nil
+          when 'file'
+            yield name, type, nil, file_picks_for(@handles.track(field))
           else
-            env["HTTP_#{name.upcase.tr('-', '_')}"] = v.to_s
+            yield name, type, field['value'].to_s, nil
           end
         end
-        if @current_url
-          env['HTTP_REFERER'] ||= @current_url
-        end
-        cookie_header = build_cookie_header(full_url)
-        env['HTTP_COOKIE'] = cookie_header unless cookie_header.empty?
-        env
       end
 
-      def normalize_response_headers(headers)
-        out = {}
-        headers.each do |name, value|
-          val = value.is_a?(Array) ? value.join("\n") : value.to_s
-          out[name.to_s] = val
+      def serialize_form(form, submitter)
+        out = []
+        each_form_field(form, submitter) do |name, type, value, picks|
+          if type == 'file'
+            # Non-multipart forms submit only the basename of any picked
+            # file (browsers can't actually upload through urlencoded).
+            out << [name, picks.empty? ? '' : File.basename(picks.first)]
+          else
+            out << [name, value]
+          end
         end
         out
       end
 
-      def stringify_keys(hash)
-        hash.each_with_object({}) {|(k, v), m| m[k.to_s] = v }
-      end
-
-      # Mirror Selenium's send_keys conventions. Top-level Symbols name a
-      # special key; an Array names a "modifier+key" combo where every
-      # element except the last is a held-down modifier. Modifier symbols
-      # at the top level stay held for everything that follows in the
-      # same call (Capybara's "hold modifiers" behaviour).
-      def encode_keys(keys)
-        Array(keys).flat_map {|k| encode_key(k) }
-      end
-
-      def encode_key(k)
-        case k
-        when String   then [k]
-        when Symbol   then [encode_special(k)]
-        when Array
-          modifiers = k[0..-2].map {|m| symbol_to_key_name(m) }
-          tail = k.last
-          [{'combo' => modifiers, 'tail' => encode_key(tail)}]
-        else [k.to_s]
-        end
-      end
-
-      def encode_special(sym)
-        {'special' => symbol_to_key_name(sym)}
-      end
-
-      def symbol_to_key_name(sym)
-        case sym
-        when :enter, :return then 'Enter'
-        when :tab            then 'Tab'
-        when :backspace      then 'Backspace'
-        when :delete         then 'Delete'
-        when :escape         then 'Escape'
-        when :space          then ' '
-        when :left           then 'ArrowLeft'
-        when :right          then 'ArrowRight'
-        when :up             then 'ArrowUp'
-        when :down           then 'ArrowDown'
-        when :home           then 'Home'
-        when :end            then 'End'
-        when :page_up        then 'PageUp'
-        when :page_down      then 'PageDown'
-        when :shift, :control, :alt, :meta, :command, :ctrl
-          {shift: 'Shift', control: 'Control', ctrl: 'Control',
-           alt:   'Alt',   meta:    'Meta',    command: 'Meta'}[sym]
-        else sym.to_s.capitalize
-        end
-      end
-
-      def encode_script_args(args)
-        Array(args).map {|v| encode_script_arg(v) }
-      end
-      def encode_script_arg(value)
-        case value
-        when Capybara::Simulated::Node
-          {'__csim_handle' => value.handle_id}
-        when Array
-          value.map {|v| encode_script_arg(v) }
-        when Hash
-          value.each_with_object({}) {|(k, v), m| m[k.to_s] = encode_script_arg(v) }
-        else
-          value
-        end
-      end
-      def decode_script_result(value)
-        case value
-        when Hash
-          if value['__csim_handle']
-            Capybara::Simulated::Node.new(@driver_for_results, value['__csim_handle'])
+      def build_multipart(form, submitter)
+        boundary = "csim-#{SecureRandom.hex(8)}"
+        body     = String.new.force_encoding(Encoding::ASCII_8BIT)
+        each_form_field(form, submitter) do |name, type, value, picks|
+          if type == 'file'
+            if picks.empty?
+              append_multipart_part(body, boundary, name, '', filename: '')
+            else
+              picks.each do |path|
+                append_multipart_part(body, boundary, name, File.binread(path),
+                                      filename:     File.basename(path),
+                                      content_type: Rack::Mime.mime_type(File.extname(path)))
+              end
+            end
           else
-            value.transform_values {|v| decode_script_result(v) }
+            append_multipart_part(body, boundary, name, value.to_s)
           end
-        when Array
-          value.map {|v| decode_script_result(v) }
+        end
+        body << "--#{boundary}--\r\n"
+        ["multipart/form-data; boundary=#{boundary}", body]
+      end
+
+      def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
+        body << "--#{boundary}\r\n"
+        disposition = %[form-data; name="#{name}"]
+        disposition += %[; filename="#{filename}"] if filename
+        body << "Content-Disposition: #{disposition}\r\n"
+        body << "Content-Type: #{content_type}\r\n" if content_type
+        body << "\r\n"
+        body << content.to_s.b
+        body << "\r\n"
+      end
+
+      def enclosing_form(node)
+        if (id = node['form'])
+          form = @document.at_xpath('.//form[@id=$id]', nil, id: id.to_s)
+          return form if form
+        end
+        node.respond_to?(:ancestors) ? node.ancestors('form').first : nil
+      end
+
+      URL_RE = %r{\A[a-z][a-z0-9+\-.]*://}i.freeze
+
+      VALIDITY_KEYS = %w[
+        valueMissing typeMismatch patternMismatch tooLong tooShort
+        rangeUnderflow rangeOverflow stepMismatch badInput customError
+      ].freeze
+
+      ALL_VALID = (VALIDITY_KEYS.zip([false] * VALIDITY_KEYS.size).to_h.merge('valid' => true)).freeze
+
+      # Best-effort HTML5 ValidityState. Real browsers have richer
+      # behaviour (locale-aware number parsing, IDN URL handling) but
+      # this covers the constraints Capybara's `valid:` filter exercises.
+      def compute_validity(node)
+        return ALL_VALID unless node.respond_to?(:[])
+        type = (node['type'] || 'text').downcase
+        # Selects / buttons / static elements aren't constraint-validated.
+        if !%w[input textarea].include?(node.name) || %w[hidden button submit reset image].include?(type)
+          return ALL_VALID
+        end
+        value   = (node.name == 'textarea' ? node.text : node['value']).to_s
+        pattern = node['pattern']
+        ml      = node['maxlength'] && Integer(node['maxlength'], exception: false)
+        minl    = node['minlength'] && Integer(node['minlength'], exception: false)
+        mn      = node['min']       && Float(node['min'], exception: false)
+        mx      = node['max']       && Float(node['max'], exception: false)
+        numeric = !value.empty? && type == 'number' ? Float(value, exception: false) : nil
+        {
+          'valueMissing'    => node['required'] && value.empty?,
+          'typeMismatch'    => !value.empty? && ((type == 'email' && !URI::MailTo::EMAIL_REGEXP.match?(value)) ||
+                                                 (type == 'url'   && !URL_RE.match?(value))),
+          'patternMismatch' => !value.empty? && pattern && !value.match?(/\A(?:#{pattern})\z/),
+          'tooLong'         => ml && value.length > ml,
+          'tooShort'        => !value.empty? && minl && value.length < minl,
+          'rangeUnderflow'  => numeric && mn && numeric < mn,
+          'rangeOverflow'   => numeric && mx && numeric > mx,
+          'stepMismatch'    => false,
+          'badInput'        => false,
+          'customError'     => false
+        }.tap { |s| s['valid'] = s.values.none? }
+      end
+
+      def validation_message(node, v = compute_validity(node))
+        return ''                                       if v['valid']
+        return 'Please fill out this field.'            if v['valueMissing']
+        return 'Please match the requested format.'     if v['patternMismatch']
+        return 'Please use a valid email address.'      if v['typeMismatch'] && (node['type'] || '').downcase == 'email'
+        return 'Please use a valid URL.'                if v['typeMismatch'] && (node['type'] || '').downcase == 'url'
+        return "Please shorten this text to #{node['maxlength']} characters or less." if v['tooLong']
+        return "Please lengthen this text to #{node['minlength']} characters or more." if v['tooShort']
+        return "Value must be greater than or equal to #{node['min']}." if v['rangeUnderflow']
+        return "Value must be less than or equal to #{node['max']}."    if v['rangeOverflow']
+        'Please match the requested format.'
+      end
+
+      def label_target(label)
+        if (target_id = label['for']) && !target_id.empty?
+          return @document.at_xpath('.//*[@id=$id]', nil, id: target_id.to_s)
+        end
+        label.css('input,select,textarea,button').first
+      end
+
+      # DOM compareDocumentPosition bitmask. Cases libraries branch on:
+      # DISCONNECTED / FOLLOWING / PRECEDING / CONTAINS / CONTAINED_BY.
+      DOC_POS_DISCONNECTED = 1
+      DOC_POS_PRECEDING    = 2
+      DOC_POS_FOLLOWING    = 4
+      DOC_POS_CONTAINS     = 8
+      DOC_POS_CONTAINED_BY = 16
+
+      def compare_positions(a, b)
+        return DOC_POS_DISCONNECTED if a.nil? || b.nil?
+        return 0 if a == b
+        return DOC_POS_CONTAINS     if b.ancestors.include?(a)
+        return DOC_POS_CONTAINED_BY if a.ancestors.include?(b)
+        # Nokogiri::XML::Node#<=> walks via libxml2 (cheaper than a Ruby
+        # traverse), returning -1/0/1 within a document or nil across.
+        cmp = (a <=> b)
+        return DOC_POS_DISCONNECTED if cmp.nil?
+        cmp.negative? ? DOC_POS_PRECEDING : DOC_POS_FOLLOWING
+      end
+
+      def node_type_for(node)
+        return 9  if node.is_a?(Nokogiri::XML::Document)
+        return 1  if node.element?
+        return 3  if node.is_a?(Nokogiri::XML::Text)
+        return 8  if node.is_a?(Nokogiri::XML::Comment)
+        return 11 if node.is_a?(Nokogiri::XML::DocumentFragment)
+        0
+      end
+
+      # `root:` flag walks ancestors via style_hidden? once at the call
+      # site; descendants only check their *own* hidden / style attrs,
+      # turning visible_text from O(N×depth) into O(N). `transform`
+      # carries inherited `text-transform` so descendant text picks up
+      # uppercase / lowercase / capitalize from any ancestor.
+      def collect_visible_text(node, out, root:, transform: nil)
+        return if node.nil?
+        if node.is_a?(Nokogiri::XML::Text)
+          out << apply_text_transform(node.text.gsub(INLINE_WHITESPACE_RE, ' '), transform)
+          return
+        end
+        return unless node.respond_to?(:children)
+        return if INVISIBLE_TAGS.include?(node.name)
+        if node.respond_to?(:[])
+          return if root ? style_hidden?(node) : self_hidden?(node)
+          transform = inherited_transform(transform, root ? ancestor_transform(node) : node_transform(node))
+        end
+        if node.name == 'br'
+          out << "\n"
+          return
+        end
+        # Real-browser innerText only inserts block boundaries around
+        # blocks that actually emit text — collect children's output
+        # into a scratch buffer so empty blocks collapse cleanly.
+        if BLOCK_TAGS.include?(node.name)
+          inner = String.new
+          node.children.each { |c| collect_visible_text(c, inner, root: false, transform: transform) }
+          return if inner.empty?
+          out << "\n" unless out.empty? || out.end_with?("\n")
+          out << inner
+          out << "\n" unless out.end_with?("\n")
         else
-          value
+          node.children.each { |c| collect_visible_text(c, out, root: false, transform: transform) }
         end
       end
 
-      def same_path_anchor?(from_url, to_url)
-        a = URI.parse(from_url) rescue nil
-        b = URI.parse(to_url) rescue nil
-        return false unless a && b
-        a.scheme == b.scheme && a.host == b.host && a.port == b.port &&
-          a.path == b.path && a.query == b.query &&
-          b.fragment && !b.fragment.empty?
+      TEXT_TRANSFORM_RE = /text-transform\s*:\s*([a-z-]+)/i
+
+      def node_transform(node)
+        style = node['style']
+        return nil if style.nil? || style.empty?
+        m = style.match(TEXT_TRANSFORM_RE)
+        m && m[1].downcase
       end
 
-      def resolve_url(url)
-        return @current_url if url.nil? || url.empty?
-        if url.start_with?('http://', 'https://')
-          url
-        else
-          base = current_base_url || @current_url || (Capybara.app_host || DEFAULT_HOST)
-          URI.join(base, url).to_s
+      def ancestor_transform(node)
+        each_ancestor(node) do |cur|
+          t = node_transform(cur)
+          return t if t
+        end
+        nil
+      end
+
+      # `inherit` (and the implicit default) lets a parent's value flow
+      # through; `none` resets back to no transform.
+      def inherited_transform(parent_transform, own)
+        return parent_transform if own.nil? || own == 'inherit'
+        own
+      end
+
+      def apply_text_transform(str, transform)
+        case transform
+        when 'uppercase' then str.upcase
+        when 'lowercase' then str.downcase
+        when 'capitalize'
+          str.gsub(/\b\w/) { |c| c.upcase }
+        else str
         end
       end
 
-      # Returns the URL implied by a `<base href>` element on the active
-      # page, or nil. happy-dom doesn't apply base href when computing
-      # `a.href`, so the driver does its own resolution.
-      def current_base_url
-        href = @ctx.eval(<<~JS) rescue nil
-          (() => {
-            const b = document && document.querySelector && document.querySelector('base[href]');
-            return b ? String(b.getAttribute('href') || '') : null;
-          })()
-        JS
-        return nil if href.nil? || href.empty?
-        return href if href.start_with?('http://', 'https://')
-        URI.join(@current_url || (Capybara.app_host || DEFAULT_HOST), href).to_s
+      def self_hidden?(node)
+        return true if node['hidden']
+        style = node['style'].to_s
+        style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
+      end
+
+      DISPLAY_NONE_RE       = /display\s*:\s*none/i
+      VISIBILITY_HIDDEN_RE  = /visibility\s*:\s*hidden/i
+
+      def style_hidden?(node)
+        each_ancestor(node) do |cur|
+          return true if cur['hidden']
+          style = cur['style'].to_s
+          return true if style.match?(DISPLAY_NONE_RE)
+          return true if style.match?(VISIBILITY_HIDDEN_RE)
+        end
+        false
       end
     end
   end

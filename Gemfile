@@ -2,9 +2,8 @@ source 'https://rubygems.org'
 
 gemspec
 
-gem 'mini_racer', '~> 0.18'
 gem 'nokogiri'
-gem 'quickjs'
+gem 'quickjs', github: 'ursm/quickjs.rb', branch: 'fix-segfault-after-oom', submodules: true
 
 group :development, :test do
   gem 'launchy'    # required by Capybara's shared save_and_open_page spec
