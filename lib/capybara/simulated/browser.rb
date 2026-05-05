@@ -592,6 +592,7 @@ module Capybara
           select.css('option').each { |o| o.delete('selected') }
           opt['selected'] = 'selected'
         end
+        dispatch_input_change(@handles.track(select))
         true
       end
 
@@ -608,6 +609,7 @@ module Capybara
             'Cannot unselect option from single select box.'
         end
         opt.delete('selected')
+        dispatch_input_change(@handles.track(select))
         true
       end
 
