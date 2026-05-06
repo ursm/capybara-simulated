@@ -2032,27 +2032,36 @@ module Capybara
 
       def submit(form, submitter)
         form_handle = @handles.track(form)
-        # `event.submitter` lets Turbo's FormSubmitObserver honour
-        # `data-turbo="false"` on the clicked button — without it Turbo
-        # treats every form-inside-a-frame submission as navigatable
-        # and intercepts it.
-        return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
-        # `formaction` / `formmethod` on the submitter override the form's
-        # own action / method (HTML5).
+        # Real browsers snapshot the form's submission entries *before*
+        # firing the submit event — listeners (rails-ujs's
+        # `data-disable-with` handler) routinely disable the submit
+        # button mid-dispatch, and reading the form afterwards would
+        # then drop the submitter (our `each_form_field` skips
+        # `[disabled]`). Capture method / action / body up front and
+        # only the dispatch's preventDefault decides whether to commit.
         method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
         action_attr = (submitter && submitter['formaction']) || form['action']
         method = method_attr.to_s.downcase
         action = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
         if method == 'post' && multipart_form?(form)
           content_type, body = build_multipart(form, submitter)
-          navigate(:post, action, body: body, content_type: content_type)
         elsif method == 'post'
-          navigate(:post, action,
-                   body:         URI.encode_www_form(serialize_form(form, submitter)),
-                   content_type: 'application/x-www-form-urlencoded')
+          content_type = 'application/x-www-form-urlencoded'
+          body         = URI.encode_www_form(serialize_form(form, submitter))
+        else
+          content_type = nil
+          body         = URI.encode_www_form(serialize_form(form, submitter))
+        end
+        # `event.submitter` lets Turbo's FormSubmitObserver honour
+        # `data-turbo="false"` on the clicked button — without it Turbo
+        # treats every form-inside-a-frame submission as navigatable
+        # and intercepts it.
+        return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
+        if method == 'post'
+          navigate(:post, action, body: body, content_type: content_type)
         else
           uri = URI.parse(action)
-          uri.query = URI.encode_www_form(serialize_form(form, submitter))
+          uri.query = body
           navigate(:get, uri.to_s)
         end
         true
