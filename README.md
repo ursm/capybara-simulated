@@ -1,6 +1,6 @@
 # capybara-simulated
 
-A lightweight Capybara driver that runs JavaScript in a long-lived
+A lightweight Capybara driver that runs JavaScript in an embedded
 [QuickJS](https://github.com/hmsk/quickjs.rb) context against a
 [Nokogiri](https://nokogiri.org/)-backed DOM. The driver sits between
 `rack-test` (zero JS) and full headless browsers like cuprite/selenium:
