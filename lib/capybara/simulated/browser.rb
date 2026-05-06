@@ -216,10 +216,10 @@ module Capybara
       # same `:checked` / `:disabled` / etc. set the Ruby DSL does.
       def safe_at_css(node, selector)
         return nil unless node.respond_to?(:at_css)
-        node.at_css(selector.to_s, css_pseudo_handlers)
+        node.at_css(strip_scope(selector), css_pseudo_handlers)
       rescue *SELECTOR_ERRORS
         css_split(selector).each {|s|
-          hit = node.at_css(s, css_pseudo_handlers) rescue next
+          hit = node.at_css(strip_scope(s), css_pseudo_handlers) rescue next
           return hit if hit
         }
         nil
@@ -227,9 +227,20 @@ module Capybara
 
       def safe_css(node, selector)
         return [] unless node.respond_to?(:css)
-        node.css(selector.to_s, css_pseudo_handlers)
+        node.css(strip_scope(selector), css_pseudo_handlers)
       rescue *SELECTOR_ERRORS
-        css_split(selector).flat_map {|s| node.css(s, css_pseudo_handlers) rescue [] }
+        css_split(selector).flat_map {|s| node.css(strip_scope(s), css_pseudo_handlers) rescue [] }
+      end
+
+      # `:scope` is the spec-shaped reference to the query origin; jQuery
+      # 3 / Sizzle prepends it to relative selectors like `> *`, but
+      # Nokogiri's CSS-to-XPath compiler chokes on it. Stripping it is
+      # safe for the descendant-or-self queries our `node.css` already
+      # performs.
+      SCOPE_RE = /:scope\s*/i
+      def strip_scope(selector)
+        s = selector.to_s
+        s.match?(SCOPE_RE) ? s.gsub(SCOPE_RE, '') : s
       end
 
       # Nokogiri's `matches?` doesn't accept a custom-pseudo handler the
