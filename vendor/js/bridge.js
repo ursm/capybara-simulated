@@ -186,6 +186,12 @@
 
     // <form> ergonomics
     get form() { return wrap(__dom(this.__h, 'form')); }
+    // HTMLFormElement.elements: HTMLFormControlsCollection of submittable
+    // descendants. rails-ujs / jQuery serialize forms via this.
+    get elements() {
+      if (this.tagName !== 'FORM') return null;
+      return HTMLCollection.from(this.querySelectorAll('input, select, textarea, button, fieldset, output, object'));
+    }
 
     // <input list="...">'s referenced <datalist>, plus its options. Used
     // by Capybara's datalist-option resolver via element.evaluate_script.
@@ -244,6 +250,7 @@
     scrollTo()               {}
     focus()                  { __dom(this.__h, 'focus'); }
     blur()                   { __dom(this.__h, 'blur'); }
+    click()                  { __dom(this.__h, 'click'); }
     select()                 {}
     setSelectionRange()      {}
     setRangeText()           {}
@@ -967,7 +974,7 @@
       try {
         t.handler.apply(null, t.args || []);
       } catch (e) {
-        try { console.error('timer threw:', e && e.message ? e.message : e); } catch (_) {}
+        try { console.error('timer threw:', e && e.stack ? e.stack : (e && e.message ? e.message : e)); } catch (_) {}
       }
     }
     // Pin the clock at `limit` even when nothing fired, so a later
