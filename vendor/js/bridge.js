@@ -1029,6 +1029,8 @@
     __wrappers.set(0, globalThis.document);
     globalThis.document.readyState = 'loading';
     __resetTimers();
+    globalThis.localStorage._reset();
+    globalThis.sessionStorage._reset();
     // Re-attach the CE observer + upgrade existing matches in the
     // freshly-parsed document.
     if (__ceDefs.size > 0) {
@@ -1399,10 +1401,65 @@
     forward: function () {},
     go:      function () {}
   };
-  globalThis.localStorage   = {getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, length: 0, key: () => null};
-  globalThis.sessionStorage = {getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, length: 0, key: () => null};
+  // Backed by a Map so set/get round-trip within a session — apps that
+  // gate UI on a stored flag (theme, dismissed banner, ...) need that
+  // to actually work. Cleared in __resetPage so each test starts fresh.
+  function makeStorage() {
+    const m = new Map();
+    return {
+      get length()        { return m.size; },
+      key(i)              { return [...m.keys()][i] ?? null; },
+      getItem(k)          { return m.has(String(k)) ? m.get(String(k)) : null; },
+      setItem(k, v)       { m.set(String(k), String(v)); },
+      removeItem(k)       { m.delete(String(k)); },
+      clear()             { m.clear(); },
+      _reset()            { m.clear(); }
+    };
+  }
+  globalThis.localStorage   = makeStorage();
+  globalThis.sessionStorage = makeStorage();
   globalThis.getComputedStyle = function () { return {getPropertyValue: () => '', length: 0}; };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
+
+  // performance.now() returns ms since the runtime started — not the
+  // virtual JS clock, since most callers (perf timing, jitter
+  // smoothing) want monotonic wall time, not virtual ticks.
+  const __perfStart = Date.now();
+  globalThis.performance = {
+    now()        { return Date.now() - __perfStart; },
+    timeOrigin:   __perfStart,
+    mark()       {},
+    measure()    {},
+    getEntries() { return []; },
+    getEntriesByName() { return []; },
+    getEntriesByType() { return []; },
+    clearMarks()    {},
+    clearMeasures() {}
+  };
+
+  // Idle callbacks: real browsers fire them when the main thread is
+  // idle. With our virtual clock there's no idleness signal, so route
+  // them through setTimeout(0) — close enough for libraries that just
+  // want "run after current task".
+  globalThis.requestIdleCallback = function (cb, _opts) {
+    return setTimeout(() => cb({didTimeout: false, timeRemaining: () => 50}), 0);
+  };
+  globalThis.cancelIdleCallback = globalThis.clearTimeout;
+
+  // structuredClone: deep clone via JSON for the common JSON-safe case.
+  // Real structuredClone handles Map / Set / Date / typed arrays /
+  // cycles; fall back to that gnarlier set only when JSON refuses.
+  globalThis.structuredClone = function (v) {
+    if (v == null || typeof v !== 'object') return v;
+    try { return JSON.parse(JSON.stringify(v)); }
+    catch (_) { return v; }
+  };
+
+  // reportError: the spec says "dispatch an error event on global,
+  // log if no handler". Logging is enough for most callers.
+  globalThis.reportError = function (e) {
+    try { console.error(e && e.stack ? e.stack : String(e)); } catch (_) {}
+  };
 
   // Layout-driven observers — libraries probe these via constructor
   // existence (Turbo's FrameController constructs an IntersectionObserver
