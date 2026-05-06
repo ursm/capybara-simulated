@@ -42,10 +42,8 @@ DESCRIPTION_SKIPS = [
   # context. Our stale-check walks Nokogiri parents directly, which
   # diverges from Capybara's "found via X" reload semantics.
   'Capybara::Session Simulated node #reload ',
-  # Capybara's `attach_file` block form simulates a click on a <label>
-  # whose <input type="file"> is hidden via display:none and resolves
-  # the click target via elementFromPoint — same layout-engine class
-  # as the click-offset family above.
+  # `attach_file` block form clicks a <label> whose <input type="file">
+  # is display:none; the click target resolves via elementFromPoint.
   'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',
   # The /with_js fixture loads jQuery + jQuery UI; jQuery UI's bundle
   # contains constructs (`(0, eval)("...")` in particular) QuickJS's

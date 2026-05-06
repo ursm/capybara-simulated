@@ -9,26 +9,23 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 
 ## Status
 
-Against Capybara 3.40's shared `Capybara::SpecHelper.spec` suite the
-driver passes 1298 / 1357 examples in ~60 seconds (vs Selenium's
-~5 minutes for the same suite), 0 failures across 12 consecutive
-runs. The unsupported-capability tags `about_scheme`, `css`,
-`download`, `frames`, `hover`, `screenshot`, `scroll`, `server`,
-`spatial`, `windows` are filtered out, plus a few classes of test
-that are skipped in the runner with a documented reason:
+Capybara 3.40's shared `Capybara::SpecHelper.spec` suite runs
+deterministically green at ~60 seconds (vs Selenium's ~5 minutes
+for the same suite). The runner filters the unsupported-capability
+tags (`about_scheme`, `css`, `download`, `frames`, `hover`,
+`screenshot`, `scroll`, `server`, `spatial`, `windows`) plus a few
+classes of test skipped with a documented reason — see
+[`spec/capybara_shared_spec.rb`](spec/capybara_shared_spec.rb).
+Each cluster falls into one of:
 
-- 22 click-offset variants (`#click / #double_click / #right_click`
-  with offset args) — resolve synthetic clientX/Y against
-  `getBoundingClientRect()`, which needs a real layout engine.
-- 19 `#drag_to` tests — drop targets resolved via
-  `elementFromPoint`, same layout dependency.
-- 5 `#reload` tests — Capybara reloads via the original Query
-  context; v2's stale-check walks Nokogiri parents directly and
-  diverges from that semantic.
-- 4 `should wait for asynchronous load` variants and the
-  `#attach_file by clicking the label` test — exercise enough JS
-  recycling to surface an upstream `quickjs.rb` crash-after-
-  recycle bug. Re-enable when that lands.
+- click-offset / drag-and-drop / `attach_file` via label — need
+  `getBoundingClientRect()` / `elementFromPoint()`, i.e. a real
+  layout engine.
+- `#reload` — Capybara reloads via the original Query context;
+  v2's stale-check walks Nokogiri parents directly and diverges.
+- `should wait for asynchronous load` and friends — exercise the
+  Capybara `/with_js` page, whose jQuery UI bundle hits
+  parser-syntax constructs the embedded QuickJS rejects.
 
 ## Install
 

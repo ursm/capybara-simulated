@@ -10,29 +10,21 @@ module Capybara
     # crosses into Ruby once; the JS side carries no DOM state of its
     # own — everything is a thin proxy keyed on integer handles.
     class JsRuntime
-      VM_FEATURES = [
-        Quickjs::POLYFILL_URL,
-        Quickjs::POLYFILL_ENCODING,
-        Quickjs::POLYFILL_CRYPTO
-      ].freeze
-
       # 100 ms was too tight for cold jQuery boot under GC pressure
       # (~ 200 ms observed). 5_000 ms still surfaces a runaway timer
       # loop as InterruptedError.
-      VM_TIMEOUT_MSEC = 5_000
-
-      # `memory_limit` is the ceiling at which QuickJS *throws* an
-      # out-of-memory InternalError, not a safeguard against running
-      # out. The gem's 128 MiB default is fine for plain Stimulus +
-      # Turbo but jQuery + jQuery UI on a single page comfortably
-      # crosses it during sustained runs (Capybara's shared spec
-      # exercises /with_js + /jquery_ui repeatedly). 512 MiB removes
-      # the OOM trigger in practice and is well below any realistic
-      # process memory ceiling.
-      VM_MEMORY_LIMIT = 512 * 1024 * 1024
+      #
+      # 128 MiB (the gem's memory_limit default) OOMs under sustained
+      # jQuery + jQuery UI loads; 512 MiB removes the trigger.
+      VM_OPTIONS = {
+        features:     [Quickjs::POLYFILL_URL, Quickjs::POLYFILL_ENCODING, Quickjs::POLYFILL_CRYPTO].freeze,
+        timeout_msec: 5_000,
+        memory_limit: 512 * 1024 * 1024
+      }.freeze
 
       def initialize(browser)
-        @browser = browser
+        @browser              = browser
+        @recycled_since_reset = false
         boot_vm
       end
 
@@ -67,9 +59,9 @@ module Capybara
       end
 
       def reset_page
-        # If the previous test stressed the VM enough to hit a recycle,
-        # boot a fresh one for the next test rather than carry forward
-        # whatever state the recycle left behind.
+        # A mid-test recycle leaves bridge.js loaded but the previous
+        # page's listeners / observers / wrappers indeterminate, so
+        # boot fresh for the next test instead of running __resetPage.
         if @recycled_since_reset
           boot_vm
           @recycled_since_reset = false
@@ -140,7 +132,7 @@ module Capybara
       private
 
       def boot_vm
-        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC, memory_limit: VM_MEMORY_LIMIT)
+        @vm = Quickjs::VM.new(**VM_OPTIONS)
         attach_dom_bridge
         # Receives the already-absolute, importmap-resolved URL we
         # rewrote into the source on a prior pass. Browser#load_module
