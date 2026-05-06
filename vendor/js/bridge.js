@@ -53,7 +53,7 @@
 
     // Tree queries
     querySelector(s)    { return wrap(__dom(this.__h, 'querySelector', [s])); }
-    querySelectorAll(s) { return __dom(this.__h, 'querySelectorAll', [s]).map(wrap); }
+    querySelectorAll(s) { return NodeList.from(__dom(this.__h, 'querySelectorAll', [s]), wrap); }
     getElementById(id)  { return wrap(__dom(this.__h, 'getElementById', [id])); }
     closest(s)          { return wrap(__dom(this.__h, 'closest', [s])); }
     matches(s)          { return !!__dom(this.__h, 'matches', [s]); }
@@ -66,8 +66,8 @@
     get lastChild()              { return wrap(__dom(this.__h, 'lastChild')); }
     get nextSibling()            { return wrap(__dom(this.__h, 'nextSibling')); }
     get previousSibling()        { return wrap(__dom(this.__h, 'previousSibling')); }
-    get children()               { return __dom(this.__h, 'children').map(wrap); }
-    get childNodes()             { return __dom(this.__h, 'childNodes').map(wrap); }
+    get children()               { return HTMLCollection.from(__dom(this.__h, 'children'), wrap); }
+    get childNodes()             { return NodeList.from(__dom(this.__h, 'childNodes'), wrap); }
     get firstElementChild()      { return wrap(__dom(this.__h, 'firstElementChild')); }
     get lastElementChild()       { return wrap(__dom(this.__h, 'lastElementChild')); }
     get nextElementSibling()     { return wrap(__dom(this.__h, 'nextElementSibling')); }
@@ -294,9 +294,11 @@
     createAttribute(name)     { return {name: String(name), value: '', specified: true}; }
 
     // getElementsBy* — jQuery / older libs probe for these directly.
-    getElementsByTagName(tag)   { return __dom(this.__h, 'getElementsByTagName',   [String(tag)]).map(wrap); }
-    getElementsByClassName(cls) { return __dom(this.__h, 'getElementsByClassName', [String(cls)]).map(wrap); }
-    getElementsByName(name)     { return __dom(this.__h, 'getElementsByName',      [String(name)]).map(wrap); }
+    // Real browsers return an HTMLCollection (live in spec, but tests
+    // rely on the `.item(i)` / `.namedItem(n)` shape, not liveness).
+    getElementsByTagName(tag)   { return HTMLCollection.from(__dom(this.__h, 'getElementsByTagName',   [String(tag)]), wrap); }
+    getElementsByClassName(cls) { return HTMLCollection.from(__dom(this.__h, 'getElementsByClassName', [String(cls)]), wrap); }
+    getElementsByName(name)     { return HTMLCollection.from(__dom(this.__h, 'getElementsByName',      [String(name)]), wrap); }
 
     cloneNode(deep) {
       const cloned = wrap(__dom(this.__h, 'cloneNode', [!!deep]));
@@ -1244,11 +1246,17 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
-  // querySelectorAll / Element.children return plain arrays in our model;
-  // distinct subclasses keep `[] instanceof NodeList` false the way real
-  // browsers do, while libraries that probe the constructor still find one.
-  globalThis.NodeList            = class NodeList extends Array {};
-  globalThis.HTMLCollection      = class HTMLCollection extends Array {};
+  // querySelectorAll / Element.children return Array subclasses with the
+  // spec methods — `.item(i)` for both, `.namedItem(n)` for HTMLCollection.
+  // Mostly-array semantics (indexed access, .length, iteration, .map etc.)
+  // are inherited; live-ness is not modelled, but tests rarely depend on it.
+  globalThis.NodeList = class NodeList extends Array {
+    item(i) { return this[i] ?? null; }
+  };
+  globalThis.HTMLCollection = class HTMLCollection extends Array {
+    item(i)      { return this[i] ?? null; }
+    namedItem(n) { return this.find(el => el && (el.id === n || el.name === n)) ?? null; }
+  };
   // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
   // ElementObserver gates its mutation-record processing on
   // `node.nodeType == Node.ELEMENT_NODE` — without these constants set,
@@ -1398,8 +1406,56 @@
   globalThis.window     = globalThis;
   globalThis.self       = globalThis;
   globalThis.location   = globalThis.document.location;
-  globalThis.navigator  = {userAgent: 'capybara-simulated', language: 'en-US', languages: ['en-US']};
+  globalThis.navigator = {
+    userAgent:      'capybara-simulated',
+    appVersion:     'capybara-simulated',
+    appName:        'Netscape',
+    appCodeName:    'Mozilla',
+    product:        'Gecko',
+    language:       'en-US',
+    languages:      ['en-US'],
+    platform:       'Linux x86_64',
+    vendor:         '',
+    onLine:         true,
+    cookieEnabled:  true,
+    doNotTrack:     null,
+    maxTouchPoints: 0
+  };
   globalThis.screen     = {width: 1024, height: 768};
+  // No layout engine — there is no scroll position. All write-ish
+  // scroll APIs are no-ops; reads return 0.
+  globalThis.scrollTo   = function () {};
+  globalThis.scroll     = function () {};
+  globalThis.scrollBy   = function () {};
+  globalThis.scrollX = globalThis.scrollY = 0;
+  globalThis.pageXOffset = globalThis.pageYOffset = 0;
+  globalThis.innerWidth  = 1024;
+  globalThis.innerHeight = 768;
+  globalThis.outerWidth  = 1024;
+  globalThis.outerHeight = 768;
+  globalThis.devicePixelRatio = 1;
+
+  // window.getSelection — Range/Selection only matter for tests that
+  // probe text selection (Redmine's quote-reply uses this). A minimal
+  // single-range Selection lets such tests reach the action under
+  // test rather than failing at API existence.
+  class Selection {
+    constructor()       { this._ranges = []; }
+    get rangeCount()    { return this._ranges.length; }
+    addRange(r)         { this._ranges.push(r); }
+    removeAllRanges()   { this._ranges = []; }
+    removeRange(r)      { const i = this._ranges.indexOf(r); if (i >= 0) this._ranges.splice(i, 1); }
+    getRangeAt(i)       { return this._ranges[i]; }
+    toString()          { return ''; }
+    collapse()          {}
+    collapseToEnd()     {}
+    collapseToStart()   {}
+    selectAllChildren() {}
+  }
+  globalThis.Selection = Selection;
+  const __selection = new Selection();
+  globalThis.getSelection = () => __selection;
+  globalThis.document.getSelection = () => __selection;
   // history.pushState / replaceState route to Ruby so this driver's
   // current_url tracks SPA-style URL changes. State + title are
   // accepted but ignored — we only mirror the URL.
