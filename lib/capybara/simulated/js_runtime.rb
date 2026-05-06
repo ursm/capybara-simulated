@@ -21,7 +21,16 @@ module Capybara
       #
       # 128 MiB (the gem's memory_limit default) OOMs under sustained
       # jQuery + jQuery UI loads; 512 MiB removes the trigger.
-      DEFAULT_FEATURES = [Quickjs::POLYFILL_URL, Quickjs::POLYFILL_ENCODING, Quickjs::POLYFILL_CRYPTO].freeze
+      DEFAULT_FEATURES = [
+        Quickjs::POLYFILL_URL,
+        Quickjs::POLYFILL_ENCODING,
+        Quickjs::POLYFILL_CRYPTO,
+        # Bundled apps (Avo's flatpickr, luxon-driven date pickers, etc.)
+        # reach for `Intl.DateTimeFormat` during module init; without it
+        # the controller-connect path throws and the rest of the
+        # bundle's controllers never register.
+        Quickjs::POLYFILL_INTL
+      ].freeze
       VM_OPTIONS = {
         timeout_msec: 5_000,
         memory_limit: 512 * 1024 * 1024

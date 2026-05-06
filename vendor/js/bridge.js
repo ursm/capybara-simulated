@@ -2035,6 +2035,52 @@
       this.lastModified = i.lastModified || 0;
     }
   };
+  // URL.createObjectURL / revokeObjectURL — bundled libraries (Avo's
+  // mapbox-gl shim, image-cropper widgets) call these to mint a worker
+  // URL or src= for a Blob. We don't actually serve the bytes; the URL
+  // is opaque enough that downstream code that doesn't fetch it gets
+  // by, and code that does just sees a 404.
+  let __blobCounter = 0;
+  globalThis.URL.createObjectURL = function (_blob) { return 'blob:csim-' + (++__blobCounter); };
+  globalThis.URL.revokeObjectURL = function (_url)  { /* no-op — we don't track */ };
+
+  // EventTarget — bundled libraries like Avo's date-picker / mapbox
+  // `class Foo extends EventTarget` and rely on
+  // `addEventListener` / `dispatchEvent` actually delivering. Minimal
+  // per-instance impl: per-type handler list, dispatch invokes them
+  // synchronously with `event.target` set to the receiver.
+  globalThis.EventTarget = class EventTarget {
+    constructor() {
+      Object.defineProperty(this, '_listeners', {value: new Map(), enumerable: false});
+    }
+    addEventListener(type, handler) {
+      if (typeof handler !== 'function' && !(handler && typeof handler.handleEvent === 'function')) return;
+      const arr = this._listeners.get(type) || [];
+      if (!arr.includes(handler)) arr.push(handler);
+      this._listeners.set(type, arr);
+    }
+    removeEventListener(type, handler) {
+      const arr = this._listeners.get(type);
+      if (!arr) return;
+      const i = arr.indexOf(handler);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    dispatchEvent(event) {
+      if (event && event.target == null) event.target = this;
+      if (event && event.currentTarget == null) event.currentTarget = this;
+      const arr = this._listeners.get(event && event.type);
+      if (!arr) return true;
+      for (const h of arr.slice()) {
+        try {
+          if (typeof h === 'function') h.call(this, event);
+          else if (h && typeof h.handleEvent === 'function') h.handleEvent(event);
+        } catch (e) {
+          try { console.error('EventTarget listener threw:', e && e.message ? e.message : e); } catch (_) {}
+        }
+      }
+      return !(event && event.defaultPrevented);
+    }
+  };
 
   globalThis.AbortController = class AbortController {
     constructor() { this.signal = new AbortSignal(); }

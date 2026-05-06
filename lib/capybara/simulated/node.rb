@@ -75,6 +75,14 @@ module Capybara
         self
       end
 
+      # `scroll_to` exists in Capybara to bring an element into view —
+      # without a layout engine there's no scroll position to update,
+      # but tests routinely call it as a noop pre-amble to a click /
+      # find. Returning self keeps method chaining alive.
+      def scroll_to(*_args, **_opts)
+        self
+      end
+
       def send_keys(*keys)
         browser.send_keys(handle_id, keys)
         true
