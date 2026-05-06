@@ -1033,6 +1033,7 @@
     __resetTimers();
     globalThis.localStorage._reset();
     globalThis.sessionStorage._reset();
+    globalThis.navigator.clipboard._reset();
     // Re-attach the CE observer + upgrade existing matches in the
     // freshly-parsed document.
     if (__ceDefs.size > 0) {
@@ -1406,6 +1407,17 @@
   globalThis.window     = globalThis;
   globalThis.self       = globalThis;
   globalThis.location   = globalThis.document.location;
+  // navigator.clipboard backed by an in-process buffer so tests that
+  // round-trip writeText / readText work without depending on the
+  // host clipboard. Cleared in __resetPage.
+  let __clipboardText = '';
+  const __clipboard = {
+    writeText(text) { __clipboardText = String(text ?? ''); return Promise.resolve(); },
+    readText()      { return Promise.resolve(__clipboardText); },
+    write(_items)   { return Promise.resolve(); },
+    read()          { return Promise.resolve([]); },
+    _reset()        { __clipboardText = ''; }
+  };
   globalThis.navigator = {
     userAgent:      'capybara-simulated',
     appVersion:     'capybara-simulated',
@@ -1419,7 +1431,8 @@
     onLine:         true,
     cookieEnabled:  true,
     doNotTrack:     null,
-    maxTouchPoints: 0
+    maxTouchPoints: 0,
+    clipboard:      __clipboard
   };
   globalThis.screen     = {width: 1024, height: 768};
   // No layout engine — there is no scroll position. All write-ish
@@ -1516,6 +1529,34 @@
     clearMarks()    {},
     clearMeasures() {}
   };
+
+  // XMLHttpRequest: stub-only. Pages probe `typeof XMLHttpRequest`
+  // at boot (jQuery, axios fallbacks, polyfill detectors). Constructing
+  // and `.open` / `.send` resolve as no-ops; `.status` reports 0.
+  // Tests that actually drive AJAX flows should go through fetch (which
+  // we route through Rack), not XHR.
+  class XMLHttpRequest {
+    constructor() {
+      this.readyState = 0;
+      this.status     = 0;
+      this.statusText = '';
+      this.response   = '';
+      this.responseText = '';
+      this.responseType = '';
+      this.responseURL  = '';
+    }
+    open()                  {}
+    send()                  {}
+    abort()                 {}
+    setRequestHeader()      {}
+    getAllResponseHeaders() { return ''; }
+    getResponseHeader()     { return null; }
+    overrideMimeType()      {}
+    addEventListener()      {}
+    removeEventListener()   {}
+    dispatchEvent()         { return true; }
+  }
+  globalThis.XMLHttpRequest = XMLHttpRequest;
 
   // Idle callbacks: real browsers fire them when the main thread is
   // idle. With our virtual clock there's no idleness signal, so route
