@@ -327,6 +327,15 @@ module Capybara
         def optional(node_set)
           node_set.reject { |n| n.respond_to?(:[]) && n['required'] }
         end
+
+        # `*:focus` — the currently-focused element. We track focus on
+        # the Browser side via @focused_handle; resolve back to its node
+        # and intersect with the candidate set.
+        def focus(node_set)
+          focused = @browser.focused_node
+          return [] unless focused
+          node_set.select { |n| n.equal?(focused) }
+        end
       end
 
       # Exposed for CssPseudoHandlers — Browser#disabled? takes a handle,
@@ -340,6 +349,12 @@ module Capybara
       # find_css, matches) all funnel through this.
       def css_pseudo_handlers
         @css_pseudo_handlers ||= CssPseudoHandlers.new(self)
+      end
+
+      # Exposed for CssPseudoHandlers — `*:focus` needs the focused
+      # node, not just its handle.
+      def focused_node
+        @focused_handle ? lookup_node(@focused_handle) : nil
       end
 
       def all_text(handle)
