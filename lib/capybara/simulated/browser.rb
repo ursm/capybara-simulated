@@ -1117,7 +1117,7 @@ module Capybara
       def send_keys(handle, keys)
         node = lookup_node(handle)
         return false if node.nil?
-        start = (node.name == 'textarea' ? node.text : node['value']).to_s
+        start = field_value(node)
         state = {value: start.dup, caret: start.length, modifiers: Set.new}
         keys.each { |k| apply_send_key(handle, state, k) }
         # Skip the commit when no key typed into the field — a shortcut
@@ -1168,9 +1168,7 @@ module Capybara
         case char
         when 'v'
           text = js.eval('__getClipboard()').to_s
-          return if text.empty?
-          state[:value] = state[:value][0, state[:caret]] + text + state[:value][state[:caret]..]
-          state[:caret] += text.length
+          splice_at_caret(state, text) unless text.empty?
         when 'c', 'x'
           js.call('__setClipboard', state[:value])
           if char == 'x'
@@ -1203,8 +1201,7 @@ module Capybara
           dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
           allow = dispatch_event(handle, 'beforeinput', cancelable: true, inputType: 'insertLineBreak')
           if allow
-            state[:value] = state[:value][0, state[:caret]] + "\n" + state[:value][state[:caret]..]
-            state[:caret] += 1
+            splice_at_caret(state, "\n")
           else
             sync_state_from_dom(handle, state)
           end
@@ -1236,7 +1233,7 @@ module Capybara
       def sync_state_from_dom(handle, state)
         node = lookup_node(handle)
         return unless node
-        state[:value] = (node.name == 'textarea' ? node.text : node['value']).to_s
+        state[:value] = field_value(node)
         state[:caret] = js.call('__getCaret', handle).to_i
       end
 
@@ -1244,6 +1241,21 @@ module Capybara
       # listener reading `selectionStart` sees the current position.
       def set_caret(handle, caret)
         js.call('__setCaret', handle, caret.to_i)
+      end
+
+      # `<textarea>`'s value lives in its text content; everything else
+      # uses the `value` attribute. Centralise the read-current-value
+      # idiom shared by `send_keys`, `sync_state_from_dom`, and the
+      # validity-state machinery.
+      def field_value(node)
+        (node.name == 'textarea' ? node.text : node['value']).to_s
+      end
+
+      # Splice `text` at `state[:caret]`, advancing the caret. Used by
+      # `insert_char`, the `:enter` newline path, and Ctrl+V paste.
+      def splice_at_caret(state, text)
+        state[:value] = state[:value][0, state[:caret]] + text + state[:value][state[:caret]..]
+        state[:caret] += text.length
       end
 
       # Fire a keydown / keyup pair for a named special key (`:enter`,
@@ -1279,10 +1291,7 @@ module Capybara
         # this guard `Ctrl+B` types a literal "b" into the field before
         # the jstoolbar shortcut handler runs.
         suppress = state[:modifiers].intersect?(SUPPRESSING_MODIFIERS)
-        unless suppress
-          state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
-          state[:caret] += char.length
-        end
+        splice_at_caret(state, char) unless suppress
         code = char.upcase.bytes.first || 0
         init = modifier_init(state[:modifiers]).merge(key: char)
         dispatch_key_event(handle, 'keydown',  code, **init)
@@ -2471,7 +2480,7 @@ module Capybara
         if !%w[input textarea].include?(node.name) || %w[hidden button submit reset image].include?(type)
           return ALL_VALID
         end
-        value   = (node.name == 'textarea' ? node.text : node['value']).to_s
+        value   = field_value(node)
         pattern = node['pattern']
         ml      = node['maxlength'] && Integer(node['maxlength'], exception: false)
         minl    = node['minlength'] && Integer(node['minlength'], exception: false)

@@ -8,6 +8,9 @@
   // would otherwise fail because each access creates a fresh wrapper.
   // Cleared in __resetPage (handle reuse + ceUpgrade prototype swaps).
   const __wrappers = new Map();
+  // CharacterData covers TEXT (3), CDATA_SECTION (4), COMMENT (8) — the
+  // node types whose payload lives in `nodeValue` / `data`.
+  const isCharacterDataType = t => t === 3 || t === 4 || t === 8;
   function wrap(h) {
     if (h == null) return null;
     let w = __wrappers.get(h);
@@ -87,14 +90,8 @@
     // CharacterData#data — alias for the text payload on text /
     // comment nodes; turndown reads `node.data.replace(...)` while
     // walking text descendants. Undefined for element nodes per spec.
-    get data() {
-      const t = this.nodeType;
-      return (t === 3 || t === 4 || t === 8) ? this.textContent : undefined;
-    }
-    set data(v) {
-      const t = this.nodeType;
-      if (t === 3 || t === 4 || t === 8) this.textContent = v;
-    }
+    get data()  { return isCharacterDataType(this.nodeType) ? this.textContent : undefined; }
+    set data(v) { if (isCharacterDataType(this.nodeType)) this.textContent = v; }
     // IDL alias for textContent on script / title / style elements.
     get text()         { return __dom(this.__h, 'textContent'); }
     set text(v)        { this.textContent = v; }
@@ -311,14 +308,8 @@
     // and the document return null per spec. Turndown reads
     // `node.nodeValue` for text descendants and `null.replace(...)` is
     // the immediate symptom when the getter is uniform.
-    get nodeValue() {
-      const t = this.nodeType;
-      return (t === 3 || t === 4 || t === 8) ? this.textContent : null;
-    }
-    set nodeValue(v) {
-      const t = this.nodeType;
-      if (t === 3 || t === 4 || t === 8) this.textContent = v;
-    }
+    get nodeValue()  { return isCharacterDataType(this.nodeType) ? this.textContent : null; }
+    set nodeValue(v) { if (isCharacterDataType(this.nodeType)) this.textContent = v; }
     get prefix()        { return null; }
     get namespaceURI()  { return null; }
 
@@ -1451,15 +1442,21 @@
   }
   // Proxy a `<form>` element so `form.name` / `form[name]` resolve
   // through `form.elements` first (legacy `this.form.<input-name>`
-  // pattern). Real Element members win when the names collide.
+  // pattern). Real Element members win when the names collide. Cached
+  // per wrapper so `this.form === this.form` holds inside a handler.
+  const __formProxies = new WeakMap();
   function namedFormProxy(form) {
-    return new Proxy(form, {
+    let proxy = __formProxies.get(form);
+    if (proxy) return proxy;
+    proxy = new Proxy(form, {
       get(target, prop) {
         if (prop in target || typeof prop === 'symbol') return target[prop];
         const named = target.elements?.namedItem(prop);
         return named ?? target[prop];
       }
     });
+    __formProxies.set(form, proxy);
+    return proxy;
   }
   // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
   // ElementObserver gates its mutation-record processing on
@@ -1530,35 +1527,40 @@
       this.endOffset       = 0;
     }
     get commonAncestorContainer() {
-      // Cheapest spec-correct answer: walk start ancestors collecting
-      // them in a Set, then walk end ancestors until one matches.
+      // Cached between boundary mutations — `intersectsNode` and the
+      // surrounding quote-reply chain hits the getter several times.
+      if (this._cachedCAC !== undefined && this._cachedCAC !== null) return this._cachedCAC;
       if (!this.startContainer || !this.endContainer) return null;
-      if (this.startContainer === this.endContainer) return this.startContainer;
+      if (this.startContainer === this.endContainer) return (this._cachedCAC = this.startContainer);
       const path = new Set();
       for (let n = this.startContainer; n; n = n.parentNode) path.add(n);
-      for (let n = this.endContainer; n; n = n.parentNode) if (path.has(n)) return n;
+      for (let n = this.endContainer; n; n = n.parentNode) if (path.has(n)) return (this._cachedCAC = n);
       return null;
     }
     selectNodeContents(node) {
-      this.startContainer = node;
-      this.endContainer   = node;
-      this.startOffset    = 0;
-      this.endOffset      = node && node.nodeType === 3
+      const end = node && node.nodeType === 3
         ? (node.textContent || '').length
         : ((node && node.childNodes && node.childNodes.length) || 0);
+      this._setBoundary(true,  node, 0);
+      this._setBoundary(false, node, end);
     }
     selectNode(node) {
       const parent = node && node.parentNode;
       const idx    = indexInParent(node);
-      this.startContainer = parent; this.startOffset = idx;
-      this.endContainer   = parent; this.endOffset   = idx + 1;
+      this._setBoundary(true,  parent, idx);
+      this._setBoundary(false, parent, idx + 1);
     }
-    setStart(node, offset)   { this.startContainer = node; this.startOffset = offset || 0; }
-    setEnd(node, offset)     { this.endContainer   = node; this.endOffset   = offset || 0; }
-    setStartBefore(node)     { this.startContainer = node && node.parentNode; this.startOffset = indexInParent(node); }
-    setStartAfter(node)      { this.startContainer = node && node.parentNode; this.startOffset = indexInParent(node) + 1; }
-    setEndBefore(node)       { this.endContainer   = node && node.parentNode; this.endOffset   = indexInParent(node); }
-    setEndAfter(node)        { this.endContainer   = node && node.parentNode; this.endOffset   = indexInParent(node) + 1; }
+    setStart(node, offset)   { this._setBoundary(true,  node, offset || 0); }
+    setEnd(node, offset)     { this._setBoundary(false, node, offset || 0); }
+    setStartBefore(node)     { this._setBoundary(true,  node && node.parentNode, indexInParent(node)); }
+    setStartAfter(node)      { this._setBoundary(true,  node && node.parentNode, indexInParent(node) + 1); }
+    setEndBefore(node)       { this._setBoundary(false, node && node.parentNode, indexInParent(node)); }
+    setEndAfter(node)        { this._setBoundary(false, node && node.parentNode, indexInParent(node) + 1); }
+    _setBoundary(isStart, node, offset) {
+      if (isStart) { this.startContainer = node; this.startOffset = offset; }
+      else         { this.endContainer   = node; this.endOffset   = offset; }
+      this._cachedCAC = null;
+    }
     collapse()               {}
     intersectsNode(node) {
       if (!this.startContainer || !node) return false;
