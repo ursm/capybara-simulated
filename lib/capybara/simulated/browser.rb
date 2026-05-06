@@ -548,16 +548,23 @@ module Capybara
         if @focused_handle
           blur_handle = @focused_handle
           @focused_handle = nil
-          dispatch_event(blur_handle, 'blur', bubbles: false, cancelable: false)
+          dispatch_event(blur_handle, 'blur',     bubbles: false, cancelable: false)
+          dispatch_event(blur_handle, 'focusout', bubbles: true,  cancelable: false)
         end
         @focused_handle = handle
-        dispatch_event(handle, 'focus', bubbles: false, cancelable: false)
+        dispatch_event(handle, 'focus',   bubbles: false, cancelable: false)
+        # focusin/focusout shadow focus/blur but bubble; jQuery 3.x
+        # rewrites delegated `$(document).on('focus', selector, ...)`
+        # registrations to focusin, so without them Tribute / atwho
+        # autocomplete attachments never fire.
+        dispatch_event(handle, 'focusin', bubbles: true,  cancelable: false)
       end
 
       def blur(handle)
         return unless @focused_handle == handle
         @focused_handle = nil
-        dispatch_event(handle, 'blur', bubbles: false, cancelable: false)
+        dispatch_event(handle, 'blur',     bubbles: false, cancelable: false)
+        dispatch_event(handle, 'focusout', bubbles: true,  cancelable: false)
       end
 
       # Session#send_keys: walks the document's focus order on :tab /
@@ -831,8 +838,23 @@ module Capybara
         changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
         return changed unless changed && @js
         dispatch_input_change(handle)
+        # Tail keydown / keyup approximate the "user finished typing"
+        # signal that autocomplete / mention libraries (Tribute.js,
+        # atwho, etc.) hook. They look at `event.key` to decide whether
+        # the most recent keystroke was a trigger character (`#`, `@`,
+        # …), so seed the event with the last character of the typed
+        # value. Better than nothing for libraries that fire on the
+        # final char; per-keystroke replay is out of scope.
+        dispatch_key_pair(handle, value)
         submit_form(handle) if submit_after
         changed
+      end
+
+      def dispatch_key_pair(handle, value)
+        last = value.is_a?(String) ? value[-1] : nil
+        init = last ? {key: last, keyCode: last.ord, which: last.ord} : {}
+        dispatch_event(handle, 'keydown', bubbles: true, cancelable: true, **init)
+        dispatch_event(handle, 'keyup',   bubbles: true, cancelable: true, **init)
       end
 
       TEXT_LIKE_INPUT_TYPES = %w[text email password search tel url].to_set.freeze

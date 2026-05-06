@@ -127,7 +127,24 @@
     get className() { return this.getAttribute('class') || ''; }
     set className(v) { this.setAttribute('class', v); }
     get value()     { return __dom(this.__h, 'value'); }
-    set value(v)    { __dom(this.__h, 'setValue', [v == null ? '' : String(v)]); }
+    set value(v)    {
+      __dom(this.__h, 'setValue', [v == null ? '' : String(v)]);
+      // Real browsers move the caret to the end after a programmatic
+      // value write — Tribute.js / autocomplete libraries read
+      // `selectionStart` to find the trigger position; without
+      // updating it on write, they think the caret never moved.
+      const n = this.value ? this.value.length : 0;
+      this._selStart = this._selEnd = n;
+    }
+    // Selection state. Real browsers track caret position on text-like
+    // inputs / textareas; we model just the offsets, no direction. Set
+    // by `setSelectionRange` / `select` and on programmatic value writes.
+    get selectionStart() { return this._selStart ?? (this.value ? this.value.length : 0); }
+    set selectionStart(v) { this._selStart = +v || 0; }
+    get selectionEnd()   { return this._selEnd   ?? (this.value ? this.value.length : 0); }
+    set selectionEnd(v)  { this._selEnd = +v || 0; }
+    get selectionDirection() { return 'none'; }
+    set selectionDirection(_) {}
     get checked()   { return !!__dom(this.__h, 'checked'); }
     set checked(v)  { __dom(this.__h, 'setChecked', [!!v]); }
     get disabled()  { return !!__dom(this.__h, 'disabled'); }
@@ -251,8 +268,14 @@
     focus()                  { __dom(this.__h, 'focus'); }
     blur()                   { __dom(this.__h, 'blur'); }
     click()                  { __dom(this.__h, 'click'); }
-    select()                 {}
-    setSelectionRange()      {}
+    setSelectionRange(start, end, _direction) {
+      this._selStart = +start || 0;
+      this._selEnd   = +end   || 0;
+    }
+    select() {
+      this._selStart = 0;
+      this._selEnd   = this.value ? this.value.length : 0;
+    }
     setRangeText()           {}
 
     // Mutations
@@ -712,33 +735,45 @@
   function __dispatch(target, event) {
     if (!target) return true;
     event.target = target;
-    const path = buildPath(target);  // [target, parent, ..., document]
-    // Capture: document → target's parent
-    for (let i = path.length - 1; i > 0; i--) {
-      if (event._stopped) break;
-      event.eventPhase = 1;
-      invokeListeners(path[i], event, true, false);
-    }
-    // Target
-    if (!event._stopped) {
-      event.eventPhase = 2;
-      invokeListeners(target, event, false, true);
-    }
-    // Bubble: target's parent → document (only if event bubbles)
-    if (event.bubbles) {
-      for (let i = 1; i < path.length; i++) {
+    // Legacy `window.event` global. IE-era code (and Redmine's
+    // Tribute config closure) reads `event.target.type` directly
+    // without taking it as a parameter; without this set the handler
+    // throws ReferenceError mid-dispatch and the dropdown silently
+    // never populates. Cleared after dispatch so reentrant access
+    // outside a handler doesn't see stale state.
+    const __prevEvent = globalThis.event;
+    globalThis.event = event;
+    try {
+      const path = buildPath(target);  // [target, parent, ..., document]
+      // Capture: document → target's parent
+      for (let i = path.length - 1; i > 0; i--) {
         if (event._stopped) break;
-        event.eventPhase = 3;
-        invokeListeners(path[i], event, false, false);
+        event.eventPhase = 1;
+        invokeListeners(path[i], event, true, false);
       }
-      // After document, the bubble continues to the window — Turbo's
-      // StreamObserver listens for `turbo:before-fetch-response` here
-      // and `event.preventDefault()`s to short-circuit the normal
-      // form-submission flow before it errors on a 200-without-redirect.
-      if (!event._stopped) invokeWindowListeners(event);
+      // Target
+      if (!event._stopped) {
+        event.eventPhase = 2;
+        invokeListeners(target, event, false, true);
+      }
+      // Bubble: target's parent → document (only if event bubbles)
+      if (event.bubbles) {
+        for (let i = 1; i < path.length; i++) {
+          if (event._stopped) break;
+          event.eventPhase = 3;
+          invokeListeners(path[i], event, false, false);
+        }
+        // After document, the bubble continues to the window — Turbo's
+        // StreamObserver listens for `turbo:before-fetch-response` here
+        // and `event.preventDefault()`s to short-circuit the normal
+        // form-submission flow before it errors on a 200-without-redirect.
+        if (!event._stopped) invokeWindowListeners(event);
+      }
+      event.eventPhase = 0;
+      return !event.defaultPrevented;
+    } finally {
+      globalThis.event = __prevEvent;
     }
-    event.eventPhase = 0;
-    return !event.defaultPrevented;
   }
 
   function invokeWindowListeners(event) {
@@ -766,7 +801,10 @@
     mouseleave:  MouseEvent,
     contextmenu: MouseEvent,
     submit:      SubmitEvent,
-    input:       InputEvent
+    input:       InputEvent,
+    keydown:     KeyboardEvent,
+    keyup:       KeyboardEvent,
+    keypress:    KeyboardEvent
   };
 
   // Called from Ruby (`browser.dispatch_event`). Returns true if no
