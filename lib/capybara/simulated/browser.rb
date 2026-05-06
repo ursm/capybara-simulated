@@ -2649,24 +2649,38 @@ module Capybara
       VISIBILITY_HIDDEN_RE  = /visibility\s*:\s*hidden/i
       # Tailwind / Bootstrap style: `.hidden` and `.d-none` resolve to
       # `display: none`. Treating these class tokens as hidden lets the
-      # visible-text walk skip clipboard-source <div class="hidden">
-      # and similar UI helpers without a stylesheet engine.
+      # visible-text walk skip clipboard-source helpers without doubling
+      # the surrounding text, and prevents `find(visible: :visible)`
+      # from picking up inactive tab panes / tooltips that real browsers
+      # CSS-hide. Modal-open flows that toggle `class="hidden"` still
+      # work because Stimulus's controller-connect path now runs to
+      # completion (microtasks pumped after every drain_timers).
       HIDDEN_CLASS_TOKENS = %w[hidden d-none].freeze
+      # Tailwind responsive variants override a bare `hidden`/`d-none`
+      # at viewport widths >= the breakpoint. We assume a desktop-class
+      # viewport (no real layout engine to consult), so any `(sm|md|lg|
+      # xl|2xl):<display>` reveal token in the same class list cancels
+      # the hide. Conversely, `(...):hidden` on its own re-hides at
+      # those breakpoints.
+      DISPLAY_REVEAL_RE = /\A(?:sm|md|lg|xl|2xl):(?:block|flex|grid|inline|inline-block|inline-flex|inline-grid|table|table-row|table-cell|contents|flow-root)\z/
+      DISPLAY_HIDE_RE   = /\A(?:sm|md|lg|xl|2xl):(?:hidden|d-none)\z/
 
       def class_hidden?(node)
         cls = node['class']
         return false unless cls && !cls.empty?
         tokens = cls.split
-        HIDDEN_CLASS_TOKENS.any? { |t| tokens.include?(t) }
+        base_hidden = tokens.any? { |t| HIDDEN_CLASS_TOKENS.include?(t) }
+        responsive_hidden = tokens.any? { |t| DISPLAY_HIDE_RE.match?(t) }
+        responsive_reveal = tokens.any? { |t| DISPLAY_REVEAL_RE.match?(t) }
+        # Last-wins for our purposes: a responsive `hidden` always wins,
+        # otherwise a responsive reveal cancels a base `hidden`.
+        return true if responsive_hidden
+        base_hidden && !responsive_reveal
       end
 
       def style_hidden?(node)
         each_ancestor(node) do |cur|
-          return true if cur['hidden']
-          return true if class_hidden?(cur)
-          style = cur['style'].to_s
-          return true if style.match?(DISPLAY_NONE_RE)
-          return true if style.match?(VISIBILITY_HIDDEN_RE)
+          return true if self_hidden?(cur)
         end
         false
       end

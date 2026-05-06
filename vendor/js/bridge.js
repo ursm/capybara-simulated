@@ -399,6 +399,11 @@
     // Document factory ops live on Element so document.createElement works
     // without a separate Document subclass.
     createElement(tag)        { return wrap(__dom(this.__h, 'createElement',         [String(tag)])); }
+    // SVG / MathML namespaced creation. Without a separate XML model
+    // we hand back a plain element keyed on the local name; libraries
+    // (Algolia Autocomplete, the search controller) only round-trip
+    // attributes and structure, so the namespace is informational.
+    createElementNS(_ns, tag)  { return wrap(__dom(this.__h, 'createElement',         [String(tag)])); }
     createTextNode(text)      { return wrap(__dom(this.__h, 'createTextNode',        [String(text)])); }
     createComment(text)       { return wrap(__dom(this.__h, 'createComment',         [String(text)])); }
     createDocumentFragment()  { return wrap(__dom(this.__h, 'createDocumentFragment')); }
@@ -2026,7 +2031,37 @@
     disconnect()             {}
     takeRecords()            { return []; }
   }
-  globalThis.IntersectionObserver = StubObserver;
+  // IntersectionObserver: lazy turbo-frames fetch via an
+  // IntersectionObserver firing when the frame scrolls into viewport.
+  // Without a layout engine we can't actually observe scroll position,
+  // but pretending every observed target is permanently "in viewport"
+  // matches the desktop-default assumption used elsewhere (Tailwind
+  // responsive classes). Reports a single intersecting=true entry once
+  // per observe() call via a microtask, then stays silent.
+  class EagerIntersectionObserver {
+    constructor(cb) { this._cb = cb; this._observed = new Set(); }
+    observe(target) {
+      if (!target || this._observed.has(target)) return;
+      this._observed.add(target);
+      const cb = this._cb, obs = this;
+      Promise.resolve().then(() => {
+        if (!obs._observed.has(target)) return;
+        try {
+          cb([{
+            target, isIntersecting: true, intersectionRatio: 1,
+            boundingClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
+            intersectionRect:   {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
+            rootBounds:         {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
+            time: 0
+          }], obs);
+        } catch (_) {}
+      });
+    }
+    unobserve(target) { this._observed.delete(target); }
+    disconnect()      { this._observed.clear(); }
+    takeRecords()     { return []; }
+  }
+  globalThis.IntersectionObserver = EagerIntersectionObserver;
   globalThis.ResizeObserver       = StubObserver;
   globalThis.PerformanceObserver  = StubObserver;
 

@@ -63,10 +63,18 @@ module Capybara
 
       # `max_ms = 0` fires only currently-due timers (microtasks);
       # passing the elapsed wall time lets `setTimeout(N)` fire as N ms
-      # of real time accumulate.
+      # of real time accumulate. Pump microtasks afterwards so any
+      # `Promise.then(...)` queued by a timer callback (e.g. Turbo's
+      # FrameRenderer chain that does `await nextRepaint()` between
+      # parsing and committing the swap) resumes before settle's next
+      # buffer-empty check, instead of stranding the trailing
+      # `appendChild` mutation in `@mutations` until reset.
       def drain_timers(max_ms = nil)
         arg = max_ms.nil? ? '' : max_ms.to_i.to_s
-        with_recycle { @vm.eval_code("__drainTimers(#{arg})") }
+        with_recycle do
+          @vm.eval_code("__drainTimers(#{arg})")
+          pump_microtasks
+        end
       end
 
       def reset_timers
