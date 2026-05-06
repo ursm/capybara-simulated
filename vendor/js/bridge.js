@@ -2116,6 +2116,7 @@
       }
       return !(event && event.defaultPrevented);
     }
+  };
 
 
   // Worker, SharedWorker, MessagePort — mapbox-gl and other bundled libraries
