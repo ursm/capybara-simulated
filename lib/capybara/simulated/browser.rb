@@ -62,6 +62,7 @@ module Capybara
         @shadow_roots       = {}   # host_handle -> Nokogiri::HTML5::DocumentFragment
         @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
         @focused_handle     = nil  # currently-focused element handle
+        @hovered_handle     = nil  # last element passed to `hover` (drives mouseleave on the next hover)
         @mutations          = []
         @mutation_recording = false
         @timers_active      = false
@@ -125,6 +126,7 @@ module Capybara
         @shadow_roots.clear
         @shadow_root_set.clear
         @focused_handle = nil
+        @hovered_handle = nil
         @js&.reset_page
         reset_per_page_state
       end
@@ -758,8 +760,8 @@ module Capybara
         prior_checked = pretoggle_form_control(node)
         # Fire 'click' before the default action — handlers may
         # preventDefault() to suppress navigation / form submit.
-        unless dispatch_event(handle, 'click', button: 0, which: 1, **mods)
-          revert_pretoggle(node, prior_checked) unless prior_checked.nil?
+        unless dispatch_event(handle, 'click', **mouse_init(button: 0), **mods)
+          revert_pretoggle(node, prior_checked)
           return true
         end
         case node.name
@@ -840,7 +842,7 @@ module Capybara
           was_checked = !!node['checked']
           now_checked = !!value
           set_value(handle, now_checked)
-          unless dispatch_event(handle, 'click', button: 0, which: 1)
+          unless dispatch_event(handle, 'click', **mouse_init(button: 0))
             set_value(handle, was_checked)
             return was_checked
           end
@@ -1142,16 +1144,17 @@ module Capybara
       def right_click(handle, modifiers = nil, delay: 0)
         mods = modifier_init(modifiers)
         fire_mouse_sequence(handle, button: 2, delay: delay, modifiers: mods)
-        dispatch_event(handle, 'contextmenu', button: 2, which: 3, **mods)
+        dispatch_event(handle, 'contextmenu', **mouse_init(button: 2), **mods)
         true
       end
 
       def double_click(handle, modifiers = nil, delay: 0)
         mods = modifier_init(modifiers)
         fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
-        dispatch_event(handle, 'click',    button: 0, which: 1, **mods)
-        dispatch_event(handle, 'click',    button: 0, which: 1, **mods)
-        dispatch_event(handle, 'dblclick', button: 0, which: 1, **mods)
+        init = mouse_init(button: 0)
+        dispatch_event(handle, 'click',    **init, **mods)
+        dispatch_event(handle, 'click',    **init, **mods)
+        dispatch_event(handle, 'dblclick', **init, **mods)
         true
       end
 
@@ -1164,7 +1167,8 @@ module Capybara
       def hover(handle)
         node = lookup_node(handle)
         return false if node.nil?
-        if @hovered_handle && @hovered_handle != handle
+        return true  if @hovered_handle == handle
+        if @hovered_handle
           dispatch_event(@hovered_handle, 'mouseout',   bubbles: true,  cancelable: true)
           dispatch_event(@hovered_handle, 'mouseleave', bubbles: false, cancelable: true)
         end
@@ -1176,14 +1180,18 @@ module Capybara
       end
 
       def fire_mouse_sequence(handle, button:, delay:, modifiers:)
-        # Legacy `event.which` is 1-indexed (left=1, middle=2, right=3)
-        # whereas `event.button` is 0-indexed; older code (Redmine's
-        # `contextMenuClick` checks `event.which == 1`) reads `which`,
-        # so emit both.
-        which = button + 1
-        dispatch_event(handle, 'mousedown', button: button, which: which, **modifiers)
+        init = mouse_init(button: button)
+        dispatch_event(handle, 'mousedown', **init, **modifiers)
         sleep(delay) if delay && delay > 0
-        dispatch_event(handle, 'mouseup',   button: button, which: which, **modifiers)
+        dispatch_event(handle, 'mouseup',   **init, **modifiers)
+      end
+
+      # MouseEvent init slice. `event.which` is the 1-indexed mirror of
+      # `event.button` (left=1, middle=2, right=3); pre-WHATWG code
+      # (Redmine's `contextMenuClick` checks `event.which == 1`) reads
+      # `which`, so emit both.
+      def mouse_init(button:)
+        {button: button, which: button + 1}
       end
 
       # Build the MouseEvent init slice from Capybara modifier symbols.
@@ -1667,6 +1675,7 @@ module Capybara
         # Same goes for focus state.
         @file_picks.clear
         @focused_handle = nil
+        @hovered_handle = nil
         @document    = Nokogiri::HTML5(response_body)
         @handles.reset!(@document)
         # Run inline `<script>` tags only when the page actually has any —
@@ -1997,7 +2006,11 @@ module Capybara
         end
       end
 
+      # No-op when `prior_checked` is nil — `pretoggle_form_control`
+      # returns nil for non-toggleable nodes, so the click path can
+      # always call this without guarding.
       def revert_pretoggle(node, prior_checked)
+        return if prior_checked.nil?
         set_value(@handles.track(node), prior_checked)
       end
 

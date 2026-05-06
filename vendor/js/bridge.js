@@ -1416,10 +1416,13 @@
     selectNode(node)         { this._node = node && node.parentNode; this.startContainer = this._node; this.endContainer = this._node; }
     setStart(node, offset)   { this.startContainer = node; this.startOffset = offset || 0; this._node ||= node; }
     setEnd(node, offset)     { this.endContainer   = node; this.endOffset   = offset || 0; this._node ||= node; }
+    // Boundary-point setters: real browsers compute (refNode.parent,
+    // refNode index ± 1) and our offset model is collapsed, so the
+    // before / after halves are functionally identical.
     setStartBefore(node)     { this.startContainer = node && node.parentNode; this._node = this.startContainer; }
-    setStartAfter(node)      { this.startContainer = node && node.parentNode; this._node = this.startContainer; }
+    setStartAfter(node)      { this.setStartBefore(node); }
     setEndBefore(node)       { this.endContainer   = node && node.parentNode; this._node ||= this.endContainer; }
-    setEndAfter(node)        { this.endContainer   = node && node.parentNode; this._node ||= this.endContainer; }
+    setEndAfter(node)        { this.setEndBefore(node); }
     collapse()               {}
     intersectsNode(node) {
       if (!this._node || !node) return false;
