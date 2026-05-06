@@ -1529,7 +1529,51 @@
   }
   globalThis.localStorage   = makeStorage();
   globalThis.sessionStorage = makeStorage();
-  globalThis.getComputedStyle = function () { return {getPropertyValue: () => '', length: 0}; };
+  // No layout engine, so "computed" style is mostly fiction. We
+  // expose what we can actually answer accurately: inline
+  // `style="..."` declarations + a hand-coded default-display table
+  // (jQuery's `.show()` consults computed display to decide whether
+  // an element is hidden via stylesheet, and bails on empty).
+  const __DEFAULT_DISPLAY = {
+    div: 'block', p: 'block', h1: 'block', h2: 'block', h3: 'block', h4: 'block',
+    h5: 'block', h6: 'block', section: 'block', article: 'block', header: 'block',
+    footer: 'block', nav: 'block', aside: 'block', main: 'block', form: 'block',
+    fieldset: 'block', address: 'block', blockquote: 'block', pre: 'block',
+    hr: 'block', ul: 'block', ol: 'block', dl: 'block', figure: 'block',
+    figcaption: 'block',
+    li: 'list-item', dt: 'block', dd: 'block',
+    table: 'table', tbody: 'table-row-group', thead: 'table-header-group',
+    tfoot: 'table-footer-group', tr: 'table-row', td: 'table-cell',
+    th: 'table-cell', caption: 'table-caption', colgroup: 'table-column-group',
+    col: 'table-column'
+  };
+  function defaultDisplayFor(el) {
+    return __DEFAULT_DISPLAY[el.tagName?.toLowerCase()] || 'inline';
+  }
+  globalThis.getComputedStyle = function (el) {
+    const inline = (el && el.getAttribute) ? (el.getAttribute('style') || '') : '';
+    const decls = {};
+    inline.split(';').forEach(decl => {
+      const i = decl.indexOf(':');
+      if (i < 0) return;
+      const k = decl.slice(0, i).trim().toLowerCase();
+      const v = decl.slice(i + 1).trim();
+      if (k) decls[k] = v;
+    });
+    return {
+      getPropertyValue(name) {
+        const k = String(name).toLowerCase();
+        if (k in decls) return decls[k];
+        if (k === 'display') return defaultDisplayFor(el);
+        return '';
+      },
+      get display()    { return decls.display    ?? defaultDisplayFor(el); },
+      get visibility() { return decls.visibility ?? 'visible'; },
+      get opacity()    { return decls.opacity    ?? '1'; },
+      get position()   { return decls.position   ?? 'static'; },
+      length: Object.keys(decls).length
+    };
+  };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
   // performance.now() returns ms since the runtime started — not the
