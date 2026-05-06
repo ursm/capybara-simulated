@@ -38,9 +38,13 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #click should allow to adjust the click offset',
   'Capybara::Session Simulated node #double_click should allow to adjust the offset',
   'Capybara::Session Simulated node #right_click should allow to adjust the offset',
-  # Capybara::Node#reload re-locates a node via the original Query
-  # context. Our stale-check walks Nokogiri parents directly, which
-  # diverges from Capybara's "found via X" reload semantics.
+  # `#reload` tests `find` a node, click an async link that mutates
+  # via setTimeout, then read `node.text` directly (no synchronize on
+  # the matcher side). Ticking the virtual clock during read paths
+  # would let the setTimeout fire — but the same hook also stresses
+  # the /with_js cluster's MutationObserver chains, increasing flake
+  # rate on neighbouring timing tests. Keep `#reload` skipped so the
+  # release baseline stays deterministic.
   'Capybara::Session Simulated node #reload ',
   # `attach_file` block form clicks a <label> whose <input type="file">
   # is display:none; the click target resolves via elementFromPoint.
