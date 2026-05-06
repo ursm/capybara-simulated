@@ -1663,7 +1663,28 @@
   // EasyMDE et al. iterate document.styleSheets at construct-time —
   // without a stylesheet engine the answer is simply "no sheets",
   // which is enough to keep them from throwing on `.length`.
-  globalThis.document.styleSheets = [];
+  // Provide a proper StyleSheetList with length and methods.
+  globalThis.CSSStyleSheet = class CSSStyleSheet {
+    constructor() {
+      this.cssRules = [];
+      this.media = { mediaText: '', appendMedium() {}, deleteMedium() {} };
+      this.disabled = false;
+      this.href = null;
+      this.ownerNode = null;
+      this.ownerRule = null;
+      this.parentStyleSheet = null;
+      this.title = '';
+      this.type = 'text/css';
+    }
+    insertRule(rule, index = 0) { this.cssRules.splice(index, 0, rule); return index; }
+    deleteRule(index) { this.cssRules.splice(index, 1); }
+  };
+  globalThis.document.styleSheets = {
+    length: 0,
+    item(index) { return null; },
+    [Symbol.iterator]: function* () {},
+    forEach(callback, thisArg) { }
+  };
 
   // window === globalThis is the universal "this is a browser-ish env"
   // signal. Plus a handful of shims used during library boot.
@@ -1823,7 +1844,7 @@
       const v = decl.slice(i + 1).trim();
       if (k) decls[k] = v;
     });
-    return {
+    const baseStyle = {
       getPropertyValue(name) {
         const k = String(name).toLowerCase();
         if (k in decls) return decls[k];
@@ -1834,8 +1855,19 @@
       get visibility() { return decls.visibility ?? 'visible'; },
       get opacity()    { return decls.opacity    ?? '1'; },
       get position()   { return decls.position   ?? 'static'; },
+      get overflow()   { return decls.overflow   ?? 'visible'; },
+      get width()      { return decls.width      ?? '0px'; },
+      get height()     { return decls.height     ?? '0px'; },
+      get padding()    { return decls.padding    ?? '0px'; },
+      get margin()     { return decls.margin     ?? '0px'; },
       length: Object.keys(decls).length
     };
+    return new Proxy(baseStyle, {
+      get(target, prop) {
+        if (prop in target) return target[prop];
+        return '';
+      }
+    });
   };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
@@ -2084,6 +2116,35 @@
       }
       return !(event && event.defaultPrevented);
     }
+
+
+  // Worker, SharedWorker, MessagePort — mapbox-gl and other bundled libraries
+  // instantiate these to offload tile rendering. No-op impls are enough since
+  // Avo's map doesn't require actual web worker functionality in tests.
+  globalThis.Worker = class Worker extends EventTarget {
+    constructor(scriptUrl) {
+      super();
+      this.url = scriptUrl;
+    }
+    postMessage(message, transferList) { }
+    terminate() { }
+  };
+
+  globalThis.SharedWorker = class SharedWorker extends EventTarget {
+    constructor(scriptUrl, options) {
+      super();
+      this.url = scriptUrl;
+      this.port = new globalThis.MessagePort();
+    }
+  };
+
+  globalThis.MessagePort = class MessagePort extends EventTarget {
+    constructor() {
+      super();
+    }
+    postMessage(message, transferList) { }
+    start() { }
+    close() { }
   };
 
   globalThis.AbortController = class AbortController {
