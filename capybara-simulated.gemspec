@@ -16,7 +16,7 @@ Gem::Specification.new do |spec|
     'rubygems_mfa_required' => 'true'
   }
 
-  spec.required_ruby_version = '>= 3.3'
+  spec.required_ruby_version = '>= 3.4'
 
   spec.files = Dir[
     'lib/**/*.rb',
@@ -28,6 +28,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.40'
   spec.add_dependency 'nokogiri', '>= 1.18'
+  spec.add_dependency 'p_css',    '>= 0.1'
   spec.add_dependency 'quickjs',  '>= 0.15'
   spec.add_dependency 'rack',     '>= 2.2'
 end

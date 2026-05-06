@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'css'
 require 'digest'
 require 'json'
 require 'nokogiri'
@@ -22,6 +23,11 @@ module Capybara
 
     DEFAULT_HOST    = 'http://www.example.com'
     BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
+
+    # Sentinel for "the page-cascade memo hasn't been computed yet" —
+    # `nil` means "computed, no stylesheets present", so we can't use
+    # nil as the unset marker.
+    NO_CASCADE = Object.new.freeze
 
     Request = Data.define(:method, :url, :body, :content_type, :referer)
 
@@ -57,6 +63,17 @@ module Capybara
         @file_picks         = {}   # handle -> [path, ...] for <input type="file">
         @modal_handlers     = []   # innermost handler matches the next modal, pops, then bubbles outward
         @resource_cache     = {}   # URL -> response body for <script src=...> etc.
+        # Parsed `CSS::Nodes::Stylesheet` keyed by stylesheet identity
+        # (URL for `<link>`, content hash for inline `<style>`). Persists
+        # across `reset!` so the per-app Tailwind bundle parses once.
+        @parsed_stylesheets = {}
+        # Cross-page Cascade reuse: stylesheet-set fingerprint →
+        # Cascade. Same fingerprint hits the same compiled instance.
+        @cascade_by_fp      = {}
+        # Memoized cascade lookup for the current page; cleared on
+        # navigation so we don't re-walk `<link>` / `<style>` and
+        # rebuild the fingerprint on every visibility check.
+        @page_cascade       = NO_CASCADE
         @importmap          = empty_importmap
         @module_cache       = {}   # URL -> rewritten module source (cleared on reset!)
         @shadow_roots       = {}   # host_handle -> Nokogiri::HTML5::DocumentFragment
@@ -127,6 +144,7 @@ module Capybara
         @shadow_root_set.clear
         @focused_handle = nil
         @hovered_handle = nil
+        invalidate_cascade
         @js&.reset_page
         reset_per_page_state
       end
@@ -2023,6 +2041,7 @@ module Capybara
         @hovered_handle = nil
         @document    = Nokogiri::HTML5(response_body)
         @handles.reset!(@document)
+        invalidate_cascade
         # Run inline `<script>` tags only when the page actually has any —
         # avoids paying QuickJS cold-start on rack_test-style flows. Reset
         # the virtual clock so timers from the previous page can't fire on
@@ -2698,7 +2717,97 @@ module Capybara
         return true if node['hidden']
         return true if class_hidden?(node)
         style = node['style'].to_s
-        style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
+        return true if style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
+        cascade_hidden_self?(node)
+      end
+
+      # Returns true when the cascade computes `display: none` or
+      # `visibility: hidden` for `node`. CSS doesn't inherit `display`,
+      # so ancestor checks happen at the caller in `style_hidden?`. Any
+      # cascade error falls through to false — the class-token
+      # heuristics above stay active as a safety net.
+      def cascade_hidden_self?(node)
+        return false unless node.respond_to?(:element?) && node.element?
+        c = cascade or return false
+        decls = c.resolve(node, inline_style: node['style'])
+        decl_value_is?(decls['display'], 'none') ||
+          decl_value_is?(decls['visibility'], 'hidden')
+      rescue StandardError
+        false
+      end
+
+      # Avoid CSS.serialize on the hot path: `display` and `visibility`
+      # values are virtually always a single ident token, so peek
+      # directly. Falls back to serialization for the long tail.
+      def decl_value_is?(decl, expected)
+        return false unless decl
+        v = decl.value
+        return false if v.nil? || v.empty?
+        first = v.first
+        return v.size == 1 && first.respond_to?(:type) && first.type == :ident && first.value == expected if v.size == 1
+        CSS.serialize(v).strip.downcase == expected
+      end
+
+      def cascade
+        return @page_cascade unless @page_cascade.equal?(NO_CASCADE)
+        sources = collect_stylesheet_sources
+        @page_cascade =
+          if sources.empty?
+            nil
+          else
+            fp = stylesheet_fingerprint(sources)
+            @cascade_by_fp[fp] ||= build_cascade(sources)
+          end
+      end
+
+      def build_cascade(sources)
+        rules = sources.flat_map {|src, key|
+          parsed = parse_stylesheet_safely(src, key) or next []
+          parsed.rules
+        }
+        return nil if rules.empty?
+        CSS.cascade(CSS::Nodes::Stylesheet.new(rules: rules))
+      rescue StandardError => e
+        warn "[capybara-simulated] cascade build failed: #{e.class}: #{e.message[0, 200]}"
+        nil
+      end
+
+      # `[source_text, cache_key]` in document order. Cache keys for
+      # inline `<style>` use a content hash so multiple inline blocks
+      # don't collide; `<link>` URLs are already unique.
+      def collect_stylesheet_sources
+        out = []
+        @document.css('link[rel~="stylesheet"], style').each do |node|
+          if node.name == 'style'
+            text = node.text.to_s
+            out << [text, [:inline, Digest::SHA1.hexdigest(text)].freeze] unless text.empty?
+          else
+            href = node['href'].to_s
+            next if href.empty?
+            url  = resolve(href)
+            text = fetch_resource(url) or next
+            out << [text, [:link, url].freeze]
+          end
+        end
+        out
+      end
+
+      # Cache keys are already `<kind>:<discriminator>` tuples, so they
+      # serialize directly into a compact fingerprint.
+      def stylesheet_fingerprint(sources)
+        sources.map {|_, key| key.join(':') }.join('|')
+      end
+
+      def parse_stylesheet_safely(source, key)
+        return @parsed_stylesheets[key] if @parsed_stylesheets.key?(key)
+        @parsed_stylesheets[key] = CSS.parse_stylesheet(source)
+      rescue CSS::ParseError => e
+        warn "[capybara-simulated] CSS parse failed for #{key.inspect}: #{e.message[0, 200]}"
+        @parsed_stylesheets[key] = nil
+      end
+
+      def invalidate_cascade
+        @page_cascade = NO_CASCADE
       end
 
       DISPLAY_NONE_RE       = /display\s*:\s*none/i
