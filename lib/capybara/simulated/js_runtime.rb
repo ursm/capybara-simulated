@@ -58,11 +58,8 @@ module Capybara
 
       def reset_page
         # If the previous test stressed the VM enough to hit a recycle,
-        # boot a fresh one for the next test. The post-recycle VM has
-        # historically been intermittently fragile under continued
-        # stress (segfaults inside quickjs.rb's free path), so we'd
-        # rather pay one extra bridge.js eval than carry forward a
-        # potentially-tainted runtime.
+        # boot a fresh one for the next test rather than carry forward
+        # whatever state the recycle left behind.
         if @recycled_since_reset
           boot_vm
           @recycled_since_reset = false
@@ -162,15 +159,18 @@ module Capybara
       rescue Quickjs::SyntaxError => e
         raise unless e.message.include?('stack overflow')
         warn '[capybara-simulated] QuickJS parser stack overflow — recycling VM'
-        boot_vm
-        @recycled_since_reset = true
+        recycle!
         yield
       rescue Quickjs::RuntimeError
         raise unless @vm.oom_poisoned?
         warn '[capybara-simulated] QuickJS VM hit OOM — recycling'
+        recycle!
+        yield
+      end
+
+      def recycle!
         boot_vm
         @recycled_since_reset = true
-        yield
       end
 
       # Wrap in `new Function` so `let`/`const` at the script's top

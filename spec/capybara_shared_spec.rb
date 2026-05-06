@@ -42,20 +42,19 @@ DESCRIPTION_SKIPS = [
   # context. Our stale-check walks Nokogiri parents directly, which
   # diverges from Capybara's "found via X" reload semantics.
   'Capybara::Session Simulated node #reload ',
-  # The /with_js fixture page loads enough jQuery to trigger several
-  # parser-stack-overflow + VM-recycle events. Upstream quickjs.rb has
-  # a known crash-after-recycle issue (hmsk/quickjs.rb#23) that turns
-  # the recycle-and-retry stress here into intermittent segfaults.
-  # Re-enable once the upstream fix lands.
-  'Capybara::Session Simulated #click_button should wait for asynchronous load',
-  'Capybara::Session Simulated #click_button when Capybara.enable_aria_role = true should click on a button role',
-  'Capybara::Session Simulated #click_link should wait for asynchronous load',
-  'Capybara::Session Simulated #click_link_or_button should wait for asynchronous load',
   # Capybara's `attach_file` block form simulates a click on a <label>
   # whose <input type="file"> is hidden via display:none and resolves
   # the click target via elementFromPoint — same layout-engine class
   # as the click-offset family above.
-  'Capybara::Session Simulated #attach_file with a block can upload by clicking the label'
+  'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',
+  # The /with_js fixture loads jQuery + jQuery UI; jQuery UI's bundle
+  # contains constructs (`(0, eval)("...")` in particular) QuickJS's
+  # parser still rejects, so `$` isn't bound by the time test.js runs.
+  # Tests that depend on /with_js's runtime behaviour flake.
+  'Capybara::Session Simulated #click_button should wait for asynchronous load',
+  'Capybara::Session Simulated #click_button when Capybara.enable_aria_role = true should click on a button role',
+  'Capybara::Session Simulated #click_link should wait for asynchronous load',
+  'Capybara::Session Simulated #click_link_or_button should wait for asynchronous load'
 ].freeze
 
 RSpec.configure do |config|
