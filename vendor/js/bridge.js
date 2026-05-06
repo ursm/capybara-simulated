@@ -194,8 +194,35 @@
     set target(v)      { this.setAttribute('target', v); }
     get name()         { return this.getAttribute('name') || ''; }
     set name(v)        { this.setAttribute('name', v); }
-    get type()         { return this.getAttribute('type') || ''; }
+    get type() {
+      // <select>.type is "select-one" / "select-multiple" per the IDL,
+      // with no underlying `type` attribute. jQuery's `valHooks.select`
+      // gates on this to decide whether `.val()` returns a string or
+      // an array; getAttribute('type') would always be '' and force
+      // the multi-select branch on a single-select.
+      if (this.tagName === 'SELECT') {
+        return this.hasAttribute('multiple') ? 'select-multiple' : 'select-one';
+      }
+      return this.getAttribute('type') || '';
+    }
     set type(v)        { this.setAttribute('type', v); }
+    // <select>.selectedIndex — jQuery's `valHooks.select.get` reads
+    // it (and treats undefined as NaN, returning null on single-selects).
+    // We compute on demand from the options' `selected` attribute.
+    get selectedIndex() {
+      if (this.tagName !== 'SELECT') return undefined;
+      const opts = this.options;
+      for (let i = 0; i < opts.length; i++) {
+        if (opts[i].selected) return i;
+      }
+      return -1;
+    }
+    set selectedIndex(v) {
+      if (this.tagName !== 'SELECT') return;
+      const i = +v;
+      const opts = this.options;
+      for (let j = 0; j < opts.length; j++) opts[j].selected = (j === i);
+    }
     // Reflected so JS-set values are also visible via getAttribute /
     // node['title'] — Redmine's jstoolbar does `button.title = ...`
     // and the `[title="..."]` Capybara filter reads the attribute.
