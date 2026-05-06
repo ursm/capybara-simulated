@@ -466,8 +466,12 @@ module Capybara
           when 'file'
             # File picks live in the Browser-side @file_picks map keyed by
             # handle — keeps them off the live DOM (where they'd leak into
-            # innerHTML / be visible to user JS).
-            @file_picks[handle] = Array(value).map(&:to_s)
+            # innerHTML / be visible to user JS). Drop blank paths
+            # (Redmine's attachments.js resets the dummy `<input>` via
+            # `value = ''` after cloning the real picker into a new entry;
+            # without the reject the dummy's empty-path entry hits
+            # `File.binread('')` in `build_multipart`).
+            @file_picks[handle] = Array(value).map(&:to_s).reject(&:empty?)
           when 'range', 'number'
             node['value'] = clamp_numeric_input(node, value).to_s
           else
