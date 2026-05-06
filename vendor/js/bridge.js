@@ -1548,32 +1548,109 @@
     clearMeasures() {}
   };
 
-  // XMLHttpRequest: stub-only. Pages probe `typeof XMLHttpRequest`
-  // at boot (jQuery, axios fallbacks, polyfill detectors). Constructing
-  // and `.open` / `.send` resolve as no-ops; `.status` reports 0.
-  // Tests that actually drive AJAX flows should go through fetch (which
-  // we route through Rack), not XHR.
+  // XMLHttpRequest: synchronous-via-Rack underneath, async-shaped on top.
+  // rails-ujs (`:remote => true` forms, `data-method` links) + jQuery's
+  // `$.ajax` go through XHR; without this all that traffic silently
+  // dropped. Send is dispatched to the underlying Rack app the same way
+  // `fetch` is, then the load / loadend / readystatechange events fire
+  // synchronously — close enough for test scenarios that immediately
+  // assert against the side effects of the response.
   class XMLHttpRequest {
     constructor() {
-      this.readyState = 0;
-      this.status     = 0;
-      this.statusText = '';
-      this.response   = '';
+      this.readyState   = 0;
+      this.status       = 0;
+      this.statusText   = '';
+      this.response     = '';
       this.responseText = '';
       this.responseType = '';
       this.responseURL  = '';
+      this.timeout      = 0;
+      this.withCredentials = false;
+      this.onreadystatechange = null;
+      this.onload        = null;
+      this.onerror       = null;
+      this.onloadend     = null;
+      this._method       = 'GET';
+      this._url          = '';
+      this._headers      = {};
+      this._respHeaders  = [];
+      this._listeners    = new Map();
+      this._aborted      = false;
     }
-    open()                  {}
-    send()                  {}
-    abort()                 {}
-    setRequestHeader()      {}
-    getAllResponseHeaders() { return ''; }
-    getResponseHeader()     { return null; }
-    overrideMimeType()      {}
-    addEventListener()      {}
-    removeEventListener()   {}
-    dispatchEvent()         { return true; }
+    open(method, url) {
+      this._method = String(method || 'GET').toUpperCase();
+      this._url    = String(url || '');
+      this.readyState = 1;
+    }
+    setRequestHeader(name, value) {
+      this._headers[String(name).toLowerCase()] = String(value);
+    }
+    overrideMimeType() {}
+    abort() { this._aborted = true; this._fireEvent('abort'); }
+    send(body) {
+      if (this._aborted) return;
+      let raw;
+      try {
+        raw = __rackFetch(this._method, this._url, body == null ? null : (typeof body === 'string' ? body : body.toString()), this._headers, 'follow');
+      } catch (e) {
+        this._fireEvent('error');
+        this._fireEvent('loadend');
+        return;
+      }
+      this.status       = raw.status || 0;
+      this.statusText   = '';
+      this.responseURL  = raw.url || this._url;
+      this.responseText = raw.body || '';
+      this.response     = this.responseText;
+      this._respHeaders = raw.headers || [];
+      this.readyState   = 4;
+      this._fireEvent('readystatechange');
+      this._fireEvent('load');
+      this._fireEvent('loadend');
+    }
+    getAllResponseHeaders() {
+      return this._respHeaders.map(([k, v]) => `${k}: ${v}`).join('\r\n');
+    }
+    getResponseHeader(name) {
+      const lower = String(name).toLowerCase();
+      const hit = this._respHeaders.find(([k]) => k.toLowerCase() === lower);
+      return hit ? hit[1] : null;
+    }
+    addEventListener(type, h) {
+      if (typeof h !== 'function') return;
+      let arr = this._listeners.get(type);
+      if (!arr) this._listeners.set(type, arr = []);
+      arr.push(h);
+    }
+    removeEventListener(type, h) {
+      const arr = this._listeners.get(type);
+      if (!arr) return;
+      const i = arr.indexOf(h);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    dispatchEvent() { return true; }
+    _fireEvent(type) {
+      const inline = this['on' + type];
+      const ev = {type, target: this, currentTarget: this};
+      if (typeof inline === 'function') {
+        try { inline.call(this, ev); } catch (e) { try { console.error('xhr ' + type + ' threw:', e && e.message ? e.message : e); } catch (_) {} }
+      }
+      const arr = this._listeners.get(type);
+      if (arr) {
+        for (const h of arr.slice()) {
+          try { h.call(this, ev); } catch (e) { try { console.error('xhr ' + type + ' threw:', e && e.message ? e.message : e); } catch (_) {} }
+        }
+      }
+    }
   }
+  // Spec readyState constants. rails-ujs's done() callback gates on
+  // `xhr.readyState === XMLHttpRequest.DONE`; without these the
+  // comparison is `4 === undefined` and the response never processes.
+  XMLHttpRequest.UNSENT           = 0;
+  XMLHttpRequest.OPENED           = 1;
+  XMLHttpRequest.HEADERS_RECEIVED = 2;
+  XMLHttpRequest.LOADING          = 3;
+  XMLHttpRequest.DONE             = 4;
   globalThis.XMLHttpRequest = XMLHttpRequest;
 
   // Idle callbacks: real browsers fire them when the main thread is

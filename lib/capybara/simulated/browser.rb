@@ -786,6 +786,18 @@ module Capybara
         form ? submit(form, nil) : false
       end
 
+      # Real browsers execute a `<script>` element when it's inserted into
+      # a connected document. rails-ujs's data-remote response handling
+      # leans on this — it builds `<script>` from the AJAX body and
+      # `head.appendChild(script)` to evaluate it. Walk the inserted
+      # subtree for scripts that haven't been executed yet and run each
+      # through the same path bootstrap_page uses for `<script>` tags.
+      def run_inserted_scripts(root)
+        return unless @js && root.respond_to?(:document) && root.document.equal?(@document)
+        scripts = root.name == 'script' ? [root] : (root.respond_to?(:css) ? root.css('script').to_a : [])
+        scripts.each {|s| @js.run_classic_script(self, s) }
+      end
+
       # Fire input + change after a user-driven value change. Mirrors what
       # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
       # via `setValue` dom_op skip this — that path is the JS author's call.
@@ -1252,6 +1264,7 @@ module Capybara
               [args[0]]
             end
             record_childlist(handle, added)
+            run_inserted_scripts(child)
           end
           args[0]
         when 'appendChildrenOf'
