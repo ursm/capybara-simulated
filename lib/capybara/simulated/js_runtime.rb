@@ -65,12 +65,16 @@ module Capybara
       end
 
       def reset_page
-        # A mid-test recycle leaves bridge.js loaded but the previous
-        # page's listeners / observers / wrappers indeterminate, so
-        # boot fresh for the next test instead of running __resetPage.
-        if @recycled_since_reset
+        # Boot a fresh VM whenever the previous test either hit a recycle
+        # (post-recycle state is indeterminate) or evaluated user scripts
+        # at top level (top-level `let` / `const` declarations are stuck
+        # in the global lexical environment until the runtime is rebuilt,
+        # and re-evaluating the same fixture in the next test would trip
+        # a redeclaration SyntaxError).
+        if @recycled_since_reset || @scripts_evaluated_since_reset
           boot_vm
           @recycled_since_reset = false
+          @scripts_evaluated_since_reset = false
           return
         end
         # Pump microtasks only when __resetPage actually queued an
@@ -181,19 +185,25 @@ module Capybara
         @recycled_since_reset = true
       end
 
-      # Wrap in `new Function` so `let`/`const` at the script's top
-      # level land in a fresh function scope per invocation — re-running
-      # the same body across page loads otherwise trips redeclaration
-      # errors (QuickJS shares the eval scope across calls). The
-      # `new Function` form also parses fewer wrapper nodes than
-      # `eval('(function(){...})()')` and is gentler on QuickJS's
-      # recursive-descent parser stack.
-      # `;void 0` ensures the eval completion value is primitive —
-      # to_rb_return_value raises ArgumentError on some object shapes
-      # (e.g. jQuery's array-like wrappers).
+      # Run user scripts at top level so `function foo() {}` / `var foo`
+      # at the script's top level become globals — a real browser does
+      # the same and a lot of legacy code (jQuery plugins, Redmine's
+      # application-legacy bundle, …) leans on it.
+      #
+      # Caveat: `let` / `const` at top level write to the global lexical
+      # environment, which QuickJS shares across eval calls. Re-running
+      # the same body after a navigation trips a SyntaxError on the
+      # redeclaration; warn and move on rather than fail the whole page.
+      # The `boot_vm`-on-recycle path resets the lexical env when it
+      # really matters; modules go through `vm.import` and aren't
+      # affected.
       def eval_safely(code, label)
         return if code.nil? || code.empty?
-        eval("new Function(#{code.to_json}).call(globalThis);#{MICROTASK_PUMP_CODE}")
+        @scripts_evaluated_since_reset = true
+        eval(code)
+      rescue Quickjs::SyntaxError => e
+        return if e.message.match?(/has already been declared/)
+        warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
       rescue Quickjs::RuntimeError, ArgumentError => e
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
       end
