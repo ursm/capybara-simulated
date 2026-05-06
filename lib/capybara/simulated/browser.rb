@@ -751,9 +751,17 @@ module Capybara
         focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
         mods = modifier_init(modifiers)
         fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
+        # Real browsers toggle a checkbox / radio *before* firing click,
+        # so listeners (Redmine's `contextMenuClick` reads
+        # `target.checked` after a row-checkbox click) see the new state.
+        # If the click is preventDefault'd we revert it below.
+        prior_checked = pretoggle_form_control(node)
         # Fire 'click' before the default action — handlers may
         # preventDefault() to suppress navigation / form submit.
-        return true unless dispatch_event(handle, 'click', **mods)
+        unless dispatch_event(handle, 'click', button: 0, which: 1, **mods)
+          revert_pretoggle(node, prior_checked) unless prior_checked.nil?
+          return true
+        end
         case node.name
         when 'a'
           href = node['href']
@@ -824,17 +832,18 @@ module Capybara
       # via `setValue` dom_op skip this — that path is the JS author's call.
       def set_value_with_events(handle, value)
         node = lookup_node(handle)
-        # Checkbox / radio: real browsers fire click → change on user
-        # toggle. Capybara's `check` / `choose` route here for the JS
-        # case, expecting click handlers to run.
+        # Checkbox / radio: real browsers toggle the input *before*
+        # firing click, so listeners reading `target.checked` (Redmine's
+        # `contextMenuClick`) see the new state. preventDefault reverts.
         if node && node.name == 'input' &&
            %w[checkbox radio].include?((node['type'] || '').downcase)
           was_checked = !!node['checked']
           now_checked = !!value
-          # preventDefault on click suppresses the toggle. The state
-          # before vs after determines whether input / change fire.
-          return was_checked unless dispatch_event(handle, 'click')
-          set_value(handle, value)
+          set_value(handle, now_checked)
+          unless dispatch_event(handle, 'click', button: 0, which: 1)
+            set_value(handle, was_checked)
+            return was_checked
+          end
           if now_checked != was_checked
             # Stimulus's default action event for radio / checkbox is 'input', not 'change'.
             dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
@@ -945,13 +954,13 @@ module Capybara
         node = lookup_node(handle)
         return false if node.nil?
         start = (node.name == 'textarea' ? node.text : node['value']).to_s
-        state = {value: start.dup, caret: start.length, modifiers: Set.new, dirty: false}
+        state = {value: start.dup, caret: start.length, modifiers: Set.new}
         keys.each { |k| apply_send_key(handle, state, k) }
         # Skip the commit when no key typed into the field — a shortcut
         # chord like `[:control, 'b']` may have let a JS listener mutate
         # the value itself, and writing our untouched buffer back would
         # clobber that work.
-        if state[:dirty]
+        if state[:value] != start
           set_value(handle, state[:value])
           dispatch_input_change(handle)
         end
@@ -990,37 +999,35 @@ module Capybara
           dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
         when :space
           insert_char(handle, state, ' ')
-        when :enter, :return
-          init = key_init(state, key)
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
         when :backspace
           if state[:caret] > 0
             state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
             state[:caret] -= 1
-            state[:dirty] = true
           end
-          init = key_init(state, key)
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
+          fire_special_key_pair(handle, state, key)
         when :delete
           if state[:caret] < state[:value].length
             state[:value] = state[:value][0, state[:caret]] + state[:value][state[:caret] + 1..]
-            state[:dirty] = true
           end
-          init = key_init(state, key)
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
+          fire_special_key_pair(handle, state, key)
         when :left  then state[:caret] = [state[:caret] - 1, 0].max
         when :right then state[:caret] = [state[:caret] + 1, state[:value].length].min
         when :home  then state[:caret] = 0
         when :end   then state[:caret] = state[:value].length
         else
-          code = SPECIAL_KEY_CODES[key] || 0
-          init = key_init(state, key)
-          dispatch_key_event(handle, 'keydown', code, **init)
-          dispatch_key_event(handle, 'keyup',   code, **init)
+          fire_special_key_pair(handle, state, key)
         end
+      end
+
+      # Fire a keydown / keyup pair for a named special key (`:enter`,
+      # `:backspace`, etc.). Code defaults to the SPECIAL_KEY_CODES entry,
+      # falling back to 0 when no entry exists — matches what real
+      # browsers send for unmapped keys.
+      def fire_special_key_pair(handle, state, key)
+        code = SPECIAL_KEY_CODES[key] || 0
+        init = key_init(state, key)
+        dispatch_key_event(handle, 'keydown', code, **init)
+        dispatch_key_event(handle, 'keyup',   code, **init)
       end
 
       # Build the KeyboardEvent init bag for the current modifier state,
@@ -1048,7 +1055,6 @@ module Capybara
         unless suppress
           state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
           state[:caret] += char.length
-          state[:dirty] = true
         end
         code = char.upcase.bytes.first || 0
         init = modifier_init(state[:modifiers]).merge(key: char)
@@ -1136,23 +1142,28 @@ module Capybara
       def right_click(handle, modifiers = nil, delay: 0)
         mods = modifier_init(modifiers)
         fire_mouse_sequence(handle, button: 2, delay: delay, modifiers: mods)
-        dispatch_event(handle, 'contextmenu', button: 2, **mods)
+        dispatch_event(handle, 'contextmenu', button: 2, which: 3, **mods)
         true
       end
 
       def double_click(handle, modifiers = nil, delay: 0)
         mods = modifier_init(modifiers)
         fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
-        dispatch_event(handle, 'click',    **mods)
-        dispatch_event(handle, 'click',    **mods)
-        dispatch_event(handle, 'dblclick', **mods)
+        dispatch_event(handle, 'click',    button: 0, which: 1, **mods)
+        dispatch_event(handle, 'click',    button: 0, which: 1, **mods)
+        dispatch_event(handle, 'dblclick', button: 0, which: 1, **mods)
         true
       end
 
       def fire_mouse_sequence(handle, button:, delay:, modifiers:)
-        dispatch_event(handle, 'mousedown', button: button, **modifiers)
+        # Legacy `event.which` is 1-indexed (left=1, middle=2, right=3)
+        # whereas `event.button` is 0-indexed; older code (Redmine's
+        # `contextMenuClick` checks `event.which == 1`) reads `which`,
+        # so emit both.
+        which = button + 1
+        dispatch_event(handle, 'mousedown', button: button, which: which, **modifiers)
         sleep(delay) if delay && delay > 0
-        dispatch_event(handle, 'mouseup',   button: button, **modifiers)
+        dispatch_event(handle, 'mouseup',   button: button, which: which, **modifiers)
       end
 
       # Build the MouseEvent init slice from Capybara modifier symbols.
@@ -1938,15 +1949,36 @@ module Capybara
           # Stored attributes are the source of truth in this driver — we don't track
           # an in-memory defaultValue snapshot, so reset is a no-op.
           true
-        when 'checkbox'
-          set_value(@handles.track(node), !node['checked'])
-          true
-        when 'radio'
-          set_value(@handles.track(node), true)
+        when 'checkbox', 'radio'
+          # Toggle already happened in pretoggle_form_control; nothing
+          # more to do once the click event passed through.
           true
         else
           false
         end
+      end
+
+      # Toggle a checkbox / radio before the click event so listeners see
+      # the post-toggle state, returning the prior value so the caller
+      # can revert if a listener preventDefault'd. Non-toggleable nodes
+      # return nil (no revert needed).
+      def pretoggle_form_control(node)
+        return nil unless node.respond_to?(:name) && node.name == 'input'
+        type = (node['type'] || '').downcase
+        case type
+        when 'checkbox'
+          prior = !!node['checked']
+          set_value(@handles.track(node), !prior)
+          prior
+        when 'radio'
+          prior = !!node['checked']
+          set_value(@handles.track(node), true)
+          prior
+        end
+      end
+
+      def revert_pretoggle(node, prior_checked)
+        set_value(@handles.track(node), prior_checked)
       end
 
       def submit(form, submitter)

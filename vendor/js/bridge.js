@@ -139,9 +139,12 @@
     // Selection state. Real browsers track caret position on text-like
     // inputs / textareas; we model just the offsets, no direction. Set
     // by `setSelectionRange` / `select` and on programmatic value writes.
-    get selectionStart() { return this._selStart ?? (this.value ? this.value.length : 0); }
+    // Default for an unset caret is end-of-value, matching freshly
+    // focused fields in real browsers.
+    get _caretDefault() { return this.value ? this.value.length : 0; }
+    get selectionStart() { return this._selStart ?? this._caretDefault; }
     set selectionStart(v) { this._selStart = +v || 0; }
-    get selectionEnd()   { return this._selEnd   ?? (this.value ? this.value.length : 0); }
+    get selectionEnd()   { return this._selEnd   ?? this._caretDefault; }
     set selectionEnd(v)  { this._selEnd = +v || 0; }
     get selectionDirection() { return 'none'; }
     set selectionDirection(_) {}
