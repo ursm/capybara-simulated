@@ -200,7 +200,7 @@ module Capybara
       def eval_safely(code, label)
         return if code.nil? || code.empty?
         @scripts_evaluated_since_reset = true
-        eval(code)
+        with_recycle { @vm.eval_code(code, filename: label) }
       rescue Quickjs::SyntaxError => e
         return if e.message.match?(/has already been declared/)
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"

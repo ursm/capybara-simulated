@@ -202,8 +202,8 @@ $ BENCH_RUNS=3 bundle exec ruby bench/run.rb
 
 | driver        | wall time (median) | per-test  | examples | failures |
 |---------------|--------------------|-----------|----------|----------|
-| simulated     |     2.94s   1.00x |  0.140s   |       21 |        0 |
-| selenium      |     8.69s   2.96x |  0.414s   |       21 |        0 |
+| simulated     |     0.55s   1.00x |  0.026s   |       21 |        0 |
+| selenium      |     8.62s  15.6x  |  0.410s   |       21 |        0 |
 ```
 
 Numbers above are from a quiet desktop, headless Chrome 148. rack_test

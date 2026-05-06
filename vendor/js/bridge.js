@@ -73,6 +73,7 @@
     get nextElementSibling()     { return wrap(__dom(this.__h, 'nextElementSibling')); }
     get previousElementSibling() { return wrap(__dom(this.__h, 'previousElementSibling')); }
     get childElementCount()      { return __dom(this.__h, 'childElementCount'); }
+    hasChildNodes()              { return this.childNodes.length > 0; }
 
     // Identity / shape
     get nodeType()    { return __dom(this.__h, 'nodeType'); }
