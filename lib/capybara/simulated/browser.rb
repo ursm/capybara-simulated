@@ -37,8 +37,9 @@ module Capybara
         @current_url
       end
 
-      def initialize(app)
+      def initialize(app, features: [])
         @app                = app
+        @extra_js_features  = features
         @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
         @handles            = HandleTable.new(@document)
         @js                 = nil
@@ -79,7 +80,7 @@ module Capybara
       end
 
       def js
-        @js ||= JsRuntime.new(self)
+        @js ||= JsRuntime.new(self, extra_features: @extra_js_features)
       end
 
       def visit(url)

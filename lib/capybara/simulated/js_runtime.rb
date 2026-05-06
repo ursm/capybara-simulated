@@ -10,20 +10,26 @@ module Capybara
     # crosses into Ruby once; the JS side carries no DOM state of its
     # own — everything is a thin proxy keyed on integer handles.
     class JsRuntime
+      # The minimum surface a Hotwire-shaped browser needs: URL parsing,
+      # TextEncoder/Decoder, and crypto.randomUUID (Turbo stream IDs).
+      # Apps that need Intl, Blob/File, etc. add to it via
+      # Driver.new(app, features: [...]).
+      #
       # 100 ms was too tight for cold jQuery boot under GC pressure
       # (~ 200 ms observed). 5_000 ms still surfaces a runaway timer
       # loop as InterruptedError.
       #
       # 128 MiB (the gem's memory_limit default) OOMs under sustained
       # jQuery + jQuery UI loads; 512 MiB removes the trigger.
+      DEFAULT_FEATURES = [Quickjs::POLYFILL_URL, Quickjs::POLYFILL_ENCODING, Quickjs::POLYFILL_CRYPTO].freeze
       VM_OPTIONS = {
-        features:     [Quickjs::POLYFILL_URL, Quickjs::POLYFILL_ENCODING, Quickjs::POLYFILL_CRYPTO].freeze,
         timeout_msec: 5_000,
         memory_limit: 512 * 1024 * 1024
       }.freeze
 
-      def initialize(browser)
+      def initialize(browser, extra_features: [])
         @browser              = browser
+        @features             = (DEFAULT_FEATURES + extra_features).uniq.freeze
         @recycled_since_reset = false
         boot_vm
       end
@@ -132,7 +138,7 @@ module Capybara
       private
 
       def boot_vm
-        @vm = Quickjs::VM.new(**VM_OPTIONS)
+        @vm = Quickjs::VM.new(features: @features, **VM_OPTIONS)
         attach_dom_bridge
         # Receives the already-absolute, importmap-resolved URL we
         # rewrote into the source on a prior pass. Browser#load_module

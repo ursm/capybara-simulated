@@ -9,12 +9,17 @@ module Capybara
     class Driver < Capybara::Driver::Base
       attr_reader :app
 
-      def initialize(app)
-        @app = app
+      # `features` is appended to the QuickJS feature flags the runtime
+       # already pins (URL / Encoding / Crypto). Pass e.g.
+      # `[Quickjs::POLYFILL_INTL]` from your `register_driver` block to
+      # surface `Intl.DateTimeFormat` etc. inside the JS sandbox.
+      def initialize(app, features: [])
+        @app      = app
+        @features = features
       end
 
       def browser
-        @browser ||= Browser.new(app)
+        @browser ||= Browser.new(app, features: @features)
       end
 
       def needs_server?       = false

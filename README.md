@@ -109,6 +109,27 @@ click_link 'About'
 puts page.text
 ```
 
+### Extra QuickJS feature flags
+
+The runtime pins `URL`, `TextEncoder`/`TextDecoder`, and `crypto.randomUUID`
+by default — the minimum a Hotwire-shaped page needs. If your app's JS
+touches `Intl.*`, `Blob` / `File`, or any other QuickJS feature flag,
+register the driver with the extras:
+
+```ruby
+require 'quickjs'
+require 'capybara/simulated'
+
+Capybara.register_driver :simulated do |app|
+  Capybara::Simulated::Driver.new(app, features: [Quickjs::POLYFILL_INTL])
+end
+```
+
+See [`Quickjs.constants`](https://github.com/hmsk/quickjs.rb) for the
+full list (`POLYFILL_INTL`, `POLYFILL_FILE`, …). `FEATURE_TIMEOUT`
+intentionally isn't honoured — the driver runs JS timers on a virtual
+clock so test runs stay deterministic.
+
 ## How it fits together
 
 - `vendor/js/bridge.js` — thin DOM proxy backed by Ruby callbacks via
