@@ -154,6 +154,12 @@
     set disabled(v) { setBoolAttr(this, 'disabled', v); }
     get hidden()    { return !!__dom(this.__h, 'hidden'); }
     set hidden(v)   { setBoolAttr(this, 'hidden', v); }
+    // <option>.selected — jQuery's `.serialize()` walks `select.options`
+    // and reads `option.selected` to find the chosen entry; without a
+    // getter the read returned undefined and the form posted whichever
+    // option the server marked as selected, even after `select_option`.
+    get selected()  { return !!__dom(this.__h, 'selected'); }
+    set selected(v) { setBoolAttr(this, 'selected', v); }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as

@@ -1340,6 +1340,7 @@ module Capybara
             .map { |k, v| [k, v.respond_to?(:value) ? v.value : v.to_s] }
         when 'value'           then value(handle)
         when 'checked'         then checked?(handle)
+        when 'selected'        then !!(node.respond_to?(:[]) && node['selected'])
         when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
         when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
         when 'form'            then @handles.track(enclosing_form(node))
