@@ -1155,6 +1155,26 @@ module Capybara
         true
       end
 
+      # Mouse-enter / mouse-leave a node. Real browsers fire
+      # mouseleave on the previously-hovered element, then mouseenter
+      # on the new one (both bubble-less); mouseover / mouseout bubble.
+      # We track @hovered_handle to drive the leave-on-previous half so
+      # tooltip-dismissal idioms like `find('body').hover` fire the
+      # mouseleave on the prior tooltip target.
+      def hover(handle)
+        node = lookup_node(handle)
+        return false if node.nil?
+        if @hovered_handle && @hovered_handle != handle
+          dispatch_event(@hovered_handle, 'mouseout',   bubbles: true,  cancelable: true)
+          dispatch_event(@hovered_handle, 'mouseleave', bubbles: false, cancelable: true)
+        end
+        @hovered_handle = handle
+        dispatch_event(handle, 'mouseover',  bubbles: true,  cancelable: true)
+        dispatch_event(handle, 'mouseenter', bubbles: false, cancelable: true)
+        dispatch_event(handle, 'mousemove',  bubbles: true,  cancelable: true)
+        true
+      end
+
       def fire_mouse_sequence(handle, button:, delay:, modifiers:)
         # Legacy `event.which` is 1-indexed (left=1, middle=2, right=3)
         # whereas `event.button` is 0-indexed; older code (Redmine's

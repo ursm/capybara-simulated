@@ -65,6 +65,16 @@ module Capybara
         browser.double_click(handle_id, keys, delay: delay)
       end
 
+      # Capybara hover dispatches mouseenter / mouseover so listeners
+      # that toggle hover-only UI fire. We can't drive CSS `:hover` (no
+      # layout engine), but most uses are JS event hooks — Redmine's
+      # tooltip dismissal calls `find('body').hover` to push a
+      # mouseleave to the previously-hovered element.
+      def hover(**_opts)
+        browser.hover(handle_id)
+        self
+      end
+
       def send_keys(*keys)
         browser.send_keys(handle_id, keys)
         true
