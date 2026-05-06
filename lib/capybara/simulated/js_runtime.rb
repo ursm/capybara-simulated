@@ -127,12 +127,13 @@ module Capybara
         end
       end
 
-      # Side-effect-only `import "URL"` as the module body — vm.import's
-      # loader callback fetches the URL and runs it; the wrapper's empty
-      # namespace export is unused.
+      # Resolve `url` straight through the module loader — quickjs.rb #30
+      # added the `filename:` shortcut so we don't have to compile a
+      # one-line `import "URL";` bridge module just to side-effect-load.
+      # The `* as __csim_unused` namespace is unused.
       def eval_module_entry(url)
         with_recycle do
-          @vm.import('* as __csim_unused', from: %[import #{url.to_json};])
+          @vm.import('* as __csim_unused', filename: url)
           pump_microtasks
         end
       rescue Quickjs::RuntimeError, ArgumentError => e

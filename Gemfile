@@ -3,7 +3,7 @@ source 'https://rubygems.org'
 gemspec
 
 gem 'nokogiri'
-gem 'quickjs', github: 'ursm/quickjs.rb', branch: 'stack-23-module-loader', submodules: true
+gem 'quickjs', github: 'ursm/quickjs.rb', branch: 'fix-segfault-after-oom', submodules: true
 
 group :development, :test do
   gem 'launchy'            # required by Capybara's shared save_and_open_page spec
