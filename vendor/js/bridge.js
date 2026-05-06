@@ -183,6 +183,15 @@
     set name(v)        { this.setAttribute('name', v); }
     get type()         { return this.getAttribute('type') || ''; }
     set type(v)        { this.setAttribute('type', v); }
+    // Reflected so JS-set values are also visible via getAttribute /
+    // node['title'] — Redmine's jstoolbar does `button.title = ...`
+    // and the `[title="..."]` Capybara filter reads the attribute.
+    get title()        { return this.getAttribute('title') || ''; }
+    set title(v)       { this.setAttribute('title', v == null ? '' : String(v)); }
+    get alt()          { return this.getAttribute('alt') || ''; }
+    set alt(v)         { this.setAttribute('alt', v == null ? '' : String(v)); }
+    get placeholder()  { return this.getAttribute('placeholder') || ''; }
+    set placeholder(v) { this.setAttribute('placeholder', v == null ? '' : String(v)); }
 
     // <template>.content: a real DocumentFragment in browsers; we
     // expose a fragment-view proxy that shares the template's handle
@@ -715,7 +724,22 @@
   // the same `onclick="..."` recurs across pages, so surviving the reset
   // is a real win.
   const __inlineCache = new Map();
+  // Run an inline-style handler and honour `return false` as
+  // preventDefault (the legacy `<a onclick="...">` contract). Listener
+  // exceptions are swallowed so dispatch continues, matching browsers.
+  function runInlineHandler(label, fn, el, event) {
+    try {
+      if (fn.call(el, event) === false) event.preventDefault();
+    } catch (e) {
+      try { console.error(label + ' threw:', e && e.message ? e.message : e); } catch (_) {}
+    }
+  }
   function invokeInlineHandler(el, event) {
+    // Property-style handler (`element.onkeydown = fn`) — jstoolbar
+    // assigns these directly rather than using addEventListener.
+    const propFn = el['on' + event.type];
+    if (typeof propFn === 'function') runInlineHandler('property handler', propFn, el, event);
+
     const body = el.getAttribute('on' + event.type);
     if (body == null || body === '') return;
     let fn = __inlineCache.get(body);
@@ -724,12 +748,7 @@
       __inlineCache.set(body, fn);
     }
     if (fn === false) return;
-    try {
-      const ret = fn.call(el, event);
-      if (ret === false) event.preventDefault();
-    } catch (e) {
-      try { console.error('inline handler threw:', e && e.message ? e.message : e); } catch (_) {}
-    }
+    runInlineHandler('inline handler', fn, el, event);
   }
 
   function __dispatch(target, event) {
@@ -819,10 +838,13 @@
   };
   // Send a keyboard event with the right shape for the page-level
   // listeners that read e.keyCode / e.which (legacy but still common).
-  globalThis.__dispatchKeyFromRuby = function (handle, type, keyCode) {
+  // `extra` carries the modifier flags + `key:` string from send_keys's
+  // chord state.
+  globalThis.__dispatchKeyFromRuby = function (handle, type, keyCode, extra) {
     return __dispatch(wrap(handle), new KeyboardEvent(type, {
       bubbles: true, cancelable: true,
-      keyCode: keyCode, which: keyCode, charCode: type === 'keypress' ? keyCode : 0
+      keyCode: keyCode, which: keyCode, charCode: type === 'keypress' ? keyCode : 0,
+      ...(extra || {})
     }));
   };
 

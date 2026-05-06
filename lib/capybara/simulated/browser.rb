@@ -894,6 +894,21 @@ module Capybara
         shift: 16, control: 17, alt: 18, meta: 91
       }.freeze
 
+      # `KeyboardEvent.key` strings — page handlers gate on these
+      # (`if (e.key === 'Escape')` etc.) so they need the user-visible
+      # name, not the keyCode.
+      SPECIAL_KEY_NAMES = {
+        backspace: 'Backspace', tab: 'Tab', enter: 'Enter', return: 'Enter',
+        escape: 'Escape', space: ' ',
+        left: 'ArrowLeft', up: 'ArrowUp', right: 'ArrowRight', down: 'ArrowDown',
+        delete: 'Delete', home: 'Home', end: 'End',
+        shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta'
+      }.freeze
+
+      # Modifiers that suppress literal character insertion (a real
+      # browser treats Ctrl+B as a shortcut, not a typed "b").
+      SUPPRESSING_MODIFIERS = Set[:control, :alt, :meta].freeze
+
       # HTML5 drag-and-drop simulation. Builds a dataTransfer payload
       # from the supplied arguments (file paths → file items, hashes →
       # string items per mime type) and fires dragenter / dragover /
@@ -929,24 +944,39 @@ module Capybara
       def send_keys(handle, keys)
         node = lookup_node(handle)
         return false if node.nil?
-        start  = (node.name == 'textarea' ? node.text : node['value']).to_s
-        state  = {value: start.dup, caret: start.length, shift: false}
+        start = (node.name == 'textarea' ? node.text : node['value']).to_s
+        state = {value: start.dup, caret: start.length, modifiers: Set.new, dirty: false}
         keys.each { |k| apply_send_key(handle, state, k) }
-        set_value(handle, state[:value])
-        dispatch_input_change(handle)
+        # Skip the commit when no key typed into the field — a shortcut
+        # chord like `[:control, 'b']` may have let a JS listener mutate
+        # the value itself, and writing our untouched buffer back would
+        # clobber that work.
+        if state[:dirty]
+          set_value(handle, state[:value])
+          dispatch_input_change(handle)
+        end
         true
       end
 
+      # Modifier handling: a chord array like [:control, 'b'] keeps its
+      # modifiers active only for the burst — keydown for the modifier
+      # at entry, then keyup at exit, with the chord's middle keys
+      # carrying ctrlKey / shiftKey / etc. on their event init. Capybara's
+      # send_keys API mirrors WebDriver's, so an outer-level modifier
+      # before a String stays sticky until the next array.
       def apply_send_key(handle, state, key)
         case key
         when Array
-          saved = state[:shift]
+          mods_before = state[:modifiers].dup
           key.each { |sub| apply_send_key(handle, state, sub) }
-          state[:shift] = saved
+          (state[:modifiers] - mods_before).each do |m|
+            dispatch_key_event(handle, 'keyup', SPECIAL_KEY_CODES[m], **key_init(state, m))
+          end
+          state[:modifiers] = mods_before
         when Symbol
           apply_special_key(handle, state, key)
         when String
-          text = state[:shift] ? key.upcase : key
+          text = state[:modifiers].include?(:shift) ? key.upcase : key
           text.each_char { |c| insert_char(handle, state, c) }
         end
       end
@@ -954,49 +984,82 @@ module Capybara
       def apply_special_key(handle, state, key)
         case key
         when :shift, :control, :alt, :meta
-          state[:shift] = true if key == :shift
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
+          # Track the modifier *before* building init so listeners reading
+          # e.ctrlKey on the modifier's own keydown see it as pressed.
+          state[:modifiers] << key
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
         when :space
           insert_char(handle, state, ' ')
         when :enter, :return
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key])
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key])
+          init = key_init(state, key)
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
         when :backspace
           if state[:caret] > 0
             state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
             state[:caret] -= 1
+            state[:dirty] = true
           end
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:backspace])
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:backspace])
+          init = key_init(state, key)
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
         when :delete
           if state[:caret] < state[:value].length
             state[:value] = state[:value][0, state[:caret]] + state[:value][state[:caret] + 1..]
+            state[:dirty] = true
           end
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[:delete])
-          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[:delete])
+          init = key_init(state, key)
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **init)
+          dispatch_key_event(handle, 'keyup',   SPECIAL_KEY_CODES[key], **init)
         when :left  then state[:caret] = [state[:caret] - 1, 0].max
         when :right then state[:caret] = [state[:caret] + 1, state[:value].length].min
         when :home  then state[:caret] = 0
         when :end   then state[:caret] = state[:value].length
         else
           code = SPECIAL_KEY_CODES[key] || 0
-          dispatch_key_event(handle, 'keydown', code)
-          dispatch_key_event(handle, 'keyup',   code)
+          init = key_init(state, key)
+          dispatch_key_event(handle, 'keydown', code, **init)
+          dispatch_key_event(handle, 'keyup',   code, **init)
         end
       end
 
-      def insert_char(handle, state, char)
-        state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
-        state[:caret] += char.length
-        code = char.upcase.bytes.first || 0
-        dispatch_key_event(handle, 'keydown',  code)
-        dispatch_key_event(handle, 'keypress', code)
-        dispatch_key_event(handle, 'keyup',    code)
+      # Build the KeyboardEvent init bag for the current modifier state,
+      # tagged with `key:` for the named special key (or its symbol
+      # fallback). For literal characters, callers pass the char directly.
+      def key_init(state, key)
+        modifier_init(state[:modifiers]).merge(key: SPECIAL_KEY_NAMES[key] || key.to_s)
       end
 
-      def dispatch_key_event(handle, type, key_code)
+      def modifier_init(active)
+        {
+          shiftKey: active.include?(:shift),
+          ctrlKey:  active.include?(:control),
+          altKey:   active.include?(:alt),
+          metaKey:  active.include?(:meta)
+        }
+      end
+
+      def insert_char(handle, state, char)
+        # A real browser suppresses the character when ctrl / alt / meta
+        # are held — that's a shortcut, not a literal keystroke. Without
+        # this guard `Ctrl+B` types a literal "b" into the field before
+        # the jstoolbar shortcut handler runs.
+        suppress = state[:modifiers].intersect?(SUPPRESSING_MODIFIERS)
+        unless suppress
+          state[:value] = state[:value][0, state[:caret]] + char + state[:value][state[:caret]..]
+          state[:caret] += char.length
+          state[:dirty] = true
+        end
+        code = char.upcase.bytes.first || 0
+        init = modifier_init(state[:modifiers]).merge(key: char)
+        dispatch_key_event(handle, 'keydown',  code, **init)
+        dispatch_key_event(handle, 'keypress', code, **init) unless suppress
+        dispatch_key_event(handle, 'keyup',    code, **init)
+      end
+
+      def dispatch_key_event(handle, type, key_code, **init_extras)
         return unless @js && @listened_types.include?(type)
-        js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code)
+        js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code, init_extras)
         settle
       end
 
