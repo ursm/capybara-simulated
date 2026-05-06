@@ -1205,6 +1205,7 @@ module Capybara
         when 'focus' then focus(handle); nil
         when 'blur'  then blur(handle);  nil
         when 'click' then click(handle); nil
+        when 'submitForm' then submit_form(handle); nil
         when 'setAttribute'   then write_attribute(node, handle, args[0], args[1].to_s)
         when 'removeAttribute' then write_attribute(node, handle, args[0], nil)
         when 'setValue'

@@ -431,6 +431,16 @@
     requestSubmit(submitter) {
       __dispatch(this, new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter}));
     }
+    // HTMLFormElement.submit() — spec says no `submit` event is fired
+    // and validation is bypassed. We still dispatch one because that's
+    // the cancellation point rails-ujs / Turbo / app code listens on
+    // (jQuery's `$(form).submit()` falls through to this). If nothing
+    // preventDefault'd, fall through to the actual Rack submission.
+    submit() {
+      const ev = new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter: null});
+      const proceed = __dispatch(this, ev);
+      if (proceed) __dom(this.__h, 'submitForm');
+    }
   }
 
   // CSSStyleDeclaration shim. Wraps a Proxy so libraries that touch
