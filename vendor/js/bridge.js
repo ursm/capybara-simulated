@@ -165,6 +165,14 @@
     set disabled(v) { setBoolAttr(this, 'disabled', v); }
     get hidden()    { return !!__dom(this.__h, 'hidden'); }
     set hidden(v)   { setBoolAttr(this, 'hidden', v); }
+    // <select multiple> reflects via `select.multiple`; jQuery's
+    // valHooks branch on it and Redmine's dual-listbox JS reads it.
+    get multiple()  { return this.hasAttribute('multiple'); }
+    set multiple(v) { setBoolAttr(this, 'multiple', v); }
+    get readOnly()  { return this.hasAttribute('readonly'); }
+    set readOnly(v) { setBoolAttr(this, 'readonly', v); }
+    get required()  { return this.hasAttribute('required'); }
+    set required(v) { setBoolAttr(this, 'required', v); }
     // <option>.selected — jQuery's `.serialize()` walks `select.options`
     // and reads `option.selected` to find the chosen entry; without a
     // getter the read returned undefined and the form posted whichever
@@ -252,12 +260,22 @@
     }
 
     // <form> ergonomics
-    get form() { return wrap(__dom(this.__h, 'form')); }
-    // HTMLFormElement.elements: HTMLFormControlsCollection of submittable
-    // descendants. rails-ujs / jQuery serialize forms via this.
+    // Owning <form> for a form-control. For `<form>` itself we wrap
+    // the element in a Proxy that exposes named-element access
+    // (`form.foo` / `form['foo']`) — legacy code (Redmine's
+    // `moveOptions(this.form.selected_X, …)` inline handler) relies
+    // on it.
+    get form() {
+      const f = wrap(__dom(this.__h, 'form'));
+      return f && f.tagName === 'FORM' ? namedFormProxy(f) : f;
+    }
+    // HTMLFormElement.elements: HTMLFormControlsCollection of
+    // submittable descendants, addressable by `[i]`, `.namedItem(n)`,
+    // and (via the Proxy) `[name]` / `.name`. rails-ujs / jQuery
+    // serialize forms via this.
     get elements() {
       if (this.tagName !== 'FORM') return null;
-      return HTMLCollection.from(this.querySelectorAll('input, select, textarea, button, fieldset, output, object'));
+      return namedCollection(HTMLCollection.from(this.querySelectorAll('input, select, textarea, button, fieldset, output, object')));
     }
 
     // <input list="...">'s referenced <datalist>, plus its options. Used
@@ -1415,6 +1433,34 @@
     item(i)      { return this[i] ?? null; }
     namedItem(n) { return this.find(el => el && (el.id === n || el.name === n)) ?? null; }
   };
+  // Named-element access for HTMLFormControlsCollection — `coll[name]`
+  // / `coll.name` should find a member by `id` or `name`. Numeric and
+  // Array-method access still flow through the underlying collection.
+  function namedCollection(list) {
+    return new Proxy(list, {
+      get(target, prop) {
+        if (prop in target || typeof prop === 'symbol') return target[prop];
+        if (typeof prop === 'string' && /^\d+$/.test(prop)) return target[+prop];
+        return target.namedItem(prop) ?? undefined;
+      },
+      has(target, prop) {
+        if (prop in target) return true;
+        return typeof prop === 'string' && target.namedItem(prop) != null;
+      }
+    });
+  }
+  // Proxy a `<form>` element so `form.name` / `form[name]` resolve
+  // through `form.elements` first (legacy `this.form.<input-name>`
+  // pattern). Real Element members win when the names collide.
+  function namedFormProxy(form) {
+    return new Proxy(form, {
+      get(target, prop) {
+        if (prop in target || typeof prop === 'symbol') return target[prop];
+        const named = target.elements?.namedItem(prop);
+        return named ?? target[prop];
+      }
+    });
+  }
   // DOM Node type / compareDocumentPosition bitmask values. Stimulus's
   // ElementObserver gates its mutation-record processing on
   // `node.nodeType == Node.ELEMENT_NODE` — without these constants set,

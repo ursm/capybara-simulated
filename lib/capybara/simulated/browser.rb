@@ -2296,28 +2296,38 @@ module Capybara
 
       def submit(form, submitter)
         form_handle = @handles.track(form)
-        # Real browsers snapshot the form's submission entries *before*
-        # firing the submit event — listeners (rails-ujs's
-        # `data-disable-with` handler) routinely disable the submit
-        # button mid-dispatch, and reading the form afterwards would
-        # then drop the submitter (our `each_form_field` skips
-        # `[disabled]`). Capture method / action / body up front and
-        # only the dispatch's preventDefault decides whether to commit.
+        # Capture submitter name / value / formaction up front: rails-ujs's
+        # `data-disable-with` listener disables the submit button while
+        # dispatch is in flight, which would drop the submitter row from
+        # `serialize_form` afterwards. The other side of the coin —
+        # Redmine's settings form has a submit listener that
+        # `prop('selected', true)`'s every option of its dual-listbox
+        # `<select multiple>`s — wants the *post-listener* form state.
+        # Serialize once after dispatch and patch the submitter row
+        # back in if the listener disabled it.
+        submitter_name        = submitter && submitter['name']
+        submitter_value       = submitter && submitter['value'].to_s
         method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
         action_attr = (submitter && submitter['formaction']) || form['action']
-        method = method_attr.to_s.downcase
-        action = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
-        if method == 'post' && multipart_form?(form)
-          content_type, body = build_multipart(form, submitter)
-        else
-          content_type = (method == 'post') ? 'application/x-www-form-urlencoded' : nil
-          body         = URI.encode_www_form(serialize_form(form, submitter))
-        end
+        method      = method_attr.to_s.downcase
+        action      = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
         # `event.submitter` lets Turbo's FormSubmitObserver honour
         # `data-turbo="false"` on the clicked button — without it Turbo
         # treats every form-inside-a-frame submission as navigatable
         # and intercepts it.
         return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
+        if method == 'post' && multipart_form?(form)
+          content_type, body = build_multipart(form, submitter)
+        else
+          rows = serialize_form(form, submitter)
+          # If the listener disabled the submit button, our serializer
+          # skipped it — patch the captured submitter row back in.
+          if submitter_name && !submitter_name.empty? && !rows.any? { |k, _| k == submitter_name }
+            rows << [submitter_name, submitter_value]
+          end
+          content_type = (method == 'post') ? 'application/x-www-form-urlencoded' : nil
+          body         = URI.encode_www_form(rows)
+        end
         if method == 'post'
           navigate(:post, action, body: body, content_type: content_type)
         else
