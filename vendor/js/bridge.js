@@ -84,6 +84,17 @@
     get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
     get textContent() { return __dom(this.__h, 'textContent'); }
     set textContent(v) { __dom(this.__h, 'setTextContent', [String(v)]); }
+    // CharacterData#data — alias for the text payload on text /
+    // comment nodes; turndown reads `node.data.replace(...)` while
+    // walking text descendants. Undefined for element nodes per spec.
+    get data() {
+      const t = this.nodeType;
+      return (t === 3 || t === 4 || t === 8) ? this.textContent : undefined;
+    }
+    set data(v) {
+      const t = this.nodeType;
+      if (t === 3 || t === 4 || t === 8) this.textContent = v;
+    }
     // IDL alias for textContent on script / title / style elements.
     get text()         { return __dom(this.__h, 'textContent'); }
     set text(v)        { this.textContent = v; }
@@ -278,7 +289,18 @@
     getRootNode(_opts)   { return globalThis.document; }
     // No slot system — we don't model a layout-aware shadow tree.
     get assignedSlot()   { return null; }
-    get nodeValue()     { return null; }
+    // Text / comment / CDATA carry the payload as nodeValue; elements
+    // and the document return null per spec. Turndown reads
+    // `node.nodeValue` for text descendants and `null.replace(...)` is
+    // the immediate symptom when the getter is uniform.
+    get nodeValue() {
+      const t = this.nodeType;
+      return (t === 3 || t === 4 || t === 8) ? this.textContent : null;
+    }
+    set nodeValue(v) {
+      const t = this.nodeType;
+      if (t === 3 || t === 4 || t === 8) this.textContent = v;
+    }
     get prefix()        { return null; }
     get namespaceURI()  { return null; }
 
@@ -653,6 +675,15 @@
       }
       if (has) this._write(cur.filter(x => x !== s));
       return false;
+    }
+    // DOMTokenList#replace(old, new) — swaps a token in place.
+    replace(oldToken, newToken) {
+      const cur = this._list();
+      const i   = cur.indexOf(String(oldToken));
+      if (i < 0) return false;
+      cur[i] = String(newToken);
+      this._write(cur);
+      return true;
     }
   }
 
@@ -1432,71 +1463,91 @@
   globalThis.document.createEvent = function (_type) {
     return new Event('', {bubbles: false, cancelable: false});
   };
-  // Range: minimal shim. Turbo's FrameRenderer uses
-  // selectNodeContents + deleteContents + extractContents to swap
-  // frame bodies, which is the only flow we model — no offsets, no
-  // partial-text selection, no boundary-point semantics.
-  // Minimal Range: covers Redmine's quote-reply controller, which uses
-  // selectNodeContents → setStart/setEnd → cloneContents → contains
-  // checks. We collapse the (start, end, container) triple to "the
-  // node whose contents the range spans" — fine for full-element
-  // selections, lossy for sub-text ranges (those tests still get the
-  // whole element quoted, not the substring).
+  // Range — covers Redmine's quote-reply / table-paste flows. The
+  // (startContainer, startOffset, endContainer, endOffset) quad is
+  // tracked spec-style; `cloneContents` for cross-boundary selections
+  // delegates to Ruby (`cloneRangeContents`) which walks Nokogiri
+  // partial-cloning text nodes at the boundaries and full-cloning
+  // interior siblings.
+  function indexInParent(node) {
+    const parent = node && node.parentNode;
+    if (!parent) return 0;
+    const kids = parent.childNodes;
+    for (let i = 0; i < kids.length; i++) if (kids[i] === node) return i;
+    return 0;
+  }
   class Range {
     constructor() {
-      this._node           = null;
       this.startContainer  = null;
       this.endContainer    = null;
       this.startOffset     = 0;
       this.endOffset       = 0;
     }
-    get commonAncestorContainer() { return this._node; }
+    get commonAncestorContainer() {
+      // Cheapest spec-correct answer: walk start ancestors collecting
+      // them in a Set, then walk end ancestors until one matches.
+      if (!this.startContainer || !this.endContainer) return null;
+      if (this.startContainer === this.endContainer) return this.startContainer;
+      const path = new Set();
+      for (let n = this.startContainer; n; n = n.parentNode) path.add(n);
+      for (let n = this.endContainer; n; n = n.parentNode) if (path.has(n)) return n;
+      return null;
+    }
     selectNodeContents(node) {
-      this._node = node;
       this.startContainer = node;
       this.endContainer   = node;
       this.startOffset    = 0;
-      this.endOffset      = (node && node.childNodes && node.childNodes.length) || 0;
+      this.endOffset      = node && node.nodeType === 3
+        ? (node.textContent || '').length
+        : ((node && node.childNodes && node.childNodes.length) || 0);
     }
-    selectNode(node)         { this._node = node && node.parentNode; this.startContainer = this._node; this.endContainer = this._node; }
-    setStart(node, offset)   { this.startContainer = node; this.startOffset = offset || 0; this._node ||= node; }
-    setEnd(node, offset)     { this.endContainer   = node; this.endOffset   = offset || 0; this._node ||= node; }
-    // Boundary-point setters: real browsers compute (refNode.parent,
-    // refNode index ± 1) and our offset model is collapsed, so the
-    // before / after halves are functionally identical.
-    setStartBefore(node)     { this.startContainer = node && node.parentNode; this._node = this.startContainer; }
-    setStartAfter(node)      { this.setStartBefore(node); }
-    setEndBefore(node)       { this.endContainer   = node && node.parentNode; this._node ||= this.endContainer; }
-    setEndAfter(node)        { this.setEndBefore(node); }
+    selectNode(node) {
+      const parent = node && node.parentNode;
+      const idx    = indexInParent(node);
+      this.startContainer = parent; this.startOffset = idx;
+      this.endContainer   = parent; this.endOffset   = idx + 1;
+    }
+    setStart(node, offset)   { this.startContainer = node; this.startOffset = offset || 0; }
+    setEnd(node, offset)     { this.endContainer   = node; this.endOffset   = offset || 0; }
+    setStartBefore(node)     { this.startContainer = node && node.parentNode; this.startOffset = indexInParent(node); }
+    setStartAfter(node)      { this.startContainer = node && node.parentNode; this.startOffset = indexInParent(node) + 1; }
+    setEndBefore(node)       { this.endContainer   = node && node.parentNode; this.endOffset   = indexInParent(node); }
+    setEndAfter(node)        { this.endContainer   = node && node.parentNode; this.endOffset   = indexInParent(node) + 1; }
     collapse()               {}
     intersectsNode(node) {
-      if (!this._node || !node) return false;
+      if (!this.startContainer || !node) return false;
+      const ca = this.commonAncestorContainer;
       // Conservative: covered when the range's container contains node
       // or vice versa. Real browsers compute boundary-point comparisons.
-      return this._node === node ||
-        (this._node.contains && this._node.contains(node)) ||
-        (node.contains && node.contains(this._node));
+      return ca === node ||
+        (ca && ca.contains && ca.contains(node)) ||
+        (node.contains && node.contains(ca));
     }
     deleteContents() {
-      if (!this._node) return;
-      const children = this._node.childNodes;
-      for (const c of Array.from(children)) this._node.removeChild(c);
+      // Used by Turbo's FrameRenderer with selectNodeContents — always
+      // a single-container range, so clearing children is enough.
+      const c = this.startContainer;
+      if (c && c.childNodes) {
+        for (const k of Array.from(c.childNodes)) c.removeChild(k);
+      }
     }
     extractContents() {
       const frag = document.createDocumentFragment();
-      if (!this._node) return frag;
-      const children = Array.from(this._node.childNodes);
-      for (const c of children) {
-        this._node.removeChild(c);
-        frag.appendChild(c);
+      const c = this.startContainer;
+      if (!c) return frag;
+      for (const k of Array.from(c.childNodes)) {
+        c.removeChild(k);
+        frag.appendChild(k);
       }
       return frag;
     }
     cloneContents() {
-      const frag = document.createDocumentFragment();
-      if (!this._node) return frag;
-      for (const c of this._node.childNodes) frag.appendChild(c.cloneNode(true));
-      return frag;
+      if (!this.startContainer) return document.createDocumentFragment();
+      const handle = __dom(0, 'cloneRangeContents', [
+        this.startContainer.__h, this.startOffset,
+        this.endContainer.__h,   this.endOffset
+      ]);
+      return wrap(handle) || document.createDocumentFragment();
     }
     cloneRange()   { const r = new Range; Object.assign(r, this); return r; }
     detach()       {}

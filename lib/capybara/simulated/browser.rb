@@ -514,6 +514,146 @@ module Capybara
         @file_picks[handle] || []
       end
 
+      # Range#cloneContents (delegated from JS). Walks from
+      # (start_container, start_offset) to (end_container, end_offset)
+      # in tree order, partial-cloning text-node substrings and
+      # element-children-by-index at the boundaries and full-cloning
+      # interior siblings.
+      def clone_range_into(fragment, start_container, start_off, end_container, end_off)
+        if start_container == end_container
+          clone_same_container_into(fragment, start_container, start_off, end_off)
+          return
+        end
+        ancestor = common_ancestor(start_container, end_container) or return
+        start_child = start_container == ancestor ? nil : ancestor_child(ancestor, start_container)
+        end_child   = end_container   == ancestor ? nil : ancestor_child(ancestor, end_container)
+        if start_child && end_child && start_child == end_child
+          # Both boundaries inside the same top-level subtree of the ancestor.
+          fragment << clone_subtree_between(start_child, start_container, start_off, end_container, end_off)
+          return
+        end
+        children = ancestor.children
+        if start_child
+          fragment << clone_subtree_to_end(start_child, start_container, start_off)
+          start_idx = (children.index(start_child) || 0) + 1
+        else
+          start_idx = start_off
+        end
+        end_idx = end_child ? (children.index(end_child) || children.length) : end_off
+        children[start_idx...end_idx]&.each { |c| fragment << c.dup(1) }
+        if end_child
+          fragment << clone_subtree_from_start(end_child, end_container, end_off)
+        end
+      end
+
+      def clone_same_container_into(fragment, container, start_off, end_off)
+        if text_node?(container)
+          fragment << Nokogiri::XML::Text.new(container.content[start_off...end_off].to_s, @document)
+        elsif container.respond_to?(:children)
+          container.children[start_off...end_off]&.each { |c| fragment << c.dup(1) }
+        end
+      end
+
+      # Clone `subtree`, including only content from (boundary, offset)
+      # to the end of `subtree`.
+      def clone_subtree_to_end(subtree, boundary, offset)
+        return text_slice(subtree, offset, nil) if subtree == boundary && text_node?(subtree)
+        shell = subtree.dup(0)
+        if subtree == boundary
+          subtree.children[offset..]&.each { |c| shell << c.dup(1) }
+          return shell
+        end
+        child = ancestor_child(subtree, boundary) or return shell
+        idx   = subtree.children.index(child)
+        shell << clone_subtree_to_end(child, boundary, offset)
+        subtree.children[(idx + 1)..]&.each { |c| shell << c.dup(1) } if idx
+        shell
+      end
+
+      # Clone `subtree`, including only content from the start of
+      # `subtree` to (boundary, offset).
+      def clone_subtree_from_start(subtree, boundary, offset)
+        return text_slice(subtree, 0, offset) if subtree == boundary && text_node?(subtree)
+        shell = subtree.dup(0)
+        if subtree == boundary
+          subtree.children[0...offset]&.each { |c| shell << c.dup(1) }
+          return shell
+        end
+        child = ancestor_child(subtree, boundary) or return shell
+        idx   = subtree.children.index(child)
+        subtree.children[0...idx]&.each { |c| shell << c.dup(1) } if idx
+        shell << clone_subtree_from_start(child, boundary, offset)
+        shell
+      end
+
+      # Both boundaries land inside the same subtree below the common
+      # ancestor — recurse pairwise.
+      def clone_subtree_between(subtree, sc, so, ec, eo)
+        if subtree == sc && subtree == ec
+          if text_node?(subtree)
+            return text_slice(subtree, so, eo)
+          else
+            shell = subtree.dup(0)
+            subtree.children[so...eo]&.each { |c| shell << c.dup(1) }
+            return shell
+          end
+        end
+        shell = subtree.dup(0)
+        s_child = subtree == sc ? nil : ancestor_child(subtree, sc)
+        e_child = subtree == ec ? nil : ancestor_child(subtree, ec)
+        if s_child && e_child && s_child == e_child
+          shell << clone_subtree_between(s_child, sc, so, ec, eo)
+          return shell
+        end
+        children = subtree.children
+        if s_child
+          shell << clone_subtree_to_end(s_child, sc, so)
+          start_idx = (children.index(s_child) || 0) + 1
+        else
+          start_idx = so
+        end
+        end_idx = e_child ? (children.index(e_child) || children.length) : eo
+        children[start_idx...end_idx]&.each { |c| shell << c.dup(1) }
+        shell << clone_subtree_from_start(e_child, ec, eo) if e_child
+        shell
+      end
+
+      def text_slice(node, lo, hi)
+        Nokogiri::XML::Text.new((node.content[lo...(hi || node.content.length)] || ''), @document)
+      end
+
+      def text_node?(n)
+        n.respond_to?(:type) && (n.type == Nokogiri::XML::Node::TEXT_NODE || n.type == Nokogiri::XML::Node::CDATA_SECTION_NODE)
+      end
+
+      # Walks `descendant` upward stopping when it's a direct child of
+      # `ancestor`. Returns nil if `descendant` isn't actually a
+      # descendant.
+      def ancestor_child(ancestor, descendant)
+        cur = descendant
+        while cur
+          parent = cur.respond_to?(:parent) ? cur.parent : nil
+          return cur if parent == ancestor
+          cur = parent
+        end
+        nil
+      end
+
+      def common_ancestor(a, b)
+        seen = Set.new
+        cur = a
+        while cur
+          seen << cur
+          cur = cur.respond_to?(:parent) ? cur.parent : nil
+        end
+        cur = b
+        while cur
+          return cur if seen.include?(cur)
+          cur = cur.respond_to?(:parent) ? cur.parent : nil
+        end
+        nil
+      end
+
       # HTML spec: readonly only blocks user input on text-y inputs and
       # textareas. checkbox / radio / range / file / etc. ignore it.
       READONLY_BLOCKS_TYPES = %w[
@@ -1364,7 +1504,24 @@ module Capybara
           @handles.track(cur)
         when 'childElementCount' then node.respond_to?(:element_children) ? node.element_children.size : 0
         when 'nodeType'        then node_type_for(node)
-        when 'nodeName'        then (node.name || '').upcase
+        when 'nodeName'
+          # DOM Node#nodeName: '#text' for text nodes, '#comment' for
+          # comments, '#document-fragment' for fragments — uppercase
+          # the name only for actual elements.
+          name = node.name || ''
+          if node.respond_to?(:type)
+            case node.type
+            when Nokogiri::XML::Node::TEXT_NODE                        then '#text'
+            when Nokogiri::XML::Node::COMMENT_NODE                     then '#comment'
+            when Nokogiri::XML::Node::CDATA_SECTION_NODE               then '#cdata-section'
+            when Nokogiri::XML::Node::DOCUMENT_FRAG_NODE               then '#document-fragment'
+            when Nokogiri::XML::Node::DOCUMENT_NODE, Nokogiri::XML::Node::HTML_DOCUMENT_NODE
+              '#document'
+            else name.upcase
+            end
+          else
+            name.upcase
+          end
         when 'tagName'         then (node.element? ? node.name.upcase : '')
         when 'textContent'     then node.text
         when 'innerText'       then visible_text(handle).strip
@@ -1571,6 +1728,18 @@ module Capybara
           # not spec-perfect (won't catch namespace differences) but
           # matches what Turbo's tracked-element check needs.
           !!(other && node.respond_to?(:to_html) && other.respond_to?(:to_html) && node.to_html == other.to_html)
+        when 'cloneRangeContents'
+          # JS-side `range.cloneContents()`. Build a fresh fragment in
+          # the live document and walk from (startContainer, startOffset)
+          # to (endContainer, endOffset) in tree order, partial-cloning
+          # text-node boundaries and full-cloning interior siblings.
+          start_node = lookup_node(args[0])
+          end_node   = lookup_node(args[2])
+          fragment   = Nokogiri::XML::DocumentFragment.new(@document)
+          if start_node && end_node
+            clone_range_into(fragment, start_node, args[1].to_i, end_node, args[3].to_i)
+          end
+          @handles.track(fragment)
         when 'parseHTML5Document'
           # DOMParser support: parse a full HTML5 document into a
           # standalone Nokogiri tree, register its nodes, and return
