@@ -158,14 +158,12 @@
     // and reads `option.selected` to find the chosen entry; without a
     // getter the read returned undefined and the form posted whichever
     // option the server marked as selected, even after `select_option`.
-    // Setter writes `selected="selected"` (rather than `selected=""`)
-    // because Redmine's form-update post-ready script gates on
-    // `option[selected=selected]` (CSS exact-match).
+    // Setter routes through `setOptionSelected` so the Ruby side can
+    // clear sibling options on a single-select (HTML IDL semantics)
+    // and write the literal `selected="selected"` attribute Redmine's
+    // form-update post-ready script keys off (`option[selected=selected]`).
     get selected()  { return !!__dom(this.__h, 'selected'); }
-    set selected(v) {
-      if (v) this.setAttribute('selected', 'selected');
-      else   this.removeAttribute('selected');
-    }
+    set selected(v) { __dom(this.__h, 'setOptionSelected', [!!v]); }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as

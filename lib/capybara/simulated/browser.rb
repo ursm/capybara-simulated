@@ -646,14 +646,22 @@ module Capybara
         return false if opt['disabled']
         select = opt.ancestors('select').first
         return false unless select
-        if select['multiple']
-          opt['selected'] = 'selected'
-        else
-          select.css('option').each { |o| o.delete('selected') }
-          opt['selected'] = 'selected'
-        end
+        set_option_selected(opt, true, select: select)
         dispatch_input_change(@handles.track(select))
         true
+      end
+
+      def set_option_selected(opt, on, select: nil)
+        return unless opt && opt.name == 'option'
+        if on
+          select ||= opt.ancestors('select').first
+          if select && !select['multiple']
+            select.css('option').each { |o| o.delete('selected') }
+          end
+          opt['selected'] = 'selected'
+        else
+          opt.delete('selected')
+        end
       end
 
       def unselect_option(handle)
@@ -1369,6 +1377,13 @@ module Capybara
             nil
           end
         when 'setChecked'      then set_value(handle, !!args[0]); nil
+        when 'setOptionSelected'
+          # IDL `option.selected = true` on a single-select clears the
+          # previously-selected sibling. Mirrors what `select_option`
+          # already does via the Capybara user-action path; keeps the
+          # attribute as the literal `selected="selected"` Redmine reads.
+          set_option_selected(node, !!args[0])
+          nil
         when 'setTextContent'
           node.content = args[0].to_s if node.respond_to?(:content=)
           record_childlist(handle)
