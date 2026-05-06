@@ -1364,7 +1364,31 @@
     }
   });
   globalThis.document.cookie      = '';
-  globalThis.document.implementation = {createHTMLDocument: () => globalThis.document};
+  // jQuery's feature-detection writes
+  // `(createHTMLDocument("").body).innerHTML = "<form></form><form></form>"`
+  // and counts childNodes. Returning the live `document` would clobber
+  // the page body — give every call a fresh detached body wrapped in
+  // a minimal Document-shaped object instead. `documentElement` /
+  // `head` cover the rest of the surface jQuery probes.
+  globalThis.document.implementation = {
+    createHTMLDocument(_title) {
+      const body = globalThis.document.createElement('body');
+      const head = globalThis.document.createElement('head');
+      const html = globalThis.document.createElement('html');
+      html.appendChild(head);
+      html.appendChild(body);
+      return {
+        documentElement: html,
+        head:            head,
+        body:            body,
+        createElement:    (tag) => globalThis.document.createElement(tag),
+        createTextNode:   (t)   => globalThis.document.createTextNode(t),
+        createDocumentFragment: () => globalThis.document.createDocumentFragment(),
+        querySelector:    (s)   => body.querySelector(s),
+        querySelectorAll: (s)   => body.querySelectorAll(s)
+      };
+    }
+  };
   // window === defaultView is the canonical relationship; libraries
   // walk it via `node.ownerDocument.defaultView` to find the global.
   globalThis.document.defaultView = globalThis;

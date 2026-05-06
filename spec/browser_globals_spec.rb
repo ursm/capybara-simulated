@@ -92,6 +92,45 @@ RSpec.describe 'browser global surface' do
     end
   end
 
+  describe 'document.implementation.createHTMLDocument' do
+    # jQuery feature-detects with
+    # `(createHTMLDocument("").body).innerHTML = "<form></form><form></form>"`
+    # and counts childNodes. Returning the live document would clobber
+    # the page body — every call must give a fresh detached body.
+    it 'returns a fresh body that is independent of document.body' do
+      result = session.evaluate_script(<<~JS)
+        const doc = document.implementation.createHTMLDocument("");
+        doc.body.innerHTML = "<form></form><form></form>";
+        ({
+          fresh_body_count: doc.body.childNodes.length,
+          page_body_count:  document.body.childNodes.length,
+          shares_body:      doc.body === document.body
+        })
+      JS
+      expect(result).to eq(
+        'fresh_body_count' => 2,
+        'page_body_count'  => 0,
+        'shares_body'      => false
+      )
+    end
+
+    it 'exposes head / documentElement on the new document' do
+      shape = session.evaluate_script(<<~JS)
+        const doc = document.implementation.createHTMLDocument("");
+        ({
+          has_head:    doc.head?.tagName === 'HEAD',
+          has_html:    doc.documentElement?.tagName === 'HTML',
+          body_in_html: doc.documentElement?.contains(doc.body)
+        })
+      JS
+      expect(shape).to eq(
+        'has_head'     => true,
+        'has_html'     => true,
+        'body_in_html' => true
+      )
+    end
+  end
+
   describe 'observer stubs' do
     it 'IntersectionObserver / ResizeObserver / PerformanceObserver construct cleanly and have spec methods' do
       shape = session.evaluate_script(<<~JS)
