@@ -151,7 +151,7 @@ module Capybara
         tick_real_time
         root = lookup_node(context) || @document
         stripped, ci_predicates = strip_case_insensitive_attr_flags(css)
-        matches = root.css(stripped, CssPseudoHandlers.new(self))
+        matches = root.css(stripped, css_pseudo_handlers)
         matches = matches.select {|n| ci_predicates.all? {|p| ci_attr_match?(n, p) } } unless ci_predicates.empty?
         matches.filter_map {|n| @handles.track(n) }
       end
@@ -209,17 +209,14 @@ module Capybara
       # evaluation only if Nokogiri rejects it — Turbo's
       # `a[href], a[xlink\:href]` would otherwise drop the leading
       # branch when the namespaced second branch fails CSS-to-XPath.
-      # CssPseudoHandlers is passed through so JS-side queries
-      # (`document.querySelector('input:checked')`, Stimulus action
-      # validators using `:disabled` / `:checked`, etc.) match the
-      # same pseudo-classes find_css supports on the Ruby DSL side.
+      # CssPseudoHandlers is threaded through so JS-side queries see the
+      # same `:checked` / `:disabled` / etc. set the Ruby DSL does.
       def safe_at_css(node, selector)
         return nil unless node.respond_to?(:at_css)
-        node.at_css(selector.to_s, CssPseudoHandlers.new(self))
+        node.at_css(selector.to_s, css_pseudo_handlers)
       rescue *SELECTOR_ERRORS
-        h = CssPseudoHandlers.new(self)
         css_split(selector).each {|s|
-          hit = node.at_css(s, h) rescue next
+          hit = node.at_css(s, css_pseudo_handlers) rescue next
           return hit if hit
         }
         nil
@@ -227,30 +224,42 @@ module Capybara
 
       def safe_css(node, selector)
         return [] unless node.respond_to?(:css)
-        node.css(selector.to_s, CssPseudoHandlers.new(self))
+        node.css(selector.to_s, css_pseudo_handlers)
       rescue *SELECTOR_ERRORS
-        h = CssPseudoHandlers.new(self)
-        css_split(selector).flat_map {|s| node.css(s, h) rescue [] }
+        css_split(selector).flat_map {|s| node.css(s, css_pseudo_handlers) rescue [] }
       end
 
       # Nokogiri's `matches?` doesn't accept a custom-pseudo handler the
-      # way `css` does, so we route through the parent's css() lookup
-      # (which does accept handlers) and check inclusion. The plain
-      # matches? fast path is kept for the common selector-without-
-      # pseudo-class case so we avoid building a result set.
+      # way `css` does, so when the selector references one of our
+      # registered pseudos we route through `parent.css(handler).include?`.
+      # Nokogiri's `matches?` doesn't accept a custom-pseudo handler the
+      # way `css` does, so when the selector references one of our
+      # registered pseudos — or when matches? itself can't compile a
+      # multi-branch selector like `a[href], a[xlink\:href]` — we fall
+      # through to a `parent.css(handler).include?` lookup.
       def safe_matches?(node, selector)
-        return node.matches?(selector.to_s) unless selector.to_s.include?(':')
+        s = selector.to_s
+        return node.matches?(s) if !s.match?(REGISTERED_PSEUDO_RE) && !s.include?(',')
+        css_match_via_parent(node, s)
+      rescue *SELECTOR_ERRORS
+        css_match_via_parent(node, s)
+      end
+
+      # `parent.css(handler).include?` lookup — the only way to evaluate
+      # selectors with custom pseudo-classes (Nokogiri's `matches?`
+      # doesn't accept the handler) or selectors Nokogiri can't compile
+      # whole (e.g. `a[href], a[xlink\:href]` — fall back to per-branch).
+      def css_match_via_parent(node, selector)
         parent = node.respond_to?(:parent) ? node.parent : nil
         return false unless parent.respond_to?(:css)
-        h = CssPseudoHandlers.new(self)
-        begin
-          parent.css(selector.to_s, h).any? { |n| n.equal?(node) }
-        rescue *SELECTOR_ERRORS
-          css_split(selector).any? {|s|
-            (parent.css(s, h) rescue []).any? { |n| n.equal?(node) }
-          }
-        end
+        parent.css(selector, css_pseudo_handlers).any? { it.equal?(node) }
+      rescue *SELECTOR_ERRORS
+        css_split(selector).any? {|branch|
+          (parent.css(branch, css_pseudo_handlers) rescue []).any? { it.equal?(node) }
+        }
       end
+
+      REGISTERED_PSEUDO_RE = /:(?:checked|selected|disabled|enabled|required|optional)\b/.freeze
 
       # Top-level comma split — bracket-content / parens are safe to
       # ignore for the kinds of selectors we see (Turbo / Stimulus
@@ -323,6 +332,13 @@ module Capybara
       # so handlers translate Nokogiri nodes back through the table.
       def handles_track(node)
         @handles.track(node)
+      end
+
+      # Stateless apart from the immutable `@browser` reference, so one
+      # instance per Browser is enough. Hot-path queries (querySelector,
+      # find_css, matches) all funnel through this.
+      def css_pseudo_handlers
+        @css_pseudo_handlers ||= CssPseudoHandlers.new(self)
       end
 
       def all_text(handle)
@@ -1395,16 +1411,11 @@ module Capybara
         true
       end
 
+      # No tick_real_time: stale-checking is a pure parent-chain walk
+      # and runs on every Node accessor. Draining timers here would
+      # keep advancing virtual time mid-assertion. User-action paths
+      # (click / fill_in / visit) tick separately.
       def check_stale(handle, captured = nil)
-        # Intentionally no tick_real_time here. Stale-checking just walks
-        # the Nokogiri parent chain to confirm `handle` is still in the
-        # tree — no JS timers need to fire. Calling drain_timers from a
-        # hot path (every Node access) would keep advancing virtual time
-        # mid-assertion, which let deeply-recursive MutationObserver
-        # delivery chains accumulate enough QuickJS C stack to trip the
-        # parser-stack guard during eval. tick_real_time is still called
-        # on the user-action paths (click / fill_in / visit) that can
-        # legitimately advance time.
         raise StaleElement, 'element is no longer attached to the document' if stale?(handle, captured)
       end
 

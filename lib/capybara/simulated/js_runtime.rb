@@ -22,11 +22,8 @@ module Capybara
       VM_TIMEOUT_MSEC = 5_000
 
       # QuickJS's default 4 MiB runtime stack overflows on deeply nested
-      # Hotwire dispatch chains: a Stimulus action handler synchronously
-      # dispatches an event whose handler dispatches another, and so on
-      # ~80 frames deep through Turbo + the page's own handlers.
-      # 16 MiB is comfortable headroom and still forces a recycle on
-      # genuinely runaway recursion.
+      # synchronous Hotwire dispatch chains. 16 MiB is comfortable
+      # headroom; runaway recursion still trips the recycle path.
       VM_MAX_STACK_SIZE = 16 * 1024 * 1024
 
       def initialize(browser)
