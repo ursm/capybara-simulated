@@ -1178,6 +1178,26 @@ module Capybara
           dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
         when :space
           insert_char(handle, state, ' ')
+        when :enter, :return
+          # Real Enter on a textarea fires `keydown` → `beforeinput`
+          # (`insertLineBreak`, cancelable) → default-action newline →
+          # `input`. Redmine's list-autofill controller listens for
+          # the `beforeinput` and replaces the default action with its
+          # own indented list-marker insertion via `setRangeText`, so
+          # `\n` only goes in when no listener `preventDefault()`s.
+          # Flush the buffer first so the listener reads our typed-so-
+          # far value (otherwise it sees the pre-`send_keys` snapshot).
+          set_value(handle, state[:value])
+          set_caret(handle, state[:caret])
+          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
+          allow = dispatch_event(handle, 'beforeinput', cancelable: true, inputType: 'insertLineBreak')
+          if allow
+            state[:value] = state[:value][0, state[:caret]] + "\n" + state[:value][state[:caret]..]
+            state[:caret] += 1
+          else
+            sync_state_from_dom(handle, state)
+          end
+          dispatch_key_event(handle, 'keyup', SPECIAL_KEY_CODES[key], **key_init(state, key))
         when :backspace
           if state[:caret] > 0
             state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
@@ -1196,6 +1216,23 @@ module Capybara
         else
           fire_special_key_pair(handle, state, key)
         end
+      end
+
+      # Refresh `state[:value]` / `state[:caret]` from the live DOM —
+      # needed when a beforeinput / input listener mutated the field
+      # itself (e.g. via `setRangeText`) and our buffered state is
+      # stale.
+      def sync_state_from_dom(handle, state)
+        node = lookup_node(handle)
+        return unless node
+        state[:value] = (node.name == 'textarea' ? node.text : node['value']).to_s
+        state[:caret] = js.call('__getCaret', handle).to_i
+      end
+
+      # Forward the buffered caret to the JS side so a Stimulus
+      # listener reading `selectionStart` sees the current position.
+      def set_caret(handle, caret)
+        js.call('__setCaret', handle, caret.to_i)
       end
 
       # Fire a keydown / keyup pair for a named special key (`:enter`,

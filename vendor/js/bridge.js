@@ -1633,6 +1633,12 @@
   // here to simulate a real paste / copy default action.
   globalThis.__getClipboard = function () { return __clipboardText; };
   globalThis.__setClipboard = function (text) { __clipboardText = String(text == null ? '' : text); };
+  // Caret bridge for Ruby-side `send_keys` — `state[:caret]` only
+  // tracks our buffered typing, but Stimulus listeners may have
+  // called `setSelectionRange` mid-flight. Round-trip these so the
+  // post-listener caret survives.
+  globalThis.__getCaret = function (h) { const w = wrap(h); return w ? (w.selectionStart || 0) : 0; };
+  globalThis.__setCaret = function (h, n) { const w = wrap(h); if (w && w.setSelectionRange) w.setSelectionRange(n, n); };
   globalThis.navigator = {
     userAgent:      'capybara-simulated',
     appVersion:     'capybara-simulated',
