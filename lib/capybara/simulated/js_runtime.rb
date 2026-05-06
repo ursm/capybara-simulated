@@ -21,6 +21,16 @@ module Capybara
       # loop as InterruptedError.
       VM_TIMEOUT_MSEC = 5_000
 
+      # `memory_limit` is the ceiling at which QuickJS *throws* an
+      # out-of-memory InternalError, not a safeguard against running
+      # out. The gem's 128 MiB default is fine for plain Stimulus +
+      # Turbo but jQuery + jQuery UI on a single page comfortably
+      # crosses it during sustained runs (Capybara's shared spec
+      # exercises /with_js + /jquery_ui repeatedly). 512 MiB removes
+      # the OOM trigger in practice and is well below any realistic
+      # process memory ceiling.
+      VM_MEMORY_LIMIT = 512 * 1024 * 1024
+
       def initialize(browser)
         @browser = browser
         boot_vm
@@ -130,7 +140,7 @@ module Capybara
       private
 
       def boot_vm
-        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC)
+        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC, memory_limit: VM_MEMORY_LIMIT)
         attach_dom_bridge
         # Receives the already-absolute, importmap-resolved URL we
         # rewrote into the source on a prior pass. Browser#load_module
