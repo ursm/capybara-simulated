@@ -793,16 +793,30 @@ module Capybara
         form ? submit(form, nil) : false
       end
 
-      # Real browsers execute a `<script>` element when it's inserted into
-      # a connected document. rails-ujs's data-remote response handling
-      # leans on this — it builds `<script>` from the AJAX body and
-      # `head.appendChild(script)` to evaluate it. Walk the inserted
-      # subtree for scripts that haven't been executed yet and run each
-      # through the same path bootstrap_page uses for `<script>` tags.
+      # Real browsers execute a `<script>` on insertion into a connected
+      # document. rails-ujs's data-remote handling leans on this — it
+      # builds `<script>` from the AJAX body and `head.appendChild`s it.
+      # Scripts inside a still-detached fragment must be skipped: jQuery
+      # 3.x's `domManip` walks our subtree before splicing it in, and
+      # firing them there would run before their sibling fields exist.
       def run_inserted_scripts(root)
         return unless @js && root.respond_to?(:document) && root.document.equal?(@document)
         scripts = root.name == 'script' ? [root] : (root.respond_to?(:css) ? root.css('script').to_a : [])
-        scripts.each {|s| @js.run_classic_script(self, s) }
+        scripts.each do |s|
+          next unless s.ancestors.include?(@document) && runnable_script_type?(s['type'])
+          @js.run_classic_script(self, s)
+        end
+      end
+
+      # jQuery 3.x's `domManip` neuters scripts during fragment build by
+      # prefixing their type with `true/` or `false/` so the browser
+      # won't auto-execute on insert; it then runs them itself via
+      # `DOMEval` (or restores the type and lets the browser do it).
+      # Strip the prefix before the classic-type check so we run those
+      # bodies once, on the post-splice walk.
+      def runnable_script_type?(type)
+        type = type.to_s.sub(%r{\A(?:true|false)/}, '')
+        JsRuntime::SCRIPT_TYPES_CLASSIC.include?(type)
       end
 
       # Fire input + change after a user-driven value change. Mirrors what
