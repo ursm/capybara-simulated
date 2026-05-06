@@ -1505,13 +1505,38 @@ module Capybara
       # has actually passed since the last tick. The cap stops a
       # runaway interval from looping forever in a single tick.
       TICK_CAP_MS = 5_000
+      # Called from every find / find_xpath / find_css before the
+      # selector evaluates, so Capybara's polling can advance the
+      # virtual JS clock by however much wall-clock time has elapsed.
+      # Settling here too is important: drain_timers fires user code
+      # that mutates the DOM (Stimulus controller-connect, Turbo
+      # frame-render trailing scripts), and those mutations need to
+      # reach observer callbacks before Capybara's match runs —
+      # otherwise the new `<div data-controller="action">` element sits
+      # unconnected and Stimulus's `removeAttribute('hidden')` never
+      # fires, so `find('[role="dialog"]')` keeps filtering it out.
       def tick_real_time
-        return unless @js && @timers_active
+        return unless @js
+        return unless @timers_active
         now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         elapsed  = ((now - @last_tick_ts) * 1000).to_i
         @last_tick_ts = now
         return if elapsed <= 0
         js.drain_timers([elapsed, TICK_CAP_MS].min)
+        deliver_pending_mutations
+      end
+
+      # Flush whatever record_* calls have accumulated during the
+      # caller's most recent JS execution — used by tick_real_time
+      # (between polls) and by the back-stop in find_xpath.  Looped
+      # because a delivered mutation can trigger a JS observer that
+      # mutates the DOM in turn.
+      def deliver_pending_mutations
+        4.times do
+          break if @mutations.empty?
+          records, @mutations = @mutations, []
+          js.call('__deliverMutations', records)
+        end
       end
 
       # Single dispatch entry called from JS via `__dom(handle, op, args)`.
