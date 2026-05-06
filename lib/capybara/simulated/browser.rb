@@ -644,17 +644,16 @@ module Capybara
         return false unless opt && opt.name == 'option'
         # Browsers don't let users select a disabled option.
         return false if opt['disabled']
-        select = opt.ancestors('select').first
-        return false unless select
-        set_option_selected(opt, true, select: select)
+        select = opt.ancestors('select').first or return false
+        set_option_selected(opt, true)
         dispatch_input_change(@handles.track(select))
         true
       end
 
-      def set_option_selected(opt, on, select: nil)
+      def set_option_selected(opt, on)
         return unless opt && opt.name == 'option'
         if on
-          select ||= opt.ancestors('select').first
+          select = opt.ancestors('select').first
           if select && !select['multiple']
             select.css('option').each { |o| o.delete('selected') }
           end
@@ -1349,6 +1348,12 @@ module Capybara
         when 'value'           then value(handle)
         when 'checked'         then checked?(handle)
         when 'selected'        then !!(node.respond_to?(:[]) && node['selected'])
+        when 'selectedIndex'
+          # First option flagged `selected`, falling back to -1 — single
+          # Ruby walk instead of one dom_op per option from the JS side.
+          opts  = node.respond_to?(:css) ? node.css('option') : []
+          found = opts.index {|o| o['selected'] }
+          found || -1
         when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
         when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
         when 'form'            then @handles.track(enclosing_form(node))
@@ -1383,6 +1388,18 @@ module Capybara
           # already does via the Capybara user-action path; keeps the
           # attribute as the literal `selected="selected"` Redmine reads.
           set_option_selected(node, !!args[0])
+          nil
+        when 'setSelectedIndex'
+          # `select.selectedIndex = N` — flip the Nth option's `selected`
+          # attribute on, clear the others. One Ruby pass instead of N
+          # `setOptionSelected` round-trips that would each re-walk the
+          # options list to clear siblings.
+          if node.respond_to?(:css)
+            idx = args[0].to_i
+            node.css('option').each_with_index do |o, i|
+              i == idx ? (o['selected'] = 'selected') : o.delete('selected')
+            end
+          end
           nil
         when 'setTextContent'
           node.content = args[0].to_s if node.respond_to?(:content=)
@@ -2045,11 +2062,8 @@ module Capybara
         action = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
         if method == 'post' && multipart_form?(form)
           content_type, body = build_multipart(form, submitter)
-        elsif method == 'post'
-          content_type = 'application/x-www-form-urlencoded'
-          body         = URI.encode_www_form(serialize_form(form, submitter))
         else
-          content_type = nil
+          content_type = (method == 'post') ? 'application/x-www-form-urlencoded' : nil
           body         = URI.encode_www_form(serialize_form(form, submitter))
         end
         # `event.submitter` lets Turbo's FormSubmitObserver honour

@@ -208,21 +208,11 @@
     set type(v)        { this.setAttribute('type', v); }
     // <select>.selectedIndex — jQuery's `valHooks.select.get` reads
     // it (and treats undefined as NaN, returning null on single-selects).
-    // We compute on demand from the options' `selected` attribute.
-    get selectedIndex() {
-      if (this.tagName !== 'SELECT') return undefined;
-      const opts = this.options;
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].selected) return i;
-      }
-      return -1;
-    }
-    set selectedIndex(v) {
-      if (this.tagName !== 'SELECT') return;
-      const i = +v;
-      const opts = this.options;
-      for (let j = 0; j < opts.length; j++) opts[j].selected = (j === i);
-    }
+    // Both getter and setter route through Ruby in one round-trip;
+    // the JS-side iterate-and-set-each-option alternative is O(N²)
+    // because each setter call clears every sibling's `selected` attr.
+    get selectedIndex()  { return this.tagName === 'SELECT' ? __dom(this.__h, 'selectedIndex') : undefined; }
+    set selectedIndex(v) { if (this.tagName === 'SELECT') __dom(this.__h, 'setSelectedIndex', [+v]); }
     // Reflected so JS-set values are also visible via getAttribute /
     // node['title'] — Redmine's jstoolbar does `button.title = ...`
     // and the `[title="..."]` Capybara filter reads the attribute.
