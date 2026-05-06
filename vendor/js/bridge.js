@@ -1391,13 +1391,44 @@
   // selectNodeContents + deleteContents + extractContents to swap
   // frame bodies, which is the only flow we model — no offsets, no
   // partial-text selection, no boundary-point semantics.
+  // Minimal Range: covers Redmine's quote-reply controller, which uses
+  // selectNodeContents → setStart/setEnd → cloneContents → contains
+  // checks. We collapse the (start, end, container) triple to "the
+  // node whose contents the range spans" — fine for full-element
+  // selections, lossy for sub-text ranges (those tests still get the
+  // whole element quoted, not the substring).
   class Range {
-    constructor() { this._node = null; }
-    selectNodeContents(node)   { this._node = node; }
-    selectNode(node)           { this._node = node && node.parentNode; }
-    setStart()                 {}
-    setEnd()                   {}
-    collapse()                 {}
+    constructor() {
+      this._node           = null;
+      this.startContainer  = null;
+      this.endContainer    = null;
+      this.startOffset     = 0;
+      this.endOffset       = 0;
+    }
+    get commonAncestorContainer() { return this._node; }
+    selectNodeContents(node) {
+      this._node = node;
+      this.startContainer = node;
+      this.endContainer   = node;
+      this.startOffset    = 0;
+      this.endOffset      = (node && node.childNodes && node.childNodes.length) || 0;
+    }
+    selectNode(node)         { this._node = node && node.parentNode; this.startContainer = this._node; this.endContainer = this._node; }
+    setStart(node, offset)   { this.startContainer = node; this.startOffset = offset || 0; this._node ||= node; }
+    setEnd(node, offset)     { this.endContainer   = node; this.endOffset   = offset || 0; this._node ||= node; }
+    setStartBefore(node)     { this.startContainer = node && node.parentNode; this._node = this.startContainer; }
+    setStartAfter(node)      { this.startContainer = node && node.parentNode; this._node = this.startContainer; }
+    setEndBefore(node)       { this.endContainer   = node && node.parentNode; this._node ||= this.endContainer; }
+    setEndAfter(node)        { this.endContainer   = node && node.parentNode; this._node ||= this.endContainer; }
+    collapse()               {}
+    intersectsNode(node) {
+      if (!this._node || !node) return false;
+      // Conservative: covered when the range's container contains node
+      // or vice versa. Real browsers compute boundary-point comparisons.
+      return this._node === node ||
+        (this._node.contains && this._node.contains(node)) ||
+        (node.contains && node.contains(this._node));
+    }
     deleteContents() {
       if (!this._node) return;
       const children = this._node.childNodes;
@@ -1419,7 +1450,7 @@
       for (const c of this._node.childNodes) frag.appendChild(c.cloneNode(true));
       return frag;
     }
-    cloneRange()   { const r = new Range; r._node = this._node; return r; }
+    cloneRange()   { const r = new Range; Object.assign(r, this); return r; }
     detach()       {}
   }
   globalThis.Range = Range;
@@ -1536,6 +1567,7 @@
   class Selection {
     constructor()       { this._ranges = []; }
     get rangeCount()    { return this._ranges.length; }
+    get isCollapsed()   { return this._ranges.length === 0; }
     addRange(r)         { this._ranges.push(r); }
     removeAllRanges()   { this._ranges = []; }
     removeRange(r)      { const i = this._ranges.indexOf(r); if (i >= 0) this._ranges.splice(i, 1); }
@@ -1545,6 +1577,13 @@
     collapseToEnd()     {}
     collapseToStart()   {}
     selectAllChildren() {}
+    // Conservative `containsNode` — true if any range intersects.
+    // Redmine's quote-reply gates the partial-quote path on this; an
+    // empty selection (no ranges, the no-pre-selection case) returns
+    // false so the controller falls through to the full-quote post.
+    containsNode(node, _partialOk) {
+      return this._ranges.some(r => r.intersectsNode && r.intersectsNode(node));
+    }
   }
   globalThis.Selection = Selection;
   const __selection = new Selection();
