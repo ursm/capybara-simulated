@@ -158,8 +158,14 @@
     // and reads `option.selected` to find the chosen entry; without a
     // getter the read returned undefined and the form posted whichever
     // option the server marked as selected, even after `select_option`.
+    // Setter writes `selected="selected"` (rather than `selected=""`)
+    // because Redmine's form-update post-ready script gates on
+    // `option[selected=selected]` (CSS exact-match).
     get selected()  { return !!__dom(this.__h, 'selected'); }
-    set selected(v) { setBoolAttr(this, 'selected', v); }
+    set selected(v) {
+      if (v) this.setAttribute('selected', 'selected');
+      else   this.removeAttribute('selected');
+    }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as
