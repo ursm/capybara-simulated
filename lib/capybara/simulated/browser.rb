@@ -1252,19 +1252,15 @@ module Capybara
           child = lookup_node(args[0])
           if child && node.respond_to?(:add_child)
             # DocumentFragment unwraps on insertion (the fragment ends
-            # up empty, its children move to `node`). Record the
-            # actual children as addedNodes so MutationObserver
-            # callbacks (incl. our ceObserver) walk the right tree.
-            added = if child.is_a?(Nokogiri::XML::DocumentFragment)
-              kids = child.children.to_a
-              node.add_child(child)
-              kids.map { |c| @handles.track(c) }
-            else
-              node.add_child(child)
-              [args[0]]
-            end
+            # up empty, its children move to `node`). Capture the
+            # children-to-be-inserted before add_child drains them so
+            # we can both record MutationObserver addedNodes and walk
+            # the right subtree for inserted <script> execution.
+            inserted_kids = child.is_a?(Nokogiri::XML::DocumentFragment) ? child.children.to_a : [child]
+            node.add_child(child)
+            added = inserted_kids.map {|c| @handles.track(c) }
             record_childlist(handle, added)
-            run_inserted_scripts(child)
+            inserted_kids.each {|n| run_inserted_scripts(n) }
           end
           args[0]
         when 'appendChildrenOf'
@@ -1308,15 +1304,11 @@ module Capybara
           new_child = lookup_node(args[0])
           ref_child = lookup_node(args[1])
           if new_child
-            added = if new_child.is_a?(Nokogiri::XML::DocumentFragment)
-              kids = new_child.children.to_a
-              ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
-              kids.map { |c| @handles.track(c) }
-            else
-              ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
-              [args[0]]
-            end
+            inserted_kids = new_child.is_a?(Nokogiri::XML::DocumentFragment) ? new_child.children.to_a : [new_child]
+            ref_child ? ref_child.add_previous_sibling(new_child) : node.add_child(new_child)
+            added = inserted_kids.map {|c| @handles.track(c) }
             record_childlist(handle, added)
+            inserted_kids.each {|n| run_inserted_scripts(n) }
           end
           args[0]
         when 'replaceChild'
