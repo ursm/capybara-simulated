@@ -1660,6 +1660,10 @@
   // window === defaultView is the canonical relationship; libraries
   // walk it via `node.ownerDocument.defaultView` to find the global.
   globalThis.document.defaultView = globalThis;
+  // EasyMDE et al. iterate document.styleSheets at construct-time —
+  // without a stylesheet engine the answer is simply "no sheets",
+  // which is enough to keep them from throwing on `.length`.
+  globalThis.document.styleSheets = [];
 
   // window === globalThis is the universal "this is a browser-ish env"
   // signal. Plus a handful of shims used during library boot.

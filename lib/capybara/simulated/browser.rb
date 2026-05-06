@@ -2588,8 +2588,25 @@ module Capybara
       end
 
       TEXT_TRANSFORM_RE = /text-transform\s*:\s*([a-z-]+)/i
+      # Tailwind exposes `text-transform` as utility classes. Without a
+      # stylesheet engine we can still honour the convention by matching
+      # the token names directly — Avo's `<span class="uppercase">` field
+      # labels rely on this to surface as upper-case visible text.
+      CLASS_TEXT_TRANSFORM = {
+        'uppercase'   => 'uppercase',
+        'lowercase'   => 'lowercase',
+        'capitalize'  => 'capitalize',
+        'normal-case' => 'none'
+      }.freeze
 
       def node_transform(node)
+        cls = node['class']
+        if cls && !cls.empty?
+          cls.split.each do |tok|
+            t = CLASS_TEXT_TRANSFORM[tok]
+            return t if t
+          end
+        end
         style = node['style']
         return nil if style.nil? || style.empty?
         m = style.match(TEXT_TRANSFORM_RE)
@@ -2623,16 +2640,30 @@ module Capybara
 
       def self_hidden?(node)
         return true if node['hidden']
+        return true if class_hidden?(node)
         style = node['style'].to_s
         style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
       end
 
       DISPLAY_NONE_RE       = /display\s*:\s*none/i
       VISIBILITY_HIDDEN_RE  = /visibility\s*:\s*hidden/i
+      # Tailwind / Bootstrap style: `.hidden` and `.d-none` resolve to
+      # `display: none`. Treating these class tokens as hidden lets the
+      # visible-text walk skip clipboard-source <div class="hidden">
+      # and similar UI helpers without a stylesheet engine.
+      HIDDEN_CLASS_TOKENS = %w[hidden d-none].freeze
+
+      def class_hidden?(node)
+        cls = node['class']
+        return false unless cls && !cls.empty?
+        tokens = cls.split
+        HIDDEN_CLASS_TOKENS.any? { |t| tokens.include?(t) }
+      end
 
       def style_hidden?(node)
         each_ancestor(node) do |cur|
           return true if cur['hidden']
+          return true if class_hidden?(cur)
           style = cur['style'].to_s
           return true if style.match?(DISPLAY_NONE_RE)
           return true if style.match?(VISIBILITY_HIDDEN_RE)

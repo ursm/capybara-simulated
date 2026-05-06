@@ -248,8 +248,11 @@ module Capybara
         @vm.define_function('__rackFetch') do |method, url, body, headers, redirect_mode|
           @browser.rack_fetch(method, url, body, headers, redirect_mode)
         end
-        @vm.on_log do |level, *parts|
-          warn "[capybara-simulated console.#{level}] #{parts.map(&:to_s).join(' ')}"
+        # quickjs.rb yields a single Quickjs::VM::Log; `to_s` already
+        # joins the args and expands JS Error objects with their stack
+        # trace, so surfacing it directly is more useful than splatting.
+        @vm.on_log do |log|
+          warn "[capybara-simulated console.#{log.severity}] #{log}"
         end
       end
     end

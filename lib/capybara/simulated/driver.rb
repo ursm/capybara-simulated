@@ -40,6 +40,17 @@ module Capybara
       def go_forward       = browser.go_forward
       def current_url      = browser.current_url || ''
       def html             = browser.html
+
+      # Capybara wires `save_screenshot` through the driver. Without a
+      # raster engine we can't produce a PNG, but spec teardown hooks
+      # ("dump on failure" plumbing) typically just want *something* at
+      # the requested path; writing the live HTML there keeps the
+      # debugging path useful and avoids the secondary
+      # `NotSupportedByDriverError` that masks the real failure.
+      def save_screenshot(path, **_opts)
+        File.write(path, browser.html.to_s)
+        path
+      end
       def title            = browser.title
       def status_code      = browser.status_code
       def response_headers = browser.response_headers
