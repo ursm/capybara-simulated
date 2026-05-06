@@ -998,8 +998,34 @@ module Capybara
         when Symbol
           apply_special_key(handle, state, key)
         when String
-          text = state[:modifiers].include?(:shift) ? key.upcase : key
-          text.each_char { |c| insert_char(handle, state, c) }
+          if state[:modifiers].intersect?(SUPPRESSING_MODIFIERS) && key.length == 1
+            apply_clipboard_shortcut(handle, state, key.downcase)
+          else
+            text = state[:modifiers].include?(:shift) ? key.upcase : key
+            text.each_char { |c| insert_char(handle, state, c) }
+          end
+        end
+      end
+
+      # Handle Ctrl/Cmd + {v|c|x} as the browser's default clipboard
+      # action: read or write the JS-side `__clipboardText` buffer and
+      # mirror the effect on the field value. We still fire the keydown
+      # / keyup pair through `insert_char` so listeners observe the
+      # chord even when we synthesise the default action.
+      def apply_clipboard_shortcut(handle, state, char)
+        insert_char(handle, state, char)  # fires keydown / keyup; suppress flag skips the literal insert
+        case char
+        when 'v'
+          text = js.eval('__getClipboard()').to_s
+          return if text.empty?
+          state[:value] = state[:value][0, state[:caret]] + text + state[:value][state[:caret]..]
+          state[:caret] += text.length
+        when 'c', 'x'
+          js.call('__setClipboard', state[:value])
+          if char == 'x'
+            state[:value] = ''
+            state[:caret] = 0
+          end
         end
       end
 

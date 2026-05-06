@@ -315,7 +315,25 @@
       this._selStart = 0;
       this._selEnd   = this.value ? this.value.length : 0;
     }
-    setRangeText()           {}
+    // setRangeText(replacement, [start], [end], [selectionMode])
+    // Replaces text within an input / textarea. Default range is the
+    // current selection. Stimulus paste handlers (Redmine's
+    // table-paste controller) call this to swap the typed-in chunk
+    // with a Markdown / Textile-rendered table.
+    setRangeText(replacement, start, end, selectionMode) {
+      const v   = this.value || '';
+      const str = String(replacement == null ? '' : replacement);
+      const s   = start === undefined ? this.selectionStart : (+start || 0);
+      const e   = end   === undefined ? this.selectionEnd   : (+end   || 0);
+      const lo  = Math.min(s, e), hi = Math.max(s, e);
+      this.value = v.slice(0, lo) + str + v.slice(hi);
+      // Per spec: 'end' moves caret to past the inserted text, others
+      // collapse / preserve selection. We model only the common case.
+      const tail = lo + str.length;
+      if (selectionMode === 'select')      { this._selStart = lo;   this._selEnd = tail; }
+      else if (selectionMode === 'start')  { this._selStart = lo;   this._selEnd = lo;   }
+      else                                 { this._selStart = tail; this._selEnd = tail; }
+    }
 
     // Mutations
     appendChild(child) {
@@ -1560,6 +1578,10 @@
     read()          { return Promise.resolve([]); },
     _reset()        { __clipboardText = ''; }
   };
+  // Ruby-side `send_keys [:control, 'v']` reads / writes the buffer
+  // here to simulate a real paste / copy default action.
+  globalThis.__getClipboard = function () { return __clipboardText; };
+  globalThis.__setClipboard = function (text) { __clipboardText = String(text == null ? '' : text); };
   globalThis.navigator = {
     userAgent:      'capybara-simulated',
     appVersion:     'capybara-simulated',
