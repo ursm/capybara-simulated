@@ -426,7 +426,10 @@ module Capybara
           options = node.css('option')
           selected = options.select { |o| o['selected'] }
           return selected.map { |o| o['value'] || o.text } if node['multiple']
-          (selected.first || options.first)&.then { |o| o['value'] || o.text }
+          # Implicit default for a single-select with no explicit
+          # `selected` is the first non-disabled option.
+          chosen = selected.first || options.find { |o| !o['disabled'] } || options.first
+          chosen&.then { |o| o['value'] || o.text }
         when 'textarea'
           node.text
         when 'input'
@@ -803,6 +806,27 @@ module Capybara
         set_option_selected(opt, true)
         dispatch_input_change(@handles.track(select))
         true
+      end
+
+      # HTML5 IDL: an `<option>` is selected when it has the `selected`
+      # attribute, OR — for a single-select with no explicitly-selected
+      # options — when it is the first non-disabled option in document
+      # order. Capybara's `have_select(selected: ...)` consults
+      # `option.selected`, so returning false for the implicit default
+      # makes it report "Expected X to be selected found []" against a
+      # newly-rendered <select> like Avo's "Published or unpublished"
+      # filter.
+      def option_selected?(opt_or_handle)
+        opt = opt_or_handle.is_a?(Integer) ? lookup_node(opt_or_handle) : opt_or_handle
+        return false unless opt && opt.respond_to?(:[]) && opt.name == 'option'
+        return true if opt['selected']
+        select = opt.ancestors('select').first
+        return false unless select
+        return false if select['multiple']
+        opts = select.css('option')
+        return false if opts.any? { |o| o['selected'] }
+        first_enabled = opts.find { |o| !o['disabled'] }
+        first_enabled && first_enabled == opt
       end
 
       def set_option_selected(opt, on)
@@ -1616,13 +1640,19 @@ module Capybara
             .map { |k, v| [k, v.respond_to?(:value) ? v.value : v.to_s] }
         when 'value'           then value(handle)
         when 'checked'         then checked?(handle)
-        when 'selected'        then !!(node.respond_to?(:[]) && node['selected'])
+        when 'selected'        then option_selected?(node)
         when 'selectedIndex'
-          # First option flagged `selected`, falling back to -1 — single
-          # Ruby walk instead of one dom_op per option from the JS side.
+          # First option flagged `selected`, falling back to the
+          # implicit-default rule below for a single-select.
           opts  = node.respond_to?(:css) ? node.css('option') : []
           found = opts.index {|o| o['selected'] }
-          found || -1
+          if found
+            found
+          elsif node['multiple'] || opts.empty?
+            -1
+          else
+            opts.index { |o| !o['disabled'] } || -1
+          end
         when 'disabled'        then !!(node.respond_to?(:[]) && node['disabled'])
         when 'hidden'          then !!(node.respond_to?(:[]) && node['hidden'])
         when 'form'            then @handles.track(enclosing_form(node))

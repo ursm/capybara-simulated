@@ -136,7 +136,12 @@ module Capybara
       end
 
       def disabled?    = browser.disabled?(handle_id)
-      def selected?    = !!self['selected']
+      # `selected?` mirrors the HTMLOptionElement IDL attribute (which
+      # Capybara consults for `have_select(selected: 'X')`): a `<select>`
+      # without `multiple` and no explicitly-selected option implicitly
+      # selects its first non-disabled option, so we have to ask
+      # Browser#option_selected? rather than just reading the attribute.
+      def selected? = browser.option_selected?(handle_id)
       def checked?     = !!self['checked']
       def readonly?    = !!self['readonly']
       def obscured?(*) = !visible?
