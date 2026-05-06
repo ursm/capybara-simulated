@@ -21,11 +21,11 @@ Each cluster falls into one of:
 - click-offset / drag-and-drop / `attach_file` via label — need
   `getBoundingClientRect()` / `elementFromPoint()`, i.e. a real
   layout engine.
-- `#reload` — Capybara reloads via the original Query context;
-  v2's stale-check walks Nokogiri parents directly and diverges.
-- `should wait for asynchronous load` and friends — exercise the
-  Capybara `/with_js` page, whose jQuery UI bundle hits
-  parser-syntax constructs the embedded QuickJS rejects.
+- `#reload` — read paths don't tick the virtual clock, so a Ruby
+  `sleep(N)` between an action and a direct `node.text` doesn't fire
+  the action's queued `setTimeout(K)`. Hooking tick into the read
+  path works in isolation but stresses neighbouring timing tests
+  on the `/with_js` page.
 
 ## Install
 

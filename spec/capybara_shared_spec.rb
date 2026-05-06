@@ -38,6 +38,9 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #click should allow to adjust the click offset',
   'Capybara::Session Simulated node #double_click should allow to adjust the offset',
   'Capybara::Session Simulated node #right_click should allow to adjust the offset',
+  # `attach_file` block form clicks a <label> whose <input type="file">
+  # is display:none; the click target resolves via elementFromPoint.
+  'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',
   # `#reload` tests `find` a node, click an async link that mutates
   # via setTimeout, then read `node.text` directly (no synchronize on
   # the matcher side). Ticking the virtual clock during read paths
@@ -45,18 +48,7 @@ DESCRIPTION_SKIPS = [
   # the /with_js cluster's MutationObserver chains, increasing flake
   # rate on neighbouring timing tests. Keep `#reload` skipped so the
   # release baseline stays deterministic.
-  'Capybara::Session Simulated node #reload ',
-  # `attach_file` block form clicks a <label> whose <input type="file">
-  # is display:none; the click target resolves via elementFromPoint.
-  'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',
-  # The /with_js fixture loads jQuery + jQuery UI; jQuery UI's bundle
-  # contains constructs (`(0, eval)("...")` in particular) QuickJS's
-  # parser still rejects, so `$` isn't bound by the time test.js runs.
-  # Tests that depend on /with_js's runtime behaviour flake.
-  'Capybara::Session Simulated #click_button should wait for asynchronous load',
-  'Capybara::Session Simulated #click_button when Capybara.enable_aria_role = true should click on a button role',
-  'Capybara::Session Simulated #click_link should wait for asynchronous load',
-  'Capybara::Session Simulated #click_link_or_button should wait for asynchronous load'
+  'Capybara::Session Simulated node #reload '
 ].freeze
 
 RSpec.configure do |config|
