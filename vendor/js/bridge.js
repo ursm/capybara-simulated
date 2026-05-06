@@ -328,7 +328,18 @@
     get clientLeft()         { return 0; }
     get clientTop()          { return 0; }
     get scrollWidth()        { return 0; }
-    get scrollHeight()       { return 0; }
+    // No layout engine, so scrollHeight is fictional — but some
+    // libraries (Avo's trix-body controller) gate the "content is too
+    // tall, show 'more' link" decision on `scrollHeight > 50`. Return
+    // a value that's non-zero whenever the element has any rendered
+    // text or child elements, so those gates fire on populated content
+    // and stay quiet on empty placeholders. Real-pixel callers
+    // (CodeMirror's gutter, etc.) typically clamp to a min anyway.
+    get scrollHeight() {
+      const txt = (__dom(this.__h, 'textContent') || '').length;
+      const kids = __dom(this.__h, 'childCount') || 0;
+      return txt === 0 && kids === 0 ? 0 : Math.max(txt, kids * 18, 100);
+    }
     get scrollLeft()         { return 0; }
     get scrollTop()          { return 0; }
     set scrollLeft(v)        {}

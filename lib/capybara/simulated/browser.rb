@@ -1598,6 +1598,7 @@ module Capybara
         when 'previousSibling' then @handles.track(node.previous)
         when 'children'        then node.element_children.map { |n| @handles.track(n) }
         when 'childNodes'      then node.children.map { |n| @handles.track(n) }
+        when 'childCount'      then node.respond_to?(:element_children) ? node.element_children.size : 0
         when 'firstElementChild' then @handles.track(node.respond_to?(:element_children) ? node.element_children.first : nil)
         when 'lastElementChild'  then @handles.track(node.respond_to?(:element_children) ? node.element_children.last  : nil)
         when 'nextElementSibling'
