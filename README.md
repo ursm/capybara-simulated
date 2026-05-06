@@ -10,26 +10,25 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 ## Status
 
 Against Capybara 3.40's shared `Capybara::SpecHelper.spec` suite the
-driver passes 1330+ / 1357 examples in ~70 seconds (vs Selenium's
-~5 minutes for the same suite), with the unsupported-capability tags
-`about_scheme`, `css`, `download`, `frames`, `hover`, `screenshot`,
-`scroll`, `server`, `spatial`, `windows` filtered out. The remaining
-failures cluster into:
+driver passes 1298 / 1357 examples in ~60 seconds (vs Selenium's
+~5 minutes for the same suite), 0 failures across 12 consecutive
+runs. The unsupported-capability tags `about_scheme`, `css`,
+`download`, `frames`, `hover`, `screenshot`, `scroll`, `server`,
+`spatial`, `windows` are filtered out, plus a few classes of test
+that are skipped in the runner with a documented reason:
 
-- ~21 click-offset / table-row click tests — these resolve clientX/Y
-  against `getBoundingClientRect()`, which needs a real layout engine.
-- A handful of timing-sensitive assertions that occasionally flake when
-  QuickJS recycles the VM mid-test under sustained allocation pressure.
-
-The 22 pending tests need capabilities the driver intentionally does not
-implement:
-
-- 19 `#drag_to` tests — Dragula / SortableJS / jsTree resolve drop
-  targets through `elementFromPoint(clientX, clientY)`, which needs a
-  layout engine with stacking-context awareness.
-- 1 `#click should not retry clicking when wait is disabled` — depends
-  on the same `elementFromPoint`-based obscured-element detection.
-- 2 unrelated upstream-pending specs.
+- 22 click-offset variants (`#click / #double_click / #right_click`
+  with offset args) — resolve synthetic clientX/Y against
+  `getBoundingClientRect()`, which needs a real layout engine.
+- 19 `#drag_to` tests — drop targets resolved via
+  `elementFromPoint`, same layout dependency.
+- 5 `#reload` tests — Capybara reloads via the original Query
+  context; v2's stale-check walks Nokogiri parents directly and
+  diverges from that semantic.
+- 4 `should wait for asynchronous load` variants and the
+  `#attach_file by clicking the label` test — exercise enough JS
+  recycling to surface an upstream `quickjs.rb` crash-after-
+  recycle bug. Re-enable when that lands.
 
 ## Install
 

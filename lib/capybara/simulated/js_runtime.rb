@@ -21,11 +21,6 @@ module Capybara
       # loop as InterruptedError.
       VM_TIMEOUT_MSEC = 5_000
 
-      # QuickJS's default 4 MiB runtime stack overflows on deeply nested
-      # synchronous Hotwire dispatch chains. 16 MiB is comfortable
-      # headroom; runaway recursion still trips the recycle path.
-      VM_MAX_STACK_SIZE = 16 * 1024 * 1024
-
       def initialize(browser)
         @browser = browser
         boot_vm
@@ -62,6 +57,17 @@ module Capybara
       end
 
       def reset_page
+        # If the previous test stressed the VM enough to hit a recycle,
+        # boot a fresh one for the next test. The post-recycle VM has
+        # historically been intermittently fragile under continued
+        # stress (segfaults inside quickjs.rb's free path), so we'd
+        # rather pay one extra bridge.js eval than carry forward a
+        # potentially-tainted runtime.
+        if @recycled_since_reset
+          boot_vm
+          @recycled_since_reset = false
+          return
+        end
         # Pump microtasks only when __resetPage actually queued an
         # initial-scan record — fresh-page bootstrap doesn't need a
         # 256-round drain otherwise.
@@ -127,7 +133,7 @@ module Capybara
       private
 
       def boot_vm
-        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC, max_stack_size: VM_MAX_STACK_SIZE)
+        @vm = Quickjs::VM.new(features: VM_FEATURES, timeout_msec: VM_TIMEOUT_MSEC)
         attach_dom_bridge
         # Receives the already-absolute, importmap-resolved URL we
         # rewrote into the source on a prior pass. Browser#load_module
@@ -157,11 +163,13 @@ module Capybara
         raise unless e.message.include?('stack overflow')
         warn '[capybara-simulated] QuickJS parser stack overflow — recycling VM'
         boot_vm
+        @recycled_since_reset = true
         yield
       rescue Quickjs::RuntimeError
         raise unless @vm.oom_poisoned?
         warn '[capybara-simulated] QuickJS VM hit OOM — recycling'
         boot_vm
+        @recycled_since_reset = true
         yield
       end
 
