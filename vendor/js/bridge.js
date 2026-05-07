@@ -101,6 +101,36 @@
     set innerHTML(v)  { __dom(this.__h, 'setInnerHTML', [String(v)]); }
     get outerHTML()   { return __dom(this.__h, 'outerHTML'); }
     set outerHTML(v)  { __dom(this.__h, 'setOuterHTML', [String(v)]); }
+    // Forem's infinite-scroll inserts batches via
+    // `followList.insertAdjacentHTML('beforeend', ...)`. Without it
+    // the fetch chain throws, leaves `fetching` stuck at true, and
+    // every subsequent setInterval call short-circuits on the
+    // `!fetching` guard.
+    insertAdjacentHTML(position, html) {
+      const pos = String(position).toLowerCase();
+      const holder = document.createElement('div');
+      holder.innerHTML = String(html);
+      const nodes = Array.from(holder.childNodes);
+      switch (pos) {
+        case 'beforebegin':
+          if (this.parentNode) for (const n of nodes) this.parentNode.insertBefore(n, this);
+          break;
+        case 'afterbegin':
+          for (const n of nodes.reverse()) this.insertBefore(n, this.firstChild);
+          break;
+        case 'beforeend':
+          for (const n of nodes) this.appendChild(n);
+          break;
+        case 'afterend':
+          if (this.parentNode) {
+            const ref = this.nextSibling;
+            for (const n of nodes) this.parentNode.insertBefore(n, ref);
+          }
+          break;
+        default:
+          throw new Error('insertAdjacentHTML: invalid position ' + pos);
+      }
+    }
 
     // Attributes
     getAttribute(name)        { return __dom(this.__h, 'getAttribute', [String(name)]); }
