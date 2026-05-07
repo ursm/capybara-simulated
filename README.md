@@ -262,6 +262,18 @@ Cuprite, not 15× faster.
   offset coordinates are passed through verbatim. Tests that rely on
   positional click resolution (e.g. Dragula-style drag drops,
   table-cell clicks based on `elementFromPoint`) need a real browser.
+- `:hover` / `:focus-within`-gated content is reachable two ways:
+  call `element.hover` explicitly (we track the most-recently-hovered
+  element and propagate `:hover` up its chain), or rely on the
+  candidate-chain fallback (when stateless cascade reports
+  `display: none`, we re-evaluate with the candidate itself in the
+  `:hover` set). What this *can't* disambiguate is symmetric peers —
+  N rows that each have `tr:hover .icon` revealing `.icon`, queried as
+  bare `find('.icon')`. Real browsers pick by mouse position; we
+  reveal them all and Capybara's `find` raises `Capybara::Ambiguous`.
+  The fix is to scope the test (`find('tr', text: 'foo').hover` then
+  `find('.icon')`, or `within('tr', text: 'foo') { find('.icon') }`),
+  which is also more robust against real-browser flake.
 - `fetch` is synchronous-via-Rack — works for HTML/JSON round-trips but
   there is no real network, no streaming, no `Request#body` ReadableStream,
   and no concurrent requests. XHR is not implemented.

@@ -2763,6 +2763,8 @@ module Capybara
         node = lookup_node(handle)
         return {} unless node && node.respond_to?(:element?) && node.element?
         c = cascade
+        # Resolve in stateless mode — `matches_style?` cares about the
+        # current computed value, not the "if you hovered" projection.
         decls = c ? c.resolve(node, inline_style: node['style']) : {}
         out = {}
         inline = parse_inline_style_pairs(node['style'])
@@ -2793,8 +2795,25 @@ module Capybara
         return false unless node.respond_to?(:element?) && node.element?
         c = cascade or return false
         decls = c.resolve(node, inline_style: node['style'])
-        decl_value_is?(decls['display'], 'none') ||
+        return false unless decl_value_is?(decls['display'], 'none') ||
           decl_value_is?(decls['visibility'], 'hidden')
+        # Stateless cascade says hidden — but the element might be
+        # gated on `:hover` / `:focus-within` etc. and reachable via
+        # interaction. Re-resolve with hover anchored to whatever the
+        # test has actually pointed at (`@hovered_handle`, set by
+        # `Browser#hover`) plus the candidate itself. p_css propagates
+        # `:hover` from each source up the ancestor chain, so this
+        # reveals content gated on the test target's chain or the
+        # explicitly-hovered element's chain — peer rows whose
+        # reveal-trigger is outside both chains stay hidden,
+        # disambiguating multi-row dropdown matches.
+        sources = []
+        sources << lookup_node(@hovered_handle) if @hovered_handle
+        sources << node
+        revealed = c.resolve(node, inline_style: node['style'],
+          state: {hover: sources, :"focus-within" => sources})
+        decl_value_is?(revealed['display'], 'none') ||
+          decl_value_is?(revealed['visibility'], 'hidden')
       rescue StandardError
         false
       end
