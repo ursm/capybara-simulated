@@ -10,7 +10,7 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 ## Status
 
 Capybara 3.40's shared `Capybara::SpecHelper.spec` suite runs
-deterministically green at ~110 seconds: 1384 examples, 0 failures,
+deterministically green at ~75 seconds: 1384 examples, 0 failures,
 34 pending (vs Selenium's ~5 minutes for the same suite). The runner
 filters the unsupported-capability tags (`about_scheme`, `frames`,
 `screenshot`, `scroll`, `server`, `spatial`, `windows`) plus a few
