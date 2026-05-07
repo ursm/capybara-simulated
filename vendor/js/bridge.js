@@ -138,6 +138,30 @@
       this.removeAttribute('open');
       __dispatch(this, new Event('close', {bubbles: false, cancelable: false}));
     }
+    // Web Animations API — without a real animation pipeline we can
+    // hand back an Animation-shaped object whose `.finished` resolves
+    // immediately, so call sites that `await el.animate(...).finished`
+    // proceed instead of hanging on a never-resolving Promise.
+    animate(_keyframes, _options) {
+      const finished = Promise.resolve();
+      return {
+        play()        {},
+        pause()       {},
+        cancel()      {},
+        finish()      {},
+        reverse()     {},
+        commitStyles(){},
+        addEventListener() {},
+        removeEventListener() {},
+        playbackRate: 1,
+        currentTime:  0,
+        startTime:    0,
+        playState:    'finished',
+        finished,
+        ready:        finished
+      };
+    }
+    getAnimations() { return []; }
     _insertAdjacent(position, nodes) {
       switch (String(position).toLowerCase()) {
         case 'beforebegin':
