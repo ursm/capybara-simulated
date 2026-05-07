@@ -75,6 +75,11 @@ module Capybara
         # navigation so we don't re-walk `<link>` / `<style>` and
         # rebuild the fingerprint on every visibility check.
         @page_cascade       = NO_CASCADE
+        # `cascade_hidden_self?` is called once per visibility filter
+        # candidate — `Node#visible?` walks every ancestor, so a single
+        # `find` query asks the same node many times. Cache by node
+        # identity until the next DOM write or page reset.
+        @hidden_cache       = {}
         @importmap          = empty_importmap
         @module_cache       = {}   # URL -> rewritten module source (cleared on reset!)
         @shadow_roots       = {}   # host_handle -> Nokogiri::HTML5::DocumentFragment
@@ -1667,6 +1672,7 @@ module Capybara
 
       # Single dispatch entry called from JS via `__dom(handle, op, args)`.
       def dom_op(handle, op, args)
+        @hidden_cache.clear if DOM_WRITE_OPS.include?(op)
         node = lookup_node(handle) || @document
         case op
         when 'querySelector'
@@ -2890,20 +2896,25 @@ module Capybara
 
       def cascade_hidden_self?(node)
         return false unless node.respond_to?(:element?) && node.element?
+        cache_key = [node.object_id, @hovered_handle]
+        cached = @hidden_cache[cache_key]
+        return cached unless cached.nil?
+        @hidden_cache[cache_key] = compute_cascade_hidden_self?(node)
+      end
+
+      # Stateless cascade says hidden. If the test has explicitly
+      # hovered an element via `Browser#hover`, retry with that element
+      # in the hover set so `:hover` rules anchored on it (or any of
+      # its ancestors) reveal the candidate. We deliberately don't
+      # anchor on the candidate itself — the Capybara `:hover`
+      # capability tests assert that an element is `visible?: false`
+      # before hovering, and self-anchored hover would un-hide content
+      # the test expects to stay gated.
+      def compute_cascade_hidden_self?(node)
         c = cascade or return false
         decls = c.resolve(node, inline_style: node['style'])
         return false unless decl_value_is?(decls['display'], 'none') ||
           decl_value_is?(decls['visibility'], 'hidden')
-        # Stateless cascade says hidden. If the test has explicitly
-        # hovered an element via `Browser#hover`, retry with that
-        # element in the hover set so `:hover` rules anchored on it
-        # (or any of its ancestors) reveal the candidate. We
-        # deliberately don't anchor on the candidate itself — the
-        # Capybara `:hover` capability tests assert that an element
-        # is `visible?: false` before hovering, and self-anchored
-        # hover would un-hide content the test expects to stay gated.
-        # Tests that assume hover without calling `.hover` are noted
-        # as a limitation in the README.
         return true if @hovered_handle.nil?
         hovered = lookup_node(@hovered_handle) or return true
         revealed = c.resolve(node, inline_style: node['style'],
@@ -2992,7 +3003,22 @@ module Capybara
 
       def invalidate_cascade
         @page_cascade = NO_CASCADE
+        @hidden_cache.clear
       end
+
+      # dom_op opcodes that mutate the DOM tree, attributes, or
+      # values, plus user-action ops whose handlers may write
+      # transitively. Anything not listed here is a pure read and
+      # leaves `@hidden_cache` warm.
+      DOM_WRITE_OPS = %w[
+        setAttribute removeAttribute
+        setValue setChecked setOptionSelected setSelectedIndex
+        setTextContent setInnerHTML setOuterHTML
+        appendChild appendChildrenOf insertChildrenOfBefore
+        removeChild insertBefore replaceChild
+        attachShadow cloneRangeContents parseHTML5Document
+        focus blur click submitForm
+      ].to_set.freeze
 
       DISPLAY_NONE_RE       = /display\s*:\s*none/i
       VISIBILITY_HIDDEN_RE  = /visibility\s*:\s*hidden/i
