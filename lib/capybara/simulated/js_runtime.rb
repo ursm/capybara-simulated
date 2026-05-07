@@ -97,11 +97,11 @@ module Capybara
 
       def reset_page
         # Boot a fresh VM whenever the previous test either hit a recycle
-        # (post-recycle state is indeterminate) or evaluated user scripts
-        # at top level (top-level `let` / `const` declarations are stuck
-        # in the global lexical environment until the runtime is rebuilt,
-        # and re-evaluating the same fixture in the next test would trip
-        # a redeclaration SyntaxError).
+        # (post-recycle state is indeterminate) or evaluated a user script
+        # that introduced top-level `let` / `const` / `class` declarations
+        # (these stick in the global lexical environment until the runtime
+        # is rebuilt — re-evaluating the same fixture in the next test
+        # would otherwise trip a redeclaration `SyntaxError`).
         if @recycled_since_reset || @scripts_evaluated_since_reset
           boot_vm
           @recycled_since_reset = false
@@ -218,20 +218,23 @@ module Capybara
       end
 
       # Run user scripts at top level so `function foo() {}` / `var foo`
-      # at the script's top level become globals — a real browser does
-      # the same and a lot of legacy code (jQuery plugins, Redmine's
-      # application-legacy bundle, …) leans on it.
+      # become globals — a real browser does the same and a lot of
+      # legacy code (jQuery plugins, Redmine's application-legacy
+      # bundle, …) leans on it.
       #
-      # Caveat: `let` / `const` at top level write to the global lexical
-      # environment, which QuickJS shares across eval calls. Re-running
-      # the same body after a navigation trips a SyntaxError on the
-      # redeclaration; warn and move on rather than fail the whole page.
-      # The `boot_vm`-on-recycle path resets the lexical env when it
-      # really matters; modules go through `vm.import` and aren't
-      # affected.
+      # `let` / `const` / `class` at top level write to the global
+      # lexical environment, which QuickJS shares across `eval` calls.
+      # Re-running the same body after a navigation trips a
+      # redeclaration `SyntaxError`; flag the runtime so `reset_page`
+      # rebuilds the VM before the next test rather than fail the
+      # whole page. The cheap regex avoids rebuilding for the 99% of
+      # scripts (jQuery, jQuery UI, test.js, etc.) that use only
+      # `var` / `function` declarations.
+      LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[\p{L}_$]/
+
       def eval_safely(code, label)
         return if code.nil? || code.empty?
-        @scripts_evaluated_since_reset = true
+        @scripts_evaluated_since_reset = true if code.match?(LEXICAL_DECL_RE)
         with_recycle { @vm.eval_code(code, filename: label) }
       rescue Quickjs::SyntaxError => e
         return if e.message.match?(/has already been declared/)
