@@ -147,7 +147,18 @@ module Capybara
       def obscured?(*) = !visible?
 
       def synchronize(*) = yield
-      def style(*)       = {}
+
+      # Capybara's `style(*names)` / `matches_style?` consult computed
+      # style. We resolve through the cascade (real CSS rules) and fall
+      # back to inline `style="..."` declarations so authors using
+      # `matches_style?(display: "inline-block")` and similar see the
+      # value the stylesheet actually computed, not the empty hash that
+      # the no-layout-engine fallback used to return.
+      def style(*styles)
+        names = styles.flatten.map(&:to_s)
+        return {} if names.empty?
+        browser.computed_style(handle_id, names)
+      end
       def path           = browser.node_path(handle_id)
 
       def ==(other)

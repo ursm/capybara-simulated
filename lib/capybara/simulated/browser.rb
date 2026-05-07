@@ -2751,6 +2751,44 @@ module Capybara
       # so ancestor checks happen at the caller in `style_hidden?`. Any
       # cascade error falls through to false — the class-token
       # heuristics above stay active as a safety net.
+      # Resolves `properties` for the element through the cascade,
+      # falling back to inline `style=...` declarations. Returns
+      # `{property => value_string}` with whatever the cascade
+      # actually computed for those names; missing properties are
+      # absent from the result. Used by `Node#style` so Capybara's
+      # `matches_style?` works against real stylesheet output.
+      def computed_style(handle, properties)
+        names = Array(properties).map(&:to_s)
+        return {} if names.empty?
+        node = lookup_node(handle)
+        return {} unless node && node.respond_to?(:element?) && node.element?
+        c = cascade
+        decls = c ? c.resolve(node, inline_style: node['style']) : {}
+        out = {}
+        inline = parse_inline_style_pairs(node['style'])
+        names.each do |name|
+          if (decl = decls[name])
+            out[name] = CSS.serialize(decl.value).strip
+          elsif inline.key?(name)
+            out[name] = inline[name]
+          end
+        end
+        out
+      rescue StandardError
+        {}
+      end
+
+      def parse_inline_style_pairs(text)
+        out = {}
+        return out if text.nil? || text.empty?
+        text.split(';').each do |decl|
+          k, v = decl.split(':', 2)
+          next unless k && v
+          out[k.strip.downcase] = v.strip
+        end
+        out
+      end
+
       def cascade_hidden_self?(node)
         return false unless node.respond_to?(:element?) && node.element?
         c = cascade or return false
@@ -2884,7 +2922,7 @@ module Capybara
       # Methods JsRuntime reaches into directly. Re-publishing here
       # (after every method has been defined under `private`) keeps the
       # rest of the surface area private without splitting the file.
-      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style
     end
   end
 end
