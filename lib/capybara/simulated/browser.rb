@@ -2207,13 +2207,31 @@ module Capybara
       # etc.) don't change between requests, and skipping the Rack
       # round-trip is a meaningful win on JS-heavy pages.
       def fetch_resource(url)
+        return nil if cross_origin?(url)
         @resource_cache.fetch(url) { @resource_cache[url] = rack_get(url) }
+      end
+
+      # Treat any absolute URL whose host differs from the current page
+      # host as out-of-test-app and skip the fetch — there's no real
+      # network in the test env, so trying to route a `<script src=
+      # https://unpkg.com/...>` through our Rack mount otherwise raises
+      # `ActionController::RoutingError` for a path Forem's Rails app
+      # has never heard of.
+      def cross_origin?(url)
+        return false unless url.is_a?(String) && url =~ %r{\A[a-z]+://}i
+        target = URI.parse(url) rescue (return false)
+        return false unless target.host
+        page_host = (@current_url ? URI.parse(@current_url).host : URI.parse(DEFAULT_HOST).host) rescue nil
+        target.host != page_host
       end
 
       def rack_get(url)
         status, _headers, body = rack_request(method: :get, url: url)
         return body if (200..299).cover?(status)
         warn "[capybara-simulated] script src #{url} returned #{status}" if ENV['CSIM_DEBUG']
+        nil
+      rescue StandardError => e
+        warn "[capybara-simulated] rack_get #{url} raised #{e.class}: #{e.message[0, 200]}" if ENV['CSIM_DEBUG']
         nil
       end
 
