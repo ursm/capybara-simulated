@@ -221,7 +221,10 @@ module Capybara
       # the way a real browser exposes them. Top-level `let` / `const` /
       # `class` stick in QuickJS' global lexical env across resets, so
       # flag the runtime for rebuild on the next page when we see one.
-      LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[\p{L}_$]/
+      # ASCII identifier-start characters only (no `\p{L}`) so the
+      # match works against scripts coming back from Rack as
+      # `ASCII-8BIT` — Redmine's bundle is one such caller.
+      LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[A-Za-z_$]/
 
       # Compiled-bytecode cache shared across every JsRuntime / VM in
       # this process. QuickJS bytecode is portable between runtimes
