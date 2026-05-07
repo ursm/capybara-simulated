@@ -8,7 +8,6 @@ end
 
 SKIPPED_TESTS = %i[
   about_scheme
-  download
   frames
   hover
   screenshot

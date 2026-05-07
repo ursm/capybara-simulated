@@ -2,6 +2,7 @@
 
 require 'css'
 require 'digest'
+require 'fileutils'
 require 'json'
 require 'nokogiri'
 require 'rack/mime'
@@ -976,6 +977,14 @@ module Capybara
           target = resolve(href)
           # Pure-fragment / same-document anchor — browsers don't navigate.
           return true if same_document_fragment?(target)
+          # `<a href="..." download[="filename"]>` triggers a download
+          # rather than navigation. Persist the body at
+          # `Capybara.save_path` so tests that assert
+          # `File.exist?(File.join(Capybara.save_path, 'download.csv'))`
+          # see the file land.
+          if node.attributes['download']
+            return save_download(target, node['download'].to_s)
+          end
           navigate(:get, target)
           true
         when 'button', 'input'
@@ -2183,6 +2192,23 @@ module Capybara
         current = URI.parse(@current_url || DEFAULT_HOST)
         rooted  = url.start_with?('/') ? url : "/#{url}"
         URI.join("#{current.scheme}://#{current.host}", rooted).to_s
+      end
+
+      # Persists `target`'s body at `Capybara.save_path/<filename>`. The
+       # `download` attribute may carry an explicit filename; otherwise
+      # we use the URL's basename. Always returns true (clicks on
+      # download links don't navigate).
+      def save_download(target, download_attr)
+        body = rack_get(target)
+        return true if body.nil?
+        dir  = Capybara.save_path.to_s
+        FileUtils.mkdir_p(dir) unless dir.empty?
+        name = download_attr unless download_attr.empty?
+        name ||= File.basename(URI.parse(target).path)
+        return true if name.nil? || name.empty?
+        path = File.join(dir, File.basename(name))
+        File.binwrite(path, body)
+        true
       end
 
       def same_document_fragment?(target)
