@@ -477,7 +477,21 @@
     // a plausible-shaped object is enough to keep them out of the way.
     getClientRects()         { return []; }
     getBoundingClientRect()  { return {top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0, x: 0, y: 0}; }
-    get offsetParent()       { return null; }
+    // Per HTML spec: returns the nearest positioned ancestor, falling
+    // back to the body. Returning null unconditionally caused libraries
+    // that use `el.offsetParent !== null` as a visibility shortcut
+    // (Forem's `addRelevantButtonsToArticle`-injected button behind
+    // `offsetParent`-gated UI hiding) to treat every connected element
+    // as invisible. We don't model `position: relative` / `absolute`
+    // ancestors without a layout engine, so the "correct" answer here
+    // is body for normal connected elements, null for the root /
+    // disconnected / `<html>` / `<body>` itself per spec.
+    get offsetParent() {
+      if (!this.isConnected) return null;
+      const t = this.tagName;
+      if (t === 'HTML' || t === 'BODY') return null;
+      return globalThis.document.body;
+    }
     get offsetWidth()        { return 0; }
     get offsetHeight()       { return 0; }
     get offsetLeft()         { return 0; }
