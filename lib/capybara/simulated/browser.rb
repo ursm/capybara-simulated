@@ -2843,10 +2843,17 @@ module Capybara
 
       def self_hidden?(node)
         return true if node['hidden']
-        return true if class_hidden?(node)
         style = node['style'].to_s
         return true if style.match?(DISPLAY_NONE_RE) || style.match?(VISIBILITY_HIDDEN_RE)
-        cascade_hidden_self?(node)
+        # Cascade is the source of truth for class-driven visibility:
+        # it knows about media queries and recognises Tailwind /
+        # custom prefixes (Forem uses `m:`, Bootstrap uses `d-md-*`,
+        # etc.) without us having to enumerate every breakpoint set.
+        # `class_hidden?` only kicks in when the page has no parsed
+        # stylesheets at all — its hand-rolled regex is conservative
+        # and was preempting cascade for elements that real CSS
+        # would have revealed.
+        cascade ? cascade_hidden_self?(node) : class_hidden?(node)
       end
 
       # Returns true when the cascade computes `display: none` or
