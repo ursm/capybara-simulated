@@ -1888,21 +1888,44 @@
   // a minimal Document-shaped object instead. `documentElement` /
   // `head` cover the rest of the surface jQuery probes.
   globalThis.document.implementation = {
-    createHTMLDocument(_title) {
+    createHTMLDocument(initialTitle) {
       const body = globalThis.document.createElement('body');
       const head = globalThis.document.createElement('head');
       const html = globalThis.document.createElement('html');
       html.appendChild(head);
       html.appendChild(body);
+      if (initialTitle) {
+        const t = globalThis.document.createElement('title');
+        t.textContent = String(initialTitle);
+        head.appendChild(t);
+      }
+      // Forem's InstantClick `processXHR` builds a detached document
+      // for each preload response, then reads `doc.title` and calls
+      // `doc.getElementById("page-content")`. The previous shim only
+      // supported `querySelector` — `getElementById` was missing and
+      // the caller died with "not a function", which silently halted
+      // every InstantClick navigation.
       return {
         documentElement: html,
         head:            head,
         body:            body,
-        createElement:    (tag) => globalThis.document.createElement(tag),
-        createTextNode:   (t)   => globalThis.document.createTextNode(t),
-        createDocumentFragment: () => globalThis.document.createDocumentFragment(),
-        querySelector:    (s)   => body.querySelector(s),
-        querySelectorAll: (s)   => body.querySelectorAll(s)
+        get title() {
+          const t = head.querySelector('title');
+          return t ? (t.textContent || '') : '';
+        },
+        set title(v) {
+          let t = head.querySelector('title');
+          if (!t) { t = globalThis.document.createElement('title'); head.appendChild(t); }
+          t.textContent = String(v);
+        },
+        createElement:           (tag) => globalThis.document.createElement(tag),
+        createTextNode:          (s)   => globalThis.document.createTextNode(s),
+        createDocumentFragment:  ()    => globalThis.document.createDocumentFragment(),
+        querySelector:           (s)   => html.querySelector(s),
+        querySelectorAll:        (s)   => html.querySelectorAll(s),
+        getElementById:          (id)  => html.querySelector('[id="' + String(id).replace(/"/g, '\\"') + '"]'),
+        getElementsByTagName:    (t)   => html.getElementsByTagName(t),
+        getElementsByClassName:  (c)   => html.getElementsByClassName(c)
       };
     }
   };
