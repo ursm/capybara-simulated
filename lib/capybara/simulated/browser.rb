@@ -1501,8 +1501,10 @@ module Capybara
         {clientX: base_x + (x || 0).to_f, clientY: base_y + (y || 0).to_f}
       end
 
-      ZERO_RECT = {x: 0.0, y: 0.0, width: 0.0, height: 0.0}.freeze
-      PX_VALUE_RE = /\A-?\d+(?:\.\d+)?/
+      ZERO_RECT    = {x: 0.0, y: 0.0, width: 0.0, height: 0.0}.freeze
+      LAYOUT_PROPS = %w[top left width height].freeze
+      ZERO_LAYOUT  = LAYOUT_PROPS.to_h { |p| [p, 0.0] }.freeze
+      PX_VALUE_RE  = /\A-?\d+(?:\.\d+)?/
 
       # Layout-free `getBoundingClientRect` approximation: ancestor-summed
       # `top` / `left` and the element's own `width` / `height`, px only.
@@ -1525,16 +1527,16 @@ module Capybara
         {x: x, y: y, width: own['width'], height: own['height']}
       end
 
-      LAYOUT_PROPS = %w[top left width height].freeze
-      ZERO_LAYOUT  = LAYOUT_PROPS.to_h { |p| [p, 0.0] }.freeze
-
       # One cascade resolution per node, then read all four layout props
-      # from the result.
+      # from the result. `inline` parsing is lazy because most ancestors
+      # have all four covered by the cascade alone — `sim_rect` walks the
+      # full chain so eager parsing was N redundant `String#split` calls.
       def resolved_layout_px(c, node)
         decls  = c ? c.resolve(node, inline_style: node['style']) : nil
-        inline = parse_inline_style_pairs(node['style'])
+        inline = nil
         LAYOUT_PROPS.to_h do |prop|
-          raw = (decls && (decl = decls[prop]) && CSS.serialize(decl.value).strip) || inline[prop]
+          decl = decls && decls[prop]
+          raw  = decl ? CSS.serialize(decl.value).strip : (inline ||= parse_inline_style_pairs(node['style']))[prop]
           [prop, parse_px(raw)]
         end
       rescue StandardError

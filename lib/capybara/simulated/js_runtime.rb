@@ -32,18 +32,11 @@ module Capybara
         Quickjs::POLYFILL_INTL
       ].freeze
       # `max_stack_size: 0` disables QuickJS' C-stack overflow check.
-      # The default 4 MiB limit measures the difference between the
-      # current C-stack pointer and the one captured when the runtime
-      # was constructed — but Capybara enters JS through deep Ruby
-      # frames (matcher → `Node#visible?` → `check_stale` →
-      # `drain_timers`), and Ruby↔JS↔Ruby ping-pongs from `__dom`
-      # callbacks deepen it further mid-drain. With the captured
-      # `stack_top` set when Ruby was shallow, the parser's
-      # `js_check_stack_overflow` trips on the first token of even a
-      # tiny eval like `__drainTimers(N)` and the VM is recycled,
-      # losing the in-flight setTimeouts. Disabling the check trades
-      # a runaway-recursion safety net (Capybara already enforces a
-      # 5_000 ms `timeout_msec`) for stable wait-style polling.
+      # The check uses the `stack_top` captured at runtime construction
+      # (Ruby was shallow), so re-entering JS from a deep Capybara
+      # matcher chain trips it on tiny evals and recycles the VM —
+      # losing in-flight setTimeouts mid-test. `timeout_msec` is the
+      # remaining backstop against runaway recursion.
       VM_OPTIONS = {
         timeout_msec:   5_000,
         memory_limit:   512 * 1024 * 1024,
@@ -217,24 +210,15 @@ module Capybara
         @recycled_since_reset = true
       end
 
-      # Run user scripts at top level so `function foo() {}` / `var foo`
-      # become globals — a real browser does the same and a lot of
-      # legacy code (jQuery plugins, Redmine's application-legacy
-      # bundle, …) leans on it.
-      #
-      # `let` / `const` / `class` at top level write to the global
-      # lexical environment, which QuickJS shares across `eval` calls.
-      # Re-running the same body after a navigation trips a
-      # redeclaration `SyntaxError`; flag the runtime so `reset_page`
-      # rebuilds the VM before the next test rather than fail the
-      # whole page. The cheap regex avoids rebuilding for the 99% of
-      # scripts (jQuery, jQuery UI, test.js, etc.) that use only
-      # `var` / `function` declarations.
+      # Top-level eval so `function foo() {}` / `var foo` become globals
+      # the way a real browser exposes them. Top-level `let` / `const` /
+      # `class` stick in QuickJS' global lexical env across resets, so
+      # flag the runtime for rebuild on the next page when we see one.
       LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[\p{L}_$]/
 
       def eval_safely(code, label)
         return if code.nil? || code.empty?
-        @scripts_evaluated_since_reset = true if code.match?(LEXICAL_DECL_RE)
+        @scripts_evaluated_since_reset ||= code.match?(LEXICAL_DECL_RE)
         with_recycle { @vm.eval_code(code, filename: label) }
       rescue Quickjs::SyntaxError => e
         return if e.message.match?(/has already been declared/)
