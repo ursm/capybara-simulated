@@ -10,15 +10,16 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 ## Status
 
 Capybara 3.40's shared `Capybara::SpecHelper.spec` suite runs
-deterministically green at ~60 seconds (vs Selenium's ~5 minutes
-for the same suite). The runner filters the unsupported-capability
-tags (`about_scheme`, `css`, `download`, `frames`, `hover`,
+deterministically green at ~100 seconds: 1384 examples, 0 failures,
+67 pending (vs Selenium's ~5 minutes for the same suite). The runner
+filters the unsupported-capability tags (`about_scheme`, `frames`,
 `screenshot`, `scroll`, `server`, `spatial`, `windows`) plus a few
-classes of test skipped with a documented reason — see
+classes of test marked pending with a documented reason — see
 [`spec/capybara_shared_spec.rb`](spec/capybara_shared_spec.rb).
-Each cluster falls into one of:
+Pending tests fall into one of:
 
-- click-offset / drag-and-drop / `attach_file` via label — need
+- click-offset / drag-and-drop / `attach_file` via label / `#obscured?` /
+  `#all` with `obscured` filter / two `style`-filter edge cases — need
   `getBoundingClientRect()` / `elementFromPoint()`, i.e. a real
   layout engine.
 - `#reload` — read paths don't tick the virtual clock, so a Ruby
@@ -26,6 +27,20 @@ Each cluster falls into one of:
   the action's queued `setTimeout(K)`. Hooking tick into the read
   path works in isolation but stresses neighbouring timing tests
   on the `/with_js` page.
+
+The `:css`, `:hover`, and `:download` capabilities now run in full —
+the cascade resolver from [`p_css`](https://github.com/ursm/p_css)
+handles real stylesheet rules, `Browser#hover` plumbs an explicit
+hover anchor through the cascade for `:hover` rules, and `<a download>`
+clicks persist the body to `Capybara.save_path`.
+
+Wall time has crept from ~60 s to ~100 s as we widened coverage and
+added cascade evaluation: more examples run (a couple of those
+capability tags add 80+ tests on their own), and `Node#visible?` /
+`Node#style` now consult `p_css` rather than returning empty
+heuristically. Half of the wall time is spent inside Capybara's
+synchronize loop waiting for the virtual clock to advance, so the
+spend tracks expected polling, not raw computation.
 
 ## Install
 
