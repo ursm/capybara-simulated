@@ -26,14 +26,6 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #drag_to ',
   # Click-retry-on-wait-disabled also routes through elementFromPoint.
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  # `#reload` tests `find` a node, click an async link that mutates
-  # via setTimeout, then read `node.text` directly (no synchronize on
-  # the matcher side). Ticking the virtual clock during read paths
-  # would let the setTimeout fire — but the same hook also stresses
-  # the /with_js cluster's MutationObserver chains, increasing flake
-  # rate on neighbouring timing tests. Keep `#reload` skipped so the
-  # release baseline stays deterministic.
-  'Capybara::Session Simulated node #reload ',
   # `#obscured?` reports whether an element sits under another in
   # stacking order — pure layout / hit-testing.
   'Capybara::Session Simulated node #obscured?',

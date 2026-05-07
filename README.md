@@ -10,22 +10,15 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 ## Status
 
 Capybara 3.40's shared `Capybara::SpecHelper.spec` suite runs
-deterministically green at ~100 seconds: 1384 examples, 0 failures,
-46 pending (vs Selenium's ~5 minutes for the same suite). The runner
+deterministically green at ~110 seconds: 1384 examples, 0 failures,
+34 pending (vs Selenium's ~5 minutes for the same suite). The runner
 filters the unsupported-capability tags (`about_scheme`, `frames`,
 `screenshot`, `scroll`, `server`, `spatial`, `windows`) plus a few
 classes of test marked pending with a documented reason — see
 [`spec/capybara_shared_spec.rb`](spec/capybara_shared_spec.rb).
-Pending tests fall into one of:
-
-- drag-and-drop / `attach_file` via label / `#obscured?` / `#all`
-  with `obscured` filter / two `style`-filter edge cases — need
-  `elementFromPoint()`, i.e. a real layout engine.
-- `#reload` — read paths don't tick the virtual clock, so a Ruby
-  `sleep(N)` between an action and a direct `node.text` doesn't fire
-  the action's queued `setTimeout(K)`. Hooking tick into the read
-  path works in isolation but stresses neighbouring timing tests
-  on the `/with_js` page.
+The remaining pending tests all need `elementFromPoint()`, i.e. a
+real layout engine: drag-and-drop, `#obscured?`, `#all` with the
+`obscured` filter, and a couple of `style`-filter edge cases.
 
 Click offsets (`element.click(x:, y:)`) work without a real layout
 engine: `clientX`/`clientY` are computed by ancestor-summing the

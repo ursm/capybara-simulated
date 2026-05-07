@@ -2026,11 +2026,15 @@ module Capybara
         true
       end
 
-      # No tick_real_time: stale-checking is a pure parent-chain walk
-      # and runs on every Node accessor. Draining timers here would
-      # keep advancing virtual time mid-assertion. User-action paths
-      # (click / fill_in / visit) tick separately.
+      # Tick before the parent-chain walk so async DOM swaps from
+      # `setTimeout`-driven handlers (Capybara's `#reload` fixtures
+      # use this shape: click `Reload!`, `sleep(0.3)`, read
+      # `node.text`) see the post-replaceWith state. Without the
+      # tick the OLD node is still attached at read time, the
+      # staleness check passes, and the user reads stale text
+      # instead of triggering Capybara's auto-reload.
       def check_stale(handle, captured = nil)
+        tick_real_time
         raise StaleElement, 'element is no longer attached to the document' if stale?(handle, captured)
       end
 
