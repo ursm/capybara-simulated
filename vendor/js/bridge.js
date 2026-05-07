@@ -398,22 +398,40 @@
       return false;
     }
 
-    // <template>.content: a real DocumentFragment in browsers; we
-    // expose a fragment-view proxy that shares the template's handle
-    // for read-side ops (querySelector / children) but signals to
-    // appendChild / insertBefore that the children — not the
-    // template element itself — should be moved.
+    // Tag-aware `content` getter / setter.
+    // - <template>.content: a real DocumentFragment in browsers; we
+    //   expose a fragment-view proxy that shares the template's handle
+    //   for read-side ops (querySelector / children) but signals to
+    //   appendChild / insertBefore that the children — not the
+    //   template element itself — should be moved.
+    // - <meta>.content: reflected from the `content` attribute. Forem's
+    //   initializeBodyData rebuilds the CSRF meta via
+    //   `m.content = token`, then a sibling poll keeps re-running until
+    //   `getAttribute('content')` is non-null — without IDL reflection,
+    //   the property assignment lands on the JS-side instance and the
+    //   poll never terminates.
     get content() {
-      if (this.tagName !== 'TEMPLATE') return this;
-      let f = this.__contentView;
-      if (!f) {
-        f = Object.create(Element.prototype);
-        Object.defineProperty(f, '__h', {value: this.__h});
-        Object.defineProperty(f, '__isContent', {value: true});
-        this.__contentView = f;
+      if (this.tagName === 'TEMPLATE') {
+        let f = this.__contentView;
+        if (!f) {
+          f = Object.create(Element.prototype);
+          Object.defineProperty(f, '__h', {value: this.__h});
+          Object.defineProperty(f, '__isContent', {value: true});
+          this.__contentView = f;
+        }
+        return f;
       }
-      return f;
+      if (this.tagName === 'META') return this.getAttribute('content') || '';
+      return undefined;
     }
+    set content(v) {
+      if (this.tagName === 'META') this.setAttribute('content', v == null ? '' : String(v));
+    }
+    // <meta>.httpEquiv / .media — same reflection contract as .content.
+    get httpEquiv()  { return this.tagName === 'META' ? (this.getAttribute('http-equiv') || '') : undefined; }
+    set httpEquiv(v) { if (this.tagName === 'META') this.setAttribute('http-equiv', v == null ? '' : String(v)); }
+    get media()      { return this.tagName === 'META' ? (this.getAttribute('media') || '') : undefined; }
+    set media(v)     { if (this.tagName === 'META') this.setAttribute('media', v == null ? '' : String(v)); }
 
     // <form> ergonomics
     // Owning <form> for a form-control. For `<form>` itself we wrap
@@ -731,15 +749,15 @@
     requestSubmit(submitter) {
       __dispatch(this, new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter}));
     }
-    // HTMLFormElement.submit() — spec says no `submit` event is fired
-    // and validation is bypassed. We still dispatch one because that's
-    // the cancellation point rails-ujs / Turbo / app code listens on
-    // (jQuery's `$(form).submit()` falls through to this). If nothing
-    // preventDefault'd, fall through to the actual Rack submission.
+    // HTMLFormElement.submit() per spec: no `submit` event is fired,
+    // validation is bypassed, the form is submitted directly. Forem's
+    // edit-comment handler relies on this — its onsubmit polls for
+    // CSRF then calls `form.submit()` to bypass its own listener; if
+    // we re-dispatched, the listener would refire and schedule a new
+    // poll, looping forever. Code that wants the listener to run uses
+    // `requestSubmit()` instead.
     submit() {
-      const ev = new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter: null});
-      const proceed = __dispatch(this, ev);
-      if (proceed) __dom(this.__h, 'submitForm');
+      __dom(this.__h, 'submitForm');
     }
   }
 
@@ -1745,6 +1763,15 @@
     configurable: true,
     get() { return globalThis.location ? globalThis.location.href : ''; }
   });
+  // No multi-document history in our model — referrer is always the
+  // empty string (a real browser would expose the previous page's URL,
+  // but we don't track that). Ahoy's `createVisit` does
+  // `document.referrer.length > 0` unguarded, so an undefined here
+  // throws "cannot read property 'length' of undefined" mid-init.
+  Object.defineProperty(globalThis.document, 'referrer', {
+    configurable: true,
+    get() { return ''; }
+  });
   // adoptNode / importNode are pass-through — Nokogiri's
   // insertBefore / replaceChild already span documents transparently.
   globalThis.document.adoptNode   = function (node) { return node; };
@@ -2014,7 +2041,33 @@
     cookieEnabled:  true,
     doNotTrack:     null,
     maxTouchPoints: 0,
-    clipboard:      __clipboard
+    clipboard:      __clipboard,
+    // Beacon API. Real browsers schedule the POST past page unload and
+    // return a boolean indicating queue success. We fire the request
+    // immediately via fetch — pre-unload fire-and-forget is the same
+    // shape from the caller's perspective. Ahoy uses this when its
+    // `useBeacon` config (default true) lines up with our presence
+    // here, which avoids a 1s setTimeout that gets dropped on
+    // SPA-style content swaps.
+    sendBeacon: function (url, data) {
+      try {
+        let body = data;
+        let headers = {};
+        if (data instanceof FormData) {
+          body = data.toString();
+          headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+        } else if (data instanceof URLSearchParams) {
+          body = data.toString();
+          headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+        } else if (typeof data === 'string') {
+          headers['Content-Type'] = 'text/plain;charset=UTF-8';
+        }
+        fetch(url, {method: 'POST', body: body, headers: headers}).catch(() => {});
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
   };
   globalThis.screen     = {width: 1024, height: 768};
   // No layout engine — scroll position is fictional, but scroll-driven

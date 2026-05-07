@@ -1033,11 +1033,16 @@ module Capybara
         end
       end
 
+      # JS-side `form.submit()` arrives here. Per spec it bypasses the
+      # 'submit' event entirely (only `requestSubmit` / user-initiated
+      # paths fire it). Forem's edit-comment handler relies on this:
+      # its own onsubmit listener calls `form.submit()` to escape itself
+      # without re-firing the listener.
       def submit_form(handle)
         node = lookup_node(handle)
         return false unless node
         form = node.name == 'form' ? node : enclosing_form(node)
-        form ? submit(form, nil) : false
+        form ? perform_submission(form, nil) : false
       end
 
       # Real browsers execute a `<script>` on insertion into a connected
@@ -2532,6 +2537,15 @@ module Capybara
 
       def submit(form, submitter)
         form_handle = @handles.track(form)
+        # `event.submitter` lets Turbo's FormSubmitObserver honour
+        # `data-turbo="false"` on the clicked button — without it Turbo
+        # treats every form-inside-a-frame submission as navigatable
+        # and intercepts it.
+        return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
+        perform_submission(form, submitter)
+      end
+
+      def perform_submission(form, submitter)
         # Capture submitter name / value / formaction up front: rails-ujs's
         # `data-disable-with` listener disables the submit button while
         # dispatch is in flight, which would drop the submitter row from
@@ -2541,17 +2555,12 @@ module Capybara
         # `<select multiple>`s — wants the *post-listener* form state.
         # Serialize once after dispatch and patch the submitter row
         # back in if the listener disabled it.
-        submitter_name        = submitter && submitter['name']
-        submitter_value       = submitter && submitter['value'].to_s
+        submitter_name  = submitter && submitter['name']
+        submitter_value = submitter && submitter['value'].to_s
         method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
         action_attr = (submitter && submitter['formaction']) || form['action']
         method      = method_attr.to_s.downcase
         action      = resolve(action_attr.to_s.empty? ? @current_url.to_s : action_attr.to_s)
-        # `event.submitter` lets Turbo's FormSubmitObserver honour
-        # `data-turbo="false"` on the clicked button — without it Turbo
-        # treats every form-inside-a-frame submission as navigatable
-        # and intercepts it.
-        return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
         if method == 'post' && multipart_form?(form)
           content_type, body = build_multipart(form, submitter)
         else
