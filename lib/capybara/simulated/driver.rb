@@ -51,6 +51,14 @@ module Capybara
         File.write(path, browser.html.to_s)
         path
       end
+
+      # Cuprite / Selenium expose `driver.resize(w, h)` for responsive-
+      # design tests. We have no layout engine to honour the request, but
+      # the call shouldn't crash — the assertion that follows usually
+      # fails on `visible?` semantics, not on the resize itself.
+      def resize(_width, _height); end
+      def resize_window_to(_handle, _width, _height); end
+      def maximize_window(_handle); end
       def title            = browser.title
       def status_code      = browser.status_code
       def response_headers = browser.response_headers

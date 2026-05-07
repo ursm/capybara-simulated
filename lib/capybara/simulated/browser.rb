@@ -1387,9 +1387,9 @@ module Capybara
 
       def marshal_script_arg(arg)
         case arg
-        when Capybara::Driver::Node then {'__elementHandle' => arg.native}
-        when Array                  then arg.map { |x| marshal_script_arg(x) }
-        when Hash                   then arg.transform_values { |v| marshal_script_arg(v) }
+        when Capybara::Simulated::Node then {'__elementHandle' => arg.handle_id}
+        when Array                     then arg.map { |x| marshal_script_arg(x) }
+        when Hash                      then arg.transform_values { |v| marshal_script_arg(v) }
         else arg
         end
       end

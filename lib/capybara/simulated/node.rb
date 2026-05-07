@@ -9,13 +9,19 @@ module Capybara
       include Capybara::Node::WhitespaceNormalizer
 
       def initialize(driver, handle)
-        super(driver, handle)
+        # Pass `self` as the Capybara `native`: tests routinely write
+        # `find(...).native.send_keys(...)` (Selenium / Cuprite return
+        # an Element with that method), so exposing the integer handle
+        # directly would error out. Our Node already implements
+        # `send_keys`, `[]`, `click`, etc.
+        super(driver, self)
+        @handle_id = handle
         # Pinning the original Nokogiri node here is what lets `==` and
         # stale-checks survive integer-handle reuse after page reloads.
         @initial_node = driver.browser.lookup_node(handle)
       end
 
-      def handle_id = native
+      attr_reader :handle_id
 
       def all_text
         check_stale
