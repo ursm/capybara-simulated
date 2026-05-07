@@ -1752,11 +1752,20 @@
     clipboard:      __clipboard
   };
   globalThis.screen     = {width: 1024, height: 768};
-  // No layout engine — there is no scroll position. All write-ish
-  // scroll APIs are no-ops; reads return 0.
-  globalThis.scrollTo   = function () {};
-  globalThis.scroll     = function () {};
-  globalThis.scrollBy   = function () {};
+  // No layout engine — scroll position is fictional, but scroll-driven
+  // listeners (Forem's infinite-scroll, lazy-load fallbacks, sticky
+  // headers) gate work on the `scroll` event firing, so dispatch one
+  // synthetically when the test calls `window.scrollTo(...)`.
+  function __dispatchScroll() {
+    const ev = new Event('scroll', {bubbles: false, cancelable: false});
+    __dispatch(globalThis.document, ev);
+    if (typeof globalThis.dispatchEvent === 'function') {
+      try { globalThis.dispatchEvent(ev); } catch (_) {}
+    }
+  }
+  globalThis.scrollTo   = function () { __dispatchScroll(); };
+  globalThis.scroll     = function () { __dispatchScroll(); };
+  globalThis.scrollBy   = function () { __dispatchScroll(); };
   globalThis.scrollX = globalThis.scrollY = 0;
   globalThis.pageXOffset = globalThis.pageYOffset = 0;
   globalThis.innerWidth  = 1024;
