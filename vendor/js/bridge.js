@@ -1718,6 +1718,19 @@
     configurable: true,
     get() { return this.querySelector('html'); }
   });
+  // `document.URL` / `documentURI` mirror `location.href` per the
+  // DOM Living Standard. Forem's bundled `parseURL(document.URL)`
+  // crashes with "cannot read property 'match' of undefined"
+  // without this — and the InstantClick preloader fans the same
+  // error out into hundreds of "listener threw" log lines per page.
+  Object.defineProperty(globalThis.document, 'URL', {
+    configurable: true,
+    get() { return globalThis.location ? globalThis.location.href : ''; }
+  });
+  Object.defineProperty(globalThis.document, 'documentURI', {
+    configurable: true,
+    get() { return globalThis.location ? globalThis.location.href : ''; }
+  });
   // adoptNode / importNode are pass-through — Nokogiri's
   // insertBefore / replaceChild already span documents transparently.
   globalThis.document.adoptNode   = function (node) { return node; };
