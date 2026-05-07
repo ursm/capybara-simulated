@@ -1269,16 +1269,25 @@ module Capybara
           # the `beforeinput` and replaces the default action with its
           # own indented list-marker insertion via `setRangeText`, so
           # `\n` only goes in when no listener `preventDefault()`s.
-          # Flush the buffer first so the listener reads our typed-so-
-          # far value (otherwise it sees the pre-`send_keys` snapshot).
+          # On `<input>` types Enter never inserts a newline (the
+          # default action is form submission, surfaced separately via
+          # `should_submit_on_enter?`); inserting `\n` into the value
+          # breaks autocomplete patterns like Forem's tag-input where
+          # the keydown listener consumes Enter to add a chip and
+          # expects `el.value` to still hold the typed token, not
+          # `"token\n"`.
           set_value(handle, state[:value])
           set_caret(handle, state[:caret])
           dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
-          allow = dispatch_event(handle, 'beforeinput', cancelable: true, inputType: 'insertLineBreak')
-          if allow
-            splice_at_caret(state, "\n")
-          else
-            sync_state_from_dom(handle, state)
+          node = lookup_node(handle)
+          inserts_newline = node.respond_to?(:name) && node.name == 'textarea'
+          if inserts_newline
+            allow = dispatch_event(handle, 'beforeinput', cancelable: true, inputType: 'insertLineBreak')
+            if allow
+              splice_at_caret(state, "\n")
+            else
+              sync_state_from_dom(handle, state)
+            end
           end
           dispatch_key_event(handle, 'keyup', SPECIAL_KEY_CODES[key], **key_init(state, key))
         when :backspace
