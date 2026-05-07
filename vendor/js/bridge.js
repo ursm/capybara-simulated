@@ -215,6 +215,19 @@
       const oldVal = __dom(this.__h, 'removeAttribute', [n]);
       if (__ceInstances.has(this.__h)) ceMaybeAttributeChanged(this, n, oldVal, null);
     }
+    // DOM-Living-Standard accessors that derive from the basic
+    // get/set/has/remove triplet. Cheap one-liners.
+    hasAttributes()      { return this.attributes.length > 0; }
+    getAttributeNames()  { return Array.from(this.attributes).map(a => a.name); }
+    toggleAttribute(name, force) {
+      const has = this.hasAttribute(name);
+      if (force === true || (force === undefined && !has)) {
+        if (!has) this.setAttribute(name, '');
+        return true;
+      }
+      if (has) this.removeAttribute(name);
+      return false;
+    }
     // NamedNodeMap-shaped: array-iterable AND name-indexable. jQuery
     // does `el.attributes[name].expando` for feature detection, so we
     // return Attr-like records on each named slot.
@@ -353,6 +366,37 @@
     set alt(v)         { this.setAttribute('alt', v == null ? '' : String(v)); }
     get placeholder()  { return this.getAttribute('placeholder') || ''; }
     set placeholder(v) { this.setAttribute('placeholder', v == null ? '' : String(v)); }
+
+    // Trivial reflective HTMLElement properties — `attr <-> prop`
+    // mappings that Preact / Stimulus / arbitrary inline JS read or
+    // write directly. Default values follow the IDL spec where they
+    // exist (`tabIndex` defaults to 0 on focusable elements, -1 otherwise).
+    get lang()         { return this.getAttribute('lang') || ''; }
+    set lang(v)        { this.setAttribute('lang', v == null ? '' : String(v)); }
+    get dir()          { return this.getAttribute('dir') || ''; }
+    set dir(v)         { this.setAttribute('dir', v == null ? '' : String(v)); }
+    get translate()    { return this.getAttribute('translate') !== 'no'; }
+    set translate(v)   { this.setAttribute('translate', v ? 'yes' : 'no'); }
+    get spellcheck()   { const v = this.getAttribute('spellcheck'); return v == null ? true : v !== 'false'; }
+    set spellcheck(v)  { this.setAttribute('spellcheck', v ? 'true' : 'false'); }
+    get draggable()    { return this.getAttribute('draggable') === 'true'; }
+    set draggable(v)   { this.setAttribute('draggable', v ? 'true' : 'false'); }
+    get inert()        { return this.hasAttribute('inert'); }
+    set inert(v)       { v ? this.setAttribute('inert', '') : this.removeAttribute('inert'); }
+    get tabIndex()     { const v = this.getAttribute('tabindex'); return v == null ? -1 : (parseInt(v, 10) || 0); }
+    set tabIndex(v)    { this.setAttribute('tabindex', String(v)); }
+    get contentEditable()  { return this.getAttribute('contenteditable') || 'inherit'; }
+    set contentEditable(v) { this.setAttribute('contenteditable', String(v)); }
+    get isContentEditable() {
+      let cur = this;
+      while (cur && cur.element !== false) {
+        const v = cur.getAttribute && cur.getAttribute('contenteditable');
+        if (v === 'true') return true;
+        if (v === 'false') return false;
+        cur = cur.parentElement;
+      }
+      return false;
+    }
 
     // <template>.content: a real DocumentFragment in browsers; we
     // expose a fragment-view proxy that shares the template's handle
