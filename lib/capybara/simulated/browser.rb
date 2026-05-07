@@ -2779,22 +2779,28 @@ module Capybara
         nil
       end
 
-      # `[source_text, cache_key]` in document order. Cache keys for
-      # inline `<style>` use a content hash so multiple inline blocks
-      # don't collide; `<link>` URLs are already unique.
+      # `[source_text, cache_key]` in document order, deduplicated by
+      # cache key — Forem's layout pre-loads + loads the same bundle
+      # twice, and including duplicate rule sets doubles the cascade's
+      # compile cost without changing the resolved values.
       def collect_stylesheet_sources
         out = []
+        seen = {}
         @document.css('link[rel~="stylesheet"], style').each do |node|
           if node.name == 'style'
             text = node.text.to_s
-            out << [text, [:inline, Digest::SHA1.hexdigest(text)].freeze] unless text.empty?
+            next if text.empty?
+            key = [:inline, Digest::SHA1.hexdigest(text)].freeze
           else
             href = node['href'].to_s
             next if href.empty?
             url  = resolve(href)
             text = fetch_resource(url) or next
-            out << [text, [:link, url].freeze]
+            key  = [:link, url].freeze
           end
+          next if seen[key]
+          seen[key] = true
+          out << [text, key]
         end
         out
       end

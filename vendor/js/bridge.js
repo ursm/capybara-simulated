@@ -1706,6 +1706,13 @@
   // signal. Plus a handful of shims used during library boot.
   globalThis.window     = globalThis;
   globalThis.self       = globalThis;
+  // `Window` (the constructor) is referenced for `instanceof` /
+  // `PropTypes.instanceOf(Window)` checks. We don't model a separate
+  // Window class — globalThis suffices as the only window-shaped
+  // object — so just point the constructor at our stand-in. A bare
+  // function works for both `instanceof` (returns false harmlessly)
+  // and `=== Window` identity checks.
+  globalThis.Window     = function Window() {};
   globalThis.location   = globalThis.document.location;
   // navigator.clipboard backed by an in-process buffer so tests that
   // round-trip writeText / readText work without depending on the
