@@ -211,14 +211,57 @@ isn't included because the suite exercises Stimulus and Turbo Stream —
 those need a JS runtime. The bench is the recommended starting point
 when comparing this driver against your own setup; clone, run, read.
 
+## Performance characteristics
+
+The bench suite above is small and JS-light. Real apps mileage varies a lot
+with what the page actually does, so it's worth being explicit about where
+the wall-clock time goes:
+
+- **Per-test framework cost** is small. RSpec + Capybara + Rails boot is
+  ~3–4 s in cold suites, identical to other drivers.
+- **`visit`** dominates `:js` tests. Each external `<script src=...>` is
+  fetched through the in-process Rack app, parsed, and run in QuickJS
+  *interpreted* (no JIT). Order-of-magnitude per page:
+
+  | page profile                          | typical `visit` |
+  |---------------------------------------|-----------------|
+  | inline scripts only, ~10 KB JS        |  50–150 ms      |
+  | a Hotwire / Stimulus app, ~200 KB JS  | 400 ms – 1 s    |
+  | React-on-Rails / Forem, 18+ bundles   | 4–6 s           |
+
+  This scales roughly linearly with bundle bytes (interpreter throughput)
+  plus a fixed-cost per microtask / promise hop because each one re-enters
+  Ruby for `__deliverMutations` and timer drains.
+- **CSS cascade build** (via [`p_css`](https://github.com/ursm/p_css))
+  is a one-shot per stylesheet *set*, cached by URL fingerprint and shared
+  across pages with the same bundle. Numbers from our two test apps:
+  Avo (single 285 KB Tailwind bundle) → ~330 ms; Forem (4 stylesheets,
+  688 KB) → ~1.8 s the first time, ~0 ms thereafter. Per-element
+  `cascade.resolve()` runs in 100–300 µs and is consulted from
+  `visible?` / `Node#style`.
+- **DOM ops cross the Ruby↔JS bridge** synchronously. A modify-heavy
+  test (e.g. SortableJS dragging thousands of items) will be noticeably
+  slower than Cuprite per op; a read-heavy test (form fill + a couple of
+  asserts) won't be.
+- **Polling** (Capybara `default_max_wait_time`) advances a *virtual*
+  JS clock — `setTimeout(N)` fires after `N` ms of accumulated wall time,
+  not real time. So a page that schedules `setTimeout(2000, x)` doesn't
+  block for 2 s; it fires once polling has waited that long.
+
+In short: we're fast on small / Hotwire-shaped pages and slower than
+real Chrome on heavy SPA bundles. The benchmark above is an
+intentionally easy case; if your app loads multiple 500 KB+ JS bundles
+on every page, expect to be in the same ballpark as Selenium /
+Cuprite, not 15× faster.
+
 ## Known limits
 
-- Without a layout engine: `visible?` is heuristic (`display:none`,
-  `visibility:hidden`, `hidden` attribute, `<details>` open state, etc.),
-  `getBoundingClientRect()` returns zeros, and click offset coordinates
-  are passed through verbatim. Tests that rely on positional click
-  resolution (e.g. Dragula-style drag drops, table-cell clicks based on
-  `elementFromPoint`) need a real browser.
+- Without a layout engine: `visible?` and `Node#style` consult the CSS
+  cascade (real stylesheet rules via `p_css`) plus the inline `style`
+  attribute, but `getBoundingClientRect()` returns zeros and click
+  offset coordinates are passed through verbatim. Tests that rely on
+  positional click resolution (e.g. Dragula-style drag drops,
+  table-cell clicks based on `elementFromPoint`) need a real browser.
 - `fetch` is synchronous-via-Rack — works for HTML/JSON round-trips but
   there is no real network, no streaming, no `Request#body` ReadableStream,
   and no concurrent requests. XHR is not implemented.
