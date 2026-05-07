@@ -432,6 +432,14 @@
     set httpEquiv(v) { if (this.tagName === 'META') this.setAttribute('http-equiv', v == null ? '' : String(v)); }
     get media()      { return this.tagName === 'META' ? (this.getAttribute('media') || '') : undefined; }
     set media(v)     { if (this.tagName === 'META') this.setAttribute('media', v == null ? '' : String(v)); }
+    // <iframe>.contentWindow / .contentDocument: real browsers expose
+    // the embedded document's window/document. We have no nested
+    // realms, so reuse the parent's. Honeybadger tries this trick to
+    // detect the "pristine" native fetch and emits a console.warn each
+    // time it can't find the property; returning self-references makes
+    // the detection succeed silently.
+    get contentWindow()   { return this.tagName === 'IFRAME' ? globalThis : null; }
+    get contentDocument() { return this.tagName === 'IFRAME' ? globalThis.document : null; }
 
     // <form> ergonomics
     // Owning <form> for a form-control. For `<form>` itself we wrap
@@ -1405,6 +1413,17 @@
     if (had) __setTimersActive(false);
   };
 
+  // Per-test storage clear — Browser#reset! invokes this to wipe
+  // localStorage / sessionStorage / clipboard between tests, since
+  // __resetPage no longer touches them on plain navigations.
+  globalThis.__resetStorage = function () {
+    if (globalThis.localStorage   && globalThis.localStorage._reset)   globalThis.localStorage._reset();
+    if (globalThis.sessionStorage && globalThis.sessionStorage._reset) globalThis.sessionStorage._reset();
+    if (globalThis.navigator && globalThis.navigator.clipboard && globalThis.navigator.clipboard._reset) {
+      globalThis.navigator.clipboard._reset();
+    }
+  };
+
   // Handle integers get reassigned across documents, so listeners /
   // observers / CE instances keyed on those handles would silently fire
   // against the wrong nodes after a navigate. `__wrappers` is also
@@ -1451,8 +1470,14 @@
     __wrappers.set(0, globalThis.document);
     globalThis.document.readyState = 'loading';
     __resetTimers();
-    globalThis.localStorage._reset();
-    globalThis.sessionStorage._reset();
+    // localStorage and sessionStorage are NOT cleared here. Per spec
+    // they persist across same-origin navigations within a session;
+    // Forem's `initializeLocalStorageRender` reads `current_user` from
+    // a previous-page write, and clearing it on every nav forces every
+    // page to fall back to the async `/async_info/base_data` fetch
+    // which doesn't resolve before the synchronous `callInitializers`
+    // chain reads `body.dataset.user` (the onboarding-task-card race).
+    // Browser#reset! triggers the per-test clear via __resetStorage.
     globalThis.navigator.clipboard._reset();
     // Re-attach the CE observer + upgrade existing matches in the
     // freshly-parsed document.
@@ -2070,6 +2095,46 @@
     }
   };
   globalThis.screen     = {width: 1024, height: 768};
+
+  // Base64 codec. QuickJS doesn't ship `btoa` / `atob`, but plenty of
+  // app code calls them — Forem's `browserStoreCache` base64-encodes
+  // the sanitized user JSON for the cross-subdomain cookie, and
+  // throwing here trips the surrounding `try/catch` which then removes
+  // `current_user` from localStorage too, defeating the cache that
+  // `initializeOnboardingTaskCard` relies on.
+  const __B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  globalThis.btoa = function (str) {
+    str = String(str);
+    let out = '';
+    for (let i = 0; i < str.length; i += 3) {
+      const c1 = str.charCodeAt(i);
+      if (c1 > 0xff) throw new Error('btoa: input contains a non-Latin1 character');
+      const c2 = i + 1 < str.length ? str.charCodeAt(i + 1) : NaN;
+      const c3 = i + 2 < str.length ? str.charCodeAt(i + 2) : NaN;
+      if (c2 > 0xff || c3 > 0xff) throw new Error('btoa: input contains a non-Latin1 character');
+      const e1 = c1 >> 2;
+      const e2 = ((c1 & 0x3) << 4) | (isNaN(c2) ? 0 : (c2 >> 4));
+      const e3 = isNaN(c2) ? 64 : (((c2 & 0xf) << 2) | (isNaN(c3) ? 0 : (c3 >> 6)));
+      const e4 = isNaN(c3) ? 64 : (c3 & 0x3f);
+      out += __B64[e1] + __B64[e2] + (e3 === 64 ? '=' : __B64[e3]) + (e4 === 64 ? '=' : __B64[e4]);
+    }
+    return out;
+  };
+  globalThis.atob = function (str) {
+    str = String(str).replace(/[^A-Za-z0-9+/=]/g, '');
+    let out = '';
+    for (let i = 0; i < str.length; i += 4) {
+      const e1 = __B64.indexOf(str[i]);
+      const e2 = __B64.indexOf(str[i + 1]);
+      const e3 = __B64.indexOf(str[i + 2]);
+      const e4 = __B64.indexOf(str[i + 3]);
+      if (e1 < 0 || e2 < 0) throw new Error('atob: invalid base64');
+      out += String.fromCharCode((e1 << 2) | (e2 >> 4));
+      if (e3 !== -1 && str[i + 2] !== '=') out += String.fromCharCode(((e2 & 0xf) << 4) | (e3 >> 2));
+      if (e4 !== -1 && str[i + 3] !== '=') out += String.fromCharCode(((e3 & 0x3) << 6) | e4);
+    }
+    return out;
+  };
   // No layout engine — scroll position is fictional, but scroll-driven
   // listeners (Forem's infinite-scroll, lazy-load fallbacks, sticky
   // headers) gate work on the `scroll` event firing, so dispatch one
@@ -2146,23 +2211,25 @@
     forward: function () {},
     go:      function () {}
   };
-  // Backed by a Map so set/get round-trip within a session — apps that
-  // gate UI on a stored flag (theme, dismissed banner, ...) need that
-  // to actually work. Cleared in __resetPage so each test starts fresh.
-  function makeStorage() {
-    const m = new Map();
+  // Backed by Ruby — Browser keeps `@local_storage` / `@session_storage`
+  // hashes that survive the VM rebuilds boot_vm triggers when a script
+  // declared a top-level let/const/class. Without that persistence,
+  // Forem's `initializeLocalStorageRender` reads `current_user` from
+  // a previous-page write and a fresh runtime would defeat the cache
+  // (the onboarding-task-card race).
+  function makeStorage(prefix) {
     return {
-      get length()        { return m.size; },
-      key(i)              { return [...m.keys()][i] ?? null; },
-      getItem(k)          { return m.has(String(k)) ? m.get(String(k)) : null; },
-      setItem(k, v)       { m.set(String(k), String(v)); },
-      removeItem(k)       { m.delete(String(k)); },
-      clear()             { m.clear(); },
-      _reset()            { m.clear(); }
+      get length()        { return __dom(0, prefix + 'Length', []) || 0; },
+      key(i)              { const v = __dom(0, prefix + 'Key', [i | 0]); return v == null ? null : v; },
+      getItem(k)          { const v = __dom(0, prefix + 'Get', [String(k)]); return v == null ? null : v; },
+      setItem(k, v)       { __dom(0, prefix + 'Set', [String(k), String(v)]); },
+      removeItem(k)       { __dom(0, prefix + 'Remove', [String(k)]); },
+      clear()             { __dom(0, prefix + 'Clear', []); },
+      _reset()            { __dom(0, prefix + 'Clear', []); }
     };
   }
-  globalThis.localStorage   = makeStorage();
-  globalThis.sessionStorage = makeStorage();
+  globalThis.localStorage   = makeStorage('localStorage');
+  globalThis.sessionStorage = makeStorage('sessionStorage');
   // No layout engine, so "computed" style is mostly fiction. We
   // expose what we can actually answer accurately: inline
   // `style="..."` declarations + a hand-coded default-display table

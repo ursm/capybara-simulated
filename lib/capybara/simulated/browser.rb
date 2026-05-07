@@ -86,6 +86,15 @@ module Capybara
         @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
         @focused_handle     = nil  # currently-focused element handle
         @hovered_handle     = nil  # last element passed to `hover` (drives mouseleave on the next hover)
+        # Web Storage backed in Ruby so the JS Map doesn't get wiped
+        # when boot_vm rebuilds the runtime mid-test (which happens
+        # whenever a script declared a top-level let/const/class).
+        # Real browsers persist localStorage across same-origin
+        # navigations within a tab; sessionStorage persists per-tab —
+        # we treat each test as a single tab/session so both behave
+        # the same way and clear at reset! time.
+        @local_storage      = {}
+        @session_storage    = {}
         @mutations          = []
         @mutation_recording = false
         @timers_active      = false
@@ -150,6 +159,8 @@ module Capybara
         @shadow_root_set.clear
         @focused_handle = nil
         @hovered_handle = nil
+        @local_storage.clear
+        @session_storage.clear
         invalidate_cascade
         # Clear @listened_types BEFORE js.reset_page: __resetPage
         # re-pins anchor listeners and notifies us via set_listened_type;
@@ -157,6 +168,8 @@ module Capybara
         reset_per_page_state
         @js&.reset_page
       end
+
+      attr_reader :local_storage, :session_storage
 
       def reset_per_page_state
         @mutations.clear
@@ -1197,6 +1210,13 @@ module Capybara
       def send_keys(handle, keys)
         node = lookup_node(handle)
         return false if node.nil?
+        # Match selenium / a real browser: keystrokes route to the
+        # focused element. Focusing here also blurs whatever was
+        # focused before — Forem's MultiSelectAutocomplete commits the
+        # tag from its `handleInputBlur`, so without this, typing into
+        # the tag input then `fill_in`-ing a sibling field never blurs
+        # the tag input and the typed value never becomes a tag.
+        focus(handle) if focusable?(node)
         start = field_value(node)
         state = {value: start.dup, caret: start.length, modifiers: Set.new}
         keys.each { |k| apply_send_key(handle, state, k) }
@@ -1699,9 +1719,27 @@ module Capybara
         end
       end
 
+      # Web Storage ops dispatch against `@local_storage` / `@session_storage`.
+      # JS-side localStorage / sessionStorage proxy here via __dom so the
+      # state survives boot_vm rebuilds within a single test.
+      def storage_op(op, args)
+        store = op.start_with?('localStorage') ? @local_storage : @session_storage
+        case op
+        when 'localStorageGet',     'sessionStorageGet'     then store[args[0].to_s]
+        when 'localStorageSet',     'sessionStorageSet'     then store[args[0].to_s] = args[1].to_s; nil
+        when 'localStorageRemove',  'sessionStorageRemove'  then store.delete(args[0].to_s); nil
+        when 'localStorageClear',   'sessionStorageClear'   then store.clear; nil
+        when 'localStorageKey',     'sessionStorageKey'     then store.keys[args[0].to_i]
+        when 'localStorageLength',  'sessionStorageLength'  then store.size
+        end
+      end
+
       # Single dispatch entry called from JS via `__dom(handle, op, args)`.
       def dom_op(handle, op, args)
         @hidden_cache.clear if DOM_WRITE_OPS.include?(op)
+        # Web Storage ops are dispatched against handle 0; route them
+        # to the Ruby-backed Hash so the state survives boot_vm.
+        return storage_op(op, args) if STORAGE_OPS.include?(op)
         node = lookup_node(handle) || @document
         case op
         when 'querySelector'
@@ -3058,6 +3096,18 @@ module Capybara
         removeChild insertBefore replaceChild
         attachShadow cloneRangeContents parseHTML5Document
         focus blur click submitForm
+      ].to_set.freeze
+
+      # Web Storage opcodes — dispatched against the Ruby-backed
+      # `@local_storage` / `@session_storage` hashes so state survives
+      # the runtime rebuilds that `boot_vm` triggers between page
+      # navigations whenever a top-level let/const/class hits the
+      # global lexical environment.
+      STORAGE_OPS = %w[
+        localStorageGet  localStorageSet  localStorageRemove
+        localStorageClear localStorageKey localStorageLength
+        sessionStorageGet sessionStorageSet sessionStorageRemove
+        sessionStorageClear sessionStorageKey sessionStorageLength
       ].to_set.freeze
 
       DISPLAY_NONE_RE       = /display\s*:\s*none/i
