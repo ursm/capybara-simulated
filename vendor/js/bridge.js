@@ -2042,36 +2042,68 @@
     disconnect()             {}
     takeRecords()            { return []; }
   }
-  // IntersectionObserver: lazy turbo-frames fetch via an
-  // IntersectionObserver firing when the frame scrolls into viewport.
-  // Without a layout engine we can't actually observe scroll position,
-  // but pretending every observed target is permanently "in viewport"
-  // matches the desktop-default assumption used elsewhere (Tailwind
-  // responsive classes). Reports a single intersecting=true entry once
-  // per observe() call via a microtask, then stays silent.
+  // IntersectionObserver without a layout engine: we can't observe
+  // real scroll position, but pretending every *visible* target is in
+  // viewport is close enough for lazy turbo-frames and similar
+  // viewport-gated UI. Targets whose ancestor chain is hidden
+  // (display:none from cascade, [hidden], etc.) stay silent until they
+  // become visible — `__pollIntersectionObservers()` re-checks pending
+  // targets after every settle so a tab-reveal click promptly loads the
+  // lazy frame inside it.
+  const __ZERO_RECT = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0};
+  const __ioInstances = new Set();
   class EagerIntersectionObserver {
-    constructor(cb) { this._cb = cb; this._observed = new Set(); }
-    observe(target) {
-      if (!target || this._observed.has(target)) return;
-      this._observed.add(target);
-      const cb = this._cb, obs = this;
-      Promise.resolve().then(() => {
-        if (!obs._observed.has(target)) return;
-        try {
-          cb([{
-            target, isIntersecting: true, intersectionRatio: 1,
-            boundingClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
-            intersectionRect:   {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
-            rootBounds:         {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0},
-            time: 0
-          }], obs);
-        } catch (_) {}
-      });
+    constructor(cb) {
+      this._cb = cb;
+      this._pending = new Set(); // observed but not yet intersecting
+      this._fired   = new Set(); // already reported intersecting=true
+      __ioInstances.add(this);
     }
-    unobserve(target) { this._observed.delete(target); }
-    disconnect()      { this._observed.clear(); }
-    takeRecords()     { return []; }
+    observe(target) {
+      if (!target) return;
+      if (this._fired.has(target) || this._pending.has(target)) return;
+      this._pending.add(target);
+      const obs = this;
+      Promise.resolve().then(() => obs._maybeFire(target));
+    }
+    unobserve(target) {
+      this._pending.delete(target);
+      this._fired.delete(target);
+    }
+    disconnect() {
+      this._pending.clear();
+      this._fired.clear();
+      __ioInstances.delete(this);
+    }
+    takeRecords() { return []; }
+    _maybeFire(target) {
+      if (!this._pending.has(target)) return;
+      if (!__dom(target.__h, 'isVisible')) return;
+      this._pending.delete(target);
+      this._fired.add(target);
+      try {
+        this._cb([{
+          target,
+          isIntersecting:     true,
+          intersectionRatio:  1,
+          boundingClientRect: __ZERO_RECT,
+          intersectionRect:   __ZERO_RECT,
+          rootBounds:         __ZERO_RECT,
+          time:               0
+        }], this);
+      } catch (_) {}
+    }
+    _poll() {
+      if (this._pending.size === 0) return;
+      for (const target of Array.from(this._pending)) this._maybeFire(target);
+    }
   }
+  // Called from settle (Ruby side) after every drain so freshly-revealed
+  // targets pick up an intersecting=true entry without waiting for the
+  // next observe() call.
+  globalThis.__pollIntersectionObservers = function () {
+    for (const obs of __ioInstances) obs._poll();
+  };
   globalThis.IntersectionObserver = EagerIntersectionObserver;
   globalThis.ResizeObserver       = StubObserver;
   globalThis.PerformanceObserver  = StubObserver;

@@ -1518,6 +1518,11 @@ module Capybara
           records, @mutations = @mutations, []
           js.call('__deliverMutations', records)
         end
+        # Lazy IntersectionObserver targets re-check visibility here so a
+        # just-revealed tab pane / dropdown that contains a lazy
+        # turbo-frame fetches its content without waiting for another
+        # observe() call.
+        js.call('__pollIntersectionObservers')
         @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until = nil
       end
@@ -1604,6 +1609,8 @@ module Capybara
           nil
         when 'matches'
           node.element? && safe_matches?(node, args[0])
+        when 'isVisible'
+          node.element? && visible?(handle)
         when 'contains'
           other = lookup_node(args[0])
           other && (node == other || other.ancestors.include?(node))
