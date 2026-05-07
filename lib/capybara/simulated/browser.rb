@@ -146,8 +146,19 @@ module Capybara
         @focused_handle = nil
         @hovered_handle = nil
         invalidate_cascade
-        @js&.reset_page
+        # Order matters and mirrors `bootstrap_page`: clear the
+        # listener-type tracker BEFORE `js.reset_page`, because the
+        # bridge's `__resetPage` re-pins anchor listeners
+        # (document / documentElement / body / head) and calls back
+        # into `set_listened_type(type, true)` for the surviving
+        # types. Clearing afterwards would wipe those notifications
+        # and `dispatch_event` would then short-circuit on the next
+        # spec — visible as Capybara's `attach_file` capture-phase
+        # `file_catcher` listener (registered on the previous page,
+        # never reset because the listener removed itself with the
+        # wrong capture flag) silently never firing.
         reset_per_page_state
+        @js&.reset_page
       end
 
       def reset_per_page_state
@@ -2129,8 +2140,12 @@ module Capybara
         if @document.at_css('script')
           bootstrap_page
         elsif @js
-          @js.reset_page
+          # See `bootstrap_page` for the ordering rule — clear
+          # `@listened_types` BEFORE the bridge's `__resetPage`, so
+          # the resulting `__setListenedType` callbacks (issued for
+          # anchor listeners that survive the page swap) survive.
           reset_per_page_state
+          @js.reset_page
           @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         end
         status

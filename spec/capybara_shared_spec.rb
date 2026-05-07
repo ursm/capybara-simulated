@@ -26,9 +26,6 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #drag_to ',
   # Click-retry-on-wait-disabled also routes through elementFromPoint.
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  # `attach_file` block form clicks a <label> whose <input type="file">
-  # is display:none; the click target resolves via elementFromPoint.
-  'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',
   # `#reload` tests `find` a node, click an async link that mutates
   # via setTimeout, then read `node.text` directly (no synchronize on
   # the matcher side). Ticking the virtual clock during read paths
