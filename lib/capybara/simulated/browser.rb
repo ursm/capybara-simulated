@@ -146,17 +146,9 @@ module Capybara
         @focused_handle = nil
         @hovered_handle = nil
         invalidate_cascade
-        # Order matters and mirrors `bootstrap_page`: clear the
-        # listener-type tracker BEFORE `js.reset_page`, because the
-        # bridge's `__resetPage` re-pins anchor listeners
-        # (document / documentElement / body / head) and calls back
-        # into `set_listened_type(type, true)` for the surviving
-        # types. Clearing afterwards would wipe those notifications
-        # and `dispatch_event` would then short-circuit on the next
-        # spec — visible as Capybara's `attach_file` capture-phase
-        # `file_catcher` listener (registered on the previous page,
-        # never reset because the listener removed itself with the
-        # wrong capture flag) silently never firing.
+        # Clear @listened_types BEFORE js.reset_page: __resetPage
+        # re-pins anchor listeners and notifies us via set_listened_type;
+        # clearing afterwards would wipe those notifications.
         reset_per_page_state
         @js&.reset_page
       end
@@ -1497,61 +1489,62 @@ module Capybara
         {button: button, which: button + 1}
       end
 
-      # Translate Capybara's click offset (`x:` / `y:`) into clientX /
-      # clientY using a layout-free `simRect` approximation. Without a
-      # real layout engine, `getBoundingClientRect()` returns
-      # (0, 0, 0, 0); fixture pages that arrange their click targets
-      # through explicit `top` / `left` / `width` / `height` (px) work
-      # fine if we walk the ancestor chain and sum those values.
-      # `offset == :center` is what Capybara's `Element#perform_click_action`
-      # passes when `Capybara.w3c_click_offset` is true — base off the
-      # element's centre instead of its top-left.
+      # `offset == :center` is the literal Capybara passes when
+      # `Capybara.w3c_click_offset` is true; everything else (including
+      # `nil`) bases off the top-left.
       def position_init(node, x, y, offset)
-        return {} unless node.respond_to?(:element?) && node.element?
-        rect    = sim_rect(node)
-        has_xy  = !x.nil? || !y.nil?
-        center  = offset == :center || !has_xy
-        base_x  = rect[:x] + (center ? rect[:width]  / 2.0 : 0.0)
-        base_y  = rect[:y] + (center ? rect[:height] / 2.0 : 0.0)
+        rect   = sim_rect(node)
+        has_xy = !x.nil? || !y.nil?
+        center = offset == :center || !has_xy
+        base_x = rect[:x] + (center ? rect[:width]  / 2.0 : 0.0)
+        base_y = rect[:y] + (center ? rect[:height] / 2.0 : 0.0)
         {clientX: base_x + (x || 0).to_f, clientY: base_y + (y || 0).to_f}
       end
 
       ZERO_RECT = {x: 0.0, y: 0.0, width: 0.0, height: 0.0}.freeze
       PX_VALUE_RE = /\A-?\d+(?:\.\d+)?/
 
-      # Crude ancestor-summed rect — px values only, no inheritance, no
-      # auto-resolution, no positioning rules. Truthful when the page
-      # uses absolute / relative positioning with explicit pixel sizes
-      # (Capybara's `/offset` fixture); collapses to (0, 0, 0, 0)
-      # otherwise, which routes the click to the document origin.
+      # Layout-free `getBoundingClientRect` approximation: ancestor-summed
+      # `top` / `left` and the element's own `width` / `height`, px only.
+      # Truthful when the page uses explicit absolute / relative
+      # positioning (Capybara's `/offset` fixture); collapses to
+      # (0, 0, 0, 0) otherwise so the click lands at the document origin.
       def sim_rect(node)
-        return ZERO_RECT.dup unless node.respond_to?(:element?) && node.element?
-        c      = cascade
-        width  = read_layout_px(c, node, 'width')
-        height = read_layout_px(c, node, 'height')
-        x      = 0.0
-        y      = 0.0
-        cur    = node
+        return ZERO_RECT unless node.respond_to?(:element?) && node.element?
+        c    = cascade
+        own  = resolved_layout_px(c, node)
+        x    = own['left']
+        y    = own['top']
+        cur  = node.parent
         while cur.respond_to?(:element?) && cur.element?
-          x += read_layout_px(c, cur, 'left')
-          y += read_layout_px(c, cur, 'top')
+          decl = resolved_layout_px(c, cur)
+          x += decl['left']
+          y += decl['top']
           cur = cur.parent
         end
-        {x: x, y: y, width: width, height: height}
+        {x: x, y: y, width: own['width'], height: own['height']}
       end
 
-      def read_layout_px(c, node, prop)
-        raw =
-          if c
-            decls = c.resolve(node, inline_style: node['style'])
-            decls && (decl = decls[prop]) ? CSS.serialize(decl.value).strip : nil
-          end
-        raw ||= parse_inline_style_pairs(node['style'])[prop]
+      LAYOUT_PROPS = %w[top left width height].freeze
+      ZERO_LAYOUT  = LAYOUT_PROPS.to_h { |p| [p, 0.0] }.freeze
+
+      # One cascade resolution per node, then read all four layout props
+      # from the result.
+      def resolved_layout_px(c, node)
+        decls  = c ? c.resolve(node, inline_style: node['style']) : nil
+        inline = parse_inline_style_pairs(node['style'])
+        LAYOUT_PROPS.to_h do |prop|
+          raw = (decls && (decl = decls[prop]) && CSS.serialize(decl.value).strip) || inline[prop]
+          [prop, parse_px(raw)]
+        end
+      rescue StandardError
+        ZERO_LAYOUT
+      end
+
+      def parse_px(raw)
         return 0.0 if raw.nil? || raw.empty? || raw == 'auto'
         m = PX_VALUE_RE.match(raw)
         m ? m[0].to_f : 0.0
-      rescue StandardError
-        0.0
       end
 
       # Build the MouseEvent init slice from Capybara modifier symbols.
@@ -2026,13 +2019,9 @@ module Capybara
         true
       end
 
-      # Tick before the parent-chain walk so async DOM swaps from
-      # `setTimeout`-driven handlers (Capybara's `#reload` fixtures
-      # use this shape: click `Reload!`, `sleep(0.3)`, read
-      # `node.text`) see the post-replaceWith state. Without the
-      # tick the OLD node is still attached at read time, the
-      # staleness check passes, and the user reads stale text
-      # instead of triggering Capybara's auto-reload.
+      # Tick first so `setTimeout`-driven DOM swaps land before the
+      # staleness walk; otherwise Capybara's auto-reload never engages
+      # and direct `node.text` reads after `sleep(N)` see stale text.
       def check_stale(handle, captured = nil)
         tick_real_time
         raise StaleElement, 'element is no longer attached to the document' if stale?(handle, captured)
@@ -2144,10 +2133,7 @@ module Capybara
         if @document.at_css('script')
           bootstrap_page
         elsif @js
-          # See `bootstrap_page` for the ordering rule — clear
-          # `@listened_types` BEFORE the bridge's `__resetPage`, so
-          # the resulting `__setListenedType` callbacks (issued for
-          # anchor listeners that survive the page swap) survive.
+          # Clear-before-reset, same ordering rule as `bootstrap_page`.
           reset_per_page_state
           @js.reset_page
           @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)

@@ -44,23 +44,13 @@ module Capybara
         browser.attr(handle_id, name.to_s)
       end
 
-      # Capybara::Node::Element forwards click / right_click / double_click
-      # as `base.click(keys_array, **opts)` — keys is one positional Array,
-      # not a splat. `delay:` reaches us in seconds; we replay it as a
-      # real sleep between mousedown and mouseup so JS handlers reading
-      # `Date.now()` see the gap (matches Selenium). `x:` / `y:` /
-      # `offset:` come from Capybara's `Element#perform_click_action`:
-      # when `Capybara.w3c_click_offset` is true `offset` is preset to
-      # `:center` so the driver bases the offset off the element's
-      # centre rather than its top-left.
+      # `delay:` is replayed as a real `sleep` between mousedown and
+      # mouseup so JS reading `Date.now()` sees the gap. `offset:` is
+      # `:center` when `Capybara.w3c_click_offset = true`, otherwise nil.
       def click(keys = [], delay: 0, x: nil, y: nil, offset: nil, **_opts)
         browser.click(handle_id, keys, delay: delay, x: x, y: y, offset: offset)
       end
 
-      # right_click and double_click fire the matching event but skip the
-      # default action for click — there's no synthesized "open native menu"
-      # behaviour to dispatch, and tests typically just look at the JS
-      # handler the event triggers.
       def right_click(keys = [], delay: 0, x: nil, y: nil, offset: nil, **_opts)
         browser.right_click(handle_id, keys, delay: delay, x: x, y: y, offset: offset)
       end
