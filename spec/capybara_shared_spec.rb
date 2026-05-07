@@ -9,7 +9,6 @@ end
 SKIPPED_TESTS = %i[
   about_scheme
   frames
-  hover
   screenshot
   scroll
   server

@@ -2823,21 +2823,20 @@ module Capybara
         decls = c.resolve(node, inline_style: node['style'])
         return false unless decl_value_is?(decls['display'], 'none') ||
           decl_value_is?(decls['visibility'], 'hidden')
-        # Stateless cascade says hidden — but the element might be
-        # gated on `:hover` / `:focus-within` etc. and reachable via
-        # interaction. Re-resolve with hover anchored to whatever the
-        # test has actually pointed at (`@hovered_handle`, set by
-        # `Browser#hover`) plus the candidate itself. p_css propagates
-        # `:hover` from each source up the ancestor chain, so this
-        # reveals content gated on the test target's chain or the
-        # explicitly-hovered element's chain — peer rows whose
-        # reveal-trigger is outside both chains stay hidden,
-        # disambiguating multi-row dropdown matches.
-        sources = []
-        sources << lookup_node(@hovered_handle) if @hovered_handle
-        sources << node
+        # Stateless cascade says hidden. If the test has explicitly
+        # hovered an element via `Browser#hover`, retry with that
+        # element in the hover set so `:hover` rules anchored on it
+        # (or any of its ancestors) reveal the candidate. We
+        # deliberately don't anchor on the candidate itself — the
+        # Capybara `:hover` capability tests assert that an element
+        # is `visible?: false` before hovering, and self-anchored
+        # hover would un-hide content the test expects to stay gated.
+        # Tests that assume hover without calling `.hover` are noted
+        # as a limitation in the README.
+        return true if @hovered_handle.nil?
+        hovered = lookup_node(@hovered_handle) or return true
         revealed = c.resolve(node, inline_style: node['style'],
-          state: {hover: sources, :"focus-within" => sources})
+          state: {hover: [hovered], :"focus-within" => [hovered]})
         decl_value_is?(revealed['display'], 'none') ||
           decl_value_is?(revealed['visibility'], 'hidden')
       rescue StandardError
