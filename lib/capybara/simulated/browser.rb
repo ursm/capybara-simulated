@@ -949,7 +949,7 @@ module Capybara
       # run JS) that have no Rack-side equivalent.
       NON_NAVIGABLE_SCHEMES = %w[javascript: mailto: tel: data: blob:].freeze
 
-      def click(handle, modifiers = nil, delay: 0)
+      def click(handle, modifiers = nil, delay: 0, x: nil, y: nil, offset: nil)
         node = lookup_node(handle)
         return false if node.nil?
         # Click on a focusable element steals focus first — matches what
@@ -957,7 +957,8 @@ module Capybara
         # element.click() / user clicks).
         focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
         mods = modifier_init(modifiers)
-        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
+        pos  = position_init(node, x, y, offset)
+        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods, position: pos)
         # Real browsers toggle a checkbox / radio *before* firing click,
         # so listeners (Redmine's `contextMenuClick` reads
         # `target.checked` after a row-checkbox click) see the new state.
@@ -965,7 +966,7 @@ module Capybara
         prior_checked = pretoggle_form_control(node)
         # Fire 'click' before the default action — handlers may
         # preventDefault() to suppress navigation / form submit.
-        unless dispatch_event(handle, 'click', **mouse_init(button: 0), **mods)
+        unless dispatch_event(handle, 'click', **mouse_init(button: 0), **pos, **mods)
           revert_pretoggle(node, prior_checked)
           return true
         end
@@ -1426,17 +1427,23 @@ module Capybara
       # mousedown → sleep(delay) → mouseup. JS handlers that read
       # Date.now() between the two events see real wall-clock elapsed,
       # which is what Selenium drivers also do for `click(delay:)`.
-      def right_click(handle, modifiers = nil, delay: 0)
+      def right_click(handle, modifiers = nil, delay: 0, x: nil, y: nil, offset: nil)
+        node = lookup_node(handle)
+        return false if node.nil?
         mods = modifier_init(modifiers)
-        fire_mouse_sequence(handle, button: 2, delay: delay, modifiers: mods)
-        dispatch_event(handle, 'contextmenu', **mouse_init(button: 2), **mods)
+        pos  = position_init(node, x, y, offset)
+        fire_mouse_sequence(handle, button: 2, delay: delay, modifiers: mods, position: pos)
+        dispatch_event(handle, 'contextmenu', **mouse_init(button: 2), **pos, **mods)
         true
       end
 
-      def double_click(handle, modifiers = nil, delay: 0)
+      def double_click(handle, modifiers = nil, delay: 0, x: nil, y: nil, offset: nil)
+        node = lookup_node(handle)
+        return false if node.nil?
         mods = modifier_init(modifiers)
-        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods)
-        init = mouse_init(button: 0)
+        pos  = position_init(node, x, y, offset)
+        fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods, position: pos)
+        init = {**mouse_init(button: 0), **pos}
         dispatch_event(handle, 'click',    **init, **mods)
         dispatch_event(handle, 'click',    **init, **mods)
         dispatch_event(handle, 'dblclick', **init, **mods)
@@ -1464,8 +1471,8 @@ module Capybara
         true
       end
 
-      def fire_mouse_sequence(handle, button:, delay:, modifiers:)
-        init = mouse_init(button: button)
+      def fire_mouse_sequence(handle, button:, delay:, modifiers:, position: {})
+        init = {**mouse_init(button: button), **position}
         dispatch_event(handle, 'mousedown', **init, **modifiers)
         sleep(delay) if delay && delay > 0
         dispatch_event(handle, 'mouseup',   **init, **modifiers)
@@ -1477,6 +1484,63 @@ module Capybara
       # `which`, so emit both.
       def mouse_init(button:)
         {button: button, which: button + 1}
+      end
+
+      # Translate Capybara's click offset (`x:` / `y:`) into clientX /
+      # clientY using a layout-free `simRect` approximation. Without a
+      # real layout engine, `getBoundingClientRect()` returns
+      # (0, 0, 0, 0); fixture pages that arrange their click targets
+      # through explicit `top` / `left` / `width` / `height` (px) work
+      # fine if we walk the ancestor chain and sum those values.
+      # `offset == :center` is what Capybara's `Element#perform_click_action`
+      # passes when `Capybara.w3c_click_offset` is true — base off the
+      # element's centre instead of its top-left.
+      def position_init(node, x, y, offset)
+        return {} unless node.respond_to?(:element?) && node.element?
+        rect    = sim_rect(node)
+        has_xy  = !x.nil? || !y.nil?
+        center  = offset == :center || !has_xy
+        base_x  = rect[:x] + (center ? rect[:width]  / 2.0 : 0.0)
+        base_y  = rect[:y] + (center ? rect[:height] / 2.0 : 0.0)
+        {clientX: base_x + (x || 0).to_f, clientY: base_y + (y || 0).to_f}
+      end
+
+      ZERO_RECT = {x: 0.0, y: 0.0, width: 0.0, height: 0.0}.freeze
+      PX_VALUE_RE = /\A-?\d+(?:\.\d+)?/
+
+      # Crude ancestor-summed rect — px values only, no inheritance, no
+      # auto-resolution, no positioning rules. Truthful when the page
+      # uses absolute / relative positioning with explicit pixel sizes
+      # (Capybara's `/offset` fixture); collapses to (0, 0, 0, 0)
+      # otherwise, which routes the click to the document origin.
+      def sim_rect(node)
+        return ZERO_RECT.dup unless node.respond_to?(:element?) && node.element?
+        c      = cascade
+        width  = read_layout_px(c, node, 'width')
+        height = read_layout_px(c, node, 'height')
+        x      = 0.0
+        y      = 0.0
+        cur    = node
+        while cur.respond_to?(:element?) && cur.element?
+          x += read_layout_px(c, cur, 'left')
+          y += read_layout_px(c, cur, 'top')
+          cur = cur.parent
+        end
+        {x: x, y: y, width: width, height: height}
+      end
+
+      def read_layout_px(c, node, prop)
+        raw =
+          if c
+            decls = c.resolve(node, inline_style: node['style'])
+            decls && (decl = decls[prop]) ? CSS.serialize(decl.value).strip : nil
+          end
+        raw ||= parse_inline_style_pairs(node['style'])[prop]
+        return 0.0 if raw.nil? || raw.empty? || raw == 'auto'
+        m = PX_VALUE_RE.match(raw)
+        m ? m[0].to_f : 0.0
+      rescue StandardError
+        0.0
       end
 
       # Build the MouseEvent init slice from Capybara modifier symbols.

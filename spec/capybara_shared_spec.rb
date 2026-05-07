@@ -26,15 +26,6 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #drag_to ',
   # Click-retry-on-wait-disabled also routes through elementFromPoint.
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  # All `#click / #double_click / #right_click` offset variants compare
-  # synthetic clientX/Y against getBoundingClientRect(); without layout
-  # the box is always (0,0,0,0) so the offset arithmetic doesn't match.
-  'Capybara::Session Simulated node #click offset',
-  'Capybara::Session Simulated node #double_click offset',
-  'Capybara::Session Simulated node #right_click offset',
-  'Capybara::Session Simulated node #click should allow to adjust the click offset',
-  'Capybara::Session Simulated node #double_click should allow to adjust the offset',
-  'Capybara::Session Simulated node #right_click should allow to adjust the offset',
   # `attach_file` block form clicks a <label> whose <input type="file">
   # is display:none; the click target resolves via elementFromPoint.
   'Capybara::Session Simulated #attach_file with a block can upload by clicking the label',

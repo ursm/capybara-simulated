@@ -11,22 +11,29 @@ the Capybara DSL works, and forms submit through `Rack::MockRequest`.
 
 Capybara 3.40's shared `Capybara::SpecHelper.spec` suite runs
 deterministically green at ~100 seconds: 1384 examples, 0 failures,
-67 pending (vs Selenium's ~5 minutes for the same suite). The runner
+46 pending (vs Selenium's ~5 minutes for the same suite). The runner
 filters the unsupported-capability tags (`about_scheme`, `frames`,
 `screenshot`, `scroll`, `server`, `spatial`, `windows`) plus a few
 classes of test marked pending with a documented reason — see
 [`spec/capybara_shared_spec.rb`](spec/capybara_shared_spec.rb).
 Pending tests fall into one of:
 
-- click-offset / drag-and-drop / `attach_file` via label / `#obscured?` /
-  `#all` with `obscured` filter / two `style`-filter edge cases — need
-  `getBoundingClientRect()` / `elementFromPoint()`, i.e. a real
-  layout engine.
+- drag-and-drop / `attach_file` via label / `#obscured?` / `#all`
+  with `obscured` filter / two `style`-filter edge cases — need
+  `elementFromPoint()`, i.e. a real layout engine.
 - `#reload` — read paths don't tick the virtual clock, so a Ruby
   `sleep(N)` between an action and a direct `node.text` doesn't fire
   the action's queued `setTimeout(K)`. Hooking tick into the read
   path works in isolation but stresses neighbouring timing tests
   on the `/with_js` page.
+
+Click offsets (`element.click(x:, y:)`) work without a real layout
+engine: `clientX`/`clientY` are computed by ancestor-summing the
+elements' computed `top` / `left` (px) on the way out, with
+`width` / `height` reused for the `:center`-base case. Truthful for
+fixture-style markup that arranges click targets through explicit
+absolute / relative positioning; collapses to `(0, 0)` otherwise,
+which routes the click to the document origin.
 
 The `:css`, `:hover`, and `:download` capabilities now run in full —
 the cascade resolver from [`p_css`](https://github.com/ursm/p_css)
