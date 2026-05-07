@@ -107,11 +107,19 @@
     // every subsequent setInterval call short-circuits on the
     // `!fetching` guard.
     insertAdjacentHTML(position, html) {
-      const pos = String(position).toLowerCase();
       const holder = document.createElement('div');
       holder.innerHTML = String(html);
-      const nodes = Array.from(holder.childNodes);
-      switch (pos) {
+      this._insertAdjacent(position, Array.from(holder.childNodes));
+    }
+    insertAdjacentElement(position, element) {
+      this._insertAdjacent(position, [element]);
+      return element;
+    }
+    insertAdjacentText(position, text) {
+      this._insertAdjacent(position, [document.createTextNode(String(text))]);
+    }
+    _insertAdjacent(position, nodes) {
+      switch (String(position).toLowerCase()) {
         case 'beforebegin':
           if (this.parentNode) for (const n of nodes) this.parentNode.insertBefore(n, this);
           break;
@@ -128,7 +136,7 @@
           }
           break;
         default:
-          throw new Error('insertAdjacentHTML: invalid position ' + pos);
+          throw new Error('invalid insertAdjacent position');
       }
     }
 
