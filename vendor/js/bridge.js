@@ -1842,6 +1842,15 @@
   // signal. Plus a handful of shims used during library boot.
   globalThis.window     = globalThis;
   globalThis.self       = globalThis;
+  // Frame hierarchy is collapsed: top / parent / frames all point at
+  // ourselves, mirroring an unframed page. `frameElement` is null
+  // because we aren't embedded. Forem's preloader reaches for `top`
+  // (`top.somefield`) without checking; without these globals it
+  // throws `ReferenceError: 'top' is not defined`.
+  globalThis.top          = globalThis;
+  globalThis.parent       = globalThis;
+  globalThis.frames       = globalThis;
+  globalThis.frameElement = null;
   // `Window` (the constructor) is referenced for `instanceof` /
   // `PropTypes.instanceOf(Window)` checks. We don't model a separate
   // Window class — globalThis suffices as the only window-shaped
