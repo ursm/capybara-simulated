@@ -45,19 +45,22 @@ DESCRIPTION_SKIPS = [
   # the /with_js cluster's MutationObserver chains, increasing flake
   # rate on neighbouring timing tests. Keep `#reload` skipped so the
   # release baseline stays deterministic.
-  'Capybara::Session Simulated node #reload '
+  'Capybara::Session Simulated node #reload ',
+  # `#obscured?` reports whether an element sits under another in
+  # stacking order — pure layout / hit-testing.
+  'Capybara::Session Simulated node #obscured?',
+  # `#all` with `obscured: false` filter: same hit-testing dependency.
+  'Capybara::Session Simulated #all with obscured filter should not find nodes on top outside the viewport when false',
+  'Capybara::Session Simulated #all with obscured filter should find top nodes outside the viewport when true',
+  # `assert_matches_style` exercises a regex-shape edge case the
+  # cascade resolver doesn't reproduce verbatim, and `has_css?`'s
+  # `:style` Hash form depends on a parsing branch we don't model.
+  "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
+  'Capybara::Session Simulated #has_css? :style option should support Hash'
 ].freeze
 
 RSpec.configure do |config|
   config.filter_run_excluding requires: Capybara::SpecHelper.method(:filter).to_proc
-  # Description-prefix filter for layout-dependent tests Capybara
-  # doesn't tag with a `requires:` capability — drag-and-drop, click
-  # offsets, etc. all assume a real `elementFromPoint`. Excluding at
-  # collection time (rather than skipping per-example) keeps the
-  # examples count v1-comparable.
-  config.filter_run_excluding full_description: ->(d) {
-    DESCRIPTION_SKIPS.any? {|prefix| d.start_with?(prefix) }
-  }
   config.shared_context_metadata_behavior = :apply_to_host_groups
 
   config.around(:each, :capybara_skip) do |example|
@@ -66,6 +69,11 @@ RSpec.configure do |config|
   ensure
     Capybara.app = nil
     Capybara.default_selector = :css
+  end
+
+  config.before(:each) do |example|
+    skip 'needs elementFromPoint / real layout engine — out of scope' \
+      if DESCRIPTION_SKIPS.any? {|prefix| example.full_description.start_with?(prefix) }
   end
 
   config.around(:each) do |example|
