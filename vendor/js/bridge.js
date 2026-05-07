@@ -44,6 +44,17 @@
     catch (_) { return raw; }
   }
 
+  // Backing helper for the `HTMLHyperlinkElementUtils` getters
+  // (`protocol` / `host` / `hash` / etc.). Returns a parsed `URL` or
+  // `null` when href is missing or unparseable.
+  function hrefURL(el) {
+    const raw = el.getAttribute('href');
+    if (raw == null) return null;
+    const base = globalThis.location && globalThis.location.href;
+    try { return new URL(raw, base); }
+    catch (_) { return null; }
+  }
+
   class Element {
     constructor(h) {
       // No-arg call lets a CE subclass's `super()` reach this ctor
@@ -278,6 +289,21 @@
     set href(v)      { this.setAttribute('href', v); }
     get src()        { return resolveUrlAttr(this.getAttribute('src')); }
     set src(v)       { this.setAttribute('src', v); }
+    // HTMLHyperlinkElementUtils mixin — derive URL parts via the
+    // built-in `URL` parser (`POLYFILL_URL` is loaded into the VM, so
+    // `new URL(...)` is the same WHATWG implementation a real browser
+    // ships). Turbo / InstantClick / Forem's `parseURL` chain reach
+    // for these directly and crash with "cannot read property
+    // 'match' of undefined" if they're absent. Falls back to empty
+    // strings on invalid / unset hrefs.
+    get protocol() { const u = hrefURL(this); return u ? u.protocol : ''; }
+    get host()     { const u = hrefURL(this); return u ? u.host     : ''; }
+    get hostname() { const u = hrefURL(this); return u ? u.hostname : ''; }
+    get port()     { const u = hrefURL(this); return u ? u.port     : ''; }
+    get pathname() { const u = hrefURL(this); return u ? u.pathname : ''; }
+    get search()   { const u = hrefURL(this); return u ? u.search   : ''; }
+    get hash()     { const u = hrefURL(this); return u ? u.hash     : ''; }
+    get origin()   { const u = hrefURL(this); return u ? u.origin   : ''; }
     // form.action falls back to the document URL when missing /
     // empty (HTML spec), so it's always a parseable absolute URL.
     get action()     { return resolveUrlAttr(this.getAttribute('action'), true); }
