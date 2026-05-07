@@ -118,6 +118,26 @@
     insertAdjacentText(position, text) {
       this._insertAdjacent(position, [document.createTextNode(String(text))]);
     }
+
+    // <dialog>.show / .showModal / .close — Forem opens user-suspension /
+    // unpublish-post modals via the native dialog API. We can't model
+    // top-layer rendering, but flipping the `open` attribute (which
+    // Forem reads back) plus dispatching the spec's `close` event is
+    // enough for those tests to drive the dialog state machine.
+    show() {
+      if (this.tagName !== 'DIALOG') return;
+      this.setAttribute('open', '');
+    }
+    showModal() {
+      if (this.tagName !== 'DIALOG') return;
+      this.setAttribute('open', '');
+    }
+    close(returnValue) {
+      if (this.tagName !== 'DIALOG') return;
+      if (returnValue !== undefined) this.returnValue = String(returnValue);
+      this.removeAttribute('open');
+      __dispatch(this, new Event('close', {bubbles: false, cancelable: false}));
+    }
     _insertAdjacent(position, nodes) {
       switch (String(position).toLowerCase()) {
         case 'beforebegin':
