@@ -174,7 +174,14 @@ module Capybara
         # fetches via Rack and rewrites this module's own nested
         # specifiers so they come back here as URLs too.
         @vm.module_loader = ->(name) { @browser.load_module(name) }
-        @vm.eval_code(File.read(BRIDGE_JS))
+        @vm.eval_bytecode(bridge_bytecode(@vm))
+      end
+
+      # Compile bridge.js exactly once per process — its bytecode is
+      # portable across QuickJS runtimes, so every subsequent
+      # `boot_vm` (test reset, recycle) just replays the compiled form.
+      def bridge_bytecode(vm)
+        @@bridge_bytecode ||= vm.compile(File.read(BRIDGE_JS), filename: BRIDGE_JS)
       end
 
       # `await null` resumes via a microtask, and JS_EVAL_FLAG_ASYNC's
@@ -216,15 +223,32 @@ module Capybara
       # flag the runtime for rebuild on the next page when we see one.
       LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[\p{L}_$]/
 
+      # Compiled-bytecode cache shared across every JsRuntime / VM in
+      # this process. QuickJS bytecode is portable between runtimes
+      # (per `quickjs.rb`'s `compile` / `eval_bytecode` contract), so
+      # the same Avo / Rails bundle parses once and replays on every
+      # page load and every VM rebuild — the parse step dominated
+      # eval_safely (10.8s out of a 23.5s Avo slice).
+      @@bytecode_cache = {}
+
       def eval_safely(code, label)
         return if code.nil? || code.empty?
         @scripts_evaluated_since_reset ||= code.match?(LEXICAL_DECL_RE)
-        with_recycle { @vm.eval_code(code, filename: label) }
+        bytecode = (@@bytecode_cache[code.hash] ||= compile_safely(code, label))
+        return unless bytecode
+        with_recycle { @vm.eval_bytecode(bytecode) }
       rescue Quickjs::SyntaxError => e
         return if e.message.match?(/has already been declared/)
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
       rescue Quickjs::RuntimeError, ArgumentError => e
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
+      end
+
+      def compile_safely(code, label)
+        with_recycle { @vm.compile(code, filename: label) }
+      rescue Quickjs::SyntaxError => e
+        warn "[capybara-simulated] script #{label} failed to compile: #{e.message[0, 200]}"
+        nil
       end
 
       EMPTY_ARGS = [].freeze
