@@ -82,6 +82,13 @@
     get nodeType()    { return __dom(this.__h, 'nodeType'); }
     get nodeName()    { return __dom(this.__h, 'nodeName'); }
     get tagName()     { return __dom(this.__h, 'tagName'); }
+    // Preact 11's diff (`diff/index.js`'s element-reuse check) compares
+    // `value.localName == nodeType` where `nodeType` is the lowercase
+    // JSX tag name. Without this getter the comparison is
+    // `undefined == "form"` and Preact creates a fresh element instead
+    // of reusing the existing DOM, surfacing as duplicate static + Preact
+    // forms on Forem's article-form mount.
+    get localName()   { const t = this.tagName; return t ? t.toLowerCase() : t; }
     // Turbo's `dispatch` retargets events to documentElement when the
     // requested target isn't connected.
     get isConnected() { return !!__dom(0, 'contains', [this.__h]); }
