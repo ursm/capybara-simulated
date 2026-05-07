@@ -31,9 +31,23 @@ module Capybara
         # bundle's controllers never register.
         Quickjs::POLYFILL_INTL
       ].freeze
+      # `max_stack_size: 0` disables QuickJS' C-stack overflow check.
+      # The default 4 MiB limit measures the difference between the
+      # current C-stack pointer and the one captured when the runtime
+      # was constructed — but Capybara enters JS through deep Ruby
+      # frames (matcher → `Node#visible?` → `check_stale` →
+      # `drain_timers`), and Ruby↔JS↔Ruby ping-pongs from `__dom`
+      # callbacks deepen it further mid-drain. With the captured
+      # `stack_top` set when Ruby was shallow, the parser's
+      # `js_check_stack_overflow` trips on the first token of even a
+      # tiny eval like `__drainTimers(N)` and the VM is recycled,
+      # losing the in-flight setTimeouts. Disabling the check trades
+      # a runaway-recursion safety net (Capybara already enforces a
+      # 5_000 ms `timeout_msec`) for stable wait-style polling.
       VM_OPTIONS = {
-        timeout_msec: 5_000,
-        memory_limit: 512 * 1024 * 1024
+        timeout_msec:   5_000,
+        memory_limit:   512 * 1024 * 1024,
+        max_stack_size: 0
       }.freeze
 
       def initialize(browser, extra_features: [])
