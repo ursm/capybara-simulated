@@ -439,9 +439,18 @@ module Capybara
       def attr(handle, name)
         node = lookup_node(handle)
         return nil if node.nil?
-        # validationMessage is a DOM property, not an HTML attribute —
-        # Capybara's `validation_message:` field filter reads it via `[]`.
-        return validation_message(node) if name == 'validationMessage'
+        # `Capybara::Node::Element#[]` documents itself as "value of
+        # an HTML attribute or DOM property"; tests reach for both
+        # interchangeably (`el["innerHTML"]`, `el["validationMessage"]`,
+        # `el["value"]`). The HTML attribute case is the default
+        # `node[name]` lookup at the bottom.
+        case name
+        when 'validationMessage' then return validation_message(node)
+        when 'innerHTML'         then return node.respond_to?(:inner_html) ? node.inner_html : node.to_html
+        when 'outerHTML'         then return node.to_html
+        when 'textContent'       then return all_text(handle)
+        when 'innerText'         then return visible_text(handle)
+        end
         node[name]
       end
 
@@ -900,6 +909,12 @@ module Capybara
         summary_seen = false
         each_ancestor(node) do |cur|
           return true  if cur.is_a?(Nokogiri::XML::Document)
+          # `<meta>` / `<link>` / `<title>` / inline `<script>` / etc.
+          # live inside `<head>`, which the user-agent stylesheet
+          # renders `display: none`. We don't load the UA stylesheet,
+          # so flag the head ancestor explicitly — Capybara's
+          # `visible: :hidden` matchers rely on it to find meta tags.
+          return false if INVISIBLE_TAGS.include?(cur.name)
           return false if self_hidden?(cur)
           return false if cur.name == 'details' && !cur['open'] && !summary_seen
           summary_seen = true if cur.name == 'summary'
