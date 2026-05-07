@@ -50,6 +50,14 @@ DESCRIPTION_SKIPS = [
 
 RSpec.configure do |config|
   config.filter_run_excluding requires: Capybara::SpecHelper.method(:filter).to_proc
+  # Description-prefix filter for layout-dependent tests Capybara
+  # doesn't tag with a `requires:` capability — drag-and-drop, click
+  # offsets, etc. all assume a real `elementFromPoint`. Excluding at
+  # collection time (rather than skipping per-example) keeps the
+  # examples count v1-comparable.
+  config.filter_run_excluding full_description: ->(d) {
+    DESCRIPTION_SKIPS.any? {|prefix| d.start_with?(prefix) }
+  }
   config.shared_context_metadata_behavior = :apply_to_host_groups
 
   config.around(:each, :capybara_skip) do |example|
@@ -58,11 +66,6 @@ RSpec.configure do |config|
   ensure
     Capybara.app = nil
     Capybara.default_selector = :css
-  end
-
-  config.before(:each) do |example|
-    skip 'needs elementFromPoint / real layout engine — out of scope' \
-      if DESCRIPTION_SKIPS.any? {|prefix| example.full_description.start_with?(prefix) }
   end
 
   config.around(:each) do |example|
