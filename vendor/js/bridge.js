@@ -659,6 +659,53 @@
     }
   }
 
+  // Inline-event-handler properties (`onclick`, `onsubmit`, …). Two
+  // reasons we need them on the prototype:
+  //
+  // - Preact 11's `setProperty` infers event-name casing by checking
+  //   `'onclick' in dom`; if missing, it registers the listener under
+  //   the JSX-literal name (`Click`) and the lowercase `click` event
+  //   we dispatch never reaches the handler. Surfaces as Forem's
+  //   `<button onClick={onPublish}>` silently doing nothing.
+  // - Legacy `el.onclick = fn` assignment is still common in older
+  //   pages and Stimulus mixins; round-tripping through
+  //   `addEventListener` keeps the firing path identical to a JSX
+  //   `onClick` registration.
+  const __INLINE_EVENT_NAMES = [
+    'click', 'dblclick', 'contextmenu',
+    'mousedown', 'mouseup', 'mouseover', 'mouseout',
+    'mouseenter', 'mouseleave', 'mousemove', 'wheel',
+    'focus', 'blur', 'focusin', 'focusout',
+    'keydown', 'keyup', 'keypress',
+    'input', 'change', 'submit', 'reset', 'select',
+    'load', 'error', 'scroll', 'resize',
+    'touchstart', 'touchend', 'touchmove', 'touchcancel',
+    'drag', 'dragstart', 'dragend', 'dragover', 'dragenter', 'dragleave', 'drop',
+    'animationstart', 'animationend', 'animationiteration',
+    'transitionstart', 'transitionend', 'transitionrun', 'transitioncancel',
+    'pointerdown', 'pointerup', 'pointermove', 'pointerover', 'pointerout',
+    'pointerenter', 'pointerleave', 'pointercancel',
+    'beforeinput', 'compositionstart', 'compositionupdate', 'compositionend',
+    'paste', 'copy', 'cut',
+    'invalid', 'beforeunload', 'unload',
+    'play', 'pause', 'ended', 'timeupdate', 'volumechange',
+    'toggle', 'close', 'cancel'
+  ];
+  const __INLINE_EVENT_KEY = '__on_';
+  for (const ev of __INLINE_EVENT_NAMES) {
+    Object.defineProperty(Element.prototype, 'on' + ev, {
+      configurable: true,
+      get() { return this[__INLINE_EVENT_KEY + ev] || null; },
+      set(v) {
+        const key = __INLINE_EVENT_KEY + ev;
+        const old = this[key];
+        if (old) this.removeEventListener(ev, old);
+        this[key] = v;
+        if (typeof v === 'function') this.addEventListener(ev, v);
+      }
+    });
+  }
+
   // CSSStyleDeclaration shim. Wraps a Proxy so libraries that touch
   // `el.style.backgroundColor` (camelCase) and `el.style['background-color']`
   // (kebab) both flow through getPropertyValue / setProperty against the
