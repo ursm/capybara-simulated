@@ -298,6 +298,18 @@
     // form-update post-ready script keys off (`option[selected=selected]`).
     get selected()  { return !!__dom(this.__h, 'selected'); }
     set selected(v) { __dom(this.__h, 'setOptionSelected', [!!v]); }
+    // <option>.index — position among `<option>` siblings of the
+    // owning `<select>`. Turbo's clone() reapplies selected via
+    // `clone.options[option.index].selected = true`, so a missing
+    // index landed every option at slot 0 and clobbered the rest.
+    get index() {
+      if (this.tagName !== 'OPTION') return -1;
+      const sel = this.closest('select, datalist');
+      if (!sel) return 0;
+      const opts = sel.querySelectorAll('option');
+      for (let i = 0; i < opts.length; i++) if (opts[i].__h === this.__h) return i;
+      return -1;
+    }
 
     // URL-bearing IDL attrs serialise as ABSOLUTE URLs (resolved
     // against the document) — Turbo / Stimulus consume `link.href` as
@@ -362,6 +374,16 @@
     // because each setter call clears every sibling's `selected` attr.
     get selectedIndex()  { return this.tagName === 'SELECT' ? __dom(this.__h, 'selectedIndex') : undefined; }
     set selectedIndex(v) { if (this.tagName === 'SELECT') __dom(this.__h, 'setSelectedIndex', [+v]); }
+    // <select>.selectedOptions — Turbo's BodyController clones the
+    // page body and re-applies `selected` per option via this list.
+    // Real browsers return an HTMLCollection; we return a plain Array
+    // (NodeList-shaped) since Turbo only iterates and Capybara doesn't
+    // touch it. Empty collection for non-SELECT elements so callers'
+    // `for...of` doesn't trip on undefined.
+    get selectedOptions() {
+      if (this.tagName !== 'SELECT' && this.tagName !== 'DATALIST') return [];
+      return Array.from(this.querySelectorAll('option')).filter(o => o.selected);
+    }
     // Reflected so JS-set values are also visible via getAttribute /
     // node['title'] — Redmine's jstoolbar does `button.title = ...`
     // and the `[title="..."]` Capybara filter reads the attribute.
@@ -412,6 +434,14 @@
     // - <meta>.content: IDL-reflects the `content` attribute. Without
     //   this, `m.content = x` lands on the JS instance only and any
     //   siblings polling `getAttribute('content')` never advance.
+    // - For every other element, `content` is not part of the IDL —
+    //   Element.prototype has no such accessor, so user code can
+    //   freely read / write it as an expando. Stamp an own data
+    //   property on first assignment to shadow this prototype
+    //   accessor (Tagify caches the dropdown wrapper as
+    //   `dropdown.content = querySelectorResult`, then later reads
+    //   `dropdown.content.innerHTML`; the no-op setter was dropping
+    //   the wrapper on the floor and breaking the next read).
     get content() {
       if (this.tagName === 'TEMPLATE') {
         let f = this.__contentView;
@@ -427,7 +457,11 @@
       return undefined;
     }
     set content(v) {
-      if (this.tagName === 'META') this.setAttribute('content', v == null ? '' : String(v));
+      if (this.tagName === 'META') {
+        this.setAttribute('content', v == null ? '' : String(v));
+        return;
+      }
+      Object.defineProperty(this, 'content', {value: v, writable: true, configurable: true, enumerable: true});
     }
     // <meta>.httpEquiv / .media — same reflection contract as .content.
     get httpEquiv()  { return this.tagName === 'META' ? (this.getAttribute('http-equiv') || '') : undefined; }
@@ -1116,7 +1150,15 @@
     const startGen = __pageGen;
     try {
       const path = buildPath(target);  // [target, parent, ..., document]
-      // Capture: document → target's parent
+      // Capture: window → document → target's parent. Turbo Drive's
+      // LinkClickObserver listens on window with `{capture: true}` and
+      // calls `event.preventDefault()` to take over link navigation;
+      // skipping window-capture meant every link fell through to our
+      // default-action navigation regardless of Turbo.
+      if (!event._stopped && __pageGen === startGen) {
+        event.eventPhase = 1;
+        invokeWindowListeners(event, true);
+      }
       for (let i = path.length - 1; i > 0; i--) {
         if (event._stopped || __pageGen !== startGen) break;
         event.eventPhase = 1;
@@ -1127,18 +1169,17 @@
         event.eventPhase = 2;
         invokeListeners(target, event, false, true);
       }
-      // Bubble: target's parent → document (only if event bubbles)
+      // Bubble: target's parent → document → window (only if event bubbles)
       if (event.bubbles && __pageGen === startGen) {
         for (let i = 1; i < path.length; i++) {
           if (event._stopped || __pageGen !== startGen) break;
           event.eventPhase = 3;
           invokeListeners(path[i], event, false, false);
         }
-        // After document, the bubble continues to the window — Turbo's
-        // StreamObserver listens for `turbo:before-fetch-response` here
-        // and `event.preventDefault()`s to short-circuit the normal
-        // form-submission flow before it errors on a 200-without-redirect.
-        if (!event._stopped && __pageGen === startGen) invokeWindowListeners(event);
+        if (!event._stopped && __pageGen === startGen) {
+          event.eventPhase = 3;
+          invokeWindowListeners(event, false);
+        }
       }
       event.eventPhase = 0;
       return !event.defaultPrevented;
@@ -1147,13 +1188,14 @@
     }
   }
 
-  function invokeWindowListeners(event) {
+  function invokeWindowListeners(event, capture) {
     const arr = __windowListeners.get(event.type);
     if (!arr) return;
     event.currentTarget = globalThis;
-    for (const h of arr.slice()) {
+    for (const entry of arr.slice()) {
       if (event._immediate) break;
-      callListener(h, globalThis, event);
+      if (!!entry.capture !== !!capture) continue;
+      callListener(entry.handler, globalThis, event);
     }
   }
 
@@ -1257,24 +1299,32 @@
   globalThis.__syncLocation = function (url) {
     try { __locationUrl = new URL(url); } catch (_) {}
   };
-  // Window-level event listener API — jQuery binds `load` on window.
-  // Reuses the document's listener machinery so __dispatch routes there.
+  // Window-level event listener API — jQuery binds `load` on window;
+  // Turbo Drive's LinkClickObserver listens for `click` on window with
+  // `{capture: true}` and preventDefault's to take over navigation.
+  // Stores {handler, capture} so __dispatch can run capture-phase
+  // listeners before the document walk starts.
   const __windowListeners = new Map();
-  globalThis.addEventListener = function (type, handler) {
+  function captureFlag(opts) {
+    if (opts === true || opts === false) return !!opts;
+    return !!(opts && opts.capture);
+  }
+  globalThis.addEventListener = function (type, handler, opts) {
     let arr = __windowListeners.get(String(type));
     if (!arr) __windowListeners.set(String(type), arr = []);
-    arr.push(handler);
+    arr.push({handler: handler, capture: captureFlag(opts)});
   };
-  globalThis.removeEventListener = function (type, handler) {
+  globalThis.removeEventListener = function (type, handler, opts) {
     const arr = __windowListeners.get(String(type));
     if (!arr) return;
-    const i = arr.indexOf(handler);
+    const cap = captureFlag(opts);
+    const i = arr.findIndex(e => e.handler === handler && e.capture === cap);
     if (i >= 0) arr.splice(i, 1);
   };
   globalThis.dispatchEvent = function (event) {
     const arr = __windowListeners.get(event.type);
     if (!arr) return true;
-    for (const h of arr.slice()) callListener(h, globalThis, event);
+    for (const entry of arr.slice()) callListener(entry.handler, globalThis, event);
     return !event.defaultPrevented;
   };
 
@@ -1420,18 +1470,24 @@
   // a throw inside `.then(() => (init(), exports))` killing the
   // downstream consumer. Only wraps `.then(onF)` (no onR); calls
   // that already pass an onR — including `.catch(handler)` —
-  // bypass the wrapper untouched.
+  // bypass the wrapper untouched. The error is marked the first
+  // time we log it so cascading no-onR `.then`s don't re-log the
+  // same rejection at every link in the chain.
   (function () {
     const origThen = Promise.prototype.then;
+    const LOGGED = '__csimRejectionLogged';
     Promise.prototype.then = function (onF, onR) {
       if (typeof onR === 'function') return origThen.call(this, onF, onR);
       return origThen.call(this, onF, function (err) {
-        try {
-          const ctor = err && err.constructor && err.constructor.name;
-          const msg  = (err && err.message) ? (ctor ? ctor + ': ' : '') + err.message : String(err);
-          const stk  = (err && err.stack)   ? '\n' + err.stack.slice(0, 600) : '';
-          console.error('unhandled rejection:', msg, stk);
-        } catch (_) {}
+        if (err && !err[LOGGED]) {
+          try {
+            err[LOGGED] = true;
+            const ctor = err.constructor && err.constructor.name;
+            const msg  = err.message ? (ctor ? ctor + ': ' : '') + err.message : String(err);
+            const stk  = err.stack ? '\n' + err.stack.slice(0, 600) : '';
+            console.error('unhandled rejection:', msg, stk);
+          } catch (_) {}
+        }
         throw err;
       });
     };
@@ -1701,6 +1757,14 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
+  // NamedNodeMap is the type of `element.attributes`; DOMPurify checks
+  // `attrs instanceof NamedNodeMap` as part of its clobber-detection
+  // and throws "invalid 'instanceof' right operand" if the constructor
+  // is missing. We don't expose a separate class for the attributes
+  // collection, so alias to Element — the only usage we've seen is
+  // structural (`X instanceof NamedNodeMap`) rather than asking for a
+  // real NamedNodeMap shape.
+  globalThis.NamedNodeMap        = Element;
   // App code occasionally reaches for these as namespace targets
   // (`Comment.propTypes = …` etc.) on the assumption that real
   // browsers always expose them; alias to Element so the writes
@@ -1820,6 +1884,82 @@
   };
   globalThis.document.createEvent = function (_type) {
     return new Event('', {bubbles: false, cancelable: false});
+  };
+  // NodeFilter / createNodeIterator — DOMPurify uses these to walk a
+  // sandbox-document subtree during sanitize(), and falls over with
+  // "cannot read property 'call' of undefined" if either is missing.
+  // We don't model the spec's iteration semantics exactly (no
+  // mutation-during-iteration recovery) — sanitize() consumes the
+  // iterator linearly to completion, which a depth-first stack handles.
+  const NODE_FILTER_ACCEPT = 1;
+  const NODE_FILTER_REJECT = 2;
+  const NODE_FILTER_SKIP   = 3;
+  globalThis.NodeFilter = {
+    SHOW_ALL:                    0xFFFFFFFF,
+    SHOW_ELEMENT:                1,
+    SHOW_ATTRIBUTE:              2,
+    SHOW_TEXT:                   4,
+    SHOW_CDATA_SECTION:          8,
+    SHOW_PROCESSING_INSTRUCTION: 64,
+    SHOW_COMMENT:                128,
+    SHOW_DOCUMENT:               256,
+    SHOW_DOCUMENT_TYPE:          512,
+    SHOW_DOCUMENT_FRAGMENT:      1024,
+    FILTER_ACCEPT:               NODE_FILTER_ACCEPT,
+    FILTER_REJECT:               NODE_FILTER_REJECT,
+    FILTER_SKIP:                 NODE_FILTER_SKIP
+  };
+  // DOM spec §6.4.1: the SHOW_* bit for a given nodeType is `1 <<
+  // (nodeType - 1)`. Returns 0 for unknown / non-positive types so
+  // they never match `whatToShow`.
+  function nodeTypeShowBit(nodeType) {
+    return nodeType > 0 ? (1 << (nodeType - 1)) : 0;
+  }
+  class NodeIterator {
+    constructor(root, whatToShow, filter) {
+      this.root         = root;
+      this.whatToShow   = (whatToShow == null) ? 0xFFFFFFFF : (whatToShow >>> 0);
+      this.filter       = filter || null;
+      this.referenceNode = root;
+      this.pointerBeforeReferenceNode = true;
+    }
+    _accept(node) {
+      if (!node) return NODE_FILTER_REJECT;
+      if ((this.whatToShow & nodeTypeShowBit(node.nodeType)) === 0) return NODE_FILTER_SKIP;
+      if (!this.filter) return NODE_FILTER_ACCEPT;
+      const fn = (typeof this.filter === 'function') ? this.filter : this.filter.acceptNode;
+      try { return fn.call(this.filter, node) | 0 || NODE_FILTER_ACCEPT; }
+      catch (_) { return NODE_FILTER_REJECT; }
+    }
+    // Pre-order successor: firstChild, else nextSibling, else walk up
+    // until we find an ancestor with a nextSibling — bounded by `root`.
+    _advance(node) {
+      const fc = node && node.firstChild;
+      if (fc) return fc;
+      let cur = node;
+      while (cur && cur !== this.root && !cur.nextSibling) cur = cur.parentNode;
+      return (cur && cur !== this.root) ? cur.nextSibling : null;
+    }
+    nextNode() {
+      let node;
+      if (this.pointerBeforeReferenceNode) {
+        node = this.referenceNode;
+        this.pointerBeforeReferenceNode = false;
+      } else {
+        node = this._advance(this.referenceNode);
+      }
+      while (node) {
+        if (this._accept(node) === NODE_FILTER_ACCEPT) {
+          this.referenceNode = node;
+          return node;
+        }
+        node = this._advance(node);
+      }
+      return null;
+    }
+  }
+  globalThis.document.createNodeIterator = function (root, whatToShow, filter) {
+    return new NodeIterator(root, whatToShow, filter);
   };
   // Range — covers Redmine's quote-reply / table-paste flows. The
   // (startContainer, startOffset, endContainer, endOffset) quad is
@@ -2877,6 +3017,10 @@
       this.head = wrap(handles.head);
       this.body = wrap(handles.body);
       this._root = this.documentElement || this.body;
+      // DOMPurify aliases `document.getElementsByTagName` and re-invokes
+      // it against its sandbox doc — without an `__h` the call lands on
+      // the live document. Mirror the root's handle so it doesn't.
+      this.__h = this._root ? this._root.__h : undefined;
     }
     querySelector(s)        { return this._root ? this._root.querySelector(s) : null; }
     querySelectorAll(s)     { return this._root ? this._root.querySelectorAll(s) : []; }
@@ -2905,6 +3049,13 @@
     return __modalDialog('prompt', String(message == null ? '' : message),
                          def == null ? '' : String(def));
   };
+
+  // Popup-blocked stub. Real browsers return a Window object (or null
+  // when the popup is denied); apps frequently call `window.open(url)`
+  // to trigger downloads or external-link flows and only check truthiness
+  // of the return. Returning `null` matches the popup-blocked branch
+  // most defensively-written code already handles.
+  globalThis.open = function () { return null; };
 
   // ── customElements ───────────────────────────────────────────
   // Minimal CE registry: define / get / whenDefined, plus auto-upgrade

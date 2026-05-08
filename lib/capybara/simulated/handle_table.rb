@@ -33,8 +33,13 @@ module Capybara
         end
       end
 
+      # DOMPurify aliases Element-prototype methods and re-invokes them
+      # via `.call(sandboxDoc, ...)`; when the receiver has no `__h`,
+      # the handle arg arrives as undefined. Treat non-Integers as a
+      # miss so the caller falls back to `@document` instead of
+      # blowing up on `Array#[]`.
       def lookup(handle)
-        @nodes[handle]
+        @nodes[handle] if handle.is_a?(Integer)
       end
     end
   end

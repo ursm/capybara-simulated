@@ -431,7 +431,7 @@ module Capybara
       def visible_text(handle)
         node = lookup_node(handle)
         return '' if node.nil?
-        out = String.new
+        out = String.new(encoding: Encoding::UTF_8)
         collect_visible_text(node, out, root: true)
         out
       end
@@ -1961,7 +1961,10 @@ module Capybara
           end
           args[1]
         when 'createElement'
-          @handles.track(@document.create_element(args[0].to_s))
+          # HTML-namespace `createElement` ASCII-lowercases the tag;
+          # flatpickr passes `nodeName` (uppercase per spec) when
+          # cloning the source input.
+          @handles.track(@document.create_element(args[0].to_s.downcase))
         when 'createTextNode'
           @handles.track(@document.create_text_node(args[0].to_s))
         when 'createComment'
@@ -2531,8 +2534,12 @@ module Capybara
           # an in-memory defaultValue snapshot, so reset is a no-op.
           true
         when 'checkbox', 'radio'
-          # Toggle already happened in pretoggle_form_control; nothing
-          # more to do once the click event passed through.
+          # Real browsers fire `input` then `change` after the click for a
+          # toggled checkbox / radio. Stimulus controllers commonly
+          # listen for `input` (`data-action="input->...#toggle"`) — Avo's
+          # item-selector and item-select-all chain depends on this.
+          handle = @handles.track(node)
+          dispatch_input_change(handle)
           true
         else
           false
@@ -2843,15 +2850,29 @@ module Capybara
         # blocks that actually emit text — collect children's output
         # into a scratch buffer so empty blocks collapse cleanly.
         if BLOCK_TAGS.include?(node.name)
-          inner = String.new
+          inner = String.new(encoding: Encoding::UTF_8)
           node.children.each { |c| collect_visible_text(c, inner, root: false, transform: transform) }
           return if inner.empty?
           out << "\n" unless out.empty? || out.end_with?("\n")
           out << inner
           out << "\n" unless out.end_with?("\n")
+          # innerText spec §14.4 step 4: append U+0009 between adjacent
+          # `<td>` / `<th>` cell siblings so the test snapshots Selenium
+          # produces (`"a\n\t\nb"`) match.
+          out << "\t" if TABLE_CELL_TAGS.include?(node.name) && next_cell_sibling?(node)
         else
           node.children.each { |c| collect_visible_text(c, out, root: false, transform: transform) }
         end
+      end
+
+      TABLE_CELL_TAGS = %w[td th].to_set.freeze
+      def next_cell_sibling?(node)
+        sib = node.next_sibling
+        while sib
+          return true if sib.respond_to?(:element?) && sib.element? && TABLE_CELL_TAGS.include?(sib.name)
+          sib = sib.next_sibling
+        end
+        false
       end
 
       TEXT_TRANSFORM_RE = /text-transform\s*:\s*([a-z-]+)/i
