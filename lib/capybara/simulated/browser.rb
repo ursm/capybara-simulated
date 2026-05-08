@@ -1519,6 +1519,13 @@ module Capybara
       end
 
       def fire_mouse_sequence(handle, button:, delay:, modifiers:, position: {})
+        # Real browsers move the cursor onto the target before pressing,
+        # which fires `mouseover`/`mouseenter` and advances `:hover` to
+        # the click target + ancestor chain. Tests that drive
+        # hover-revealed UI through clicks alone (Redmine's context-menu
+        # submenu cascades `display:block` off `li:hover ul`) rely on
+        # this to surface the next clickable layer.
+        hover(handle)
         init = {**mouse_init(button: button), **position}
         dispatch_event(handle, 'mousedown', **init, **modifiers)
         sleep(delay) if delay && delay > 0
@@ -1764,6 +1771,12 @@ module Capybara
           node.element? && safe_matches?(node, args[0])
         when 'isVisible'
           node.element? && visible?(handle)
+        when 'computedStyle'
+          # Returns the cascade-resolved value for one CSS property,
+          # e.g. 'display'. Falls through inline → cascade → '' so
+          # callers can mirror the standard `getComputedStyle`
+          # contract.
+          node.element? ? computed_style(handle, [args[0]])[args[0].to_s].to_s : ''
         when 'contains'
           other = lookup_node(args[0])
           other && (node == other || other.ancestors.include?(node))

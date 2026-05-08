@@ -2545,15 +2545,26 @@
       const v = decl.slice(i + 1).trim();
       if (k) decls[k] = v;
     });
+    // Cascade-resolved value for the visibility-relevant properties.
+    // Without this, jQuery `.toggle()` (and any code that gates off
+    // `getComputedStyle(el).display === 'none'`) misclassifies
+    // class-driven hides like Redmine's `.hidden { display:none; }`
+    // as visible — `.toggle()` would then *hide* the already-hidden
+    // node instead of showing it.
+    function cascadeProp(name) {
+      if (!el || el.__h == null) return '';
+      return String(__dom(el.__h, 'computedStyle', [name]) || '');
+    }
     const baseStyle = {
       getPropertyValue(name) {
         const k = String(name).toLowerCase();
         if (k in decls) return decls[k];
-        if (k === 'display') return defaultDisplayFor(el);
+        if (k === 'display') return cascadeProp('display') || defaultDisplayFor(el);
+        if (k === 'visibility') return cascadeProp('visibility') || 'visible';
         return '';
       },
-      get display()    { return decls.display    ?? defaultDisplayFor(el); },
-      get visibility() { return decls.visibility ?? 'visible'; },
+      get display()    { return decls.display    ?? (cascadeProp('display')    || defaultDisplayFor(el)); },
+      get visibility() { return decls.visibility ?? (cascadeProp('visibility') || 'visible'); },
       get opacity()    { return decls.opacity    ?? '1'; },
       get position()   { return decls.position   ?? 'static'; },
       get overflow()   { return decls.overflow   ?? 'visible'; },
