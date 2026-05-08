@@ -67,6 +67,18 @@ module Capybara
       def resize(width, height) = browser.set_viewport(width, height)
       def resize_window_to(_handle, width, height) = browser.set_viewport(width, height)
       def maximize_window(_handle); end
+
+      # We don't model windows / tabs — there's only the one document.
+      # But Capybara's `current_window.resize_to(w, h)` and similar
+      # session-level helpers walk through `current_window_handle`, so
+      # without these any responsive-test that goes via the
+      # `Capybara::Window` API blows up before the resize lands.
+      WINDOW_HANDLE = 'csim-window-0'
+      def current_window_handle  = WINDOW_HANDLE
+      def window_handles         = [WINDOW_HANDLE]
+      def window_size(_handle)   = [browser.viewport_width, browser.viewport_height]
+      def close_window(_handle); end
+      def switch_to_window(_handle); end
       def title            = browser.title
       def status_code      = browser.status_code
       def response_headers = browser.response_headers

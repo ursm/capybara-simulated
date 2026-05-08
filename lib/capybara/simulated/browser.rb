@@ -512,12 +512,6 @@ module Capybara
       def set_value(handle, value)
         node = lookup_node(handle)
         return false if node.nil?
-        # readonly text inputs / textareas silently reject writes; the
-        # `readonly` attribute does NOT apply to checkboxes / radios /
-        # range / etc. per the HTML spec, so don't short-circuit those.
-        if node['readonly'] && !readonly_exempt?(node)
-          return false
-        end
         case node.name
         when 'input'
           type = (node['type'] || 'text').downcase
@@ -1095,6 +1089,15 @@ module Capybara
       # via `setValue` dom_op skip this — that path is the JS author's call.
       def set_value_with_events(handle, value)
         node = lookup_node(handle)
+        # User-simulation gate: `readonly` text inputs / textareas reject
+        # `fill_in` / `set`, mirroring selenium / cuprite. The attribute
+        # does NOT apply to checkboxes / radios / range / etc. per the
+        # HTML spec, so don't short-circuit those. Programmatic writes
+        # via `el.value = ...` (the JS `setValue` dom_op path) skip
+        # this gate — JS authors expect their assignments to land
+        # regardless of readonly (flatpickr's altInput is the canonical
+        # example).
+        return false if node && node['readonly'] && !readonly_exempt?(node)
         # Checkbox / radio: real browsers toggle the input *before*
         # firing click, so listeners reading `target.checked` (Redmine's
         # `contextMenuClick`) see the new state. preventDefault reverts.
@@ -3135,6 +3138,9 @@ module Capybara
       # (Forem's `Capybara.current_session.driver.resize(425, 694)` before
       # clicking `.js-hamburger-trigger`) actually trip the matching
       # `@media (max-width: ...)` rules.
+      def viewport_width  = @viewport_width  || 1024
+      def viewport_height = @viewport_height || 768
+
       def set_viewport(width, height)
         return if @viewport_width == width && @viewport_height == height
         @viewport_width  = width
@@ -3290,7 +3296,7 @@ module Capybara
       # Methods JsRuntime reaches into directly. Re-publishing here
       # (after every method has been defined under `private`) keeps the
       # rest of the surface area private without splitting the file.
-      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style, :set_viewport
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style, :set_viewport, :viewport_width, :viewport_height
     end
   end
 end
