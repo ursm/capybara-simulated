@@ -299,10 +299,10 @@ module Capybara
       def css_match_via_parent(node, selector)
         parent = node.respond_to?(:parent) ? node.parent : nil
         return false unless parent.respond_to?(:css)
-        parent.css(selector, css_pseudo_handlers).any? { it.equal?(node) }
+        parent.css(selector, css_pseudo_handlers).any? {|n| n.equal?(node) }
       rescue *SELECTOR_ERRORS
         css_split(selector).any? {|branch|
-          (parent.css(branch, css_pseudo_handlers) rescue []).any? { it.equal?(node) }
+          (parent.css(branch, css_pseudo_handlers) rescue []).any? {|n| n.equal?(node) }
         }
       end
 
