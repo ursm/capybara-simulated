@@ -1157,7 +1157,7 @@ module Capybara
       SPECIAL_KEY_CODES = {
         backspace: 8, tab: 9, enter: 13, return: 13, escape: 27, space: 32,
         left: 37, up: 38, right: 39, down: 40, delete: 46, home: 36, end: 35,
-        shift: 16, control: 17, alt: 18, meta: 91
+        shift: 16, control: 17, alt: 18, meta: 91, command: 91
       }.freeze
 
       # `KeyboardEvent.key` strings — page handlers gate on these
@@ -1168,12 +1168,14 @@ module Capybara
         escape: 'Escape', space: ' ',
         left: 'ArrowLeft', up: 'ArrowUp', right: 'ArrowRight', down: 'ArrowDown',
         delete: 'Delete', home: 'Home', end: 'End',
-        shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta'
+        shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta',
+        command: 'Meta'
       }.freeze
 
       # Modifiers that suppress literal character insertion (a real
       # browser treats Ctrl+B as a shortcut, not a typed "b").
-      SUPPRESSING_MODIFIERS = Set[:control, :alt, :meta].freeze
+      # `:command` is Capybara's Mac-flavoured alias for `:meta`.
+      SUPPRESSING_MODIFIERS = Set[:control, :alt, :meta, :command].freeze
 
       # HTML5 drag-and-drop simulation. Builds a dataTransfer payload
       # from the supplied arguments (file paths → file items, hashes →
@@ -1279,6 +1281,10 @@ module Capybara
       end
 
       def apply_special_key(handle, state, key)
+        # Capybara's Mac-flavoured `:command` is the same physical key as
+        # `:meta`; normalise so `metaKey` is reported and modifier
+        # tracking matches the rest of the suite.
+        key = :meta if key == :command
         case key
         when :shift, :control, :alt, :meta
           # Track the modifier *before* building init so listeners reading

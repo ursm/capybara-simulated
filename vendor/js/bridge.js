@@ -1085,11 +1085,14 @@
     }
   }
   function invokeInlineHandler(el, event) {
-    // Property-style handler (`element.onkeydown = fn`) — jstoolbar
-    // assigns these directly rather than using addEventListener.
-    const propFn = el['on' + event.type];
-    if (typeof propFn === 'function') runInlineHandler('property handler', propFn, el, event);
-
+    // Property-style `el.onclick = fn` registrations are routed
+    // through `addEventListener` by the setter on Element.prototype.on*
+    // (so Preact 11's `'onclick' in dom` casing inference works), so
+    // they fire via the listener loop. Re-invoking propFn here would
+    // double-fire — Redmine's jstoolbar Ctrl+B fired encloseSelection
+    // twice per click for exactly this reason. Only the HTML-attribute
+    // path (`<a onclick="...">`) is handled here, since that body is
+    // never round-tripped to an event listener.
     const body = el.getAttribute('on' + event.type);
     if (body == null || body === '') return;
     let fn = __inlineCache.get(body);
