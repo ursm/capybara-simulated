@@ -2193,6 +2193,17 @@ module Capybara
           ))
         end
 
+        # Content-Disposition: attachment → real browsers persist the
+        # body and stay on the current page. The history entry we just
+        # pushed for this request needs to roll back so back/forward
+        # don't try to re-fetch it.
+        if (filename = attachment_filename(headers, req.url))
+          save_download_to_path(filename, response_body)
+          @history.pop
+          @history_idx = @history.size - 1
+          return status
+        end
+
         @status_code      = status
         @response_headers = headers
         @current_url      = req.url
@@ -2349,14 +2360,33 @@ module Capybara
       def save_download(target, download_attr)
         body = rack_get(target)
         return true if body.nil?
-        dir  = Capybara.save_path.to_s
-        FileUtils.mkdir_p(dir) unless dir.empty?
-        name = download_attr unless download_attr.empty?
-        name ||= File.basename(URI.parse(target).path)
-        return true if name.nil? || name.empty?
+        name = download_attr.empty? ? File.basename(URI.parse(target).path) : download_attr
+        save_download_to_path(name, body)
+        true
+      end
+
+      # Inspects a response's `Content-Disposition` for `attachment`
+      # disposition. Returns the filename to save under (decoded for
+      # the RFC 5987 `filename*=UTF-8''…` form), falling back to the
+      # URL's basename. Returns nil for non-attachment responses.
+      def attachment_filename(headers, url)
+        cd = headers.find {|k, _| k.to_s.downcase == 'content-disposition' }&.last.to_s
+        return nil unless cd.match?(/\A\s*attachment\b/i)
+        if (m = cd.match(/filename\*=(?:UTF-8'')?"?([^";]+)"?/i))
+          URI.decode_www_form_component(m[1])
+        elsif (m = cd.match(/filename="?([^";]+)"?/i))
+          m[1]
+        else
+          File.basename(URI.parse(url).path)
+        end
+      end
+
+      def save_download_to_path(name, body)
+        dir = Capybara.save_path.to_s
+        return if dir.empty? || name.nil? || name.empty?
+        FileUtils.mkdir_p(dir)
         path = File.join(dir, File.basename(name))
         File.binwrite(path, body)
-        true
       end
 
       def same_document_fragment?(target)

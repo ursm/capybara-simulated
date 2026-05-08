@@ -67,6 +67,18 @@
     catch (_) { return null; }
   }
 
+  // Defers to Ruby-side `Browser#visible?` so the answer mirrors the
+  // cascade Capybara's own visibility filter would give — including
+  // media-query-driven hiding (Redmine's `.js-flyout-menu-toggle-button`
+  // is desktop-hidden via `@media (max-width: ...)`, and a JS-only
+  // inline-style walk would incorrectly call it visible and flip
+  // `responsive.js`'s `isMobile()` true). Cached on the Ruby side via
+  // `@hidden_cache`, so repeated `offsetWidth` reads stay cheap.
+  function __isLayoutVisible(el) {
+    if (!el || el.__h == null) return false;
+    return !!__dom(el.__h, 'isVisible');
+  }
+
   class Element {
     constructor(h) {
       // CE upgrade goes through `Reflect.construct(ctor, [], ctor)` —
@@ -565,8 +577,20 @@
       if (t === 'HTML' || t === 'BODY') return null;
       return globalThis.document.body;
     }
-    get offsetWidth()        { return 0; }
-    get offsetHeight()       { return 0; }
+    // No layout engine, so real pixel widths aren't available — but
+    // jQuery's `:visible` (and a long tail of similar gates: react-dom
+    // ResizeObserver shims, vue-router scroll restoration, autocomplete
+    // dropdown placement) check `offsetWidth || offsetHeight` as a
+    // proxy for "is this element rendered?" Returning 0 unconditionally
+    // makes them all conclude the element is invisible and gate work
+    // off — Redmine's `show_api_key.js.erb` skips `.show()` on the
+    // copy-link because `$('#api-access-key').is(':visible')` reads
+    // false right after `.toggle()` removes display:none. Returning 1
+    // when the cascade considers the element visible is enough for
+    // the visibility-gate pattern, without pretending to know real
+    // pixel dimensions.
+    get offsetWidth()  { return __isLayoutVisible(this) ? 1 : 0; }
+    get offsetHeight() { return __isLayoutVisible(this) ? 1 : 0; }
     get offsetLeft()         { return 0; }
     get offsetTop()          { return 0; }
     get clientWidth()        { return 0; }
