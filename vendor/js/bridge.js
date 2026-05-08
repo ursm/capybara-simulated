@@ -8,6 +8,11 @@
   // would otherwise fail because each access creates a fresh wrapper.
   // Cleared in __resetPage (handle reuse + ceUpgrade prototype swaps).
   const __wrappers = new Map();
+  // Page generation counter, bumped on every __resetPage. __dispatch
+  // snapshots this before walking the event path so a handler that
+  // navigates mid-dispatch can't keep visiting stale ancestors whose
+  // handles got reassigned to unrelated nodes on the new page.
+  let __pageGen = 0;
   // CharacterData covers TEXT (3), CDATA_SECTION (4), COMMENT (8) — the
   // node types whose payload lives in `nodeValue` / `data`.
   const isCharacterDataType = t => t === 3 || t === 4 || t === 8;
@@ -1115,23 +1120,34 @@
     // outside a handler doesn't see stale state.
     const __prevEvent = globalThis.event;
     globalThis.event = event;
+    // Snapshot the page generation. A handler that triggers a
+    // navigation (form submit, location.href) re-runs __resetPage,
+    // bumping __pageGen and rebuilding wrappers. Path entries from
+    // before the bump now reference handles whose wrappers point at
+    // unrelated nodes on the new page (handle reuse across pages),
+    // so any continued capture / target / bubble step would invoke
+    // listeners on the new tree — Redmine's MyPage `add_block`
+    // would then re-fire the select's `onchange` body on a stale
+    // ancestor wrapper that now resolves to a different `<select>`,
+    // submitting the form a second time and 422'ing.
+    const startGen = __pageGen;
     try {
       const path = buildPath(target);  // [target, parent, ..., document]
       // Capture: document → target's parent
       for (let i = path.length - 1; i > 0; i--) {
-        if (event._stopped) break;
+        if (event._stopped || __pageGen !== startGen) break;
         event.eventPhase = 1;
         invokeListeners(path[i], event, true, false);
       }
       // Target
-      if (!event._stopped) {
+      if (!event._stopped && __pageGen === startGen) {
         event.eventPhase = 2;
         invokeListeners(target, event, false, true);
       }
       // Bubble: target's parent → document (only if event bubbles)
-      if (event.bubbles) {
+      if (event.bubbles && __pageGen === startGen) {
         for (let i = 1; i < path.length; i++) {
-          if (event._stopped) break;
+          if (event._stopped || __pageGen !== startGen) break;
           event.eventPhase = 3;
           invokeListeners(path[i], event, false, false);
         }
@@ -1139,7 +1155,7 @@
         // StreamObserver listens for `turbo:before-fetch-response` here
         // and `event.preventDefault()`s to short-circuit the normal
         // form-submission flow before it errors on a 200-without-redirect.
-        if (!event._stopped) invokeWindowListeners(event);
+        if (!event._stopped && __pageGen === startGen) invokeWindowListeners(event);
       }
       event.eventPhase = 0;
       return !event.defaultPrevented;
@@ -1466,6 +1482,7 @@
     // a same-realm "navigation". Per-element __listeners are mostly
     // stale though (handles get reassigned), so they get cleared with
     // a remap of just the document-anchor entries below.
+    __pageGen++;
     __styleFacades.clear();
     // Without this, every fresh page loses Turbo's
     // FormSubmitObserver / FormLinkClickObserver listeners (attached to
@@ -2737,6 +2754,15 @@
         const type = (f.getAttribute('type') || (f.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase();
         if (type === 'submit' || type === 'reset' || type === 'button' || type === 'image') continue;
         if ((type === 'checkbox' || type === 'radio') && !f.checked) continue;
+        // Real browsers serialize an empty `<input type=file>` as a
+        // multipart part with `filename=""`, which Rails / Rack drop
+        // from the request params entirely. Forwarding it as an empty
+        // string here lands a string in `params[name]` instead, and
+        // server code that branches on `value.key?(:file)` (Redmine's
+        // attachment custom-field format) tries to build an Attachment
+        // from `''` and fails validation. Skip them to match the
+        // Rails-visible result.
+        if (type === 'file' && (!f.value || f.value === '')) continue;
         if (f.tagName === 'SELECT') {
           const opts     = f.querySelectorAll('option');
           const explicit = Array.from(opts).filter(o => o.getAttribute('selected') != null);

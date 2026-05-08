@@ -14,9 +14,20 @@ module Capybara
       end
 
       def reset!(document)
-        @nodes.clear
+        # Don't reuse old slots — when the QuickJS VM is rebooted in
+        # the middle of a `form.submit()` Ruby callback (because the
+        # navigated-to page has top-level let/const/class declarations
+        # that taint the global lexical env), the OLD VM resumes with
+        # stale wrappers whose `__h` integers were assigned to nodes
+        # on the prior page. Clearing the slots and reusing the
+        # integers would silently rebind those wrappers to whatever
+        # NEW node happens to land at the same index — Redmine's
+        # MyPage `add_block` then re-fires `form.submit()` on a
+        # neighbouring form via the OLD VM's stale ancestor wrapper
+        # and 422's the second POST.
+        @nodes.fill(nil)
         @reverse.clear
-        @nodes   << document
+        @nodes[0] = document
         @reverse[document.object_id] = 0
       end
 
@@ -27,6 +38,9 @@ module Capybara
           @nodes.size - 1
         end
       end
+
+      # Number of slots ever allocated (live or filled with nil).
+      def size = @nodes.size
 
       def lookup(handle)
         @nodes[handle]
