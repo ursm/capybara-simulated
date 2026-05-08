@@ -86,13 +86,8 @@ module Capybara
         @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
         @focused_handle     = nil  # currently-focused element handle
         @hovered_handle     = nil  # last element passed to `hover` (drives mouseleave on the next hover)
-        # Web Storage backed in Ruby so the JS Map doesn't get wiped
-        # when boot_vm rebuilds the runtime mid-test (which happens
-        # whenever a script declared a top-level let/const/class).
-        # Real browsers persist localStorage across same-origin
-        # navigations within a tab; sessionStorage persists per-tab —
-        # we treat each test as a single tab/session so both behave
-        # the same way and clear at reset! time.
+        # Ruby-backed so the JS Map doesn't get wiped when boot_vm
+        # rebuilds the runtime mid-test. Cleared at per-test reset!.
         @local_storage      = {}
         @session_storage    = {}
         @mutations          = []
@@ -168,8 +163,6 @@ module Capybara
         reset_per_page_state
         @js&.reset_page
       end
-
-      attr_reader :local_storage, :session_storage
 
       def reset_per_page_state
         @mutations.clear
@@ -1048,9 +1041,7 @@ module Capybara
 
       # JS-side `form.submit()` arrives here. Per spec it bypasses the
       # 'submit' event entirely (only `requestSubmit` / user-initiated
-      # paths fire it). Forem's edit-comment handler relies on this:
-      # its own onsubmit listener calls `form.submit()` to escape itself
-      # without re-firing the listener.
+      # paths fire it).
       def submit_form(handle)
         node = lookup_node(handle)
         return false unless node
@@ -1157,7 +1148,7 @@ module Capybara
       SPECIAL_KEY_CODES = {
         backspace: 8, tab: 9, enter: 13, return: 13, escape: 27, space: 32,
         left: 37, up: 38, right: 39, down: 40, delete: 46, home: 36, end: 35,
-        shift: 16, control: 17, alt: 18, meta: 91, command: 91
+        shift: 16, control: 17, alt: 18, meta: 91
       }.freeze
 
       # `KeyboardEvent.key` strings — page handlers gate on these
@@ -1168,14 +1159,12 @@ module Capybara
         escape: 'Escape', space: ' ',
         left: 'ArrowLeft', up: 'ArrowUp', right: 'ArrowRight', down: 'ArrowDown',
         delete: 'Delete', home: 'Home', end: 'End',
-        shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta',
-        command: 'Meta'
+        shift: 'Shift', control: 'Control', alt: 'Alt', meta: 'Meta'
       }.freeze
 
       # Modifiers that suppress literal character insertion (a real
       # browser treats Ctrl+B as a shortcut, not a typed "b").
-      # `:command` is Capybara's Mac-flavoured alias for `:meta`.
-      SUPPRESSING_MODIFIERS = Set[:control, :alt, :meta, :command].freeze
+      SUPPRESSING_MODIFIERS = Set[:control, :alt, :meta].freeze
 
       # HTML5 drag-and-drop simulation. Builds a dataTransfer payload
       # from the supplied arguments (file paths → file items, hashes →
@@ -1212,12 +1201,9 @@ module Capybara
       def send_keys(handle, keys)
         node = lookup_node(handle)
         return false if node.nil?
-        # Match selenium / a real browser: keystrokes route to the
-        # focused element. Focusing here also blurs whatever was
-        # focused before — Forem's MultiSelectAutocomplete commits the
-        # tag from its `handleInputBlur`, so without this, typing into
-        # the tag input then `fill_in`-ing a sibling field never blurs
-        # the tag input and the typed value never becomes a tag.
+        # Match selenium: keystrokes route to the focused element, so
+        # focus first. The implicit blur of whatever was focused before
+        # matters for blur-driven commit patterns (autocomplete chips).
         focus(handle) if focusable?(node)
         start = field_value(node)
         state = {value: start.dup, caret: start.length, modifiers: Set.new}
@@ -1281,9 +1267,7 @@ module Capybara
       end
 
       def apply_special_key(handle, state, key)
-        # Capybara's Mac-flavoured `:command` is the same physical key as
-        # `:meta`; normalise so `metaKey` is reported and modifier
-        # tracking matches the rest of the suite.
+        # Capybara's `:command` is the Mac alias for `:meta`.
         key = :meta if key == :command
         case key
         when :shift, :control, :alt, :meta
@@ -1730,13 +1714,16 @@ module Capybara
       # state survives boot_vm rebuilds within a single test.
       def storage_op(op, args)
         store = op.start_with?('localStorage') ? @local_storage : @session_storage
-        case op
-        when 'localStorageGet',     'sessionStorageGet'     then store[args[0].to_s]
-        when 'localStorageSet',     'sessionStorageSet'     then store[args[0].to_s] = args[1].to_s; nil
-        when 'localStorageRemove',  'sessionStorageRemove'  then store.delete(args[0].to_s); nil
-        when 'localStorageClear',   'sessionStorageClear'   then store.clear; nil
-        when 'localStorageKey',     'sessionStorageKey'     then store.keys[args[0].to_i]
-        when 'localStorageLength',  'sessionStorageLength'  then store.size
+        case op.delete_prefix('localStorage').delete_prefix('sessionStorage')
+        when 'Get'    then store[args[0].to_s]
+        when 'Set'    then store[args[0].to_s] = args[1].to_s
+                           nil
+        when 'Remove' then store.delete(args[0].to_s)
+                           nil
+        when 'Clear'  then store.clear
+                           nil
+        when 'Key'    then store.keys[args[0].to_i]
+        when 'Length' then store.size
         end
       end
 

@@ -88,12 +88,6 @@ module Capybara
         with_recycle { @vm.eval_code('__resetTimers()') }
       end
 
-      # Per-test storage clear. Page navigations preserve localStorage /
-      # sessionStorage per spec; only the per-test reset wipes them.
-      def reset_storage
-        with_recycle { @vm.eval_code('__resetStorage()') }
-      end
-
       def reset_page
         # Boot a fresh VM whenever the previous test either hit a recycle
         # (post-recycle state is indeterminate) or evaluated a user script

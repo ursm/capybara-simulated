@@ -409,12 +409,9 @@
     //   for read-side ops (querySelector / children) but signals to
     //   appendChild / insertBefore that the children — not the
     //   template element itself — should be moved.
-    // - <meta>.content: reflected from the `content` attribute. Forem's
-    //   initializeBodyData rebuilds the CSRF meta via
-    //   `m.content = token`, then a sibling poll keeps re-running until
-    //   `getAttribute('content')` is non-null — without IDL reflection,
-    //   the property assignment lands on the JS-side instance and the
-    //   poll never terminates.
+    // - <meta>.content: IDL-reflects the `content` attribute. Without
+    //   this, `m.content = x` lands on the JS instance only and any
+    //   siblings polling `getAttribute('content')` never advance.
     get content() {
       if (this.tagName === 'TEMPLATE') {
         let f = this.__contentView;
@@ -437,12 +434,10 @@
     set httpEquiv(v) { if (this.tagName === 'META') this.setAttribute('http-equiv', v == null ? '' : String(v)); }
     get media()      { return this.tagName === 'META' ? (this.getAttribute('media') || '') : undefined; }
     set media(v)     { if (this.tagName === 'META') this.setAttribute('media', v == null ? '' : String(v)); }
-    // <iframe>.contentWindow / .contentDocument: real browsers expose
-    // the embedded document's window/document. We have no nested
-    // realms, so reuse the parent's. Honeybadger tries this trick to
-    // detect the "pristine" native fetch and emits a console.warn each
-    // time it can't find the property; returning self-references makes
-    // the detection succeed silently.
+    // <iframe>.contentWindow / .contentDocument — we have no nested
+    // realms, so reuse the parent's. Code that reaches into an iframe
+    // to find a "pristine" copy of a global (a common Honeybadger /
+    // Sentry trick) gets the same global back; close enough.
     get contentWindow()   { return this.tagName === 'IFRAME' ? globalThis : null; }
     get contentDocument() { return this.tagName === 'IFRAME' ? globalThis.document : null; }
 
@@ -763,12 +758,8 @@
       __dispatch(this, new SubmitEvent('submit', {bubbles: true, cancelable: true, submitter}));
     }
     // HTMLFormElement.submit() per spec: no `submit` event is fired,
-    // validation is bypassed, the form is submitted directly. Forem's
-    // edit-comment handler relies on this — its onsubmit polls for
-    // CSRF then calls `form.submit()` to bypass its own listener; if
-    // we re-dispatched, the listener would refire and schedule a new
-    // poll, looping forever. Code that wants the listener to run uses
-    // `requestSubmit()` instead.
+    // validation is bypassed, the form is submitted directly. Code
+    // that wants listeners to run uses `requestSubmit()` instead.
     submit() {
       __dom(this.__h, 'submitForm');
     }
@@ -1090,14 +1081,11 @@
     }
   }
   function invokeInlineHandler(el, event) {
-    // Property-style `el.onclick = fn` registrations are routed
-    // through `addEventListener` by the setter on Element.prototype.on*
-    // (so Preact 11's `'onclick' in dom` casing inference works), so
-    // they fire via the listener loop. Re-invoking propFn here would
-    // double-fire — Redmine's jstoolbar Ctrl+B fired encloseSelection
-    // twice per click for exactly this reason. Only the HTML-attribute
-    // path (`<a onclick="...">`) is handled here, since that body is
-    // never round-tripped to an event listener.
+    // Property-style `el.onclick = fn` registrations already fire via
+    // the listener loop — the setter on Element.prototype.on* routes
+    // them through addEventListener (so Preact 11's `'onclick' in dom`
+    // casing inference works). Only the HTML-attribute path
+    // (`<a onclick="...">`) is handled here.
     const body = el.getAttribute('on' + event.type);
     if (body == null || body === '') return;
     let fn = __inlineCache.get(body);
@@ -1120,16 +1108,11 @@
     // outside a handler doesn't see stale state.
     const __prevEvent = globalThis.event;
     globalThis.event = event;
-    // Snapshot the page generation. A handler that triggers a
-    // navigation (form submit, location.href) re-runs __resetPage,
-    // bumping __pageGen and rebuilding wrappers. Path entries from
-    // before the bump now reference handles whose wrappers point at
-    // unrelated nodes on the new page (handle reuse across pages),
-    // so any continued capture / target / bubble step would invoke
-    // listeners on the new tree — Redmine's MyPage `add_block`
-    // would then re-fire the select's `onchange` body on a stale
-    // ancestor wrapper that now resolves to a different `<select>`,
-    // submitting the form a second time and 422'ing.
+    // Snapshot __pageGen — a handler that triggers a same-realm
+    // navigation bumps it via __resetPage, and continuing the
+    // capture / target / bubble walk afterwards would invoke
+    // listeners against stale-handle wrappers that resolve to
+    // unrelated nodes on the new page.
     const startGen = __pageGen;
     try {
       const path = buildPath(target);  // [target, parent, ..., document]
@@ -1432,44 +1415,27 @@
     if (had) __setTimersActive(false);
   };
 
-  // Surface unhandled Promise rejections to the console so silent
-  // chain breaks (Forem's `Promise.resolve().then(() => (TW(), PW))`
-  // pattern, where a throw inside the .then body silently kills
-  // renderFeed) show up instead of disappearing into the void.
-  // QuickJS' default behaviour swallows them.
+  // Surface unhandled Promise rejections to the console — QuickJS
+  // swallows them by default, which hides silent chain breaks like
+  // a throw inside `.then(() => (init(), exports))` killing the
+  // downstream consumer. Only wraps `.then(onF)` (no onR); calls
+  // that already pass an onR — including `.catch(handler)` —
+  // bypass the wrapper untouched.
   (function () {
     const origThen = Promise.prototype.then;
     Promise.prototype.then = function (onF, onR) {
-      const wrappedR = function (err) {
-        if (typeof onR === 'function') return onR(err);
-        // No onR handler — schedule a microtask that re-throws so the
-        // rejection becomes unhandled iff no later .catch attaches.
-        const dup = origThen.call(Promise.resolve(), () => Promise.reject(err));
-        // Drop the rejection from `dup` synchronously to avoid spamming;
-        // we just want the side-effect log.
-        origThen.call(dup, undefined, function (e) {
-          try {
-            const msg = (e && e.message) ? (e.constructor && e.constructor.name ? e.constructor.name + ': ' : '') + e.message : String(e);
-            const stk = (e && e.stack) ? '\n' + e.stack.slice(0, 600) : '';
-            console.error('unhandled rejection:', msg, stk);
-          } catch (_) {}
-        });
+      if (typeof onR === 'function') return origThen.call(this, onF, onR);
+      return origThen.call(this, onF, function (err) {
+        try {
+          const ctor = err && err.constructor && err.constructor.name;
+          const msg  = (err && err.message) ? (ctor ? ctor + ': ' : '') + err.message : String(err);
+          const stk  = (err && err.stack)   ? '\n' + err.stack.slice(0, 600) : '';
+          console.error('unhandled rejection:', msg, stk);
+        } catch (_) {}
         throw err;
-      };
-      return origThen.call(this, onF, wrappedR);
+      });
     };
   })();
-
-  // Per-test storage clear — Browser#reset! invokes this to wipe
-  // localStorage / sessionStorage / clipboard between tests, since
-  // __resetPage no longer touches them on plain navigations.
-  globalThis.__resetStorage = function () {
-    if (globalThis.localStorage   && globalThis.localStorage._reset)   globalThis.localStorage._reset();
-    if (globalThis.sessionStorage && globalThis.sessionStorage._reset) globalThis.sessionStorage._reset();
-    if (globalThis.navigator && globalThis.navigator.clipboard && globalThis.navigator.clipboard._reset) {
-      globalThis.navigator.clipboard._reset();
-    }
-  };
 
   // Handle integers get reassigned across documents, so listeners /
   // observers / CE instances keyed on those handles would silently fire
@@ -1518,14 +1484,9 @@
     __wrappers.set(0, globalThis.document);
     globalThis.document.readyState = 'loading';
     __resetTimers();
-    // localStorage and sessionStorage are NOT cleared here. Per spec
-    // they persist across same-origin navigations within a session;
-    // Forem's `initializeLocalStorageRender` reads `current_user` from
-    // a previous-page write, and clearing it on every nav forces every
-    // page to fall back to the async `/async_info/base_data` fetch
-    // which doesn't resolve before the synchronous `callInitializers`
-    // chain reads `body.dataset.user` (the onboarding-task-card race).
-    // Browser#reset! triggers the per-test clear via __resetStorage.
+    // localStorage / sessionStorage persist across same-origin
+    // navigations per spec — they're Ruby-backed and cleared at the
+    // per-test boundary by Browser#reset!, not here.
     globalThis.navigator.clipboard._reset();
     // Re-attach the CE observer + upgrade existing matches in the
     // freshly-parsed document.
@@ -1740,13 +1701,10 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
-  // DOM Comment / Text / CharacterData interfaces — Forem's
-  // `articles/components/CommentsList.jsx` has a stray
-  // `Comment.propTypes = ...` assignment that's harmless in real
-  // browsers (lands on the DOM Comment class) but throws
-  // ReferenceError here without this stub. The thrown error inside
-  // the module-init function silently rejects the renderFeed
-  // promise chain and the homepage feed never paints.
+  // App code occasionally reaches for these as namespace targets
+  // (`Comment.propTypes = …` etc.) on the assumption that real
+  // browsers always expose them; alias to Element so the writes
+  // don't ReferenceError mid-module-init.
   globalThis.Comment             = Element;
   globalThis.Text                = Element;
   globalThis.CharacterData       = Element;
@@ -1846,11 +1804,9 @@
     configurable: true,
     get() { return globalThis.location ? globalThis.location.href : ''; }
   });
-  // No multi-document history in our model — referrer is always the
-  // empty string (a real browser would expose the previous page's URL,
-  // but we don't track that). Ahoy's `createVisit` does
-  // `document.referrer.length > 0` unguarded, so an undefined here
-  // throws "cannot read property 'length' of undefined" mid-init.
+  // No multi-document history; referrer is always the empty string.
+  // Defined explicitly so unguarded `document.referrer.length` reads
+  // don't throw on undefined.
   Object.defineProperty(globalThis.document, 'referrer', {
     configurable: true,
     get() { return ''; }
@@ -2125,13 +2081,10 @@
     doNotTrack:     null,
     maxTouchPoints: 0,
     clipboard:      __clipboard,
-    // Beacon API. Real browsers schedule the POST past page unload and
-    // return a boolean indicating queue success. We fire the request
-    // immediately via fetch — pre-unload fire-and-forget is the same
-    // shape from the caller's perspective. Ahoy uses this when its
-    // `useBeacon` config (default true) lines up with our presence
-    // here, which avoids a 1s setTimeout that gets dropped on
-    // SPA-style content swaps.
+    // Beacon API. Real browsers schedule the POST past page unload
+    // and return a boolean indicating queue success; we just fire
+    // the request immediately via fetch — pre-unload fire-and-forget
+    // is the same shape from the caller's perspective.
     sendBeacon: function (url, data) {
       try {
         let body = data;
@@ -2154,12 +2107,9 @@
   };
   globalThis.screen     = {width: 1024, height: 768};
 
-  // Base64 codec. QuickJS doesn't ship `btoa` / `atob`, but plenty of
-  // app code calls them — Forem's `browserStoreCache` base64-encodes
-  // the sanitized user JSON for the cross-subdomain cookie, and
-  // throwing here trips the surrounding `try/catch` which then removes
-  // `current_user` from localStorage too, defeating the cache that
-  // `initializeOnboardingTaskCard` relies on.
+  // QuickJS doesn't ship `btoa` / `atob`. Plain implementation —
+  // the WHATWG-strict path (Latin-1 only, throw on non-Latin1) is
+  // what real browsers do.
   const __B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   globalThis.btoa = function (str) {
     str = String(str);
@@ -2277,13 +2227,12 @@
   // (the onboarding-task-card race).
   function makeStorage(prefix) {
     return {
-      get length()        { return __dom(0, prefix + 'Length', []) || 0; },
-      key(i)              { const v = __dom(0, prefix + 'Key', [i | 0]); return v == null ? null : v; },
-      getItem(k)          { const v = __dom(0, prefix + 'Get', [String(k)]); return v == null ? null : v; },
-      setItem(k, v)       { __dom(0, prefix + 'Set', [String(k), String(v)]); },
+      get length()        { return __dom(0, prefix + 'Length', []) ?? 0; },
+      key(i)              { return __dom(0, prefix + 'Key',    [i | 0])      ?? null; },
+      getItem(k)          { return __dom(0, prefix + 'Get',    [String(k)])  ?? null; },
+      setItem(k, v)       { __dom(0, prefix + 'Set',    [String(k), String(v)]); },
       removeItem(k)       { __dom(0, prefix + 'Remove', [String(k)]); },
-      clear()             { __dom(0, prefix + 'Clear', []); },
-      _reset()            { __dom(0, prefix + 'Clear', []); }
+      clear()             { __dom(0, prefix + 'Clear',  []); }
     };
   }
   globalThis.localStorage   = makeStorage('localStorage');
@@ -2754,15 +2703,13 @@
         const type = (f.getAttribute('type') || (f.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase();
         if (type === 'submit' || type === 'reset' || type === 'button' || type === 'image') continue;
         if ((type === 'checkbox' || type === 'radio') && !f.checked) continue;
-        // Real browsers serialize an empty `<input type=file>` as a
-        // multipart part with `filename=""`, which Rails / Rack drop
-        // from the request params entirely. Forwarding it as an empty
-        // string here lands a string in `params[name]` instead, and
-        // server code that branches on `value.key?(:file)` (Redmine's
-        // attachment custom-field format) tries to build an Attachment
-        // from `''` and fails validation. Skip them to match the
-        // Rails-visible result.
-        if (type === 'file' && (!f.value || f.value === '')) continue;
+        // Empty file inputs serialize as multipart `filename=""` parts
+        // that Rails / Rack drop from `params`; forwarding them as empty
+        // strings here would instead leave `''` under that name, and
+        // server code that branches on the key's presence would try to
+        // build something from it. Skip so the Rails-visible result
+        // matches a real-browser submit.
+        if (type === 'file' && !f.value) continue;
         if (f.tagName === 'SELECT') {
           const opts     = f.querySelectorAll('option');
           const explicit = Array.from(opts).filter(o => o.getAttribute('selected') != null);
