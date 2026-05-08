@@ -1413,6 +1413,34 @@
     if (had) __setTimersActive(false);
   };
 
+  // Surface unhandled Promise rejections to the console so silent
+  // chain breaks (Forem's `Promise.resolve().then(() => (TW(), PW))`
+  // pattern, where a throw inside the .then body silently kills
+  // renderFeed) show up instead of disappearing into the void.
+  // QuickJS' default behaviour swallows them.
+  (function () {
+    const origThen = Promise.prototype.then;
+    Promise.prototype.then = function (onF, onR) {
+      const wrappedR = function (err) {
+        if (typeof onR === 'function') return onR(err);
+        // No onR handler — schedule a microtask that re-throws so the
+        // rejection becomes unhandled iff no later .catch attaches.
+        const dup = origThen.call(Promise.resolve(), () => Promise.reject(err));
+        // Drop the rejection from `dup` synchronously to avoid spamming;
+        // we just want the side-effect log.
+        origThen.call(dup, undefined, function (e) {
+          try {
+            const msg = (e && e.message) ? (e.constructor && e.constructor.name ? e.constructor.name + ': ' : '') + e.message : String(e);
+            const stk = (e && e.stack) ? '\n' + e.stack.slice(0, 600) : '';
+            console.error('unhandled rejection:', msg, stk);
+          } catch (_) {}
+        });
+        throw err;
+      };
+      return origThen.call(this, onF, wrappedR);
+    };
+  })();
+
   // Per-test storage clear — Browser#reset! invokes this to wipe
   // localStorage / sessionStorage / clipboard between tests, since
   // __resetPage no longer touches them on plain navigations.
@@ -1692,6 +1720,16 @@
   globalThis.DocumentFragment    = Element;
   globalThis.ShadowRoot          = Element;
   globalThis.Node                = Element;
+  // DOM Comment / Text / CharacterData interfaces — Forem's
+  // `articles/components/CommentsList.jsx` has a stray
+  // `Comment.propTypes = ...` assignment that's harmless in real
+  // browsers (lands on the DOM Comment class) but throws
+  // ReferenceError here without this stub. The thrown error inside
+  // the module-init function silently rejects the renderFeed
+  // promise chain and the homepage feed never paints.
+  globalThis.Comment             = Element;
+  globalThis.Text                = Element;
+  globalThis.CharacterData       = Element;
   // querySelectorAll / Element.children return Array subclasses with the
   // spec methods — `.item(i)` for both, `.namedItem(n)` for HTMLCollection.
   // Mostly-array semantics (indexed access, .length, iteration, .map etc.)
