@@ -1235,6 +1235,22 @@
         }
       }
       event.eventPhase = 0;
+      // Anchor click default action: when JS dispatches a click on
+      // `<a>` (FileSaver.js's `dispatchEvent(new MouseEvent('click'))`
+      // pattern), the browser performs the navigation / download
+      // step *after* the listener walk if not prevented. Ruby owns
+      // the navigation logic, so reach back through `__dom` for the
+      // anchor-specific default. Synthetic clicks dispatched from
+      // Ruby's own `Browser#click` set `__suppressAnchorDefault`
+      // because the Ruby path runs the same code immediately
+      // afterward.
+      if (event.type === 'click' &&
+          !event.defaultPrevented &&
+          !event.__suppressAnchorDefault &&
+          target && target.tagName === 'A' &&
+          target.__h != null) {
+        __dom(target.__h, 'anchorClickDefault');
+      }
       return !event.defaultPrevented;
     } finally {
       globalThis.event = __prevEvent;
@@ -1281,7 +1297,12 @@
     const i = init || {};
     if (typeof i.submitter === 'number') i.submitter = wrap(i.submitter);
     const Ctor = EVENT_CTOR_BY_TYPE[type] || Event;
-    return __dispatch(wrap(handle), new Ctor(type, i));
+    const event = new Ctor(type, i);
+    // Ruby's click flow runs the anchor default action immediately
+    // after this returns, so suppress the JS-side fallback in
+    // `__dispatch` to avoid double-navigation / double-download.
+    event.__suppressAnchorDefault = true;
+    return __dispatch(wrap(handle), event);
   };
   // Send a keyboard event with the right shape for the page-level
   // listeners that read e.keyCode / e.which (legacy but still common).
@@ -2846,13 +2867,43 @@
     }
   };
   // URL.createObjectURL / revokeObjectURL — bundled libraries (Avo's
-  // mapbox-gl shim, image-cropper widgets) call these to mint a worker
-  // URL or src= for a Blob. We don't actually serve the bytes; the URL
-  // is opaque enough that downstream code that doesn't fetch it gets
-  // by, and code that does just sees a 404.
+  // mapbox-gl shim, image-cropper widgets, FileSaver.js) call these
+  // to mint a worker URL or src= for a Blob. Track each minted URL
+  // against the originating Blob so `<a download href="blob:...">`
+  // clicks can serialize the bytes back through Capybara's
+  // `save_path`. URLs that aren't fetched (mapbox style sources etc.)
+  // continue to be opaque.
+  const __blobs = new Map();
   let __blobCounter = 0;
-  globalThis.URL.createObjectURL = function (_blob) { return 'blob:csim-' + (++__blobCounter); };
-  globalThis.URL.revokeObjectURL = function (_url)  { /* no-op — we don't track */ };
+  globalThis.URL.createObjectURL = function (blob) {
+    const url = 'blob:csim-' + (++__blobCounter);
+    __blobs.set(url, blob);
+    return url;
+  };
+  globalThis.URL.revokeObjectURL = function (url) { __blobs.delete(url); };
+  // Ruby-callable: serialize a tracked blob's bytes as a string.
+  // Used by `Browser#save_download` for blob URLs. Returns null when
+  // the URL isn't in the registry.
+  globalThis.__getBlobBody = function (url) {
+    const b = __blobs.get(url);
+    if (!b) return null;
+    const parts = b._parts || [];
+    let out = '';
+    for (const p of parts) {
+      if (typeof p === 'string') out += p;
+      else if (p instanceof Uint8Array) {
+        for (let i = 0; i < p.length; i++) out += String.fromCharCode(p[i]);
+      } else if (p instanceof ArrayBuffer) {
+        const v = new Uint8Array(p);
+        for (let i = 0; i < v.length; i++) out += String.fromCharCode(v[i]);
+      } else if (p && p._parts) {
+        out += p._parts.join('');
+      } else {
+        out += String(p);
+      }
+    }
+    return out;
+  };
 
   // EventTarget — bundled libraries like Avo's date-picker / mapbox
   // `class Foo extends EventTarget` and rely on

@@ -1010,22 +1010,7 @@ module Capybara
         end
         case node.name
         when 'a'
-          href = node['href']
-          return true if href.nil? || href.empty?
-          return true if NON_NAVIGABLE_SCHEMES.any? { |s| href.start_with?(s) }
-          target = resolve(href)
-          # Pure-fragment / same-document anchor — browsers don't navigate.
-          return true if same_document_fragment?(target)
-          # `<a href="..." download[="filename"]>` triggers a download
-          # rather than navigation. Persist the body at
-          # `Capybara.save_path` so tests that assert
-          # `File.exist?(File.join(Capybara.save_path, 'download.csv'))`
-          # see the file land.
-          if node.attributes['download']
-            return save_download(target, node['download'].to_s)
-          end
-          navigate(:get, target)
-          true
+          anchor_default_action(node)
         when 'button', 'input'
           click_form_control(node)
         when 'label'
@@ -1795,6 +1780,14 @@ module Capybara
           # callers can mirror the standard `getComputedStyle`
           # contract.
           node.element? ? computed_style(handle, [args[0]])[args[0].to_s].to_s : ''
+        when 'anchorClickDefault'
+          # JS-side `__dispatch` calls this after a click event on
+          # an `<a>` finishes its listener walk un-prevented. Mirrors
+          # the `case node.name when 'a'` branch of `Browser#click`
+          # but without re-dispatching the click — the dispatch
+          # already happened on the JS side.
+          anchor_default_action(node) if node.respond_to?(:name) && node.name == 'a'
+          nil
         when 'contains'
           other = lookup_node(args[0])
           other && (node == other || other.ancestors.include?(node))
@@ -2384,16 +2377,48 @@ module Capybara
         URI.join("#{current.scheme}://#{current.host}", rooted).to_s
       end
 
+      # Default action for a click on an `<a>` — navigation, in-page
+      # fragment, or download. Shared between `Browser#click` (sync,
+      # Ruby-driven) and the `anchorClickDefault` dom_op fired by
+      # `__dispatch` after a JS-driven `dispatchEvent('click')` walk
+      # finishes un-prevented.
+      def anchor_default_action(node)
+        href = node['href']
+        return true if href.nil? || href.empty?
+        return true if NON_NAVIGABLE_SCHEMES.any? {|s| href.start_with?(s) }
+        target = resolve(href)
+        return true if same_document_fragment?(target)
+        if node.attributes['download']
+          return save_download(target, node['download'].to_s)
+        end
+        navigate(:get, target)
+        true
+      end
+
       # Persists `target`'s body at `Capybara.save_path/<filename>`. The
        # `download` attribute may carry an explicit filename; otherwise
-      # we use the URL's basename. Always returns true (clicks on
-      # download links don't navigate).
+      # we use the URL's basename. `blob:` URLs source bytes from the
+      # in-process blob registry; ordinary http(s) URLs hit the Rack
+      # app. Always returns true (clicks on download links don't
+      # navigate).
       def save_download(target, download_attr)
-        body = rack_get(target)
+        body =
+          if target.start_with?('blob:') && @js
+            blob_body(target)
+          else
+            rack_get(target)
+          end
         return true if body.nil?
         name = download_attr.empty? ? File.basename(URI.parse(target).path) : download_attr
         save_download_to_path(name, body)
         true
+      end
+
+      def blob_body(url)
+        raw = js.eval("(globalThis.__getBlobBody && globalThis.__getBlobBody(#{url.to_json})) || null")
+        raw && raw.to_s
+      rescue StandardError
+        nil
       end
 
       # Inspects a response's `Content-Disposition` for `attachment`
