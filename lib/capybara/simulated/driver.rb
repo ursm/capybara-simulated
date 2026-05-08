@@ -38,6 +38,13 @@ module Capybara
       def reset!           = browser.reset!
       def go_back          = browser.go_back
       def go_forward       = browser.go_forward
+
+      # Rack-test parity: `Capybara.current_session.driver.header(name, value)`
+      # sets a header to be sent on every subsequent request for the
+      # lifetime of the session. Forem's `ForemWebView` specs use this
+      # to flip `User-Agent` so the rendered page picks the mobile
+      # registration UI variant.
+      def header(name, value) = browser.set_header(name, value)
       def current_url      = browser.current_url || ''
       def html             = browser.html
 

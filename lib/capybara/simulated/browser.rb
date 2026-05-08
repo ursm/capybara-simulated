@@ -61,6 +61,7 @@ module Capybara
         @last_tick_ts       = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until      = nil  # sticky window — see Browser#polling?
         @cookies            = {}
+        @sticky_headers     = {}   # explicit `driver.header(name, value)` overrides applied on every request
         @file_picks         = {}   # handle -> [path, ...] for <input type="file">
         @modal_handlers     = []   # innermost handler matches the next modal, pops, then bubbles outward
         @resource_cache     = {}   # URL -> response body for <script src=...> etc.
@@ -118,6 +119,17 @@ module Capybara
         navigate(:get, resolve_against_current(url), referer: nil)
       end
 
+      # Rack-test-compatible escape hatch for tests that need to set
+      # headers (most commonly `User-Agent` to make conditional UI
+      # render its mobile / web-view variant). Cleared on `reset!`.
+      def set_header(name, value)
+        if value.nil?
+          @sticky_headers.delete(name.to_s)
+        else
+          @sticky_headers[name.to_s] = value.to_s
+        end
+      end
+
       def refresh
         req = current_request
         replay(req) if req
@@ -146,6 +158,7 @@ module Capybara
         @last_tick_ts     = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until    = nil
         @cookies.clear
+        @sticky_headers.clear
         @file_picks.clear
         @resource_cache.clear
         @importmap = empty_importmap
@@ -2503,6 +2516,10 @@ module Capybara
         opts['CONTENT_TYPE'] = content_type          if content_type
         opts['HTTP_COOKIE']  = cookie_header_value   unless @cookies.empty?
         opts['HTTP_REFERER'] = referer               if referer
+        # Sticky `driver.header(...)` overrides apply on every request
+        # for the lifetime of the session. Layered before per-request
+        # `headers` so explicit per-call values win on collision.
+        merge_request_headers(opts, @sticky_headers)
         merge_request_headers(opts, headers)
         # env_for accepts an absolute URL and derives HTTP_HOST /
         # SERVER_NAME / SERVER_PORT / rack.url_scheme from it.
