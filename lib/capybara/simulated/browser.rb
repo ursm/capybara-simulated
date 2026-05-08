@@ -1729,7 +1729,15 @@ module Capybara
 
       # Single dispatch entry called from JS via `__dom(handle, op, args)`.
       def dom_op(handle, op, args)
-        @hidden_cache.clear if DOM_WRITE_OPS.include?(op)
+        # JS-injected `<style>` / `<link>` (Trix injects its toolbar
+        # CSS via `head.appendChild(<style>)`) need the cascade to
+        # rebuild; per-keystroke ops (setValue / click / focus) only
+        # need the hidden cache cleared.
+        if CASCADE_INVALIDATING_OPS.include?(op)
+          invalidate_cascade
+        elsif DOM_WRITE_OPS.include?(op)
+          @hidden_cache.clear
+        end
         # Web Storage ops are dispatched against handle 0; route them
         # to the Ruby-backed Hash so the state survives boot_vm.
         return storage_op(op, args) if STORAGE_OPS.include?(op)
@@ -3110,6 +3118,20 @@ module Capybara
         removeChild insertBefore replaceChild
         attachShadow cloneRangeContents parseHTML5Document
         focus blur click submitForm
+      ].to_set.freeze
+
+      # Subset of DOM_WRITE_OPS that can introduce / replace
+      # `<style>` / `<link>` content — these need the *full* cascade
+      # rebuild, not just the per-element hidden cache. Form-control
+      # ops (setValue / setChecked / etc.) and pure user actions
+      # (focus / blur / click / submitForm) can't change stylesheets,
+      # so they only flush the hidden cache.
+      CASCADE_INVALIDATING_OPS = %w[
+        setAttribute removeAttribute
+        setTextContent setInnerHTML setOuterHTML
+        appendChild appendChildrenOf insertChildrenOfBefore
+        removeChild insertBefore replaceChild
+        attachShadow cloneRangeContents parseHTML5Document
       ].to_set.freeze
 
       # Web Storage opcodes — dispatched against the Ruby-backed

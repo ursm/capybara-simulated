@@ -16,6 +16,14 @@
   // CharacterData covers TEXT (3), CDATA_SECTION (4), COMMENT (8) — the
   // node types whose payload lives in `nodeValue` / `data`.
   const isCharacterDataType = t => t === 3 || t === 4 || t === 8;
+  // CE-upgrade hand-off slot for `Reflect.construct(ctor, [], ctor)`:
+  // the user ctor's `super()` lands in the Element ctor with no args,
+  // and we read this slot so the live instance ends up bound to the
+  // node the pre-upgrade wrapper was using. This is the
+  // @ungap/custom-elements pattern — running the user ctor against
+  // `this` (rather than a throwaway `tmp` whose props we copy) so
+  // private class fields land on the live receiver.
+  let __pendingHandle = null;
   function wrap(h) {
     if (h == null) return null;
     let w = __wrappers.get(h);
@@ -26,10 +34,9 @@
       // live document (ceEnsureObserver's MutationObserver). DOMParser
       // / template-innerHTML parses don't trigger that observer
       // because the nodes start detached, so eagerly upgrade on first
-      // wrapper access — matches the real-browser parse-time semantics
-      // Turbo's importStreamElements relies on. `__lazyUpgrade` is
-      // populated below once the CE registry is in scope.
-      if (__lazyUpgrade) __lazyUpgrade(w);
+      // wrapper access — matches real-browser parse-time semantics
+      // Turbo's importStreamElements relies on.
+      if (__lazyUpgrade) w = __lazyUpgrade(w) || w;
     }
     return w;
   }
@@ -62,9 +69,15 @@
 
   class Element {
     constructor(h) {
-      // No-arg call lets a CE subclass's `super()` reach this ctor
-      // without clobbering the wrapper's pre-existing __h (ceUpgrade
-      // swaps the prototype on a wrapper whose handle is already pinned).
+      // CE upgrade goes through `Reflect.construct(ctor, [], ctor)` —
+      // the user ctor's `super()` lands here with no args. Pick up
+      // the handle from the module-level hand-off slot so the live
+      // instance ends up bound to the same node the pre-upgrade
+      // wrapper was using.
+      if (h === undefined && __pendingHandle != null) {
+        h = __pendingHandle;
+        __pendingHandle = null;
+      }
       if (h !== undefined) {
         Object.defineProperty(this, '__h', {value: h, writable: false});
       }
@@ -618,6 +631,15 @@
       } else {
         __dom(this.__h, 'appendChild', [child.__h]);
       }
+      // Real browsers run CE upgrade + connectedCallback synchronously
+      // on attach; relying on the MutationObserver-driven upgrade
+      // delays those callbacks to microtask drain time, breaking
+      // libraries that compose CEs synchronously (Trix's editor
+      // ctor inserts a `<trix-toolbar>` and immediately expects its
+      // toolbar controller's `resetDialogInputs` to find the
+      // toolbar's children — disabling the link-dialog `<input>`s
+      // before the form sees them).
+      if (__lazyUpgrade && __ceDefs.size > 0) ceUpgradeTree(child);
       return child;
     }
     removeChild(child) {
@@ -632,6 +654,7 @@
       } else {
         __dom(this.__h, 'insertBefore', [newChild.__h, refChild && refChild.__h]);
       }
+      if (__lazyUpgrade && __ceDefs.size > 0) ceUpgradeTree(newChild);
       return newChild;
     }
     replaceChild(newChild, oldChild) {
@@ -1034,6 +1057,12 @@
     preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
     stopPropagation() { this._stopped = true; }
     stopImmediatePropagation() { this._stopped = true; this._immediate = true; }
+    // Legacy `document.createEvent('Events')` + `e.initEvent(...)` API.
+    initEvent(type, bubbles, cancelable) {
+      this.type       = String(type);
+      this.bubbles    = !!bubbles;
+      this.cancelable = !!cancelable;
+    }
   }
   globalThis.Event = Event;
   // Subtypes are aliases — base Event already spreads init keys, so every
@@ -1960,6 +1989,90 @@
   }
   globalThis.document.createNodeIterator = function (root, whatToShow, filter) {
     return new NodeIterator(root, whatToShow, filter);
+  };
+  // TreeWalker — Trix's HTML sanitiser uses a `currentNode`-based
+  // cursor while walking parsed fragments. Shares NodeIterator's
+  // depth-first advance.
+  class TreeWalker {
+    constructor(root, whatToShow, filter) {
+      this.root        = root;
+      this.whatToShow  = (whatToShow == null) ? 0xFFFFFFFF : (whatToShow >>> 0);
+      this.filter      = filter || null;
+      this.currentNode = root;
+    }
+    _accept(node) {
+      if (!node) return NODE_FILTER_REJECT;
+      if ((this.whatToShow & nodeTypeShowBit(node.nodeType)) === 0) return NODE_FILTER_SKIP;
+      if (!this.filter) return NODE_FILTER_ACCEPT;
+      const fn = (typeof this.filter === 'function') ? this.filter : this.filter.acceptNode;
+      try { return fn.call(this.filter, node) | 0 || NODE_FILTER_ACCEPT; }
+      catch (_) { return NODE_FILTER_REJECT; }
+    }
+    _advanceFrom(node) {
+      const fc = node && node.firstChild;
+      if (fc) return fc;
+      let cur = node;
+      while (cur && cur !== this.root && !cur.nextSibling) cur = cur.parentNode;
+      return (cur && cur !== this.root) ? cur.nextSibling : null;
+    }
+    nextNode() {
+      let node = this._advanceFrom(this.currentNode);
+      while (node) {
+        if (this._accept(node) === NODE_FILTER_ACCEPT) {
+          this.currentNode = node;
+          return node;
+        }
+        node = this._advanceFrom(node);
+      }
+      return null;
+    }
+    parentNode() {
+      let cur = this.currentNode && this.currentNode.parentNode;
+      while (cur && cur !== this.root.parentNode) {
+        if (this._accept(cur) === NODE_FILTER_ACCEPT) {
+          this.currentNode = cur;
+          return cur;
+        }
+        cur = cur.parentNode;
+      }
+      return null;
+    }
+    firstChild() {
+      let cur = this.currentNode && this.currentNode.firstChild;
+      while (cur) {
+        if (this._accept(cur) === NODE_FILTER_ACCEPT) {
+          this.currentNode = cur;
+          return cur;
+        }
+        cur = cur.nextSibling;
+      }
+      return null;
+    }
+    nextSibling() {
+      let cur = this.currentNode && this.currentNode.nextSibling;
+      while (cur) {
+        if (this._accept(cur) === NODE_FILTER_ACCEPT) {
+          this.currentNode = cur;
+          return cur;
+        }
+        cur = cur.nextSibling;
+      }
+      return null;
+    }
+    previousSibling() {
+      let cur = this.currentNode && this.currentNode.previousSibling;
+      while (cur) {
+        if (this._accept(cur) === NODE_FILTER_ACCEPT) {
+          this.currentNode = cur;
+          return cur;
+        }
+        cur = cur.previousSibling;
+      }
+      return null;
+    }
+  }
+  globalThis.document.createTreeWalker = function (root, whatToShow, filter) {
+    return new TreeWalker(root, whatToShow, filter);
   };
   // Range — covers Redmine's quote-reply / table-paste flows. The
   // (startContainer, startOffset, endContainer, endOffset) quad is
@@ -3073,64 +3186,52 @@
     return __ceDefs.get(String(tagName || '').toLowerCase());
   }
 
-  // Walk an object graph rooted at `root` and replace every direct
-  // reference to `tmp` with `el`. Limited depth + WeakSet visited
-  // guard keep the cost bounded for delegate / view / observer
-  // hierarchies (Turbo's FrameController's depth is ~3).
-  function rewriteTmpRefs(root, tmp, el, depth = 4, seen = new WeakSet()) {
-    if (depth <= 0 || !root || typeof root !== 'object' || seen.has(root)) return;
-    seen.add(root);
-    for (const k of Object.getOwnPropertyNames(root)) {
-      let v;
-      try { v = root[k]; } catch (_) { continue; }
-      if (v === tmp) {
-        try { root[k] = el; } catch (_) {}
-      } else if (v && typeof v === 'object') {
-        rewriteTmpRefs(v, tmp, el, depth - 1, seen);
-      }
-    }
-  }
-
+  // @ungap/custom-elements-style upgrade: `Reflect.construct(ctor, [], ctor)`
+  // runs the user ctor against the live receiver so private class
+  // fields (`#oo`, `#delegate`, etc.) land on it instead of a
+  // throwaway. Trix's editor / form-association controllers rely on
+  // this — the controller ctor's `resetDialogInputs()` disables the
+  // link-dialog inputs only if the receiver carries the toolbar's
+  // private slots, which it doesn't with the older "setPrototypeOf
+  // + copy own props" approach.
+  //
+  // The replacement wrapper is stamped into `__wrappers` here so
+  // every code path (wrap's lazy upgrade, the MutationObserver's
+  // ceUpgradeTree, customElements.define's initial scan,
+  // __resetPage's reattach) sees subsequent `wrap(h)` calls return
+  // the upgraded instance without each having to mirror the swap.
   function ceUpgrade(el) {
-    if (!el || el.nodeType !== 1) return;
-    if (__ceInstances.has(el.__h)) return;
+    if (!el || el.nodeType !== 1) return null;
+    if (__ceInstances.has(el.__h)) return __wrappers.get(el.__h) || el;
     const ctor = ceCtorFor(el.tagName);
-    if (!ctor) return;
-    // Real browsers upgrade in place; we lack the [[Construct]] hook,
-    // so we swap the prototype, run the ctor against a throwaway
-    // `tmp` (sharing __h so DOM ops target the same node), then copy
-    // own props onto the wrapper. Turbo's `class FrameElement` does
-    // `this.delegate = new FrameController(this)` in its ctor — the
-    // FrameController stashes `this.element = tmp`, so after copy
-    // `el.delegate.element === tmp` (NOT `=== el`). FrameController's
-    // willSubmitForm then does `form.closest('turbo-frame') === this.element`
-    // and the strict-equality check fails (tmp ≠ el). Fix: walk the
-    // copied subtree once and rewrite any `tmp` reference to `el`.
-    Object.setPrototypeOf(el, ctor.prototype);
+    if (!ctor) return null;
+    const h = el.__h;
+    __pendingHandle = h;
+    let upgraded;
     try {
-      const tmp = Reflect.construct(ctor, [], ctor);
-      try { Object.defineProperty(tmp, '__h', {value: el.__h, writable: false}); } catch (_) {}
-      for (const k of Object.getOwnPropertyNames(tmp)) {
-        if (k === '__h') continue;
-        try {
-          Object.defineProperty(el, k, Object.getOwnPropertyDescriptor(tmp, k));
-        } catch (_) {}
-      }
-      rewriteTmpRefs(el, tmp, el);
+      upgraded = Reflect.construct(ctor, [], ctor);
     } catch (e) {
-      logCallbackError('CE constructor', e);
+      logCallbackError('CE constructor', e, el.tagName);
+      return null;
+    } finally {
+      __pendingHandle = null;
     }
-    __ceInstances.set(el.__h, el);
-    invokeCECallback(el, 'connectedCallback');
+    __ceInstances.set(h, upgraded);
+    __wrappers.set(h, upgraded);
+    invokeCECallback(upgraded, 'connectedCallback');
+    return upgraded;
   }
 
   function invokeCECallback(el, name, ...args) {
     if (typeof el[name] !== 'function') return;
-    try { el[name].apply(el, args); } catch (e) { logCallbackError(name, e); }
+    try { el[name].apply(el, args); } catch (e) { logCallbackError(name, e, el && el.tagName); }
   }
 
-  function logCallbackError(label, e) {
-    try { console.error(label + ' threw:', e && e.message ? e.message : e); } catch (_) {}
+  function logCallbackError(label, e, tag) {
+    try {
+      const where = tag ? ' on <' + String(tag).toLowerCase() + '>' : '';
+      console.error(label + ' threw' + where + ':', e && e.message ? e.message : e);
+    } catch (_) {}
   }
 
   // Notify a CE that an observedAttribute changed. Turbo's FrameElement
@@ -3158,9 +3259,10 @@
 
   function ceDisconnect(el) {
     if (!el || el.nodeType !== 1) return;
-    if (!__ceInstances.has(el.__h)) return;
+    const inst = __ceInstances.get(el.__h);
+    if (!inst) return;
     __ceInstances.delete(el.__h);
-    invokeCECallback(el, 'disconnectedCallback');
+    invokeCECallback(inst, 'disconnectedCallback');
   }
 
   function ceDisconnectTree(el) {
@@ -3238,10 +3340,10 @@
   // observer, and upgrading too early loses post-creation property
   // assignments like `el.id = 'foo'`.
   __lazyUpgrade = function (el) {
-    if (__ceDefs.size === 0) return;
-    if (__ceInstances.has(el.__h)) return;
-    if (!ceCtorFor(el.tagName)) return;
-    if (!el.parentNode) return;
-    ceUpgrade(el);
+    if (__ceDefs.size === 0) return null;
+    if (__ceInstances.has(el.__h)) return null;
+    if (!ceCtorFor(el.tagName)) return null;
+    if (!el.parentNode) return null;
+    return ceUpgrade(el);
   };
 })();
