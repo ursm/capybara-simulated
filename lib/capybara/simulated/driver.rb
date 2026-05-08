@@ -59,12 +59,13 @@ module Capybara
         path
       end
 
-      # Cuprite / Selenium expose `driver.resize(w, h)` for responsive-
-      # design tests. We have no layout engine to honour the request, but
-      # the call shouldn't crash — the assertion that follows usually
-      # fails on `visible?` semantics, not on the resize itself.
-      def resize(_width, _height); end
-      def resize_window_to(_handle, _width, _height); end
+      # Cuprite / Selenium expose `driver.resize(w, h)` to drive
+      # responsive-design tests. We don't lay anything out, but the
+      # call still moves the cascade's `@media` evaluation context —
+      # rules behind `(max-width: 768px)` etc. flip on/off when the
+      # test sizes the viewport into / out of a breakpoint.
+      def resize(width, height) = browser.set_viewport(width, height)
+      def resize_window_to(_handle, width, height) = browser.set_viewport(width, height)
       def maximize_window(_handle); end
       def title            = browser.title
       def status_code      = browser.status_code

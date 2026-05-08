@@ -159,6 +159,8 @@ module Capybara
         @polling_until    = nil
         @cookies.clear
         @sticky_headers.clear
+        @viewport_width  = nil
+        @viewport_height = nil
         @file_picks.clear
         @resource_cache.clear
         @importmap = empty_importmap
@@ -3104,8 +3106,14 @@ module Capybara
           if sources.empty?
             nil
           else
+            # Cache key is `[stylesheet_fp, viewport_key]` because
+            # `@media (max-width: ...)` filtering happens at cascade
+            # build time — same stylesheets at different viewports
+            # produce different rule sets. Tests that call
+            # `driver.resize(...)` move the viewport between cascade
+            # buckets without re-parsing the stylesheets.
             fp = stylesheet_fingerprint(sources)
-            @cascade_by_fp[fp] ||= build_cascade(sources)
+            @cascade_by_fp[[fp, viewport_key]] ||= build_cascade(sources)
           end
       end
 
@@ -3115,10 +3123,43 @@ module Capybara
           parsed.rules
         }
         return nil if rules.empty?
-        CSS.cascade(CSS::Nodes::Stylesheet.new(rules: rules))
+        CSS.cascade(CSS::Nodes::Stylesheet.new(rules: rules), context: viewport_context)
       rescue StandardError => e
         warn "[capybara-simulated] cascade build failed: #{e.class}: #{e.message[0, 200]}"
         nil
+      end
+
+      # Active viewport, applied to `@media` evaluation in `build_cascade`.
+      # Defaults to p_css's desktop preset (1024 × 768); `Driver#resize`
+      # rewrites it so tests that switch into a mobile breakpoint mid-run
+      # (Forem's `Capybara.current_session.driver.resize(425, 694)` before
+      # clicking `.js-hamburger-trigger`) actually trip the matching
+      # `@media (max-width: ...)` rules.
+      def set_viewport(width, height)
+        return if @viewport_width == width && @viewport_height == height
+        @viewport_width  = width
+        @viewport_height = height
+        # Cache buckets are keyed on viewport, so we don't drop the
+        # other-size entries — but the *current* page's cascade
+        # pointer needs to re-resolve next time it's asked.
+        @page_cascade   = NO_CASCADE
+        @hidden_cache.clear
+      end
+
+      def viewport_context
+        CSS::MediaQueries::Context.default(
+          'width'               => @viewport_width  || 1024,
+          'height'              => @viewport_height || 768,
+          'device-width'        => @viewport_width  || 1024,
+          'device-height'       => @viewport_height || 768,
+          'aspect-ratio'        => (@viewport_width  || 1024).to_f / (@viewport_height || 768),
+          'device-aspect-ratio' => (@viewport_width  || 1024).to_f / (@viewport_height || 768),
+          'orientation'         => (@viewport_width || 1024) >= (@viewport_height || 768) ? 'landscape' : 'portrait'
+        )
+      end
+
+      def viewport_key
+        [@viewport_width || 1024, @viewport_height || 768]
       end
 
       # `[source_text, cache_key]` in document order, deduplicated by
@@ -3249,7 +3290,7 @@ module Capybara
       # Methods JsRuntime reaches into directly. Re-publishing here
       # (after every method has been defined under `private`) keeps the
       # rest of the surface area private without splitting the file.
-      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style, :set_viewport
     end
   end
 end
