@@ -295,6 +295,12 @@ module Capybara
         @vm.define_function('__rackFetch') do |method, url, body, headers, redirect_mode|
           @browser.rack_fetch(method, url, body, headers, redirect_mode)
         end
+        @vm.define_function('__getDocumentCookie') do
+          @browser.document_cookie
+        end
+        @vm.define_function('__setDocumentCookie') do |line|
+          @browser.write_document_cookie(line.to_s)
+        end
         # quickjs.rb yields a single Quickjs::VM::Log; `to_s` already
         # joins the args and expands JS Error objects with their stack
         # trace, so surfacing it directly is more useful than splatting.

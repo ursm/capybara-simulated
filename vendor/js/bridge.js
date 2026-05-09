@@ -2378,7 +2378,16 @@
       return true;
     }
   });
-  globalThis.document.cookie      = '';
+  // Round-trip `document.cookie` reads/writes through the Ruby-side
+  // jar so JS-set cookies (Avo's sidebar open/closed) reach the
+  // server on the next request and server-set cookies (CSRF token,
+  // session id) are visible to JS code that reads them — Stimulus
+  // controllers' use of `js-cookie` resolves through this surface.
+  Object.defineProperty(globalThis.document, 'cookie', {
+    configurable: true,
+    get() { return __getDocumentCookie(); },
+    set(v) { __setDocumentCookie(v == null ? '' : String(v)); }
+  });
   // jQuery's feature-detection writes
   // `(createHTMLDocument("").body).innerHTML = "<form></form><form></form>"`
   // and counts childNodes. Returning the live `document` would clobber

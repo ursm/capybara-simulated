@@ -2818,6 +2818,29 @@ module Capybara
         @cookies.map { |k, v| "#{k}=#{v}" }.join('; ')
       end
 
+      # JS-visible `document.cookie`. Same wire format as the
+      # cookie_header_value used for outgoing requests so server-side
+      # `cookies['k']` reads see what `document.cookie = 'k=v'`
+      # wrote (Avo's sidebar Stimulus controller persists open/closed
+      # via `js-cookie`, which round-trips through `document.cookie`).
+      def document_cookie
+        cookie_header_value
+      end
+
+      def write_document_cookie(line)
+        return if line.nil? || line.empty?
+        pair, * = line.to_s.split(';', 2)
+        name, value = pair.split('=', 2)
+        return if name.nil? || name.empty?
+        # `Max-Age=0` / `expires=<past>` is the JS convention for
+        # deleting a cookie. We don't model expiry otherwise.
+        if /(?:^|;)\s*(?:Max-Age=0|expires=Thu,?\s+01\s+Jan\s+1970)/i.match?(line.to_s)
+          @cookies.delete(name.strip)
+        else
+          @cookies[name.strip] = value.to_s.strip
+        end
+      end
+
       # We don't honour Path / Domain / Expires — single-session,
       # single-domain cookie jar matches what rack_test does.
       def ingest_set_cookie(headers)
@@ -3573,7 +3596,7 @@ module Capybara
       # Methods JsRuntime reaches into directly. Re-publishing here
       # (after every method has been defined under `private`) keeps the
       # rest of the surface area private without splitting the file.
-      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style, :set_viewport, :viewport_width, :viewport_height
+      public :fetch_resource, :resolve, :load_module, :cache_inline_module, :rack_fetch, :computed_style, :set_viewport, :viewport_width, :viewport_height, :document_cookie, :write_document_cookie
     end
   end
 end
