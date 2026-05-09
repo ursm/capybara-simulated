@@ -1418,6 +1418,12 @@
   };
   globalThis.__setReadyState = function (state) {
     globalThis.document.readyState = state;
+    // Real browsers dispatch `readystatechange` on every transition.
+    // Turbo Drive's PageObserver hooks that — *not* DOMContentLoaded —
+    // to fire `turbo:load`. Without it, libraries that piggyback on
+    // `turbo:load` (Avo's tippy init, has-data-tippy bookkeeping)
+    // never run on the initial page render.
+    __dispatch(globalThis.document, new Event('readystatechange', {bubbles: false, cancelable: false}));
   };
   // Browser bumps this on every navigate / pushState / replaceState so
   // location.href / pathname etc. reflect the current URL on read.
