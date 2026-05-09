@@ -280,7 +280,7 @@ module Capybara
         # parser rejects the empty predicate; strip it so the rest of
         # the expression matches as if no text filter was given.
         xpath = xpath.to_s.sub(/\)\[\]\z/, ')').sub(/\A\((.*)\)\z/, '\1')
-        root.xpath(xpath).filter_map { |n| @handles.track(n) }
+        root.xpath(xpath).reject { |n| inside_template?(n) }.filter_map { |n| @handles.track(n) }
       end
 
       def find_css(css, context = nil)
@@ -289,7 +289,18 @@ module Capybara
         stripped, ci_predicates = strip_case_insensitive_attr_flags(css)
         matches = root.css(stripped, css_pseudo_handlers)
         matches = matches.select {|n| ci_predicates.all? {|p| ci_attr_match?(n, p) } } unless ci_predicates.empty?
-        matches.filter_map {|n| @handles.track(n) }
+        matches.reject { |n| inside_template?(n) }.filter_map {|n| @handles.track(n) }
+      end
+
+      # Real browsers stash `<template>` content in a separate
+      # DocumentFragment (`template.content`); the template element
+      # itself shows up empty in the live tree. Nokogiri parses
+      # template children inline, which would bleed them into selector
+      # queries and form serialization. Filter at the query boundary
+      # so Capybara's `find` / `have_*` and form submits match what a
+      # real browser sees.
+      def inside_template?(node)
+        node.respond_to?(:ancestors) && node.ancestors('template').any?
       end
 
       # Nokogiri's CSS parser doesn't grok the Selectors-Level-4 case-
@@ -1860,15 +1871,19 @@ module Capybara
         node = lookup_node(handle) || @document
         case op
         when 'querySelector'
-          @handles.track(safe_at_css(node, args[0]))
+          hit = safe_at_css(node, args[0])
+          hit = nil if hit && inside_template?(hit)
+          @handles.track(hit)
         when 'querySelectorAll'
-          safe_css(node, args[0]).map { |n| @handles.track(n) }
+          safe_css(node, args[0]).reject { |n| inside_template?(n) }.map { |n| @handles.track(n) }
         when 'getElementById'
           # CSS rather than `.//*[@id=...]` because the XPath form
           # skips direct children of a DocumentFragment, which would
           # break shadow-root lookups.
           scope = node.respond_to?(:at_css) ? node : @document
-          @handles.track(scope.at_css("##{escape_id_selector(args[0].to_s)}"))
+          hit = scope.at_css("##{escape_id_selector(args[0].to_s)}")
+          hit = nil if hit && inside_template?(hit)
+          @handles.track(hit)
         when 'closest'
           cur = node
           while cur && cur.element?
@@ -2892,9 +2907,16 @@ module Capybara
 
       def each_form_field(form, submitter)
         form_id      = form['id']
-        descendants  = form.css(FORM_FIELD_CSS)
+        # `<template>` content is inert in real browsers (lives in
+        # `template.content`, a DocumentFragment); Nokogiri parses
+        # template children as plain descendants. Filter so form
+        # serialization matches the live-DOM view — Avo's polymorphic
+        # belongs-to renders every type's select inside a `<template>`
+        # for the controller to clone, and without this all the unused
+        # selects would also submit.
+        descendants  = form.css(FORM_FIELD_CSS).reject { |f| inside_template?(f) }
         adopted      = if form_id && !form_id.empty?
-          @document.xpath(ADOPTED_FIELD_XPATH, nil, fid: form_id.to_s).to_a
+          @document.xpath(ADOPTED_FIELD_XPATH, nil, fid: form_id.to_s).to_a.reject { |f| inside_template?(f) }
         else
           []
         end
