@@ -999,6 +999,24 @@ module Capybara
         first_enabled && first_enabled == opt
       end
 
+      # When an `<option>` with `selected="selected"` lands in a
+      # non-multiple `<select>`, real browsers clear sibling
+      # selectedness so the latest insert is the only chosen option.
+      # Avo's `update-belongs-to` controller does exactly this:
+      # `option.selected = true; select.appendChild(option)`. We set
+      # the attribute before the parent is known, so the cleanup has
+      # to run again at attach time.
+      def normalize_select_selectedness(parent, inserted)
+        return unless parent.respond_to?(:name) && parent.name == 'select' && !parent['multiple']
+        last_selected = nil
+        inserted.each do |n|
+          next unless n.respond_to?(:name) && n.name == 'option' && n['selected']
+          last_selected = n
+        end
+        return unless last_selected
+        parent.css('option').each {|o| o.delete('selected') unless o == last_selected }
+      end
+
       def set_option_selected(opt, on)
         return unless opt && opt.name == 'option'
         if on
@@ -2046,8 +2064,14 @@ module Capybara
         when 'removeAttribute' then write_attribute(node, handle, args[0], nil)
         when 'setValue'
           # `el.value=` on a checkbox/radio writes the value attribute;
-          # `.checked=` toggles state via setChecked.
-          if node.name == 'input' && CHECKABLE_INPUT_TYPES.include?((node['type'] || '').downcase)
+          # `.checked=` toggles state via setChecked. `<option>.value`
+          # IDL also reflects the value attribute (Avo's
+          # update-belongs-to controller does `option.value = id` on
+          # a freshly-created option), so write it through here too —
+          # `set_value` itself only knows about input / textarea /
+          # contenteditable shapes.
+          if node.name == 'option' ||
+             (node.name == 'input' && CHECKABLE_INPUT_TYPES.include?((node['type'] || '').downcase))
             write_attribute(node, handle, 'value', args[0].to_s)
           else
             set_value(handle, args[0])
@@ -2118,6 +2142,7 @@ module Capybara
             added = inserted_kids.map {|c| @handles.track(c) }
             record_childlist(handle, added)
             inserted_kids.each {|n| run_inserted_scripts(n) }
+            normalize_select_selectedness(node, inserted_kids)
           end
           args[0]
         when 'appendChildrenOf'

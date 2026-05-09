@@ -746,6 +746,16 @@
         Object.defineProperty(view, '__isContent', {value: true});
         return view;
       }
+      // Real browsers run CE construction synchronously on clone (so
+      // `cloneNode(true).getterFromCE` works), but defer
+      // connectedCallback until the clone is actually attached. Walk
+      // the subtree with ceConstruct, not ceUpgrade. The walk swaps
+      // the per-handle wrapper to the upgraded instance; re-fetch
+      // so the returned reference has the CE class's prototype.
+      if (cloned && __ceDefs.size > 0) {
+        ceConstructTree(cloned);
+        return __wrappers.get(cloned.__h) || cloned;
+      }
       return cloned;
     }
     compareDocumentPosition(o)   { return __dom(this.__h, 'compareDocumentPosition', [o && o.__h]); }
@@ -1678,6 +1688,7 @@
     // registry but drop all per-element instance state and re-arm the
     // mutation observer against the freshly-parsed document.
     __ceInstances.clear();
+    __ceConnected.clear();
     __ceWaiters.clear();
     // Drop the old CE-upgrade observer from __observers BEFORE snapshotting
     // — ceEnsureObserver() below re-creates a fresh one, and replaying a
@@ -2059,10 +2070,14 @@
     configurable: true,
     get() { return ''; }
   });
-  // adoptNode / importNode are pass-through — Nokogiri's
-  // insertBefore / replaceChild already span documents transparently.
+  // adoptNode is identity — we run a single Nokogiri document, so
+  // ownership transfer is implicit. importNode MUST clone per spec
+  // (returns a copy in the importing document); Turbo's StreamMessage
+  // does `element.replaceWith(document.importNode(element, true))`,
+  // so identity-importNode collapses to `el.replaceWith(el)`, which
+  // hits libxml2's "Could not reparent node" via insertBefore(x, x).
   globalThis.document.adoptNode   = function (node) { return node; };
-  globalThis.document.importNode  = function (node, _deep) { return node; };
+  globalThis.document.importNode  = function (node, deep) { return node ? node.cloneNode(!!deep) : node; };
   globalThis.document.contains    = function (other) {
     return !!(other && other.__h != null && __dom(0, 'contains', [other.__h]));
   };
@@ -3456,6 +3471,7 @@
   // directly anyway.
   const __ceDefs      = new Map();   // tag (lowercased) → ctor
   const __ceInstances = new Map();   // handle → instance object
+  const __ceConnected = new Set();   // handles whose connectedCallback has fired
   const __ceWaiters   = new Map();   // tag → [resolve, ...]
   let   __ceObserver  = null;
 
@@ -3477,7 +3493,10 @@
   // ceUpgradeTree, customElements.define's initial scan,
   // __resetPage's reattach) sees subsequent `wrap(h)` calls return
   // the upgraded instance without each having to mirror the swap.
-  function ceUpgrade(el) {
+  // Run the CE constructor (no connectedCallback). Returned wrapper
+  // has the right [[Prototype]] / private slots; appropriate for
+  // cloneNode and other create-but-don't-attach paths.
+  function ceConstruct(el) {
     if (!el || el.nodeType !== 1) return null;
     if (__ceInstances.has(el.__h)) return __wrappers.get(el.__h) || el;
     const ctor = ceCtorFor(el.tagName);
@@ -3495,7 +3514,26 @@
     }
     __ceInstances.set(h, upgraded);
     __wrappers.set(h, upgraded);
-    invokeCECallback(upgraded, 'connectedCallback');
+    return upgraded;
+  }
+
+  // Construct + fire connectedCallback. Used by attach paths
+  // (appendChild / insertBefore / customElements.define's initial
+  // scan) where the element is becoming connected to the document.
+  // Construction happens once per CE instance (preserved across
+  // disconnect / reconnect); connectedCallback fires only when the
+  // element is actually reachable from the document root — adding
+  // to a detached subtree (e.g. Turbo's StreamMessage staging
+  // template) is not "connected" per spec, so the callback waits
+  // until the subtree itself is attached.
+  function ceUpgrade(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const upgraded = ceConstruct(el);
+    if (!upgraded) return null;
+    if (!__ceConnected.has(el.__h) && el.isConnected) {
+      __ceConnected.add(el.__h);
+      invokeCECallback(upgraded, 'connectedCallback');
+    }
     return upgraded;
   }
 
@@ -3521,6 +3559,14 @@
     invokeCECallback(el, 'attributeChangedCallback', name, oldVal, newVal);
   }
 
+  function ceConstructTree(el) {
+    if (!el) return;
+    ceConstruct(el);
+    if (el.nodeType === 1 || el.nodeType === 11) {
+      for (const c of el.childNodes) ceConstructTree(c);
+    }
+  }
+
   function ceUpgradeTree(el) {
     if (!el) return;
     ceUpgrade(el);
@@ -3538,8 +3584,7 @@
     if (!el || el.nodeType !== 1) return;
     const inst = __ceInstances.get(el.__h);
     if (!inst) return;
-    __ceInstances.delete(el.__h);
-    invokeCECallback(inst, 'disconnectedCallback');
+    if (__ceConnected.delete(el.__h)) invokeCECallback(inst, 'disconnectedCallback');
   }
 
   function ceDisconnectTree(el) {
