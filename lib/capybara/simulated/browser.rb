@@ -63,11 +63,9 @@ module Capybara
         @current_url
       end
 
-      # `driver` is a back-ref used only for cross-window operations
-      # (opening / switching / closing tabs). When sibling windows
-      # exist, the driver hands each new Browser the primary's
-      # `exportable_state` so cookies + localStorage are visible
-      # across tabs (per-origin, per HTML spec).
+      # The driver hands a sibling Browser the primary's exportable
+      # state so cookies + localStorage are shared across windows
+      # (per-origin, per HTML spec).
       def exportable_state
         {cookies: @cookies, local_storage: @local_storage}
       end
@@ -76,7 +74,6 @@ module Capybara
         @app                = app
         @extra_js_features  = features
         @driver             = driver
-        @shared_state       = shared_state
         @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
         @handles            = HandleTable.new(@document)
         @js                 = nil
@@ -90,9 +87,6 @@ module Capybara
         # once a test has actually waited N ms.
         @last_tick_ts       = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until      = nil  # sticky window — see Browser#polling?
-        # Shared with sibling windows when shared_state is supplied —
-        # each Browser sees the same Hash instance, so a write in one
-        # tab is visible to the next outgoing request from another.
         @cookies            = shared_state && shared_state[:cookies]       || {}
         @sticky_headers     = {}   # explicit `driver.header(name, value)` overrides applied on every request
         @file_picks         = {}   # handle -> [path, ...] for <input type="file">
@@ -120,12 +114,10 @@ module Capybara
         @shadow_root_set    = Set.new  # mirrors @shadow_roots.values for O(1) ancestor-walk checks
         @focused_handle     = nil  # currently-focused element handle
         @hovered_handle     = nil  # last element passed to `hover` (drives mouseleave on the next hover)
-        # Ruby-backed so the JS Map doesn't get wiped when boot_vm
-        # rebuilds the runtime mid-test. Cleared at per-test reset!.
-        # localStorage is per-origin in real browsers — windows of the
-        # same origin see the same store. sessionStorage is scoped to
-        # the top-level browsing context (effectively per-window for
-        # our model) so each Browser keeps its own.
+        # localStorage is per-origin (shared with sibling windows when
+        # `shared_state` is supplied); sessionStorage is per-Browser.
+        # Both Ruby-backed so the JS Map doesn't get wiped when
+        # boot_vm rebuilds the runtime mid-test.
         @local_storage      = shared_state && shared_state[:local_storage] || {}
         @session_storage    = {}
         @mutations          = []
@@ -1040,8 +1032,10 @@ module Capybara
         target = select.css('option').find {|o|
           (o.attribute('value') ? o['value'] : (o.text || '')) == value
         }
-        select.css('option').each {|o| o.delete('selected') }
-        target['selected'] = 'selected' if target
+        # `set_option_selected` already clears sibling selectedness on
+        # a single-select (and leaves it alone on `<select multiple>`),
+        # so reuse it instead of hand-rolling the deselect loop.
+        set_option_selected(target, true) if target
       end
 
       def set_option_selected(opt, on)
@@ -1334,12 +1328,12 @@ module Capybara
 
       # HTML5 implicit submission: a form is submitted when Enter is
       # pressed in a text-like input if either (a) the form has a
-      # default button (the first submit-style control) or (b) it has
-      # exactly one text-like input. Returns the enclosing form when
-      # implicit submission applies, nil otherwise.
+      # default submit-style button or (b) it has exactly one text-
+      # like input. Returns the enclosing form when implicit
+      # submission applies, nil otherwise.
       def implicit_submit_form_for(node)
         form = enclosing_form(node) or return nil
-        return form if form.css('button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]').any?
+        return form if form.at_css('button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]')
         text_count = 0
         form.xpath('.//input').each do |i|
           next unless TEXT_LIKE_INPUT_TYPES.include?((i['type'] || 'text').downcase)
