@@ -2688,7 +2688,37 @@ module Capybara
         # treats every form-inside-a-frame submission as navigatable
         # and intercepts it.
         return true unless dispatch_event(form_handle, 'submit', submitter: @handles.track(submitter))
+        # `<form method="dialog">` doesn't submit — it closes the
+        # nearest ancestor `<dialog>` with `returnValue` = submitter's
+        # value, then fires 'close' on the dialog. Avo's
+        # `Turbo.config.forms.confirm` builds a `<dialog>` with this
+        # form-shaped close path; without honouring it the dialog
+        # stays open and the awaiting promise never resolves.
+        method_attr = (submitter && submitter['formmethod']) || form['method'] || 'get'
+        if method_attr.to_s.downcase == 'dialog'
+          close_enclosing_dialog(form, submitter)
+          return true
+        end
         perform_submission(form, submitter)
+      end
+
+      def close_enclosing_dialog(form, submitter)
+        dialog = form.ancestors.find {|a| a.respond_to?(:name) && a.name == 'dialog' }
+        return unless dialog
+        dialog_handle = @handles.track(dialog)
+        return_value  = submitter ? submitter['value'].to_s : ''
+        # Drive the JS-side `dialog.close(returnValue)` so the
+        # `returnValue` property lands on the wrapper instance (where
+        # awaiting `addEventListener('close', () => resolve(dialog
+        # .returnValue === 'confirm'))` reads it from). Doing the
+        # work purely in Ruby/Nokogiri would set the attribute but
+        # leave the JS-side getter returning the wrapper's own slot.
+        if @js
+          js.call('__closeDialog', dialog_handle, return_value)
+        else
+          dialog.delete('open')
+          dispatch_event(dialog_handle, 'close', bubbles: false, cancelable: false)
+        end
       end
 
       def perform_submission(form, submitter)

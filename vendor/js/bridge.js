@@ -1289,6 +1289,16 @@
     keypress:    KeyboardEvent
   };
 
+  // Ruby-callable: close a `<dialog>` with a returnValue. Drives the
+  // `<form method="dialog">` close path so the awaiting close-event
+  // listener (Avo's `Turbo.config.forms.confirm` resolves a Promise
+  // off `dialog.returnValue === 'confirm'`) reads the returnValue
+  // off the same wrapper instance the JS side is holding.
+  globalThis.__closeDialog = function (handle, returnValue) {
+    const w = __wrappers.get(handle);
+    if (w && typeof w.close === 'function') w.close(returnValue);
+  };
+
   // Called from Ruby (`browser.dispatch_event`). Returns true if no
   // listener prevented the default action — Ruby uses that to decide
   // whether to navigate, submit, etc. Integer-handle fields on init
