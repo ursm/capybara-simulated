@@ -1273,21 +1273,18 @@ module Capybara
           # before storing the value so the submitted body doesn't carry it.
           submit_after = should_submit_on_enter?(node, value)
           new_value    = submit_after ? value.to_s.chomp("\n") : value
-          # Use `insertFromPaste` rather than `insertReplacementText`:
-          # Trix's `insertReplacementText` handler requires a non-empty
-          # `event.getTargetRanges()`, while `insertFromPaste` falls back
-          # to the current selection — closer to our programmatic-write
-          # semantics. The value is exposed through `event.data` (legacy)
-          # and `dataTransfer.getData('text/plain')` (Input Events L2).
-          # Also fire `paste` with clipboardData carrying the same text:
-          # ProseMirror / TipTap ignores beforeinput's insertFromPaste
-          # (their handler is a no-op except for one Chrome-Android case)
-          # and reads `event.clipboardData.getData('text/plain')` instead.
-          input_text  = new_value.to_s
-          input_init  = {bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: input_text, dataTransferText: input_text}
-          unprevented = dispatch_event(handle, 'beforeinput', **input_init)
-          ce_target   = contenteditable?(node)
-          dispatch_event(handle, 'paste', bubbles: true, cancelable: true, clipboardDataText: input_text) if ce_target
+          # Real browsers fire `paste` first (cancelable); if a listener
+          # calls preventDefault, the default-action chain — which
+          # includes `beforeinput insertFromPaste` — is skipped. So
+          # try paste first on a contenteditable, then fall through to
+          # beforeinput only when paste wasn't consumed. Trix listens
+          # to both and inserts on each, so firing both unconditionally
+          # double-inserts. ProseMirror / TipTap take the paste branch.
+          input_text       = new_value.to_s
+          ce_target        = contenteditable?(node)
+          paste_consumed   = ce_target && !dispatch_event(handle, 'paste', bubbles: true, cancelable: true, clipboardDataText: input_text)
+          input_init       = {bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: input_text, dataTransferText: input_text}
+          unprevented      = paste_consumed ? false : dispatch_event(handle, 'beforeinput', **input_init)
           # On a contenteditable owned by a beforeinput- or paste-
           # listening library, the library re-renders + syncs its hidden
           # input — a wholesale `node.content = value` write would
