@@ -3202,7 +3202,13 @@
             ? explicit
             : (f.hasAttribute('multiple') ? [] : Array.from(opts).filter(o => !o.disabled).slice(0, 1));
           for (const opt of chosen) {
-            this.append(name, opt.getAttribute('value') || opt.textContent || '');
+            // `value=""` set explicitly (typical placeholder option) is
+            // a real submitted value; `||` would silently promote it to
+            // `textContent` and submit the placeholder label as the
+            // value. Fall back to text only when the attribute is
+            // genuinely absent.
+            const v = opt.getAttribute('value');
+            this.append(name, v != null ? v : (opt.textContent || ''));
           }
           continue;
         }
