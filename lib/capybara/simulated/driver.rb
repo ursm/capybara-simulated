@@ -140,9 +140,13 @@ module Capybara
 
       def run_modal(type, accept:, text: nil, with: nil, wait: nil, &block)
         captured = nil
-        handler = ->(_t, msg, default_value) {
+        # Selenium / cuprite respond by *modal*, not by the helper
+        # name — `accept_alert do ... end` accepts confirm() and
+        # prompt() too. Dispatch by the actual modal type fired,
+        # not by the helper's `type` argument.
+        handler = ->(actual_type, msg, default_value) {
           captured = msg
-          modal_response(type, accept, with, default_value)
+          modal_response(actual_type, accept, with, default_value)
         }
         browser.with_modal(handler, &block)
         if captured.nil?
@@ -155,8 +159,8 @@ module Capybara
         captured
       end
 
-      def modal_response(type, accept, with, default_value)
-        case type
+      def modal_response(actual_type, accept, with, default_value)
+        case actual_type.to_sym
         when :alert   then nil
         when :confirm then accept
         when :prompt

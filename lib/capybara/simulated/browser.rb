@@ -1017,6 +1017,15 @@ module Capybara
         parent.css('option').each {|o| o.delete('selected') unless o == last_selected }
       end
 
+      def select_option_by_value(select, value)
+        return unless select.respond_to?(:css)
+        target = select.css('option').find {|o|
+          (o.attribute('value') ? o['value'] : (o.text || '')) == value
+        }
+        select.css('option').each {|o| o.delete('selected') }
+        target['selected'] = 'selected' if target
+      end
+
       def set_option_selected(opt, on)
         return unless opt && opt.name == 'option'
         if on
@@ -1301,16 +1310,25 @@ module Capybara
       def should_submit_on_enter?(node, value)
         return false if node.nil? || !value.is_a?(String) || !value.end_with?("\n")
         return false unless node.name == 'input'
-        form = enclosing_form(node) or return false
-        # HTML5 implicit submission: form has *exactly one* text-like input.
-        # Short-circuit at 2 instead of materialising the whole list.
-        count = 0
+        return false unless TEXT_LIKE_INPUT_TYPES.include?((node['type'] || 'text').downcase)
+        implicit_submit_form_for(node)
+      end
+
+      # HTML5 implicit submission: a form is submitted when Enter is
+      # pressed in a text-like input if either (a) the form has a
+      # default button (the first submit-style control) or (b) it has
+      # exactly one text-like input. Returns the enclosing form when
+      # implicit submission applies, nil otherwise.
+      def implicit_submit_form_for(node)
+        form = enclosing_form(node) or return nil
+        return form if form.css('button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]').any?
+        text_count = 0
         form.xpath('.//input').each do |i|
           next unless TEXT_LIKE_INPUT_TYPES.include?((i['type'] || 'text').downcase)
-          count += 1
-          return false if count > 1
+          text_count += 1
+          return nil if text_count > 1
         end
-        count == 1
+        text_count == 1 ? form : nil
       end
 
       SPECIAL_KEY_CODES = {
@@ -1463,9 +1481,10 @@ module Capybara
           # `"token\n"`.
           set_value(handle, state[:value])
           set_caret(handle, state[:caret])
-          dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
+          keydown_allowed = dispatch_key_event(handle, 'keydown', SPECIAL_KEY_CODES[key], **key_init(state, key))
           node = lookup_node(handle)
           inserts_newline = node.respond_to?(:name) && node.name == 'textarea'
+          submit_form_target = nil
           if inserts_newline
             allow = dispatch_event(handle, 'beforeinput', cancelable: true, inputType: 'insertLineBreak')
             if allow
@@ -1473,8 +1492,16 @@ module Capybara
             else
               sync_state_from_dom(handle, state)
             end
+          elsif keydown_allowed && node.respond_to?(:name) && node.name == 'input' &&
+                TEXT_LIKE_INPUT_TYPES.include?((node['type'] || 'text').downcase)
+            # Implicit form submission. Defer the actual submit until
+            # after keyup so listeners that rely on the keyup observe
+            # the typed-into-field state (Forem's tag-input commits
+            # on keyup, not keydown).
+            submit_form_target = implicit_submit_form_for(node)
           end
           dispatch_key_event(handle, 'keyup', SPECIAL_KEY_CODES[key], **key_init(state, key))
+          submit_form(@handles.track(submit_form_target)) if submit_form_target && submit_form_target.parent
         when :backspace
           if state[:caret] > 0
             state[:value] = state[:value][0, state[:caret] - 1] + state[:value][state[:caret]..]
@@ -1569,9 +1596,10 @@ module Capybara
       end
 
       def dispatch_key_event(handle, type, key_code, **init_extras)
-        return unless @js && @listened_types.include?(type)
-        js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code, init_extras)
+        return true unless @js && @listened_types.include?(type)
+        result = js.call('__dispatchKeyFromRuby', handle, type.to_s, key_code, init_extras)
         settle
+        result != false
       end
 
       def evaluate_script(code, args = [])
@@ -2073,6 +2101,14 @@ module Capybara
           if node.name == 'option' ||
              (node.name == 'input' && CHECKABLE_INPUT_TYPES.include?((node['type'] || '').downcase))
             write_attribute(node, handle, 'value', args[0].to_s)
+          elsif node.name == 'select'
+            # `select.value = "X"` — find the first option whose value
+            # matches X and mark it selected, clearing siblings on a
+            # single-select. Avo's `city-in-country` controller relies
+            # on this to restore the originally-selected city after a
+            # country change re-populates the option list.
+            select_option_by_value(node, args[0].to_s)
+            nil
           else
             set_value(handle, args[0])
             nil
