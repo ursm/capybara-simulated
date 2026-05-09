@@ -313,11 +313,46 @@ module Capybara
 
       def find_css(css, context = nil)
         tick_real_time
-        root = lookup_node(context) || @document
+        scope = lookup_node(context)
+        root  = scope || @document
         stripped, ci_predicates = strip_case_insensitive_attr_flags(css)
         matches = root.css(stripped, css_pseudo_handlers)
+        # `Element#querySelectorAll` matches the full selector against
+        # the document and only filters the result to descendants of
+        # the scope element. So `tr.querySelectorAll('table tbody tr td')`
+        # returns the tr's tds — their ancestor chain (table > tbody >
+        # tr) reaches outside the tr's subtree but satisfies the
+        # selector. Nokogiri's `node.css` is subtree-scoped and would
+        # come back empty there. Fall back to doc-rooted-and-filter
+        # only when the cheap tree-rooted query came up empty for a
+        # non-document scope; the fast path stays untouched.
+        if matches.empty? && scope && css_has_descendant_combinator?(stripped)
+          matches = @document.css(stripped, css_pseudo_handlers).select {|n| descendant_of?(n, scope) }
+        end
         matches = matches.select {|n| ci_predicates.all? {|p| ci_attr_match?(n, p) } } unless ci_predicates.empty?
         matches.reject { |n| inside_template?(n) }.filter_map {|n| @handles.track(n) }
+      end
+
+      def css_has_descendant_combinator?(css)
+        depth = 0
+        css.each_char do |c|
+          case c
+          when '['  then depth += 1
+          when ']'  then depth -= 1 if depth > 0
+          when ' ', '>', '+', '~'
+            return true if depth.zero?
+          end
+        end
+        false
+      end
+
+      def descendant_of?(node, scope)
+        cur = node.respond_to?(:parent) ? node.parent : nil
+        while cur
+          return true if cur.equal?(scope)
+          cur = cur.respond_to?(:parent) ? cur.parent : nil
+        end
+        false
       end
 
       # Real browsers stash `<template>` content in a separate
