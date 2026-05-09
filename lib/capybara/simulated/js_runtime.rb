@@ -268,8 +268,11 @@ module Capybara
         @vm.define_function('__dom') do |handle, op, args|
           @browser.dom_op(handle, op, args || EMPTY_ARGS)
         end
-        @vm.define_function('__notifyMutationActive') do |active|
-          @browser.mutation_recording = !!active
+        @vm.define_function('__addMutationObserverId') do |id|
+          @browser.add_mutation_observer_id(id.to_i)
+        end
+        @vm.define_function('__removeMutationObserverId') do |id|
+          @browser.remove_mutation_observer_id(id.to_i)
         end
         @vm.define_function('__setListenedType') do |type, active|
           @browser.set_listened_type(type, !!active)

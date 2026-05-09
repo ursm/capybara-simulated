@@ -38,7 +38,19 @@ module Capybara
     # user JS (when present) sees a thin DOM proxy backed by `dom_op`.
     class Browser
       attr_reader   :app, :status_code, :response_headers
-      attr_accessor :mutation_recording, :timers_active
+      attr_accessor :timers_active
+
+      def mutation_recording? = !@active_observer_ids.empty?
+
+      def add_mutation_observer_id(id)
+        @active_observer_ids << id
+        @active_observer_ids_snapshot = nil
+      end
+
+      def remove_mutation_observer_id(id)
+        @active_observer_ids.delete(id)
+        @active_observer_ids_snapshot = nil
+      end
 
       # Active trace recorder for the current test, or nil. After
       # `reset!` it moves to `@pending_trace` so the host's
@@ -99,7 +111,12 @@ module Capybara
         @local_storage      = {}
         @session_storage    = {}
         @mutations          = []
-        @mutation_recording = false
+        # IDs of MutationObservers currently observing. Records stamp
+        # this set so a reconnected observer doesn't replay records
+        # taken while it was disconnected. Snapshot is memoised and
+        # nil'd by the add/remove helpers.
+        @active_observer_ids          = Set.new
+        @active_observer_ids_snapshot = nil
         @timers_active      = false
         # Event types with at least one live listener — JS notifies us
         # via __setListenedType so dispatch_event can skip the JS hop
@@ -266,8 +283,9 @@ module Capybara
 
       def reset_per_page_state
         @mutations.clear
-        @mutation_recording = false
-        @timers_active      = false
+        @active_observer_ids.clear
+        @active_observer_ids_snapshot = nil
+        @timers_active                = false
         @listened_types.clear
       end
 
@@ -845,7 +863,7 @@ module Capybara
       # check.
       def focusable?(node)
         return false unless node.respond_to?(:[])
-        FOCUSABLE_TAGS.include?(node.name) || !node['tabindex'].nil?
+        FOCUSABLE_TAGS.include?(node.name) || !node['tabindex'].nil? || contenteditable?(node)
       end
 
       def focus(handle)
@@ -1095,7 +1113,7 @@ module Capybara
         # Click on a focusable element steals focus first — matches what
         # browsers do (focus event fires before click for synthetic
         # element.click() / user clicks).
-        focus(handle) if node.respond_to?(:name) && FOCUSABLE_TAGS.include?(node.name)
+        focus(handle) if focusable?(node)
         mods = modifier_init(modifiers)
         pos  = position_init(node, x, y, offset)
         fire_mouse_sequence(handle, button: 0, delay: delay, modifiers: mods, position: pos)
@@ -1215,17 +1233,39 @@ module Capybara
           # default behaviour for Enter in a single-field form). Strip the \n
           # before storing the value so the submitted body doesn't carry it.
           submit_after = should_submit_on_enter?(node, value)
-          changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
-          break changed unless changed && @js
-          dispatch_input_change(handle)
+          new_value    = submit_after ? value.to_s.chomp("\n") : value
+          # Use `insertFromPaste` rather than `insertReplacementText`:
+          # Trix's `insertReplacementText` handler requires a non-empty
+          # `event.getTargetRanges()`, while `insertFromPaste` falls back
+          # to the current selection — closer to our programmatic-write
+          # semantics. The value is exposed through `event.data` (legacy)
+          # and `dataTransfer.getData('text/plain')` (Input Events L2).
+          input_text  = new_value.to_s
+          input_init  = {bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: input_text, dataTransferText: input_text}
+          unprevented = dispatch_event(handle, 'beforeinput', **input_init)
+          # On a contenteditable owned by a beforeinput-listening library,
+          # the library re-renders + syncs its hidden input — a wholesale
+          # `node.content = value` write would clobber the library's
+          # serialized output. Plain contenteditable (no listener) falls
+          # through to set_value so Capybara's `set` contract still holds.
+          library_owned_ce = contenteditable?(node) && @listened_types.include?('beforeinput')
+          if library_owned_ce
+            settle
+            changed = true
+          elsif unprevented
+            changed = set_value(handle, new_value)
+            break changed unless changed && @js
+            dispatch_input_change(handle, inputType: input_init[:inputType], data: input_text)
+          else
+            settle
+            changed = true
+          end
           # Tail keydown / keyup approximate the "user finished typing"
           # signal that autocomplete / mention libraries (Tribute.js,
-          # atwho, etc.) hook. They look at `event.key` to decide whether
-          # the most recent keystroke was a trigger character (`#`, `@`,
-          # …), so seed the event with the last character of the typed
-          # value. Better than nothing for libraries that fire on the
-          # final char; per-keystroke replay is out of scope.
-          dispatch_key_pair(handle, value)
+          # atwho, etc.) hook. Rich-text editors process input through
+          # beforeinput, so a stray keystroke would re-enter their
+          # handler.
+          dispatch_key_pair(handle, value) unless library_owned_ce
           submit_form(handle) if submit_after
           changed
         end
@@ -1548,8 +1588,8 @@ module Capybara
       # The "user typed into a field" event pair. Both bubble, neither is
       # cancelable — matches what real browsers fire after a value change
       # via keyboard or driver `set` / `send_keys`.
-      def dispatch_input_change(handle)
-        dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+      def dispatch_input_change(handle, **input_extras)
+        dispatch_event(handle, 'input',  bubbles: true, cancelable: false, **input_extras)
         dispatch_event(handle, 'change', bubbles: true, cancelable: false)
       end
 
@@ -1566,7 +1606,7 @@ module Capybara
         # already qualifies the event for dispatch. Inline-handler
         # detection only matters as a fallback that also boots @js for
         # script-less pages (e.g. plain `onclick="..."` markup).
-        listened = @listened_types.include?(type) || @mutation_recording
+        listened = @listened_types.include?(type) || mutation_recording?
         return true unless listened || inline_handler_in_path?(handle, type)
         result = js.call('__dispatchFromRuby', handle, type.to_s,
                          {bubbles: bubbles, cancelable: cancelable, **init_extras})
@@ -1725,21 +1765,26 @@ module Capybara
         }
       end
 
-      # Push a buffered MutationRecord. No-op when no observer is active —
-      # the JS side flips @mutation_recording via __notifyMutationActive,
-      # so dom_op writes pay nothing on observer-less pages. Split into
-      # two specialised methods (instead of one `**extra`) to skip the
-      # kwargs hash + per-key empty-array allocations on the hot path.
+      # Push a buffered MutationRecord. No-op when no observer is
+      # active — observer-less pages pay nothing on every dom_op write.
+      # Split into two specialised methods (instead of one `**extra`)
+      # to skip kwargs hash + per-key empty-array allocations on the
+      # hot path. The active-id snapshot is memoised and shared across
+      # records so a single batch flush doesn't re-allocate per record.
       EMPTY_HANDLES = [].freeze
 
       def record_childlist(target_handle, added = EMPTY_HANDLES, removed = EMPTY_HANDLES)
-        return unless @mutation_recording && target_handle
-        @mutations << {type: 'childList', target: target_handle, addedNodes: added, removedNodes: removed}
+        return if !target_handle || @active_observer_ids.empty?
+        @mutations << {type: 'childList', target: target_handle, addedNodes: added, removedNodes: removed, activeObserverIds: active_observer_ids_snapshot}
       end
 
       def record_attribute(target_handle, name, old_value)
-        return unless @mutation_recording && target_handle
-        @mutations << {type: 'attributes', target: target_handle, attributeName: name, oldValue: old_value}
+        return if !target_handle || @active_observer_ids.empty?
+        @mutations << {type: 'attributes', target: target_handle, attributeName: name, oldValue: old_value, activeObserverIds: active_observer_ids_snapshot}
+      end
+
+      def active_observer_ids_snapshot
+        @active_observer_ids_snapshot ||= @active_observer_ids.to_a.freeze
       end
 
       # Drain microtasks + scheduled timers (setTimeout(0), rAF) and
@@ -1886,6 +1931,8 @@ module Capybara
           hit = scope.at_css("##{escape_id_selector(args[0].to_s)}")
           hit = nil if hit && inside_template?(hit)
           @handles.track(hit)
+        when 'activeElement'
+          active_element_handle
         when 'closest'
           cur = node
           while cur && cur.element?

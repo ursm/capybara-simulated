@@ -1142,8 +1142,32 @@
   globalThis.MouseEvent    = makeEventSubclass('MouseEvent');
   globalThis.KeyboardEvent = makeEventSubclass('KeyboardEvent');
   globalThis.SubmitEvent   = makeEventSubclass('SubmitEvent');
-  globalThis.InputEvent    = makeEventSubclass('InputEvent');
   globalThis.CustomEvent   = makeEventSubclass('CustomEvent');
+  // `data` / `inputType` / `getTargetRanges` live on the prototype so
+  // Trix's level2-vs-level0 detector (`'data' in InputEvent.prototype`)
+  // sees a level-2 surface. Event's init-spread skips keys already on
+  // the prototype, so per-instance values get redefined as own slots.
+  class InputEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      const i = init || {};
+      let dt = null;
+      if (i.dataTransfer) {
+        dt = i.dataTransfer;
+      } else if ('dataTransferText' in i) {
+        const text = i.dataTransferText == null ? '' : String(i.dataTransferText);
+        dt = makeDataTransfer([{kind: 'string', type: 'text/plain', value: text}]);
+      }
+      Object.defineProperty(this, 'data',         {value: 'data'      in i ? i.data      : null, writable: true, configurable: true, enumerable: true});
+      Object.defineProperty(this, 'inputType',    {value: 'inputType' in i ? i.inputType : '',   writable: true, configurable: true, enumerable: true});
+      Object.defineProperty(this, 'dataTransfer', {value: dt,                                    writable: true, configurable: true, enumerable: true});
+    }
+    get data()         { return null; }
+    get inputType()    { return ''; }
+    get dataTransfer() { return null; }
+    getTargetRanges()  { return []; }
+  }
+  globalThis.InputEvent = InputEvent;
 
   function buildPath(target) {
     const path = [];
@@ -1325,6 +1349,7 @@
     contextmenu: MouseEvent,
     submit:      SubmitEvent,
     input:       InputEvent,
+    beforeinput: InputEvent,
     keydown:     KeyboardEvent,
     keyup:       KeyboardEvent,
     keypress:    KeyboardEvent
@@ -1721,9 +1746,11 @@
       obs._observed = fresh;
       obs._records  = [];
       obs._scheduled = false;
-      if (fresh.length > 0) __observers.add(obs);
+      if (fresh.length > 0) {
+        __observers.add(obs);
+        __addMutationObserverId(obs._id);
+      }
     }
-    __notifyMutationActive(__observers.size > 0);
     for (const {obs, entry} of initialScans) emitInitialScan(obs, entry);
     return initialScans.length;
   }
@@ -1779,7 +1806,7 @@
   // ── MutationObserver ────────────────────────────────────────
   // Observer storage lives in JS; Ruby buffers records during DOM
   // writes (dom_op) and ships them in batches through __deliverMutations.
-  // observe()/disconnect() flip a Ruby-side flag via __notifyMutationActive
+  // observe()/disconnect() update the Ruby-side observer-id set via
   // so that pages with no observers pay zero per-mutation overhead.
   const __observers = new Set();
 
@@ -1794,9 +1821,16 @@
     return !!options.subtree && obsTarget.contains(rec.target);
   }
 
+  // Each record carries the IDs of observers that were attached when
+  // it was captured; on reconnect, an observer skips records it didn't
+  // witness — matches real-browser MutationObserver around editor
+  // sync-view patterns (Trix's editorWillSyncDocumentView).
+  let __nextObserverId = 1;
+
   class MutationObserver {
     constructor(callback) {
       Object.defineProperty(this, '_cb', {value: callback, writable: false});
+      Object.defineProperty(this, '_id', {value: __nextObserverId++, writable: false});
       this._observed  = [];
       this._records   = [];
       this._scheduled = false;
@@ -1810,15 +1844,17 @@
       // navigations — without this hint we'd lose all controllers
       // after the first nav.
       this._observed.push({target, options: options || {}, logicalRef: logicalAnchorOf(target)});
-      const wasEmpty = __observers.size === 0;
-      __observers.add(this);
-      if (wasEmpty) __notifyMutationActive(true);
+      if (!__observers.has(this)) {
+        __observers.add(this);
+        __addMutationObserverId(this._id);
+      }
     }
     disconnect() {
       this._observed = [];
       this._records  = [];
-      const had = __observers.delete(this);
-      if (had && __observers.size === 0) __notifyMutationActive(false);
+      if (__observers.delete(this)) {
+        __removeMutationObserverId(this._id);
+      }
     }
     takeRecords() {
       const out = this._records;
@@ -1828,10 +1864,10 @@
   }
   globalThis.MutationObserver = MutationObserver;
 
-  // Called from Ruby with a JSON-serialised batch of records. We wrap
-  // node handles back into Element instances, route to interested
-  // observers, and queue a microtask per observer to flush its batch
-  // (matching the spec's "deliver as a microtask" semantics).
+  // Called from Ruby with a JSON-serialised batch of records. Wrap
+  // handles back into Element instances, route to interested observers,
+  // and queue a microtask per observer to flush its batch (matching
+  // the spec's "deliver as a microtask" semantics).
   globalThis.__deliverMutations = function (records) {
     if (!records || records.length === 0) return;
     for (const r of records) {
@@ -1842,6 +1878,7 @@
     for (const obs of __observers) {
       const matched = [];
       for (const rec of records) {
+        if (rec.activeObserverIds && rec.activeObserverIds.indexOf(obs._id) === -1) continue;
         for (const o of obs._observed) {
           if (matchRecord(o.target, o.options, rec)) { matched.push(rec); break; }
         }
@@ -1986,6 +2023,10 @@
   // they re-resolve to whatever currently occupies the slot, even
   // after Turbo's `document.body.replaceWith(newBody)` swaps the
   // body element.
+  Object.defineProperty(globalThis.document, 'activeElement', {
+    configurable: true,
+    get() { return wrap(__dom(0, 'activeElement')); }
+  });
   Object.defineProperty(globalThis.document, 'body', {
     configurable: true,
     get() { return this.querySelector('body'); }
