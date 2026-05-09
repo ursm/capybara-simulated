@@ -953,9 +953,11 @@ module Capybara
         # Browsers don't let users select a disabled option.
         return false if opt['disabled']
         select = opt.ancestors('select').first or return false
-        set_option_selected(opt, true)
-        dispatch_input_change(@handles.track(select))
-        true
+        record_action(:select, "select #{describe_node(select)} = #{(opt['value'] || opt.text).inspect[0, 80]}") do
+          set_option_selected(opt, true)
+          dispatch_input_change(@handles.track(select))
+          true
+        end
       end
 
       # HTML5 IDL: an `<option>` is selected when it has the `selected`
