@@ -1279,15 +1279,22 @@ module Capybara
           # to the current selection — closer to our programmatic-write
           # semantics. The value is exposed through `event.data` (legacy)
           # and `dataTransfer.getData('text/plain')` (Input Events L2).
+          # Also fire `paste` with clipboardData carrying the same text:
+          # ProseMirror / TipTap ignores beforeinput's insertFromPaste
+          # (their handler is a no-op except for one Chrome-Android case)
+          # and reads `event.clipboardData.getData('text/plain')` instead.
           input_text  = new_value.to_s
           input_init  = {bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: input_text, dataTransferText: input_text}
           unprevented = dispatch_event(handle, 'beforeinput', **input_init)
-          # On a contenteditable owned by a beforeinput-listening library,
-          # the library re-renders + syncs its hidden input — a wholesale
-          # `node.content = value` write would clobber the library's
-          # serialized output. Plain contenteditable (no listener) falls
-          # through to set_value so Capybara's `set` contract still holds.
-          library_owned_ce = contenteditable?(node) && @listened_types.include?('beforeinput')
+          ce_target   = contenteditable?(node)
+          dispatch_event(handle, 'paste', bubbles: true, cancelable: true, clipboardDataText: input_text) if ce_target
+          # On a contenteditable owned by a beforeinput- or paste-
+          # listening library, the library re-renders + syncs its hidden
+          # input — a wholesale `node.content = value` write would
+          # clobber its serialized output. Plain contenteditable (no
+          # listener) falls through to set_value so Capybara's `set`
+          # contract still holds.
+          library_owned_ce = ce_target && (@listened_types.include?('beforeinput') || @listened_types.include?('paste'))
           if library_owned_ce
             settle
             changed = true

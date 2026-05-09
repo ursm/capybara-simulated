@@ -1177,6 +1177,28 @@
   }
   globalThis.InputEvent = InputEvent;
 
+  // ClipboardEvent's `clipboardData` is the same DataTransfer shape
+  // used by drag-drop. Editors that listen for `paste` (ProseMirror /
+  // TipTap) read `event.clipboardData.getData('text/plain')`; we
+  // build the wrapper from `clipboardDataText` in init the same way
+  // InputEvent builds dataTransfer.
+  class ClipboardEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      const i = init || {};
+      let cd = null;
+      if (i.clipboardData) {
+        cd = i.clipboardData;
+      } else if ('clipboardDataText' in i) {
+        const text = i.clipboardDataText == null ? '' : String(i.clipboardDataText);
+        cd = makeDataTransfer([{kind: 'string', type: 'text/plain', value: text}]);
+      }
+      Object.defineProperty(this, 'clipboardData', {value: cd, writable: true, configurable: true, enumerable: true});
+    }
+    get clipboardData() { return null; }
+  }
+  globalThis.ClipboardEvent = ClipboardEvent;
+
   function buildPath(target) {
     const path = [];
     let cur = target;
@@ -1358,6 +1380,9 @@
     submit:      SubmitEvent,
     input:       InputEvent,
     beforeinput: InputEvent,
+    paste:       ClipboardEvent,
+    copy:        ClipboardEvent,
+    cut:         ClipboardEvent,
     keydown:     KeyboardEvent,
     keyup:       KeyboardEvent,
     keypress:    KeyboardEvent
