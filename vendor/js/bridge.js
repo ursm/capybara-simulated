@@ -2604,6 +2604,32 @@
   };
   globalThis.matchMedia = function () { return {matches: false, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}}; };
 
+  // QuickJS' Intl polyfill defaults `resolvedOptions().timeZone` to
+  // UTC regardless of the process' `TZ` env var. Tests that depend
+  // on Luxon's `DateTime.local().zoneName` (= the system default)
+  // matching Ruby-side `ENV["TZ"]` (Avo's `:tz` metadata hook flips
+  // it before each spec) end up with `displayTimezone === 'UTC'` and
+  // the formatted value drifts. Wrap the constructor so calls
+  // without an explicit `timeZone` get the host's `ENV["TZ"]` filled
+  // in once at runtime boot — explicit `{timeZone: ...}` calls fall
+  // straight through to the polyfill, which already knows the IANA
+  // tables.
+  (function patchIntlDefaultZone() {
+    if (!globalThis.Intl || !globalThis.Intl.DateTimeFormat) return;
+    const sysTZ = __dom(0, 'systemTimeZone');
+    if (!sysTZ || sysTZ === 'UTC') return;
+    const Original = globalThis.Intl.DateTimeFormat;
+    function CustomDTF(locales, options) {
+      const opts = Object.assign({}, options || {});
+      if (!opts.timeZone) opts.timeZone = sysTZ;
+      return new Original(locales, opts);
+    }
+    CustomDTF.supportedLocalesOf = Original.supportedLocalesOf
+      ? Original.supportedLocalesOf.bind(Original)
+      : function () { return []; };
+    globalThis.Intl.DateTimeFormat = CustomDTF;
+  })();
+
   // performance.now() returns ms since the runtime started — not the
   // virtual JS clock, since most callers (perf timing, jitter
   // smoothing) want monotonic wall time, not virtual ticks.

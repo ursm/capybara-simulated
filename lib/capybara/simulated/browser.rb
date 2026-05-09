@@ -1751,6 +1751,16 @@ module Capybara
         # Web Storage ops are dispatched against handle 0; route them
         # to the Ruby-backed Hash so the state survives boot_vm.
         return storage_op(op, args) if STORAGE_OPS.include?(op)
+        # QuickJS' Intl polyfill ships IANA zone tables (apps that
+        # explicitly pass `{timeZone: 'X'}` work), but its default
+        # `resolvedOptions().timeZone` is hardcoded UTC and ignores
+        # the host's `ENV["TZ"]`. Avo's `DateTime.local().zoneName`
+        # (Luxon's read of the system default) ends up "UTC" even
+        # with `ENV["TZ"]="Europe/Bucharest"`, which then propagates
+        # as `displayTimezone` and the rendered value stays UTC.
+        # Surfacing the host process' `TZ` here lets the JS-side
+        # `Intl.DateTimeFormat` wrapper fill it in.
+        return ENV['TZ'] if op == 'systemTimeZone'
         node = lookup_node(handle) || @document
         case op
         when 'querySelector'
