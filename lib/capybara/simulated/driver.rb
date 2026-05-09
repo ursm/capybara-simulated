@@ -23,8 +23,10 @@ module Capybara
       end
 
       def initialize(app, features: [])
-        @app      = app
-        @features = features
+        @app           = app
+        @features      = features
+        @windows       = []                 # [{handle:, browser:}]; first entry is the primary
+        @active_handle = nil                # picks current_browser; nil → primary
         self.class.current = self
       end
 
@@ -52,8 +54,40 @@ module Capybara
       def tracing?     = !current_trace.nil?
       def current_trace = browser.trace || browser.pending_trace
 
+      # Most callers want the *active* window's Browser. Behind the
+      # scenes we keep a list of windows; switching tabs swaps which
+      # Browser this returns.
       def browser
-        @browser ||= Browser.new(app, features: @features)
+        ensure_primary_window
+        active = @windows.find {|w| w[:handle] == (@active_handle || PRIMARY_HANDLE) }
+        (active || @windows.first)[:browser]
+      end
+      alias current_browser browser
+
+      def primary_browser
+        ensure_primary_window
+        @windows.first[:browser]
+      end
+
+      def ensure_primary_window
+        return unless @windows.empty?
+        @windows << {handle: PRIMARY_HANDLE, browser: build_browser}
+      end
+
+      def build_browser(shared_state: nil)
+        Browser.new(@app, features: @features, driver: self, shared_state: shared_state)
+      end
+
+      # Opens an auxiliary window pointing at `url`. New window inherits
+      # the primary's cookie / localStorage jars (real browsers scope
+      # those per-origin, not per-tab). Returns the handle.
+      def open_aux_window(url)
+        ensure_primary_window
+        aux = build_browser(shared_state: primary_browser.exportable_state)
+        aux.visit(url) if url
+        handle = "csim-window-#{@windows.length}"
+        @windows << {handle: handle, browser: aux}
+        handle
       end
 
       def needs_server?       = false
@@ -69,7 +103,20 @@ module Capybara
 
       def visit(path)      = browser.visit(path)
       def refresh          = browser.refresh
-      def reset!           = browser.reset!
+
+      # Capybara hands us reset! between tests. Tear down any auxiliary
+      # windows first (they hold their own JS VMs, which would leak)
+      # and reset the primary; the shared cookie / localStorage jars
+      # the primary owns are cleared as part of its reset.
+      def reset!
+        ensure_primary_window
+        # Drop aux Browsers — GC reclaims their per-window JS VM. The
+        # primary's reset! clears the cookie / localStorage jars they
+        # were sharing.
+        @windows = @windows.first(1)
+        @active_handle = PRIMARY_HANDLE
+        primary_browser.reset!
+      end
       def go_back          = browser.go_back
       def go_forward       = browser.go_forward
 
@@ -107,12 +154,32 @@ module Capybara
       # session-level helpers walk through `current_window_handle`, so
       # without these any responsive-test that goes via the
       # `Capybara::Window` API blows up before the resize lands.
-      WINDOW_HANDLE = 'csim-window-0'
-      def current_window_handle  = WINDOW_HANDLE
-      def window_handles         = [WINDOW_HANDLE]
-      def window_size(_handle)   = [browser.viewport_width, browser.viewport_height]
-      def close_window(_handle); end
-      def switch_to_window(_handle); end
+      PRIMARY_HANDLE = 'csim-window-0'
+      def current_window_handle = @active_handle || PRIMARY_HANDLE
+      def window_handles
+        ensure_primary_window
+        @windows.map {|w| w[:handle] }
+      end
+      def window_size(handle)   = [find_window(handle)[:browser].viewport_width, find_window(handle)[:browser].viewport_height]
+      def close_window(handle)
+        return if handle == PRIMARY_HANDLE
+        idx = @windows.index {|w| w[:handle] == handle } or return
+        @windows.delete_at(idx)  # GC the per-window Browser + JS VM
+        @active_handle = PRIMARY_HANDLE if @active_handle == handle
+      end
+      def switch_to_window(handle)
+        ensure_primary_window
+        unless @windows.any? {|w| w[:handle] == handle }
+          raise Capybara::WindowError, "Unknown window handle: #{handle.inspect}"
+        end
+        @active_handle = handle
+      end
+
+      private def find_window(handle)
+        ensure_primary_window
+        @windows.find {|w| w[:handle] == handle } or
+          raise Capybara::WindowError, "Unknown window handle: #{handle.inspect}"
+      end
       def title            = browser.title
       def status_code      = browser.status_code
       def response_headers = browser.response_headers

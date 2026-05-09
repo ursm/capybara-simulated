@@ -63,9 +63,20 @@ module Capybara
         @current_url
       end
 
-      def initialize(app, features: [])
+      # `driver` is a back-ref used only for cross-window operations
+      # (opening / switching / closing tabs). When sibling windows
+      # exist, the driver hands each new Browser the primary's
+      # `exportable_state` so cookies + localStorage are visible
+      # across tabs (per-origin, per HTML spec).
+      def exportable_state
+        {cookies: @cookies, local_storage: @local_storage}
+      end
+
+      def initialize(app, features: [], driver: nil, shared_state: nil)
         @app                = app
         @extra_js_features  = features
+        @driver             = driver
+        @shared_state       = shared_state
         @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
         @handles            = HandleTable.new(@document)
         @js                 = nil
@@ -79,7 +90,10 @@ module Capybara
         # once a test has actually waited N ms.
         @last_tick_ts       = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until      = nil  # sticky window — see Browser#polling?
-        @cookies            = {}
+        # Shared with sibling windows when shared_state is supplied —
+        # each Browser sees the same Hash instance, so a write in one
+        # tab is visible to the next outgoing request from another.
+        @cookies            = shared_state && shared_state[:cookies]       || {}
         @sticky_headers     = {}   # explicit `driver.header(name, value)` overrides applied on every request
         @file_picks         = {}   # handle -> [path, ...] for <input type="file">
         @modal_handlers     = []   # innermost handler matches the next modal, pops, then bubbles outward
@@ -108,7 +122,11 @@ module Capybara
         @hovered_handle     = nil  # last element passed to `hover` (drives mouseleave on the next hover)
         # Ruby-backed so the JS Map doesn't get wiped when boot_vm
         # rebuilds the runtime mid-test. Cleared at per-test reset!.
-        @local_storage      = {}
+        # localStorage is per-origin in real browsers — windows of the
+        # same origin see the same store. sessionStorage is scoped to
+        # the top-level browsing context (effectively per-window for
+        # our model) so each Browser keeps its own.
+        @local_storage      = shared_state && shared_state[:local_storage] || {}
         @session_storage    = {}
         @mutations          = []
         # IDs of MutationObservers currently observing. Records stamp
@@ -2631,12 +2649,22 @@ module Capybara
         href = node['href']
         return true if href.nil? || href.empty?
         return true if NON_NAVIGABLE_SCHEMES.any? {|s| href.start_with?(s) }
-        target = resolve(href)
-        return true if same_document_fragment?(target)
+        target_url = resolve(href)
+        return true if same_document_fragment?(target_url)
         if node.attributes['download']
-          return save_download(target, node['download'].to_s)
+          return save_download(target_url, node['download'].to_s)
         end
-        navigate(:get, target)
+        # `target="_blank"` (or any non-_self/_top/_parent name) opens
+        # in a new browsing context. We model that as a sibling Browser
+        # (own DOM / VM, shared cookies + localStorage); the current
+        # window stays put. `_self` / `_top` / `_parent` collapse to
+        # the current top-level context for our flat model.
+        link_target = (node['target'] || '').strip.downcase
+        if @driver && !link_target.empty? && !%w[_self _top _parent].include?(link_target)
+          @driver.open_aux_window(target_url)
+          return true
+        end
+        navigate(:get, target_url)
         true
       end
 
