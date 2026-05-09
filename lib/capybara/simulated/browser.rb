@@ -13,6 +13,7 @@ require 'uri'
 require 'uri/mailto'
 require_relative 'handle_table'
 require_relative 'js_runtime'
+require_relative 'trace'
 
 module Capybara
   module Simulated
@@ -38,6 +39,12 @@ module Capybara
     class Browser
       attr_reader   :app, :status_code, :response_headers
       attr_accessor :mutation_recording, :timers_active
+
+      # Active trace recorder for the current test, or nil. After
+      # `reset!` it moves to `@pending_trace` so the host's
+      # `after(:each)` hook (which Capybara runs *after* reset!) can
+      # still find it and persist with a meaningful filename.
+      attr_reader :trace, :pending_trace
 
       def current_url
         tick_real_time
@@ -98,6 +105,10 @@ module Capybara
         # via __setListenedType so dispatch_event can skip the JS hop
         # for events nobody cares about.
         @listened_types     = Set.new
+        # Snapshot the env decision once at boot so the per-action hot
+        # path (`record_action`) doesn't pay a hash lookup when tracing
+        # is off — the 99% case in normal test runs.
+        @trace_autostart    = !ENV['CSIM_TRACE_DIR'].nil?
       end
 
       def set_listened_type(type, active)
@@ -112,11 +123,71 @@ module Capybara
         @js ||= JsRuntime.new(self, extra_features: @extra_js_features)
       end
 
+      def start_trace(metadata = {})
+        @trace = Trace.new(metadata: metadata)
+      end
+
+      # Persist `trace` (defaults to live or pending) to `path` and
+      # return the path. Doesn't clear — `clear_trace!` is the explicit
+      # follow-up so the caller controls the lifecycle.
+      def finish_trace_to(path, trace = (@trace || @pending_trace))
+        return nil unless trace
+        trace.write_json(path)
+      end
+
+      def clear_trace!
+        @trace = nil
+        @pending_trace = nil
+      end
+
+      def describe_node(node)
+        return '<unknown>' unless node.respond_to?(:name)
+        tag = node.name
+        if (id = node['id']) && !id.empty?
+          "#{tag}##{id}"
+        elsif (name = node['name']) && !name.empty?
+          "#{tag}[name=#{name.inspect}]"
+        elsif (cls = node['class']) && !cls.empty?
+          "#{tag}.#{cls.split.first}"
+        elsif (txt = node.text.to_s.strip)[0, 40].length.positive?
+          "#{tag}(#{txt[0, 40].inspect})"
+        else
+          tag
+        end
+      end
+
+      # Wraps a driver action so the trace records the post-action DOM
+      # snapshot plus any console / network activity that happened
+      # during the action. Re-entrant: when one recorded action calls
+      # another (session_send_keys → send_keys, label-click → click),
+      # the outer step owns the snapshot and the inner just yields.
+      def record_action(kind, description)
+        if @trace.nil?
+          return yield unless @trace_autostart
+          @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
+        end
+        return yield if @recording_action
+        @recording_action = true
+        @trace.begin_step(kind, description: description, url_before: @current_url)
+        error = nil
+        begin
+          yield
+        rescue => e
+          error = {class: e.class.name, message: e.message}
+          raise
+        ensure
+          @trace.finish_step(url_after: @current_url, dom_after: html, error: error)
+          @recording_action = false
+        end
+      end
+
       def visit(url)
-        # Address-bar navigation — no Referer, regardless of where we
-        # were before. Link clicks / form submits / location.assign
-        # take the @current_url default.
-        navigate(:get, resolve_against_current(url), referer: nil)
+        record_action(:visit, "visit #{url}") do
+          # Address-bar navigation — no Referer, regardless of where we
+          # were before. Link clicks / form submits / location.assign
+          # take the @current_url default.
+          navigate(:get, resolve_against_current(url), referer: nil)
+        end
       end
 
       # Rack-test-compatible escape hatch for tests that need to set
@@ -131,23 +202,37 @@ module Capybara
       end
 
       def refresh
-        req = current_request
-        replay(req) if req
+        record_action(:refresh, 'refresh') do
+          req = current_request
+          replay(req) if req
+        end
       end
 
       def go_back
-        return if @history_idx <= 0
-        @history_idx -= 1
-        replay(current_request)
+        record_action(:go_back, 'go_back') do
+          return if @history_idx <= 0
+          @history_idx -= 1
+          replay(current_request)
+        end
       end
 
       def go_forward
-        return if @history_idx >= @history.size - 1
-        @history_idx += 1
-        replay(current_request)
+        record_action(:go_forward, 'go_forward') do
+          return if @history_idx >= @history.size - 1
+          @history_idx += 1
+          replay(current_request)
+        end
       end
 
       def reset!
+        # Hand the live trace off to `@pending_trace` so the host's
+        # `after(:each)` hook (which runs *after* Capybara's reset)
+        # still finds it. Anything left in `@pending_trace` from an
+        # earlier missed-after-hook run is discarded — better to lose
+        # one trace than to merge two tests' actions into a single
+        # file when a future hook does fire.
+        @pending_trace = @trace
+        @trace = nil
         @document         = Nokogiri::HTML5(BLANK_DOCUMENT)
         @handles.reset!(@document)
         @current_url      = nil
@@ -784,21 +869,24 @@ module Capybara
       # buttons / links-with-href / [tabindex>=0], skipping disabled
       # / hidden ones.
       def session_send_keys(keys)
-        forward = []
-        shift = false
-        keys.each do |k|
-          if k == :shift
-            shift = true
-          elsif k == :tab
-            advance_focus(shift ? -1 : 1)
-            shift = false
-          else
-            forward << k
-            shift = false
+        record_action(:send_keys, "session send_keys #{keys.inspect[0, 80]}") do
+          forward = []
+          shift = false
+          keys.each do |k|
+            if k == :shift
+              shift = true
+            elsif k == :tab
+              advance_focus(shift ? -1 : 1)
+              shift = false
+            else
+              forward << k
+              shift = false
+            end
           end
-        end
-        if forward.any? && (h = active_element_handle)
-          send_keys(h, forward)
+          # `record_action` is re-entrant: the inner send_keys call sees
+          # an open step and just yields, so the trace stays a single
+          # `session send_keys` entry.
+          send_keys(active_element_handle, forward) if forward.any? && active_element_handle
         end
       end
 
@@ -990,6 +1078,7 @@ module Capybara
       def click(handle, modifiers = nil, delay: 0, x: nil, y: nil, offset: nil)
         node = lookup_node(handle)
         return false if node.nil?
+        record_action(:click, "click #{describe_node(node)}") do
         # Click on a focusable element steals focus first — matches what
         # browsers do (focus event fires before click for synthetic
         # element.click() / user clicks).
@@ -1031,6 +1120,7 @@ module Capybara
         else
           false
         end
+        end
       end
 
       # JS-side `form.submit()` arrives here. Per spec it bypasses the
@@ -1039,8 +1129,10 @@ module Capybara
       def submit_form(handle)
         node = lookup_node(handle)
         return false unless node
-        form = node.name == 'form' ? node : enclosing_form(node)
-        form ? perform_submission(form, nil) : false
+        record_action(:submit, "submit #{describe_node(node)}") do
+          form = node.name == 'form' ? node : enclosing_form(node)
+          form ? perform_submission(form, nil) : false
+        end
       end
 
       # Real browsers execute a `<script>` on insertion into a connected
@@ -1072,56 +1164,58 @@ module Capybara
       # Fire input + change after a user-driven value change. Mirrors what
       # Selenium / a real browser do for `fill_in` / `set`. JS-driven writes
       # via `setValue` dom_op skip this — that path is the JS author's call.
+      #
+      # `readonly` text inputs / textareas short-circuit at the entry
+      # point: selenium and cuprite both refuse user typing on them.
+      # The attribute does NOT apply to checkboxes / radios / range /
+      # etc. per the HTML spec, so the gate uses `readonly_exempt?`.
+      # Programmatic writes via `el.value = ...` (the JS `setValue`
+      # dom_op path) skip this gate — flatpickr's altInput is the
+      # canonical example.
       def set_value_with_events(handle, value)
         node = lookup_node(handle)
-        # User-simulation gate: `readonly` text inputs / textareas reject
-        # `fill_in` / `set`, mirroring selenium / cuprite. The attribute
-        # does NOT apply to checkboxes / radios / range / etc. per the
-        # HTML spec, so don't short-circuit those. Programmatic writes
-        # via `el.value = ...` (the JS `setValue` dom_op path) skip
-        # this gate — JS authors expect their assignments to land
-        # regardless of readonly (flatpickr's altInput is the canonical
-        # example).
         return false if node && node['readonly'] && !readonly_exempt?(node)
-        # Checkbox / radio: real browsers toggle the input *before*
-        # firing click, so listeners reading `target.checked` (Redmine's
-        # `contextMenuClick`) see the new state. preventDefault reverts.
-        if node && node.name == 'input' &&
-           %w[checkbox radio].include?((node['type'] || '').downcase)
-          was_checked = !!node['checked']
-          now_checked = !!value
-          set_value(handle, now_checked)
-          unless dispatch_event(handle, 'click', **mouse_init(button: 0))
-            set_value(handle, was_checked)
-            return was_checked
+        record_action(:set, "set #{describe_node(node)} = #{value.inspect[0, 80]}") do
+          # Checkbox / radio: real browsers toggle the input *before*
+          # firing click, so listeners reading `target.checked` (Redmine's
+          # `contextMenuClick`) see the new state. preventDefault reverts.
+          if node && node.name == 'input' &&
+             %w[checkbox radio].include?((node['type'] || '').downcase)
+            was_checked = !!node['checked']
+            now_checked = !!value
+            set_value(handle, now_checked)
+            unless dispatch_event(handle, 'click', **mouse_init(button: 0))
+              set_value(handle, was_checked)
+              break was_checked
+            end
+            if now_checked != was_checked
+              # Stimulus's default action event for radio / checkbox is 'input', not 'change'.
+              dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
+              dispatch_event(handle, 'change', bubbles: true, cancelable: false)
+            end
+            break true
           end
-          if now_checked != was_checked
-            # Stimulus's default action event for radio / checkbox is 'input', not 'change'.
-            dispatch_event(handle, 'input',  bubbles: true, cancelable: false)
-            dispatch_event(handle, 'change', bubbles: true, cancelable: false)
-          end
-          return true
+          # Focus the field first — fill_in / set on a real browser implies
+          # clicking into the field, which fires focus before input/change.
+          focus(handle)
+          # Trailing \n on a single-input text form submits the form (browser
+          # default behaviour for Enter in a single-field form). Strip the \n
+          # before storing the value so the submitted body doesn't carry it.
+          submit_after = should_submit_on_enter?(node, value)
+          changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
+          break changed unless changed && @js
+          dispatch_input_change(handle)
+          # Tail keydown / keyup approximate the "user finished typing"
+          # signal that autocomplete / mention libraries (Tribute.js,
+          # atwho, etc.) hook. They look at `event.key` to decide whether
+          # the most recent keystroke was a trigger character (`#`, `@`,
+          # …), so seed the event with the last character of the typed
+          # value. Better than nothing for libraries that fire on the
+          # final char; per-keystroke replay is out of scope.
+          dispatch_key_pair(handle, value)
+          submit_form(handle) if submit_after
+          changed
         end
-        # Focus the field first — fill_in / set on a real browser implies
-        # clicking into the field, which fires focus before input/change.
-        focus(handle)
-        # Trailing \n on a single-input text form submits the form (browser
-        # default behaviour for Enter in a single-field form). Strip the \n
-        # before storing the value so the submitted body doesn't carry it.
-        submit_after = should_submit_on_enter?(node, value)
-        changed = set_value(handle, submit_after ? value.to_s.chomp("\n") : value)
-        return changed unless changed && @js
-        dispatch_input_change(handle)
-        # Tail keydown / keyup approximate the "user finished typing"
-        # signal that autocomplete / mention libraries (Tribute.js,
-        # atwho, etc.) hook. They look at `event.key` to decide whether
-        # the most recent keystroke was a trigger character (`#`, `@`,
-        # …), so seed the event with the last character of the typed
-        # value. Better than nothing for libraries that fire on the
-        # final char; per-keystroke replay is out of scope.
-        dispatch_key_pair(handle, value)
-        submit_form(handle) if submit_after
-        changed
       end
 
       def dispatch_key_pair(handle, value)
@@ -1204,22 +1298,24 @@ module Capybara
       def send_keys(handle, keys)
         node = lookup_node(handle)
         return false if node.nil?
-        # Match selenium: keystrokes route to the focused element, so
-        # focus first. The implicit blur of whatever was focused before
-        # matters for blur-driven commit patterns (autocomplete chips).
-        focus(handle) if focusable?(node)
-        start = field_value(node)
-        state = {value: start.dup, caret: start.length, modifiers: Set.new}
-        keys.each { |k| apply_send_key(handle, state, k) }
-        # Skip the commit when no key typed into the field — a shortcut
-        # chord like `[:control, 'b']` may have let a JS listener mutate
-        # the value itself, and writing our untouched buffer back would
-        # clobber that work.
-        if state[:value] != start
-          set_value(handle, state[:value])
-          dispatch_input_change(handle)
+        record_action(:send_keys, "send_keys #{describe_node(node)} #{keys.inspect[0, 80]}") do
+          # Match selenium: keystrokes route to the focused element, so
+          # focus first. The implicit blur of whatever was focused before
+          # matters for blur-driven commit patterns (autocomplete chips).
+          focus(handle) if focusable?(node)
+          start = field_value(node)
+          state = {value: start.dup, caret: start.length, modifiers: Set.new}
+          keys.each { |k| apply_send_key(handle, state, k) }
+          # Skip the commit when no key typed into the field — a shortcut
+          # chord like `[:control, 'b']` may have let a JS listener mutate
+          # the value itself, and writing our untouched buffer back would
+          # clobber that work.
+          if state[:value] != start
+            set_value(handle, state[:value])
+            dispatch_input_change(handle)
+          end
+          true
         end
-        true
       end
 
       # Modifier handling: a chord array like [:control, 'b'] keeps its
@@ -1914,12 +2010,26 @@ module Capybara
           end
           nil
         when 'setTextContent'
+          # Replacement: every prior child is removed, the new text node
+          # (when non-empty) is added. MutationObserver consumers like
+          # Stimulus's action observer need both lists populated to
+          # rescan the subtree, otherwise a `data-action` on a node
+          # that arrived this way never gets wired up.
+          removed_handles = node.children.map { |c| @handles.track(c) }
           node.content = args[0].to_s if node.respond_to?(:content=)
-          record_childlist(handle)
+          added_handles = node.children.map { |c| @handles.track(c) }
+          record_childlist(handle, added_handles, removed_handles)
           nil
         when 'setInnerHTML'
+          # Same shape as setTextContent: replace all children and
+          # report both lists. Avo's KeyValue / MultiSelectAutocomplete
+          # controllers rebuild their inner HTML this way; without the
+          # added-nodes list Stimulus's action observer never sees the
+          # `data-action` on the newly-inserted inputs.
+          removed_handles = node.children.map { |c| @handles.track(c) }
           node.inner_html = args[0].to_s if node.respond_to?(:inner_html=)
-          record_childlist(handle)
+          added_handles = node.children.map { |c| @handles.track(c) }
+          record_childlist(handle, added_handles, removed_handles)
           nil
         when 'setOuterHTML'
           # Mutation reported against the parent so subtree observers see the new nodes.
@@ -2147,7 +2257,7 @@ module Capybara
       # again on block exit in case the dialog never fired.
       def with_modal(handler)
         @modal_handlers.push(handler)
-        yield
+        yield if block_given?
       ensure
         @modal_handlers.delete(handler)
       end
@@ -2567,6 +2677,7 @@ module Capybara
         status, response_headers, body_iter = @app.call(env)
         response_body = read_rack_body(body_iter)
         ingest_set_cookie(response_headers)
+        @trace&.log_network(method, url, status)
         [status, response_headers, response_body]
       end
 
@@ -2715,6 +2826,11 @@ module Capybara
         # leave the JS-side getter returning the wrapper's own slot.
         if @js
           js.call('__closeDialog', dialog_handle, return_value)
+          # The close event runs the awaiting `resolve(...)` synchronously,
+          # but the host's `await` continuation lives on the microtask
+          # queue. Drain so Turbo's data-turbo-confirm flow can proceed
+          # to the actual DELETE / GET that the dialog was gating.
+          settle
         else
           dialog.delete('open')
           dispatch_event(dialog_handle, 'close', bubbles: false, cancelable: false)

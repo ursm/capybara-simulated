@@ -10,13 +10,47 @@ module Capybara
       attr_reader :app
 
       # `features` is appended to the QuickJS feature flags the runtime
-       # already pins (URL / Encoding / Crypto). Pass e.g.
+      # already pins (URL / Encoding / Crypto). Pass e.g.
       # `[Quickjs::POLYFILL_INTL]` from your `register_driver` block to
       # surface `Intl.DateTimeFormat` etc. inside the JS sandbox.
+      class << self
+        # `Capybara.current_session.driver` is unreliable from RSpec
+        # hooks — hosts swap sessions via `using_session` blocks, so by
+        # the time `after(:each)` runs the active session is often back
+        # to `:rack_test`. The auto-trace hook in `support/csim_rspec.rb`
+        # reads this slot instead so it can always find the live driver.
+        attr_accessor :current
+      end
+
       def initialize(app, features: [])
         @app      = app
         @features = features
+        self.class.current = self
       end
+
+      # Per-test trace recording. Mirrors capybara-playwright-driver's
+      # `start_tracing` / `stop_tracing` shape so suites can swap drivers
+      # without rewriting hooks. Keyword args are stashed verbatim into
+      # the trace's metadata.
+      def start_tracing(**metadata)
+        browser.start_trace(metadata)
+      end
+
+      # With `path:`, persist the active trace as JSON and clear it.
+      # Without, return the trace object for in-memory inspection.
+      # Falls back to `Browser#pending_trace` because Capybara runs its
+      # per-test session reset *before* user `after(:each)` hooks — by
+      # the time RSpec teardown sees the driver, the live slot has
+      # already been moved to `pending`.
+      def stop_tracing(path: nil)
+        active = current_trace or return nil
+        result = path ? browser.finish_trace_to(path, active) : active
+        browser.clear_trace!
+        result
+      end
+
+      def tracing?     = !current_trace.nil?
+      def current_trace = browser.trace || browser.pending_trace
 
       def browser
         @browser ||= Browser.new(app, features: @features)

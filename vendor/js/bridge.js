@@ -522,7 +522,26 @@
     // <input list="...">'s referenced <datalist>, plus its options. Used
     // by Capybara's datalist-option resolver via element.evaluate_script.
     get list()    { return wrap(__dom(this.__h, 'list')); }
-    get options() { return __dom(this.__h, 'options').map(wrap); }
+    // <select>.options — Array-shaped, but with `add` / `remove` methods
+    // so `select.options.remove(0)` and Array.from(...) both work the way
+    // controllers expect (HTMLOptionsCollection has both Array indexing
+    // and these mutators in real browsers). Mutations route through the
+    // owning <select>, mirroring the live-collection contract.
+    get options() {
+      const arr = __dom(this.__h, 'options').map(wrap);
+      const owner = this;
+      arr.add = function (option, before) {
+        if (before == null) owner.appendChild(option);
+        else owner.insertBefore(option, typeof before === 'number' ? arr[before] : before);
+      };
+      arr.remove = function (idx) {
+        const o = arr[idx];
+        if (o && o.parentNode) o.parentNode.removeChild(o);
+      };
+      arr.item        = function (i) { return arr[i] || null; };
+      arr.namedItem   = function (n) { return arr.find(o => o.id === n || o.name === n) || null; };
+      return arr;
+    }
     // <option>.label — falls back to text content when no label attr.
     get label()   { return __dom(this.__h, 'label'); }
 
@@ -763,9 +782,31 @@
         if (ref) parent.insertBefore(node, ref); else parent.appendChild(node);
       }
     }
-    remove() {
+    remove(idx) {
+      // HTMLSelectElement.remove(index) overloads the generic
+      // ChildNode.remove(): with an integer it removes the option at
+      // that position from the select; without args it removes self
+      // from the parent. The branch is decided by the receiver's tag.
+      if (idx != null && (this.tagName === 'SELECT' || this.tagName === 'OPTGROUP')) {
+        const opt = this.options ? this.options[idx] : null;
+        if (opt && opt.parentNode) opt.parentNode.removeChild(opt);
+        return;
+      }
       const parent = this.parentNode;
       if (parent) parent.removeChild(this);
+    }
+    // HTMLSelectElement.add(option, before) — appends an <option> to
+    // the select, optionally inserting before another option (by ref or
+    // index). Stimulus's city-in-country#onCountryChange relies on it.
+    add(option, before) {
+      if (option == null) return;
+      if (before == null || before === -1) {
+        this.appendChild(option);
+        return;
+      }
+      const ref = typeof before === 'number' ? (this.options ? this.options[before] : null) : before;
+      if (ref) this.insertBefore(option, ref);
+      else     this.appendChild(option);
     }
     append(...nodes) {
       for (const n of nodes) {
@@ -1828,6 +1869,18 @@
   globalThis.HTMLLinkElement     = Element;
   globalThis.HTMLMetaElement     = Element;
   globalThis.HTMLOptionElement   = Element;
+  // `new Option(text, value, defaultSelected, selected)` builds a
+  // detached <option>. Real browsers expose this as a constructor on
+  // HTMLOptionElement; Stimulus's city-in-country#onCountryChange
+  // builds replacement options this way after a country switch.
+  globalThis.Option = function Option(text, value, defaultSelected, selected) {
+    const o = globalThis.document.createElement('option');
+    if (text !== undefined)  o.textContent = String(text);
+    if (value !== undefined) o.setAttribute('value', String(value));
+    if (defaultSelected)     o.setAttribute('selected', '');
+    if (selected)            o.selected = true;
+    return o;
+  };
   globalThis.HTMLScriptElement   = Element;
   globalThis.HTMLSelectElement   = Element;
   globalThis.HTMLSpanElement     = Element;
@@ -2222,6 +2275,15 @@
     }
     cloneRange()   { const r = new Range; Object.assign(r, this); return r; }
     detach()       {}
+    // No layout engine — return a degenerate rect. CodeMirror's
+    // hasBadBidiRects probe relies on calling this on a Range and
+    // checking `left == right` to opt into its text-only fallback;
+    // returning all-zeros lands in that branch instead of throwing
+    // "TypeError: not a function" and breaking controller-connect.
+    getBoundingClientRect() {
+      return {x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0};
+    }
+    getClientRects() { return []; }
   }
   globalThis.Range = Range;
   globalThis.document.createRange = function () { return new Range; };
@@ -2624,6 +2686,46 @@
   // in once at runtime boot — explicit `{timeZone: ...}` calls fall
   // straight through to the polyfill, which already knows the IANA
   // tables.
+  // QuickJS's default console.error stringifies object args via `String(x)`,
+  // which collapses `Error` to its `message` (no stack) and any other
+  // object to "[object Object]". For diagnostics that means a Stimulus
+  // controller-connect TypeError shows up as
+  //   `Error connecting controller TypeError: not a function [object Object]`
+  // — useless for finding the offending controller. Wrap each level so
+  //   - Error args expand to their stack when present, else message
+  //   - plain objects get JSON.stringify (cycle-safe via WeakSet)
+  // Other arg types fall through unchanged.
+  (function expandConsoleArgs() {
+    function format(v, seen) {
+      if (v && typeof v === 'object') {
+        if (v instanceof Error) return v.stack || (v.name + ': ' + v.message);
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+        try { return JSON.stringify(v); } catch (_) { return String(v); }
+      }
+      return v;
+    }
+    ['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+      const orig = globalThis.console[level];
+      if (typeof orig !== 'function') return;
+      globalThis.console[level] = function () {
+        // Fast-path: most app logs are primitive-only. Skip the
+        // WeakSet + arg-array allocation when there's no object to
+        // format — this runs on every console call.
+        let needsFormat = false;
+        for (let i = 0; i < arguments.length; i++) {
+          const a = arguments[i];
+          if (a !== null && typeof a === 'object') { needsFormat = true; break; }
+        }
+        if (!needsFormat) return orig.apply(globalThis.console, arguments);
+        const seen = new WeakSet();
+        const out  = new Array(arguments.length);
+        for (let i = 0; i < arguments.length; i++) out[i] = format(arguments[i], seen);
+        return orig.apply(globalThis.console, out);
+      };
+    });
+  })();
+
   (function patchIntlDefaultZone() {
     if (!globalThis.Intl || !globalThis.Intl.DateTimeFormat) return;
     const sysTZ = __dom(0, 'systemTimeZone');

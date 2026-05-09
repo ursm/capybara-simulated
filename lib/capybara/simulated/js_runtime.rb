@@ -134,6 +134,14 @@ module Capybara
       end
 
       def run_module_script(browser, script)
+        # Modules evaluate exactly once per VM (QuickJS keeps them in its
+        # module table forever), so any module side-effect — `Application.start()`,
+        # `customElements.define`, top-level `let` — pins state we'd
+        # otherwise want fresh on the next page. Force a VM reboot at
+        # the next `reset_page` so navigation lands on a clean module
+        # graph; without this an inline module body reused across pages
+        # silently no-ops on the second visit.
+        @scripts_evaluated_since_reset = true
         src = script['src']
         if src && !src.empty?
           url = browser.resolve(src)
@@ -289,6 +297,7 @@ module Capybara
         # trace, so surfacing it directly is more useful than splatting.
         @vm.on_log do |log|
           warn "[capybara-simulated console.#{log.severity}] #{log}"
+          @browser.trace&.log_console(log.severity, log.to_s)
         end
       end
     end
