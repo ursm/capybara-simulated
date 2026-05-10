@@ -263,26 +263,39 @@ module Capybara
         end
       end
 
+      # mini_racer corrupts V8 internal state if a Ruby exception
+      # propagates out of an attached lambda — the next operation on the
+      # Context segfaults somewhere deep in V8. Catch every error inside
+      # the host fn and substitute nil; let bridge.js see "host op
+      # returned nothing" rather than tearing the isolate down.
+      def safe_call
+        yield
+      rescue StandardError => e
+        warn "[capybara-simulated v8] host fn error: #{e.class}: #{e.message[0, 200]}"
+        nil
+      end
+
       def attach_host_fns(c)
         browser = @browser
         coerce  = method(:to_js_value)
+        sc      = method(:safe_call)
         # mini_racer's `attach` matches the JS callsite arity strictly,
         # so use variadic `*a` and pull the slots we care about — keeps
         # bridge.js callsites that drop trailing args (`__locationAssign(url)`
         # vs `__rackFetch(...5 args...)`) from blowing up at the host
         # boundary.
-        c.attach('__dom',                       ->(*a) { coerce.(browser.dom_op(a[0], a[1], a[2] || [])) })
-        c.attach('__addMutationObserverId',     ->(*a) { coerce.(browser.add_mutation_observer_id(a[0].to_i)) })
-        c.attach('__removeMutationObserverId',  ->(*a) { coerce.(browser.remove_mutation_observer_id(a[0].to_i)) })
-        c.attach('__setListenedType',           ->(*a) { coerce.(browser.set_listened_type(a[0], !!a[1])) })
-        c.attach('__setTimersActive',           ->(*a) { browser.timers_active = !!a[0]; nil })
-        c.attach('__modalDialog',               ->(*a) { coerce.(browser.handle_modal(a[0], a[1], a[2])) })
-        c.attach('__setCurrentUrl',             ->(*a) { coerce.(browser.history_state(a[0])) })
-        c.attach('__locationAssign',            ->(*a) { coerce.(browser.location_assign(a[0])) })
-        c.attach('__locationReload',            ->(*a) { browser.refresh; nil })
-        c.attach('__rackFetch',                 ->(*a) { coerce.(browser.rack_fetch(a[0], a[1], a[2], a[3], a[4])) })
-        c.attach('__getDocumentCookie',         ->(*a) { coerce.(browser.document_cookie) })
-        c.attach('__setDocumentCookie',         ->(*a) { browser.write_document_cookie(a[0].to_s); nil })
+        c.attach('__dom',                       ->(*a) { sc.() { coerce.(browser.dom_op(a[0], a[1], a[2] || [])) } })
+        c.attach('__addMutationObserverId',     ->(*a) { sc.() { browser.add_mutation_observer_id(a[0].to_i); nil } })
+        c.attach('__removeMutationObserverId',  ->(*a) { sc.() { browser.remove_mutation_observer_id(a[0].to_i); nil } })
+        c.attach('__setListenedType',           ->(*a) { sc.() { browser.set_listened_type(a[0], !!a[1]); nil } })
+        c.attach('__setTimersActive',           ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
+        c.attach('__modalDialog',               ->(*a) { sc.() { coerce.(browser.handle_modal(a[0], a[1], a[2])) } })
+        c.attach('__setCurrentUrl',             ->(*a) { sc.() { browser.history_state(a[0]); nil } })
+        c.attach('__locationAssign',            ->(*a) { sc.() { browser.location_assign(a[0]); nil } })
+        c.attach('__locationReload',            ->(*a) { sc.() { browser.refresh; nil } })
+        c.attach('__rackFetch',                 ->(*a) { sc.() { coerce.(browser.rack_fetch(a[0], a[1], a[2], a[3], a[4])) } })
+        c.attach('__getDocumentCookie',         ->(*a) { sc.() { browser.document_cookie } })
+        c.attach('__setDocumentCookie',         ->(*a) { sc.() { browser.write_document_cookie(a[0].to_s); nil } })
         c.attach('__csim_randomUUID',  ->(*a) { SecureRandom.uuid })
         c.attach('__csim_randomBytes', ->(*a) { SecureRandom.bytes(a[0].to_i).bytes })
         c.attach('__csim_atob',        ->(*a) { Base64.decode64(a[0].to_s) })

@@ -403,7 +403,13 @@ module Capybara
       SELECTOR_ERRORS = [
         Nokogiri::CSS::SyntaxError,
         Nokogiri::XML::XPath::SyntaxError,
-        ArgumentError
+        ArgumentError,
+        # Nokogiri 1.19's `Node#matches?` calls `ancestors.last.search`,
+        # which is `nil.search` for orphaned / root nodes — surfaces as
+        # NoMethodError. Treat it as "selector path can't reach node"
+        # and fall through to `css_match_via_parent`, which returns
+        # false on parentless nodes.
+        NoMethodError
       ].freeze
 
       CHECKABLE_INPUT_TYPES = %w[checkbox radio].freeze
