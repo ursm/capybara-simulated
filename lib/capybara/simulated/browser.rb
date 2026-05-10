@@ -2737,8 +2737,16 @@ module Capybara
       end
 
       def blob_body(url)
-        raw = js.eval("(globalThis.__getBlobBody && globalThis.__getBlobBody(#{url.to_json})) || null")
-        raw && raw.to_s
+        # `__getBlobBodyHex` builds the hex-encoded bytes via `s += ...`
+        # in a loop, which leaves QuickJS holding an intermediate
+        # rope-string (a tree of concatenated segments). The bridge's
+        # JS→Ruby string conversion mangles non-trivial ropes — the
+        # whole return becomes Ruby `nil`. Calling `normalize()`
+        # flattens the rope into a single canonical string before
+        # the marshal step, sidestepping the bug.
+        hex = js.eval("(globalThis.__getBlobBodyHex && globalThis.__getBlobBodyHex(#{url.to_json}) || '').normalize()")
+        return nil if hex.nil? || hex.empty?
+        [hex].pack('H*').force_encoding(Encoding::ASCII_8BIT)
       rescue StandardError
         nil
       end

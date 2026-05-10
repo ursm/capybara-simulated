@@ -3134,6 +3134,41 @@
   // Ruby-callable: serialize a tracked blob's bytes as a string.
   // Used by `Browser#save_download` for blob URLs. Returns null when
   // the URL isn't in the registry.
+  // Hex-encoded variant for binary blobs. Ruby's QuickJS bridge
+  // converts return values to UTF-8 strings, which silently nils-out
+  // a body containing NUL or other non-UTF-8 bytes (e.g. PDF / PNG).
+  // Hex round-trips through any string transport.
+  globalThis.__getBlobBodyHex = function (url) {
+    const b = __blobs.get(url);
+    if (!b) return null;
+    const parts = b._parts || [];
+    let out = '';
+    for (const p of parts) {
+      if (typeof p === 'string') {
+        for (let i = 0; i < p.length; i++) {
+          const c = p.charCodeAt(i) & 0xff;
+          out += (c < 16 ? '0' : '') + c.toString(16);
+        }
+      } else if (p instanceof Uint8Array || p instanceof ArrayBuffer) {
+        const v = p instanceof Uint8Array ? p : new Uint8Array(p);
+        for (let i = 0; i < v.length; i++) {
+          const c = v[i] & 0xff;
+          out += (c < 16 ? '0' : '') + c.toString(16);
+        }
+      } else if (p && p._parts) {
+        for (const inner of p._parts) {
+          if (typeof inner === 'string') {
+            for (let i = 0; i < inner.length; i++) {
+              const c = inner.charCodeAt(i) & 0xff;
+              out += (c < 16 ? '0' : '') + c.toString(16);
+            }
+          }
+        }
+      }
+    }
+    return out;
+  };
+
   globalThis.__getBlobBody = function (url) {
     const b = __blobs.get(url);
     if (!b) return null;
