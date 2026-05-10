@@ -140,6 +140,83 @@ See [`Quickjs.constants`](https://github.com/hmsk/quickjs.rb) for the
 full list. `FEATURE_TIMEOUT` intentionally isn't honoured — the driver
 runs JS timers on a virtual clock so test runs stay deterministic.
 
+## Trace
+
+Each Capybara action (`visit`, `click`, `fill_in`, …) can be recorded
+as a step in a per-test trace: the URL before / after, a full DOM
+snapshot at the end of the step, console output and network requests
+that happened during it, plus elapsed and per-step durations. Output
+is one JSON file per test — downstream tooling can build whatever
+viewer it wants on top.
+
+### Auto mode
+
+Set `CSIM_TRACE_DIR=/path/to/dir` and trace recording starts on the
+first action of every system test, then writes `<example slug>.json`
+into the directory after the test finishes. The bundled
+[`csim_rspec.rb`](https://github.com/ursm/capybara-simulated-vs-world/blob/main/support/csim_rspec.rb)
+provides the RSpec hook; for Minitest, mirror it in
+`application_system_test_case.rb`'s teardown.
+
+```sh
+CSIM_TRACE_DIR=tmp/csim-traces bundle exec rspec spec/system
+```
+
+The metadata block on each trace includes `title`, `file`, `outcome`
+(`passed` / `failed`), and the exception message if the example
+failed — enough to index a CI artifact directory by failure.
+
+### Programmatic mode
+
+For finer-grained control (only trace specific examples, attach
+custom metadata, persist to a non-default location), call
+`driver.start_tracing(...)` / `driver.stop_tracing(path: ...)`. The
+shape mirrors `capybara-playwright-driver` so suites can swap drivers
+without rewriting their hooks.
+
+```ruby
+RSpec.describe 'flaky payment flow', type: :system, js: true do
+  it 'completes a checkout' do
+    page.driver.start_tracing(case_id: 'PAY-1431')
+    visit '/checkout'
+    fill_in 'Card', with: '4242424242424242'
+    click_button 'Pay'
+    expect(page).to have_text 'Thank you'
+  ensure
+    page.driver.stop_tracing(path: "tmp/traces/#{example.full_description}.json")
+  end
+end
+```
+
+### Trace JSON schema
+
+```jsonc
+{
+  "version": 1,
+  "metadata": { "title": "...", "outcome": "passed", "...": "..." },
+  "steps": [
+    {
+      "index":       0,
+      "kind":        "visit",       // visit / click / fill_in / set / refresh / go_back / …
+      "description": "/checkout",
+      "url_before":  null,
+      "url_after":   "http://www.example.com/checkout",
+      "dom_after":   "<!DOCTYPE html>…",
+      "console":     [{ "severity": "info", "message": "Stripe.js loaded" }],
+      "network":     [{ "method": "GET",    "url": "/checkout", "status": 200 }],
+      "elapsed_ms":  0,
+      "duration_ms": 38,
+      "error":       null
+    }
+  ]
+}
+```
+
+The previous step's `dom_after` is the implicit "before" for the
+next step; only the post-action snapshot is stored to keep the file
+size manageable. Console and network entries are scoped to whichever
+step was active when they happened.
+
 ## Performance characteristics
 
 `Quickjs::VM.new` releases the GVL during runtime construction, so
