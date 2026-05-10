@@ -93,6 +93,7 @@ module Capybara
       # mouseup so JS reading `Date.now()` sees the gap. `offset:` is
       # `:center` when `Capybara.w3c_click_offset = true`, otherwise nil.
       def click(keys = [], delay: 0, x: nil, y: nil, offset: nil, **_opts)
+        check_stale
         browser.click(handle_id, keys, delay: delay, x: x, y: y, offset: offset)
       end
 
