@@ -3300,7 +3300,7 @@ module Capybara
       # turning visible_text from O(N×depth) into O(N). `transform`
       # carries inherited `text-transform` so descendant text picks up
       # uppercase / lowercase / capitalize from any ancestor.
-      def collect_visible_text(node, out, root:, transform: nil)
+      def collect_visible_text(node, out, root:, transform: nil, blockify_children: false)
         return if node.nil?
         if node.is_a?(Nokogiri::XML::Text)
           out << apply_text_transform(node.text.gsub(INLINE_WHITESPACE_RE, ' '), transform)
@@ -3316,12 +3316,18 @@ module Capybara
           out << "\n"
           return
         end
+        # Per CSS, `display: flex` / `inline-flex` / `grid` / `inline-grid`
+        # blockifies its children — they're laid out as block-level boxes
+        # regardless of their own `display` value, so `innerText` puts a
+        # newline between adjacent items.
+        children_blockified = blockify_children || flex_or_grid_container?(node)
+        treat_as_block = BLOCK_TAGS.include?(node.name) || blockify_children
         # Real-browser innerText only inserts block boundaries around
         # blocks that actually emit text — collect children's output
         # into a scratch buffer so empty blocks collapse cleanly.
-        if BLOCK_TAGS.include?(node.name)
+        if treat_as_block
           inner = String.new(encoding: Encoding::UTF_8)
-          node.children.each { |c| collect_visible_text(c, inner, root: false, transform: transform) }
+          node.children.each { |c| collect_visible_text(c, inner, root: false, transform: transform, blockify_children: children_blockified) }
           return if inner.empty?
           out << "\n" unless out.empty? || out.end_with?("\n")
           out << inner
@@ -3331,8 +3337,20 @@ module Capybara
           # produces (`"a\n\t\nb"`) match.
           out << "\t" if TABLE_CELL_TAGS.include?(node.name) && next_cell_sibling?(node)
         else
-          node.children.each { |c| collect_visible_text(c, out, root: false, transform: transform) }
+          node.children.each { |c| collect_visible_text(c, out, root: false, transform: transform, blockify_children: children_blockified) }
         end
+      end
+
+      FLEX_GRID_CLASS_TOKENS = %w[flex inline-flex grid inline-grid].to_set.freeze
+      def flex_or_grid_container?(node)
+        return false unless node.respond_to?(:[])
+        klass = node['class']
+        if klass && !klass.empty?
+          klass.split(/\s+/).each {|t| return true if FLEX_GRID_CLASS_TOKENS.include?(t) }
+        end
+        style = node['style']
+        return false if style.nil? || style.empty?
+        /display\s*:\s*(?:inline-)?(?:flex|grid)\b/.match?(style)
       end
 
       TABLE_CELL_TAGS = %w[td th].to_set.freeze
