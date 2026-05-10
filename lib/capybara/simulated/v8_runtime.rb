@@ -12,6 +12,27 @@ require 'securerandom'
 require 'set'
 require 'digest'
 
+# V8's default per-isolate stack is small enough that jQuery 3 +
+# Stimulus event-handler chains exhaust it before any real test work
+# starts. 8 MiB is well clear of any reasonable recursive depth and
+# matches Node's default. Must run before the first
+# `MiniRacer::Context.new`; idempotent calls raise
+# `PlatformAlreadyInitialized`.
+begin
+  # Default V8 stack ~984KB; 2 MiB clears jQuery + Stimulus chains
+  # without running into the 8 MiB pthread cap on Linux that triggers
+  # SIGSEGV when V8 thinks it has more headroom than the OS provides.
+  # 3 MiB clears jQuery 3 + Stimulus event-handler chains; staying
+  # safely below the 8 MiB pthread default leaves Ruby + V8 internal
+  # frames room before SIGSEGV. `CSIM_V8_STACK_KB=N` overrides for
+  # workloads that need more (with `ulimit -s` raised correspondingly).
+  stack_kb = (ENV['CSIM_V8_STACK_KB'] || '3000').to_i
+  MiniRacer::Platform.set_flags!(stack_size: stack_kb) unless ENV['CSIM_V8_NO_STACK_FLAG']
+rescue MiniRacer::PlatformAlreadyInitialized
+  # Another callsite beat us to it; either the prior caller picked a
+  # compatible value or they're testing the platform-init path.
+end
+
 module Capybara
   module Simulated
     class V8Runtime
@@ -142,7 +163,10 @@ module Capybara
       end
 
       def reset_page
-        @ctx&.dispose
+        # Drop the slot rather than calling `dispose`. Explicit dispose
+        # races with V8's GC when bridge.js still holds Ruby callback
+        # refs (the lambdas attached via `attach`); leaving GC to clean
+        # up sidesteps a SIGSEGV on the next test boot.
         @ctx = nil
       end
 
@@ -219,25 +243,46 @@ module Capybara
         @ctx = c
       end
 
+      # mini_racer's Ruby→JS converter handles Hash, Array, primitives —
+      # but not Set / Range / Symbol-keyed Hashes / etc. `Browser#dom_op`
+      # legitimately returns Sets in some places (e.g. `data-controller`
+      # tokens). Recursively coerce on the way out so the bridge sees a
+      # plain JS Array.
+      def to_js_value(v)
+        case v
+        when Set, Range
+          v.to_a.map {|x| to_js_value(x) }
+        when Array
+          v.map {|x| to_js_value(x) }
+        when Hash
+          v.transform_keys(&:to_s).transform_values {|x| to_js_value(x) }
+        when Symbol
+          v.to_s
+        else
+          v
+        end
+      end
+
       def attach_host_fns(c)
         browser = @browser
+        coerce  = method(:to_js_value)
         # mini_racer's `attach` matches the JS callsite arity strictly,
         # so use variadic `*a` and pull the slots we care about — keeps
         # bridge.js callsites that drop trailing args (`__locationAssign(url)`
         # vs `__rackFetch(...5 args...)`) from blowing up at the host
         # boundary.
-        c.attach('__dom',                       ->(*a) { browser.dom_op(a[0], a[1], a[2] || []) })
-        c.attach('__addMutationObserverId',     ->(*a) { browser.add_mutation_observer_id(a[0].to_i) })
-        c.attach('__removeMutationObserverId',  ->(*a) { browser.remove_mutation_observer_id(a[0].to_i) })
-        c.attach('__setListenedType',           ->(*a) { browser.set_listened_type(a[0], !!a[1]) })
-        c.attach('__setTimersActive',           ->(*a) { browser.timers_active = !!a[0] })
-        c.attach('__modalDialog',               ->(*a) { browser.handle_modal(a[0], a[1], a[2]) })
-        c.attach('__setCurrentUrl',             ->(*a) { browser.history_state(a[0]) })
-        c.attach('__locationAssign',            ->(*a) { browser.location_assign(a[0]) })
-        c.attach('__locationReload',            ->(*a) { browser.refresh })
-        c.attach('__rackFetch',                 ->(*a) { browser.rack_fetch(a[0], a[1], a[2], a[3], a[4]) })
-        c.attach('__getDocumentCookie',         ->(*a) { browser.document_cookie })
-        c.attach('__setDocumentCookie',         ->(*a) { browser.write_document_cookie(a[0].to_s) })
+        c.attach('__dom',                       ->(*a) { coerce.(browser.dom_op(a[0], a[1], a[2] || [])) })
+        c.attach('__addMutationObserverId',     ->(*a) { coerce.(browser.add_mutation_observer_id(a[0].to_i)) })
+        c.attach('__removeMutationObserverId',  ->(*a) { coerce.(browser.remove_mutation_observer_id(a[0].to_i)) })
+        c.attach('__setListenedType',           ->(*a) { coerce.(browser.set_listened_type(a[0], !!a[1])) })
+        c.attach('__setTimersActive',           ->(*a) { browser.timers_active = !!a[0]; nil })
+        c.attach('__modalDialog',               ->(*a) { coerce.(browser.handle_modal(a[0], a[1], a[2])) })
+        c.attach('__setCurrentUrl',             ->(*a) { coerce.(browser.history_state(a[0])) })
+        c.attach('__locationAssign',            ->(*a) { coerce.(browser.location_assign(a[0])) })
+        c.attach('__locationReload',            ->(*a) { browser.refresh; nil })
+        c.attach('__rackFetch',                 ->(*a) { coerce.(browser.rack_fetch(a[0], a[1], a[2], a[3], a[4])) })
+        c.attach('__getDocumentCookie',         ->(*a) { coerce.(browser.document_cookie) })
+        c.attach('__setDocumentCookie',         ->(*a) { browser.write_document_cookie(a[0].to_s); nil })
         c.attach('__csim_randomUUID',  ->(*a) { SecureRandom.uuid })
         c.attach('__csim_randomBytes', ->(*a) { SecureRandom.bytes(a[0].to_i).bytes })
         c.attach('__csim_atob',        ->(*a) { Base64.decode64(a[0].to_s) })
