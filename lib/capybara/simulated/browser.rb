@@ -146,8 +146,19 @@ module Capybara
         end
       end
 
+      # `CSIM_JS_ENGINE=v8` opts into the experimental mini_racer-backed
+      # runtime. Default is the QuickJS-backed `JsRuntime`.
       def js
-        @js ||= JsRuntime.new(self, extra_features: @extra_js_features)
+        @js ||= js_engine_class.new(self, extra_features: @extra_js_features)
+      end
+
+      def js_engine_class
+        if ENV['CSIM_JS_ENGINE'] == 'v8'
+          require_relative 'v8_runtime'
+          V8Runtime
+        else
+          JsRuntime
+        end
       end
 
       def start_trace(metadata = {})
