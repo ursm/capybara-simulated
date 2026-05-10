@@ -1619,6 +1619,17 @@
   // the next macrotask, but with virtual time it's near-equivalent.
   globalThis.queueMicrotask = function (cb) { scheduleTimer(cb, 0, [], null); };
 
+  // True when at least one timer is due <= virtualNow — i.e. a
+  // setTimeout(0) is queued and ready to fire on the next drain.
+  // Settle uses this to decide whether to keep iterating; pure
+  // setInterval / requestAnimationFrame chains stay quiet here.
+  globalThis.__hasReadyTimer = function () {
+    for (const t of __timers.values()) {
+      if (t.due <= __virtualNow) return true;
+    }
+    return false;
+  };
+
   globalThis.__drainTimers = function (maxMs, maxIter) {
     if (typeof maxMs   !== 'number') maxMs   = 2000;
     if (typeof maxIter !== 'number') maxIter = 10000;

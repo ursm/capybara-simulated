@@ -84,6 +84,16 @@ module Capybara
         end
       end
 
+      # True when a timer is queued with due <= virtualNow — i.e. a
+      # setTimeout(0) (commonly scheduled inside a Promise microtask
+      # that ran AFTER the prior drain_timers finished firing
+      # timers). Settle keeps iterating while this returns true so
+      # post-microtask setTimeout(0) chains drain in the same call,
+      # but a lone setInterval / rAF doesn't keep us pegged.
+      def has_ready_timer?
+        with_recycle { @vm.eval_code('!!__hasReadyTimer()') }
+      end
+
       def reset_timers
         with_recycle { @vm.eval_code('__resetTimers()') }
       end

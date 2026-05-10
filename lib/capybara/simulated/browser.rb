@@ -1898,9 +1898,19 @@ module Capybara
         drain_max = @modal_handlers.empty? ? SETTLE_DRAIN_MS : SYNC_DRAIN_MS
         10.times do
           js.drain_timers(drain_max) if @timers_active
-          break if @mutations.empty?
-          records, @mutations = @mutations, []
-          js.call('__deliverMutations', records)
+          if @mutations.any?
+            records, @mutations = @mutations, []
+            js.call('__deliverMutations', records)
+          elsif @timers_active && js.has_ready_timer?
+            # A setTimeout(0) was scheduled inside a Promise microtask
+            # that ran after drain_timers finished its timer-firing
+            # phase (e.g. file-saver's anchor-click `setTimeout(0)`
+            # is queued when a turbo-stream resolves). Loop again so
+            # it gets a chance to fire. Lone setInterval / rAF chains
+            # have due > virtualNow and don't trip this branch.
+          else
+            break
+          end
         end
         # Lazy IntersectionObserver targets re-check visibility here so a
         # just-revealed tab pane / dropdown that contains a lazy
