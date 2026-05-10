@@ -1898,9 +1898,11 @@ module Capybara
         drain_max = @modal_handlers.empty? ? SETTLE_DRAIN_MS : SYNC_DRAIN_MS
         10.times do
           js.drain_timers(drain_max) if @timers_active
-          break if @mutations.empty?
-          records, @mutations = @mutations, []
-          js.call('__deliverMutations', records)
+          break if @mutations.empty? && !@timers_active
+          if @mutations.any?
+            records, @mutations = @mutations, []
+            js.call('__deliverMutations', records)
+          end
         end
         # Lazy IntersectionObserver targets re-check visibility here so a
         # just-revealed tab pane / dropdown that contains a lazy
@@ -2681,12 +2683,18 @@ module Capybara
       def anchor_default_action(node)
         href = node['href']
         return true if href.nil? || href.empty?
+        # `download` short-circuits the navigability check. file-saver
+        # builds `<a href="blob:..." download="...">` and dispatches a
+        # click; even though `blob:` is otherwise non-navigable, the
+        # `download` attr means "save the bytes to disk" rather than
+        # "navigate to this URL", and we want to honour that.
+        if node.attributes['download']
+          target_url = resolve(href)
+          return save_download(target_url, node['download'].to_s)
+        end
         return true if NON_NAVIGABLE_SCHEMES.any? {|s| href.start_with?(s) }
         target_url = resolve(href)
         return true if same_document_fragment?(target_url)
-        if node.attributes['download']
-          return save_download(target_url, node['download'].to_s)
-        end
         # `target="_blank"` (or any non-_self/_top/_parent name) opens
         # in a new browsing context. We model that as a sibling Browser
         # (own DOM / VM, shared cookies + localStorage); the current
