@@ -45,6 +45,14 @@ module Capybara
       # registered on the Context. Goal: cover bridge.js's surface area,
       # not pass WHATWG conformance.
       POLYFILL_PRELUDE = <<~JS.freeze
+        // V8's bare globalThis reports as `[object Object]` (no built-in
+        // Symbol.toStringTag), so jQuery's `isPlainObject(globalThis)`
+        // returns true. Any deep-clone library (jQuery UI's
+        // `widget.extend`, lodash's `cloneDeep`, …) that walks plain-
+        // object properties then dives into the global and never returns
+        // — globalThis is full of cycles. Real browsers tag it `[object
+        // Window]`, so we do the same.
+        Object.defineProperty(globalThis, Symbol.toStringTag, { value: 'Window' });
         // crypto.randomUUID + getRandomValues
         globalThis.crypto = {
           randomUUID()              { return __csim_randomUUID(); },
@@ -208,7 +216,16 @@ module Capybara
         return if code.nil? || code.empty?
         ctx.eval(code)
       rescue MiniRacer::RuntimeError, MiniRacer::ParseError, MiniRacer::ScriptTerminatedError => e
-        warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
+        # Stack traces matter for `RangeError: Maximum call stack size
+        # exceeded` — we need the JS call site (usually inside jQuery+UI
+        # init) to know which proxy chain blew the V8 stack. Dump the full
+        # message + backtrace under `CSIM_V8_TRACE=1`.
+        if ENV['CSIM_V8_TRACE'] == '1'
+          warn "[capybara-simulated] script #{label} failed: #{e.class}: #{e.message}"
+          warn e.backtrace&.first(20)&.join("\n")
+        else
+          warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
+        end
       end
 
       private
