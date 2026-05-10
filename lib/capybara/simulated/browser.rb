@@ -1898,11 +1898,9 @@ module Capybara
         drain_max = @modal_handlers.empty? ? SETTLE_DRAIN_MS : SYNC_DRAIN_MS
         10.times do
           js.drain_timers(drain_max) if @timers_active
-          break if @mutations.empty? && !@timers_active
-          if @mutations.any?
-            records, @mutations = @mutations, []
-            js.call('__deliverMutations', records)
-          end
+          break if @mutations.empty?
+          records, @mutations = @mutations, []
+          js.call('__deliverMutations', records)
         end
         # Lazy IntersectionObserver targets re-check visibility here so a
         # just-revealed tab pane / dropdown that contains a lazy
