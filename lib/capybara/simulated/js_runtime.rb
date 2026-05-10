@@ -5,6 +5,45 @@ require 'set'
 
 module Capybara
   module Simulated
+    # Pre-warmed pool of `Quickjs::VM` instances. `Quickjs::VM.new` with
+    # `POLYFILL_INTL` is ~140 ms (FormatJS locale tables + IANA TZ
+    # bytecode); quickjs.rb#36 releases the GVL throughout, so warmer
+    # threads build in parallel.
+    class VmPool
+      # 4 warmers × ~140 ms/build ≈ 28 VMs/sec — covers sustained demand
+      # for shared-spec-shaped runs (~16 tests/sec at peak). Capacity
+      # buffers short bursts before warmers backfill; larger capacity
+      # only matters under parallel-test runners we don't support.
+      WARMER_COUNT = 4
+      CAPACITY     = 6
+
+      def initialize(features, vm_options)
+        @features   = features
+        @vm_options = vm_options
+        @queue      = SizedQueue.new(CAPACITY)
+        @threads    = WARMER_COUNT.times.map do |i|
+          Thread.new { warmer_loop }.tap {|t| t.name = "csim-vm-warmer-#{i}" }
+        end
+      end
+
+      def checkout = @queue.pop
+
+      # `at_exit` hook: SEGV if a warmer is mid-`Quickjs::VM.new` (GVL
+      # released, inside QuickJS C) when Ruby starts tearing itself down.
+      def shutdown
+        @queue.close
+        @threads.each {|t| t.join(2) }
+      end
+
+      private
+
+      def warmer_loop
+        loop { @queue.push(Quickjs::VM.new(features: @features, **@vm_options)) }
+      rescue ClosedQueueError
+        # process exit
+      end
+    end
+
     # QuickJS context wrapper. Owns the bridge that lets user JS read /
     # write the Nokogiri-backed DOM owned by `Browser`. Each DOM op
     # crosses into Ruby once; the JS side carries no DOM state of its
@@ -43,17 +82,34 @@ module Capybara
         max_stack_size: 0
       }.freeze
 
+      # Pool registry, keyed by feature set so that `extra_features:`
+      # callers don't share a pool with default-feature ones (the warmed
+      # VMs would have the wrong polyfills loaded).
+      @@pools_lock = Mutex.new
+      @@pools      = {}
+
+      def self.pool_for(features)
+        @@pools_lock.synchronize {
+          @@pools[features] ||= VmPool.new(features, VM_OPTIONS)
+        }
+      end
+
+      at_exit do
+        @@pools_lock.synchronize { @@pools.each_value(&:shutdown) }
+      rescue StandardError
+        # Ruby already mid-shutdown; best-effort.
+      end
+
       def initialize(browser, extra_features: [])
-        @browser              = browser
-        @features             = (DEFAULT_FEATURES + extra_features).uniq.freeze
-        @recycled_since_reset = false
-        boot_vm
+        @browser  = browser
+        @features = (DEFAULT_FEATURES + extra_features).uniq.freeze
+        @pool     = self.class.pool_for(@features)
       end
 
       BRIDGE_JS = File.expand_path('../../../vendor/js/bridge.js', __dir__).freeze
 
       def eval(code)
-        with_recycle { @vm.eval_code(code.to_s) }
+        with_recycle { vm.eval_code(code.to_s) }
       end
 
       # Pumping microtasks after every call is needed because js_std_await
@@ -62,7 +118,7 @@ module Capybara
       # otherwise.
       def call(name, *args)
         with_recycle do
-          result = @vm.call(name, *args)
+          result = vm.call(name, *args)
           pump_microtasks
           result
         end
@@ -79,7 +135,7 @@ module Capybara
       def drain_timers(max_ms = nil)
         arg = max_ms.nil? ? '' : max_ms.to_i.to_s
         with_recycle do
-          @vm.eval_code("__drainTimers(#{arg})")
+          vm.eval_code("__drainTimers(#{arg})")
           pump_microtasks
         end
       end
@@ -90,34 +146,26 @@ module Capybara
       # timers). Settle keeps iterating while this returns true so
       # post-microtask setTimeout(0) chains drain in the same call,
       # but a lone setInterval / rAF doesn't keep us pegged.
+      # No VM = no queued timers; skip the pool checkout.
       def has_ready_timer?
+        return false if @vm.nil?
         with_recycle { @vm.eval_code('!!__hasReadyTimer()') }
       end
 
       def reset_timers
+        return if @vm.nil?
         with_recycle { @vm.eval_code('__resetTimers()') }
       end
 
+      # Real-browser parity: every navigation gets a fresh JS context.
+      # Top-level `let`/`const`/`class`, the module-import-cache, and
+      # accumulated `document.addEventListener` registrations all
+      # vanish with the old VM. Nilling the slot rather than checking
+      # out eagerly means a Browser that's reset and then discarded
+      # without further use (the common test-boundary pattern) costs
+      # zero pool builds.
       def reset_page
-        # Boot a fresh VM whenever the previous test either hit a recycle
-        # (post-recycle state is indeterminate) or evaluated a user script
-        # that introduced top-level `let` / `const` / `class` declarations
-        # (these stick in the global lexical environment until the runtime
-        # is rebuilt — re-evaluating the same fixture in the next test
-        # would otherwise trip a redeclaration `SyntaxError`).
-        if @recycled_since_reset || @scripts_evaluated_since_reset
-          boot_vm
-          @recycled_since_reset = false
-          @scripts_evaluated_since_reset = false
-          return
-        end
-        # Pump microtasks only when __resetPage actually queued an
-        # initial-scan record — fresh-page bootstrap doesn't need a
-        # 256-round drain otherwise.
-        with_recycle do
-          pending = @vm.eval_code('__resetPage()')
-          pump_microtasks if pending && pending > 0
-        end
+        @vm = nil
       end
 
       SCRIPT_TYPES_CLASSIC = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
@@ -147,11 +195,9 @@ module Capybara
         # Modules evaluate exactly once per VM (QuickJS keeps them in its
         # module table forever), so any module side-effect — `Application.start()`,
         # `customElements.define`, top-level `let` — pins state we'd
-        # otherwise want fresh on the next page. Force a VM reboot at
-        # the next `reset_page` so navigation lands on a clean module
-        # graph; without this an inline module body reused across pages
-        # silently no-ops on the second visit.
-        @scripts_evaluated_since_reset = true
+        # otherwise want fresh on the next page. The unconditional
+        # boot_vm in `reset_page` (one VM per navigation) makes this a
+        # non-issue: every page load lands on a clean module graph.
         src = script['src']
         if src && !src.empty?
           url = browser.resolve(src)
@@ -175,7 +221,7 @@ module Capybara
       # The `* as __csim_unused` namespace is unused.
       def eval_module_entry(url)
         with_recycle do
-          @vm.import('* as __csim_unused', filename: url)
+          vm.import('* as __csim_unused', filename: url)
           pump_microtasks
         end
       rescue Quickjs::RuntimeError, ArgumentError => e
@@ -184,22 +230,28 @@ module Capybara
 
       private
 
-      def boot_vm
-        @vm = Quickjs::VM.new(features: @features, **VM_OPTIONS)
-        attach_dom_bridge
-        # Receives the already-absolute, importmap-resolved URL we
-        # rewrote into the source on a prior pass. Browser#load_module
-        # fetches via Rack and rewrites this module's own nested
-        # specifiers so they come back here as URLs too.
-        @vm.module_loader = ->(name) { @browser.load_module(name) }
-        @vm.eval_bytecode(bridge_bytecode(@vm))
+      def vm
+        @vm ||= boot_vm
       end
 
-      # Compile bridge.js exactly once per process — its bytecode is
-      # portable across QuickJS runtimes, so every subsequent
-      # `boot_vm` (test reset, recycle) just replays the compiled form.
-      def bridge_bytecode(vm)
-        @@bridge_bytecode ||= vm.compile(File.read(BRIDGE_JS), filename: BRIDGE_JS)
+      def boot_vm
+        v = @pool.checkout
+        attach_dom_bridge_to(v)
+        # Browser#load_module fetches via Rack and rewrites the module's
+        # nested specifiers to absolute URLs before they come back here.
+        v.module_loader = ->(name) { @browser.load_module(name) }
+        bridge_runnable(v).run(on: v)
+        @vm = v
+      end
+
+      # The wrapped bytecode is portable across QuickJS runtimes, so
+      # bridge.js parses once per process; every subsequent `boot_vm`
+      # just replays. The benign double-compile race on first call is
+      # tolerated for the same reason `@@runnable_cache` (below) does:
+      # both candidates produce equivalent `Runnable`s.
+      @@bridge_runnable = nil
+      def bridge_runnable(vm)
+        @@bridge_runnable ||= vm.compile(File.read(BRIDGE_JS), filename: BRIDGE_JS)
       end
 
       # `await null` resumes via a microtask, and JS_EVAL_FLAG_ASYNC's
@@ -207,7 +259,11 @@ module Capybara
       # one. 64 rounds covers Turbo Drive's deepest observed chain (~50)
       # with headroom; empty pumps still cost ~30µs, so don't oversize.
       MICROTASK_PUMP_CODE = (('await null;' * 64) + 'void 0').freeze
+      # `@vm` may be nil if the call yielding to us triggered a
+      # navigation that nilled the slot via `reset_page`. The fresh VM
+      # has no microtasks queued — nothing to pump.
       def pump_microtasks
+        return if @vm.nil?
         @vm.eval_code(MICROTASK_PUMP_CODE)
       end
 
@@ -221,43 +277,28 @@ module Capybara
       rescue Quickjs::SyntaxError => e
         raise unless e.message.include?('stack overflow')
         warn '[capybara-simulated] QuickJS parser stack overflow — recycling VM'
-        recycle!
+        boot_vm
         yield
       rescue Quickjs::RuntimeError
-        raise unless @vm.oom_poisoned?
+        raise if @vm.nil? || !@vm.oom_poisoned?
         warn '[capybara-simulated] QuickJS VM hit OOM — recycling'
-        recycle!
+        boot_vm
         yield
       end
 
-      def recycle!
-        boot_vm
-        @recycled_since_reset = true
-      end
-
-      # Top-level eval so `function foo() {}` / `var foo` become globals
-      # the way a real browser exposes them. Top-level `let` / `const` /
-      # `class` stick in QuickJS' global lexical env across resets, so
-      # flag the runtime for rebuild on the next page when we see one.
-      # ASCII identifier-start characters only (no `\p{L}`) so the
-      # match works against scripts coming back from Rack as
-      # `ASCII-8BIT` — Redmine's bundle is one such caller.
-      LEXICAL_DECL_RE = /\b(?:let|const|class)\s+[A-Za-z_$]/
-
-      # Compiled-bytecode cache shared across every JsRuntime / VM in
-      # this process. QuickJS bytecode is portable between runtimes
-      # (per `quickjs.rb`'s `compile` / `eval_bytecode` contract), so
+      # Compiled-`Runnable` cache shared across every JsRuntime / VM in
+      # this process. The wrapped QuickJS bytecode is portable between
+      # runtimes (per `quickjs.rb`'s `Runnable#run(on:)` contract), so
       # the same Avo / Rails bundle parses once and replays on every
       # page load and every VM rebuild — the parse step dominated
       # eval_safely (10.8s out of a 23.5s Avo slice).
-      @@bytecode_cache = {}
+      @@runnable_cache = {}
 
       def eval_safely(code, label)
         return if code.nil? || code.empty?
-        @scripts_evaluated_since_reset ||= code.match?(LEXICAL_DECL_RE)
-        bytecode = (@@bytecode_cache[code.hash] ||= compile_safely(code, label))
-        return unless bytecode
-        with_recycle { @vm.eval_bytecode(bytecode) }
+        runnable = (@@runnable_cache[code.hash] ||= compile_safely(code, label))
+        return unless runnable
+        with_recycle { runnable.run(on: vm) }
       rescue Quickjs::SyntaxError => e
         return if e.message.match?(/has already been declared/)
         warn "[capybara-simulated] script #{label} failed: #{e.message[0, 200]}"
@@ -266,7 +307,7 @@ module Capybara
       end
 
       def compile_safely(code, label)
-        with_recycle { @vm.compile(code, filename: label) }
+        with_recycle { vm.compile(code, filename: label) }
       rescue Quickjs::SyntaxError => e
         warn "[capybara-simulated] script #{label} failed to compile: #{e.message[0, 200]}"
         nil
@@ -274,47 +315,47 @@ module Capybara
 
       EMPTY_ARGS = [].freeze
 
-      def attach_dom_bridge
-        @vm.define_function('__dom') do |handle, op, args|
+      def attach_dom_bridge_to(vm)
+        vm.define_function('__dom') do |handle, op, args|
           @browser.dom_op(handle, op, args || EMPTY_ARGS)
         end
-        @vm.define_function('__addMutationObserverId') do |id|
+        vm.define_function('__addMutationObserverId') do |id|
           @browser.add_mutation_observer_id(id.to_i)
         end
-        @vm.define_function('__removeMutationObserverId') do |id|
+        vm.define_function('__removeMutationObserverId') do |id|
           @browser.remove_mutation_observer_id(id.to_i)
         end
-        @vm.define_function('__setListenedType') do |type, active|
+        vm.define_function('__setListenedType') do |type, active|
           @browser.set_listened_type(type, !!active)
         end
-        @vm.define_function('__setTimersActive') do |active|
+        vm.define_function('__setTimersActive') do |active|
           @browser.timers_active = !!active
         end
-        @vm.define_function('__modalDialog') do |type, message, default_value|
+        vm.define_function('__modalDialog') do |type, message, default_value|
           @browser.handle_modal(type, message, default_value)
         end
-        @vm.define_function('__setCurrentUrl') do |url|
+        vm.define_function('__setCurrentUrl') do |url|
           @browser.history_state(url)
         end
-        @vm.define_function('__locationAssign') do |url|
+        vm.define_function('__locationAssign') do |url|
           @browser.location_assign(url)
         end
-        @vm.define_function('__locationReload') do
+        vm.define_function('__locationReload') do
           @browser.refresh
         end
-        @vm.define_function('__rackFetch') do |method, url, body, headers, redirect_mode|
+        vm.define_function('__rackFetch') do |method, url, body, headers, redirect_mode|
           @browser.rack_fetch(method, url, body, headers, redirect_mode)
         end
-        @vm.define_function('__getDocumentCookie') do
+        vm.define_function('__getDocumentCookie') do
           @browser.document_cookie
         end
-        @vm.define_function('__setDocumentCookie') do |line|
+        vm.define_function('__setDocumentCookie') do |line|
           @browser.write_document_cookie(line.to_s)
         end
         # quickjs.rb yields a single Quickjs::VM::Log; `to_s` already
         # joins the args and expands JS Error objects with their stack
         # trace, so surfacing it directly is more useful than splatting.
-        @vm.on_log do |log|
+        vm.on_log do |log|
           warn "[capybara-simulated console.#{log.severity}] #{log}"
           @browser.trace&.log_console(log.severity, log.to_s)
         end
