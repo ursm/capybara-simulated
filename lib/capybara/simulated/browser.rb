@@ -610,6 +610,19 @@ module Capybara
         out
       end
 
+      # Per HTML spec, `innerText` on an element that is *not being
+      # rendered* (display: none / detached / similar) returns the
+      # element's descendant text content, NOT an empty string.
+      # Stimulus-driven date / number formatters often run on hidden
+      # tab content first and read `el.innerText` to seed their cache;
+      # without the textContent fallback they cache "" and bake an
+      # "Invalid DateTime" placeholder in before the tab is even
+      # revealed.
+      def innerText_for(handle, node)
+        rendered = node.respond_to?(:[]) ? !style_hidden?(node) : true
+        rendered ? visible_text(handle) : (node.text || '')
+      end
+
       def tag_name(handle)
         node = lookup_node(handle)
         return 'ShadowRoot' if @shadow_root_set.include?(node)
@@ -629,7 +642,7 @@ module Capybara
         when 'innerHTML'         then return node.respond_to?(:inner_html) ? node.inner_html : node.to_html
         when 'outerHTML'         then return node.to_html
         when 'textContent'       then return all_text(handle)
-        when 'innerText'         then return visible_text(handle)
+        when 'innerText'         then return innerText_for(handle, node)
         end
         node[name]
       end
@@ -2110,7 +2123,7 @@ module Capybara
           end
         when 'tagName'         then (node.element? ? node.name.upcase : '')
         when 'textContent'     then node.text
-        when 'innerText'       then visible_text(handle).strip
+        when 'innerText'       then innerText_for(handle, node).strip
         when 'innerHTML'       then node.respond_to?(:inner_html) ? node.inner_html : node.to_html
         when 'outerHTML'       then node.to_html
         when 'getAttribute'    then node.respond_to?(:[]) ? node[args[0]] : nil
