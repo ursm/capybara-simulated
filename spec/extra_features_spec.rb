@@ -1,9 +1,11 @@
 require 'capybara/simulated'
 
-# Default feature set carries URL / Encoding / Crypto / Intl. If
-# callers need more (File / Blob, ...) they thread `features:` through
-# their `Capybara.register_driver` block; this spec locks both halves
-# of that contract so a refactor that severs the chain fails loudly.
+# Default feature set carries URL / Encoding / Crypto. `POLYFILL_INTL`
+# costs ~140 ms at VM construction (FormatJS locale tables + IANA TZ);
+# bundles that need it (Avo's flatpickr / luxon, etc.) opt in via
+# `Driver.new(features: [Quickjs::POLYFILL_INTL])`. This spec locks
+# both halves of that contract so a refactor that severs the chain
+# fails loudly.
 RSpec.describe 'extra QuickJS feature flags' do
   let(:app) {
     lambda do |_env|
@@ -11,7 +13,7 @@ RSpec.describe 'extra QuickJS feature flags' do
     end
   }
 
-  it 'pins URL / Encoding / Crypto / Intl by default and leaves File absent' do
+  it 'pins URL / Encoding / Crypto by default and leaves Intl / File absent' do
     session = Capybara::Session.new(:simulated, app)
     session.visit '/'
     have = session.evaluate_script(<<~JS)
@@ -30,13 +32,16 @@ RSpec.describe 'extra QuickJS feature flags' do
       'URL'         => 'function',
       'TextEncoder' => 'function',
       'randomUUID'  => 'function',
-      'Intl'        => 'object',
+      'Intl'        => 'undefined',
       'Blob'        => 'function'
     )
   end
 
-  it 'formats currency via Intl.NumberFormat out of the box' do
-    session = Capybara::Session.new(:simulated, app)
+  it 'formats currency via Intl.NumberFormat when POLYFILL_INTL is opted in' do
+    Capybara.register_driver :simulated_with_intl do |a|
+      Capybara::Simulated::Driver.new(a, features: [Quickjs::POLYFILL_INTL])
+    end
+    session = Capybara::Session.new(:simulated_with_intl, app)
     session.visit '/'
     formatted = session.evaluate_script(<<~JS)
       new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD'}).format(1234.5)
@@ -46,7 +51,7 @@ RSpec.describe 'extra QuickJS feature flags' do
 
   it 'extends with extra features without dropping the defaults' do
     Capybara.register_driver :simulated_with_extras do |a|
-      Capybara::Simulated::Driver.new(a, features: [Quickjs::POLYFILL_FILE])
+      Capybara::Simulated::Driver.new(a, features: [Quickjs::POLYFILL_FILE, Quickjs::POLYFILL_INTL])
     end
     session = Capybara::Session.new(:simulated_with_extras, app)
     session.visit '/'

@@ -51,24 +51,15 @@ module Capybara
     class JsRuntime
       # The minimum surface a Hotwire-shaped browser needs: URL parsing,
       # TextEncoder/Decoder, and crypto.randomUUID (Turbo stream IDs).
-      # Apps that need Intl, Blob/File, etc. add to it via
-      # Driver.new(app, features: [...]).
-      #
-      # 100 ms was too tight for cold jQuery boot under GC pressure
-      # (~ 200 ms observed). 5_000 ms still surfaces a runaway timer
-      # loop as InterruptedError.
-      #
-      # 128 MiB (the gem's memory_limit default) OOMs under sustained
-      # jQuery + jQuery UI loads; 512 MiB removes the trigger.
+      # `POLYFILL_INTL` is ~140 ms of FormatJS locale data + IANA TZ
+      # tables and dwarfs every other VM-construction cost; bundles that
+      # reach for `Intl.DateTimeFormat` during module init (Avo's
+      # flatpickr / luxon-driven date pickers, etc.) opt in via
+      # `Driver.new(app, features: [Quickjs::POLYFILL_INTL])`.
       DEFAULT_FEATURES = [
         Quickjs::POLYFILL_URL,
         Quickjs::POLYFILL_ENCODING,
-        Quickjs::POLYFILL_CRYPTO,
-        # Bundled apps (Avo's flatpickr, luxon-driven date pickers, etc.)
-        # reach for `Intl.DateTimeFormat` during module init; without it
-        # the controller-connect path throws and the rest of the
-        # bundle's controllers never register.
-        Quickjs::POLYFILL_INTL
+        Quickjs::POLYFILL_CRYPTO
       ].freeze
       # `max_stack_size: 0` disables QuickJS' C-stack overflow check.
       # The check uses the `stack_top` captured at runtime construction
