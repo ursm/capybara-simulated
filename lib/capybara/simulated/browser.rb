@@ -1774,9 +1774,32 @@ module Capybara
           dispatch_event(@hovered_handle, 'mouseleave', bubbles: false, cancelable: true)
         end
         @hovered_handle = handle
-        dispatch_event(handle, 'mouseover',  bubbles: true,  cancelable: true)
-        dispatch_event(handle, 'mouseenter', bubbles: false, cancelable: true)
-        dispatch_event(handle, 'mousemove',  bubbles: true,  cancelable: true)
+        # Real browsers fire mouseover / mouseenter on the topmost element
+        # under the cursor, then bubble. For an `<a>` that wraps an
+        # `<svg>` (the common icon-link / Tippy-trigger pattern), the
+        # cursor lands on both: mouseenter fires on the `<a>` AND the
+        # `<svg>` because the cursor is "in" both. Without layout we
+        # can't pick the topmost child by position, so walk down the
+        # first-element-child chain to a leaf and treat that as the
+        # cursor target. Listeners attached to inner elements (Tippy
+        # binds `mouseenter` on the SVG, not the wrapping `<a>`) then
+        # see the event the same way they would in a real browser.
+        target = node
+        while (child = target.element_children.first)
+          target = child
+        end
+        target_handle = target.equal?(node) ? handle : @handles.track(target)
+        dispatch_event(target_handle, 'mouseover', bubbles: true, cancelable: true)
+        # `mouseenter` doesn't bubble — fire on each element on the
+        # entry path (handle → first-child → … → target).
+        cursor = node
+        loop do
+          h = cursor.equal?(node) ? handle : @handles.track(cursor)
+          dispatch_event(h, 'mouseenter', bubbles: false, cancelable: true)
+          break if cursor.equal?(target)
+          cursor = cursor.element_children.first
+        end
+        dispatch_event(target_handle, 'mousemove', bubbles: true, cancelable: true)
         true
       end
 
