@@ -12,22 +12,24 @@ require 'securerandom'
 require 'set'
 require 'digest'
 
-# V8's default per-isolate stack is small enough that jQuery 3 +
-# Stimulus event-handler chains exhaust it before any real test work
-# starts. 8 MiB is well clear of any reasonable recursive depth and
-# matches Node's default. Must run before the first
-# `MiniRacer::Context.new`; idempotent calls raise
-# `PlatformAlreadyInitialized`.
+# V8 flag setup. Must run before the first `MiniRacer::Context.new`;
+# idempotent calls raise `PlatformAlreadyInitialized`.
+#
+# `single_threaded` is the load-bearing one: V8's default multi-thread
+# mode SIGSEGVs deep in V8 when our bridge.js + a Proxy-heavy library
+# bundle (Redmine's jQuery+UI 342 KB) executes a tight chain of DOM-
+# accessor proxies. The background JIT/GC threads race the foreground
+# Ruby callback path that mini_racer uses for `attach`. Reproducible at
+# any stack size; switching to single-threaded turns the SIGSEGV into
+# a clean `RangeError: Maximum call stack size exceeded` that
+# `eval_safely` catches.
+#
+# `stack_size` widens V8's stack guard so jQuery 3 + Stimulus event-
+# handler chains fit. `CSIM_V8_STACK_KB=N` overrides; default 2 MiB
+# fits comfortably inside the 8 MiB pthread cap.
 begin
-  # Default V8 stack ~984KB; 2 MiB clears jQuery + Stimulus chains
-  # without running into the 8 MiB pthread cap on Linux that triggers
-  # SIGSEGV when V8 thinks it has more headroom than the OS provides.
-  # 3 MiB clears jQuery 3 + Stimulus event-handler chains; staying
-  # safely below the 8 MiB pthread default leaves Ruby + V8 internal
-  # frames room before SIGSEGV. `CSIM_V8_STACK_KB=N` overrides for
-  # workloads that need more (with `ulimit -s` raised correspondingly).
-  stack_kb = (ENV['CSIM_V8_STACK_KB'] || '3000').to_i
-  MiniRacer::Platform.set_flags!(stack_size: stack_kb) unless ENV['CSIM_V8_NO_STACK_FLAG']
+  stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
+  MiniRacer::Platform.set_flags!(:single_threaded, stack_size: stack_kb)
 rescue MiniRacer::PlatformAlreadyInitialized
   # Another callsite beat us to it; either the prior caller picked a
   # compatible value or they're testing the platform-init path.
