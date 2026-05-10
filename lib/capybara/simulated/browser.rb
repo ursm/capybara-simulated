@@ -3322,12 +3322,14 @@ module Capybara
           out << "\n"
           return
         end
-        # Per CSS, `display: flex` / `inline-flex` / `grid` / `inline-grid`
-        # blockifies its children — they're laid out as block-level boxes
-        # regardless of their own `display` value, so `innerText` puts a
-        # newline between adjacent items.
-        children_blockified = blockify_children || flex_or_grid_container?(node)
+        # Per CSS, the *direct* children of `display: flex` /
+        # `inline-flex` / `grid` / `inline-grid` are blockified —
+        # laid out as block-level boxes regardless of their own
+        # `display`. innerText puts a newline between them. Only
+        # propagate the flag to immediate children; grandchildren
+        # follow their own parent's display.
         treat_as_block = BLOCK_TAGS.include?(node.name) || blockify_children
+        children_blockified = flex_or_grid_container?(node)
         # Real-browser innerText only inserts block boundaries around
         # blocks that actually emit text — collect children's output
         # into a scratch buffer so empty blocks collapse cleanly.
