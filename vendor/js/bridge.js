@@ -313,6 +313,13 @@
     set readOnly(v) { setBoolAttr(this, 'readonly', v); }
     get required()  { return this.hasAttribute('required'); }
     set required(v) { setBoolAttr(this, 'required', v); }
+    // `<a>.download` — IDL reflection of the `download` content attr.
+    // file-saver feature-detects via `'download' in HTMLAnchorElement
+    // .prototype` to decide between the anchor-click flow and the
+    // `location.href = blob:` fallback. Without the slot it took the
+    // fallback, which we (correctly) refuse to navigate to.
+    get download()  { return this.getAttribute('download') || ''; }
+    set download(v) { this.setAttribute('download', v == null ? '' : String(v)); }
     // <option>.selected — jQuery's `.serialize()` walks `select.options`
     // and reads `option.selected` to find the chosen entry; without a
     // getter the read returned undefined and the form posted whichever
