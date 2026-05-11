@@ -24,7 +24,8 @@ end
 module Capybara
   module Simulated
     class V3Runtime
-      BRIDGE_JS = File.expand_path('../../../vendor/js/v3_bridge.js', __dir__).freeze
+      BRIDGE_JS  = File.expand_path('../../../vendor/js/v3_bridge.js', __dir__).freeze
+      WGXPATH_JS = File.expand_path('../../../vendor/js/wgxpath.js',   __dir__).freeze
 
       # Stub host fns so the bridge can be baked into a Snapshot. Same
       # shape as `V8Runtime::SNAPSHOT_HOST_STUBS`; only the host fns
@@ -80,7 +81,15 @@ module Capybara
       end
 
       def self.build_snapshot
-        MiniRacer::Snapshot.new(SNAPSHOT_HOST_STUBS + File.read(BRIDGE_JS))
+        # Order matters: v3_bridge installs `globalThis.Document` (etc.)
+        # first, then wgxpath patches `Document.prototype.evaluate` on
+        # top, then the install-on-current-document line ties it to the
+        # live `document` instance the bridge created.
+        src = SNAPSHOT_HOST_STUBS +
+              File.read(BRIDGE_JS) +
+              File.read(WGXPATH_JS) + ";\n" +
+              "wgxpath.install(globalThis);\n"
+        MiniRacer::Snapshot.new(src)
       end
 
       def initialize(browser)

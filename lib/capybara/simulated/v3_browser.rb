@@ -102,22 +102,28 @@ module Capybara
       # HTML, recover JS handle ids from the attribute. One Context#call
       # plus one Nokogiri parse per query — still cheap vs v2's
       # per-element __dom callback storm.
+      # XPath is evaluated *inside* V8 against the live JS DOM via
+      # wgxpath (vendored, installed at snapshot build). One IPC per
+      # `find_xpath` — no serialise + reparse round-trip. Set
+      # `CSIM_V3_XPATH=nokogiri` to fall back to the serialize-and-
+      # reparse path for debugging when wgxpath chokes on a query.
+      XPATH_BACKEND = ENV['CSIM_V3_XPATH'] == 'nokogiri' ? :nokogiri : :wgxpath
       def find_xpath(xpath, context_handle = nil)
         tick_real_time
-        # Always serialise the full document — XPath like `//p` is
-        # document-rooted in spec terms (libxml2 returns all matches
-        # from the doc root regardless of context), and Capybara's
-        # ancestor / sibling / scoped finders already filter the
-        # result list to those within the calling context. Scoping
-        # the serialise to the context subtree would strip away the
-        # exact ancestors Capybara needs.
+        if XPATH_BACKEND == :nokogiri
+          find_xpath_via_nokogiri(xpath, context_handle)
+        else
+          @runtime.call('__csimEvaluateXPath', xpath.to_s, context_handle || 0).to_a
+        end
+      end
+
+      # Kept as a fallback / debug aid. Same semantics as the wgxpath
+      # path but routes through Nokogiri::HTML5 — useful when wgxpath
+      # rejects a query Capybara emits.
+      def find_xpath_via_nokogiri(xpath, context_handle = nil)
         html = @runtime.call('__csimSerialize', 0).to_s
         return [] if html.empty?
-        doc = Nokogiri::HTML5.parse(html)
-        # For context-scoped queries (Node#find_xpath emits `.//`),
-        # locate the context node in the parsed doc by handle so the
-        # current-node `.` resolves correctly. With nil context, the
-        # doc-root is fine.
+        doc  = Nokogiri::HTML5.parse(html)
         root = context_handle ? doc.at_xpath("//*[@data-csim-handle='#{context_handle}']") : doc
         return [] unless root
         root.xpath(xpath.to_s).filter_map {|n|

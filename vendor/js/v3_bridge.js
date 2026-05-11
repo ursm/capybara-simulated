@@ -141,9 +141,16 @@
       this.nodeType = NODE_TEXT;
       this.data     = String(data == null ? '' : data);
     }
-    get nodeName() { return '#text'; }
+    get nodeName()    { return '#text'; }
+    get nodeValue()   { return this.data; }
+    set nodeValue(v)  { this.data = String(v == null ? '' : v); }
     get textContent() { return this.data; }
-    set textContent(v) { this.data = String(v == null ? '' : v); }
+    set textContent(v){ this.data = String(v == null ? '' : v); }
+    // wgxpath uses these on text nodes via XPath `text()` / `string()`.
+    get prefix()       { return null; }
+    get namespaceURI() { return null; }
+    get localName()    { return null; }
+    get ownerDocument(){ return globalThis.document; }
   }
 
   class Element extends Node {
@@ -157,7 +164,15 @@
     }
     get tagName()    { return this._tag.toUpperCase(); }
     get nodeName()   { return this.tagName; }
+    get nodeValue()  { return null; }
     get localName()  { return this._tag; }
+    // XPath 1.0 `*` wildcard matches names in *no* namespace. Reporting
+    // the XHTML namespace here would silently mismatch Capybara-emitted
+    // `//*` queries. We don't model XML namespaces; null is what
+    // Capybara / Selenium effectively see in real-browser HTML mode.
+    get prefix()       { return null; }
+    get namespaceURI() { return null; }
+    get ownerDocument(){ return globalThis.document; }
     getAttribute(name)        { const v = this._attrs[String(name).toLowerCase()]; return v == null ? null : v; }
     setAttribute(name, value) {
       const n = String(name).toLowerCase();
@@ -173,8 +188,42 @@
       recordAttrMutation(this, n, old == null ? null : old);
     }
     hasAttribute(name)        { return Object.prototype.hasOwnProperty.call(this._attrs, String(name).toLowerCase()); }
+    // `attributes` returns a NamedNodeMap-shaped collection — array-
+    // indexed + `getNamedItem(name)`. wgxpath iterates via `length` +
+    // index access; Capybara's `Element#native.attributes` reads
+    // `{name, value}` pairs. We give each item the Attr fields wgxpath
+    // touches (`specified`, `namespaceURI`, `prefix`, `localName`,
+    // `ownerElement`).
     get attributes() {
-      return Object.keys(this._attrs).map(name => ({ name, value: this._attrs[name] }));
+      const el    = this;
+      const names = Object.keys(this._attrs);
+      const list  = names.map(n => makeAttr(el, n));
+      list.getNamedItem = name => {
+        const lower = String(name).toLowerCase();
+        return Object.prototype.hasOwnProperty.call(el._attrs, lower) ? makeAttr(el, lower) : null;
+      };
+      return list;
+    }
+    getAttributeNode(name) {
+      const n = String(name).toLowerCase();
+      return Object.prototype.hasOwnProperty.call(this._attrs, n) ? makeAttr(this, n) : null;
+    }
+    // HTMLCollection-shaped getters wgxpath / framework code expects.
+    // Spec says these return *descendants* of the element (not self);
+    // my `walk()` starts at the receiver so we have to drop the
+    // self-hit explicitly to avoid wgxpath descendant-axis dupes.
+    getElementsByTagName(tag) {
+      const t = String(tag).toLowerCase();
+      const all = t === '*' ? this.querySelectorAll('*') : this.querySelectorAll(t);
+      return all.filter(n => n !== this);
+    }
+    getElementsByClassName(cls) {
+      const sel = String(cls).split(/\s+/).filter(Boolean).map(c => '.' + c).join('');
+      return this.querySelectorAll(sel).filter(n => n !== this);
+    }
+    getElementsByName(name) {
+      const sel = '[name="' + String(name).replace(/"/g, '\\"') + '"]';
+      return this.querySelectorAll(sel).filter(n => n !== this);
     }
     // IDL `id` / `className` go through setAttribute so MO sees the
     // change record. Setting them directly on `_attrs` would skip the
@@ -296,11 +345,116 @@
     }
     querySelector(sel)    { return this.documentElement ? this.documentElement.querySelector(sel) : null; }
     querySelectorAll(sel) { return this.documentElement ? this.documentElement.querySelectorAll(sel) : []; }
+    // wgxpath optimizes `descendant::name` and `descendant::*` against
+    // Document-rooted queries via getElementsByTagName. Without these
+    // shims the descendant axis returns empty from a Document context.
+    getElementsByTagName(tag) {
+      return this.documentElement ? this.documentElement.getElementsByTagName(tag) : [];
+    }
+    getElementsByClassName(cls) {
+      return this.documentElement ? this.documentElement.getElementsByClassName(cls) : [];
+    }
+    getElementsByName(name) {
+      return this.documentElement ? this.documentElement.getElementsByName(name) : [];
+    }
+    // Minimal Range stub. wgxpath uses `document.createRange()` +
+    // `compareBoundaryPoints` to sort XPath result sets into document
+    // order. We don't model partial-range selection (start/end offsets
+    // on text nodes etc.); only document-order comparison between two
+    // nodes' start containers, which is the only thing wgxpath drives.
+    createRange() { return new DocumentOrderRange(); }
+  }
+  class DocumentOrderRange {
+    constructor() {
+      this.startContainer = null;
+      this.startOffset    = 0;
+      this.endContainer   = null;
+      this.endOffset      = 0;
+    }
+    setStart(node, offset)  { this.startContainer = node; this.startOffset = offset | 0; }
+    setEnd(node, offset)    { this.endContainer   = node; this.endOffset   = offset | 0; }
+    // Real DOM: selectNode sets the range to span the given node
+    // *within* its parent. Collapse moves both endpoints to one side.
+    // wgxpath only cares that the start container ends up referring to
+    // the node we passed.
+    selectNode(node) {
+      this.startContainer = this.endContainer = node;
+      this.startOffset    = this.endOffset    = 0;
+    }
+    selectNodeContents(node) {
+      this.startContainer = this.endContainer = node;
+      this.startOffset    = 0;
+      this.endOffset      = node._children ? node._children.length : 0;
+    }
+    collapse(toStart) {
+      if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
+      else         { this.startContainer = this.endContainer; this.startOffset = this.endOffset; }
+    }
+    compareBoundaryPoints(_how, other) {
+      return compareDocOrder(this.startContainer, other.startContainer);
+    }
+  }
+  // Range boundary-comparison constants. wgxpath reads them off the
+  // range instance via `range.START_TO_END` so they have to live on
+  // the prototype (not just the constructor).
+  DocumentOrderRange.START_TO_START = 0;
+  DocumentOrderRange.START_TO_END   = 1;
+  DocumentOrderRange.END_TO_END     = 2;
+  DocumentOrderRange.END_TO_START   = 3;
+  DocumentOrderRange.prototype.START_TO_START = 0;
+  DocumentOrderRange.prototype.START_TO_END   = 1;
+  DocumentOrderRange.prototype.END_TO_END     = 2;
+  DocumentOrderRange.prototype.END_TO_START   = 3;
+  globalThis.Range = DocumentOrderRange;
+  function compareDocOrder(a, b) {
+    if (a === b) return 0;
+    const chainA = ancestorChain(a), chainB = ancestorChain(b);
+    let i = 0;
+    while (i < chainA.length && i < chainB.length && chainA[i] === chainB[i]) i++;
+    if (i === 0) return 0; // disconnected — treat as equal
+    const lca = chainA[i - 1];
+    // If one node is an ancestor of the other, ancestor comes first.
+    if (i === chainA.length) return -1;
+    if (i === chainB.length) return  1;
+    const idxA = lca._children.indexOf(chainA[i]);
+    const idxB = lca._children.indexOf(chainB[i]);
+    return idxA < idxB ? -1 : (idxA > idxB ? 1 : 0);
+  }
+  function ancestorChain(node) {
+    const chain = [];
+    let cur = node;
+    while (cur) { chain.unshift(cur); cur = cur._parent; }
+    return chain;
   }
 
   function classes(el) {
     const cls = el._attrs['class'];
     return cls ? cls.split(/\s+/).filter(Boolean) : [];
+  }
+
+  // Build an Attr-shaped object on demand. Returned from `attributes`
+  // / `getAttributeNode`. wgxpath reads `specified`, `value`,
+  // `nodeName`, `name`, `namespaceURI`, `prefix`, `localName`,
+  // `ownerElement`.
+  function makeAttr(el, name) {
+    return {
+      name,
+      nodeName: name,
+      value:    el._attrs[name],
+      nodeValue: el._attrs[name],
+      specified: true,
+      namespaceURI: null,
+      prefix:    null,
+      localName: name,
+      ownerElement: el,
+      ownerDocument: globalThis.document,
+      // wgxpath calls `node.ownerDocument.createRange()` for
+      // document-order comparison. Real DOM gives every node a
+      // valid ownerDocument; we have to thread it through Attr
+      // shims explicitly since they're plain objects.
+      parentNode: null,
+      nodeType:  2  // ATTRIBUTE_NODE
+    };
   }
 
   // ── Event class + dispatch walk ─────────────────────────────────
@@ -866,6 +1020,10 @@
 
   // ── Globals seen by Ruby side via Context#call('__csim<Op>') ────
 
+  globalThis.Document = Document;     // so wgxpath patches Document.prototype.evaluate
+  globalThis.Element  = Element;
+  globalThis.Node     = Node;
+  globalThis.Text     = Text;
   globalThis.document = new Document();
   globalThis.window   = globalThis;
 
@@ -1004,6 +1162,32 @@
       : (root.querySelectorAll ? root.querySelectorAll(selector) : []);
     return matches.map(el => el._id);
   };
+  // XPath evaluation via wgxpath (Google's wicked-good-xpath, vendored
+  // into vendor/js/wgxpath.js and installed at boot). `document.
+  // evaluate` is patched onto Document.prototype. We use ORDERED_NODE_
+  // SNAPSHOT_TYPE (7) so the result is a live array we can iterate
+  // by index, and so the node order matches Capybara's expectations.
+  globalThis.__csimEvaluateXPath = function (xpath, contextHandle) {
+    const ctx = contextHandle ? lookup(contextHandle) : globalThis.document;
+    if (!ctx) return [];
+    let result;
+    try {
+      result = globalThis.document.evaluate(String(xpath), ctx, null, 7, null);
+    } catch (e) {
+      // Match Capybara's selenium driver: throw `Capybara::ElementNotFound`
+      // for bad XPath. Surface to Ruby as a sentinel so the caller can
+      // raise; for now we just return an empty result and log.
+      try { console.error('[csim v3] XPath threw:', e && e.message, 'for', xpath); } catch (_) {}
+      return [];
+    }
+    const out = [];
+    for (let i = 0; i < result.snapshotLength; i++) {
+      const n = result.snapshotItem(i);
+      if (n && typeof n._id === 'number') out.push(n._id);
+    }
+    return out;
+  };
+
   globalThis.__csimQueryOne = function (rootHandle, selector) {
     const root = rootHandle ? lookup(rootHandle) : globalThis.document;
     if (!root) return 0;
