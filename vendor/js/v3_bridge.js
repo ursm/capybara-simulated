@@ -368,6 +368,16 @@
     set value(v)   { this._attrs.value = String(v == null ? '' : v); }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
+    // Constraint validation API — PoC stubs. We don't actually run
+    // the validation algorithm, so `valid` is always true and the
+    // message is empty. Frameworks (Stimulus form controllers,
+    // Capybara's `:valid` filter) probe these without crashing.
+    get validity()          { return { valid: true, valueMissing: false, typeMismatch: false, patternMismatch: false, tooLong: false, tooShort: false, rangeUnderflow: false, rangeOverflow: false, stepMismatch: false, badInput: false, customError: false }; }
+    get validationMessage() { return this._validationMessage || ''; }
+    get willValidate()      { return false; }
+    checkValidity()         { return true; }
+    reportValidity()        { return true; }
+    setCustomValidity(msg)  { this._validationMessage = String(msg || ''); }
 
     get innerHTML() { return serializeChildren(this); }
     set innerHTML(html) {
@@ -1848,7 +1858,7 @@
       return { kind: 'navigate', url: n._attrs.href };
     }
     if (isSubmitButton(n)) {
-      const form = ancestorForm(n);
+      const form = formForControl(n);
       if (!form) return null;
       const submit = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: n });
       dispatchEvent(form, submit);
@@ -1890,6 +1900,22 @@
       cur = cur._parent;
     }
     return null;
+  }
+  // HTML 5: a form control's owning form is resolved via either the
+  // `form="<id>"` IDL attribute (looking up the form by id) or — when
+  // absent — by walking ancestors. The attribute takes precedence
+  // and is the only way to associate a button that lives *outside*
+  // the form's DOM subtree.
+  function formForControl(n) {
+    const formId = n._attrs.form;
+    if (formId) {
+      const root = globalThis.document.documentElement;
+      if (root) {
+        const forms = root.getElementsByTagName('form');
+        for (const f of forms) if (f._attrs.id === formId) return f;
+      }
+    }
+    return ancestorForm(n);
   }
   function toggleChecked(n) {
     if (n._attrs.checked != null) delete n._attrs.checked;
