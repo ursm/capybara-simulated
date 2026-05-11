@@ -220,6 +220,32 @@ module Capybara
         @runtime.call('__csimDispatchEvent', handle, type.to_s, init)
       end
 
+      # Capybara's `send_keys` accepts Strings and Symbols (special
+      # keys: `:enter`, `:tab`, `:backspace`, …) and Array combos
+      # (modifier + key). PoC: append printable keys to the input's
+      # value and fire input/change. Special keys + modifier combos
+      # land later — for now, special keys without a known glyph are
+      # dropped.
+      def send_keys(handle, keys)
+        tick_real_time
+        text = keys.flat_map {|k|
+          case k
+          when String then [k]
+          when Symbol then [SEND_KEYS_GLYPHS[k]].compact
+          when Array  then k.map {|x| x.is_a?(String) ? x : SEND_KEYS_GLYPHS[x] }.compact
+          else []
+          end
+        }.join
+        @runtime.call('__csimSendKeys', handle, text)
+      end
+
+      SEND_KEYS_GLYPHS = {
+        space: ' ',
+        tab:   "\t",
+        enter: "\n",
+        return: "\n"
+      }.freeze
+
       def select_option(handle)
         tick_real_time
         @runtime.call('__csimSelectOption', handle)

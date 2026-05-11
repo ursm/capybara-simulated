@@ -73,7 +73,12 @@ module Capybara
       end
 
       def scroll_to(*, **)       ; self ; end
-      def send_keys(*_keys)      ; true ; end
+
+      def send_keys(*keys)
+        check_stale
+        browser.send_keys(handle_id, keys)
+        true
+      end
 
       def trigger(event)
         check_stale

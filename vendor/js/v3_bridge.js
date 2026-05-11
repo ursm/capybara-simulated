@@ -1290,6 +1290,28 @@
   // `select`) all eventually call Node#set / select_option /
   // unselect_option. Each is one Context#call into here.
 
+  // send_keys: append text to a focusable control and fire `input`+
+  // `change`. Mirrors what selenium does at this level — keydown/
+  // keypress/keyup chain comes later when test pages depend on it.
+  globalThis.__csimSendKeys = function (h, text) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    if (n._tag === 'input' || n._tag === 'textarea') {
+      if (n._attrs.readonly != null || n._attrs.disabled != null) return false;
+      const cur = n._attrs.value != null ? n._attrs.value : '';
+      const newVal = cur + String(text);
+      const maxlen = parseInt(n._attrs.maxlength || '', 10);
+      n._attrs.value = (maxlen > 0 && newVal.length > maxlen) ? newVal.slice(0, maxlen) : newVal;
+      if (n._tag === 'textarea') {
+        n._children = [Object.assign(new Text(n._attrs.value), { _parent: n })];
+      }
+      dispatchEvent(n, new InputEvent('input',  { bubbles: true, cancelable: true }));
+      dispatchEvent(n, new Event('change', { bubbles: true, cancelable: false }));
+      return true;
+    }
+    return false;
+  };
+
   globalThis.__csimAncestorForm = function (h) {
     const n = lookup(h);
     if (!n) return 0;
