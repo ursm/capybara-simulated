@@ -54,6 +54,27 @@
     dispatchEvent(event) {
       return dispatchEvent(this, event);
     }
+    // Shallow / deep node cloning. jQuery probes feature support
+    // via `document.createElement('div').cloneNode(true).attachEvent`
+    // etc. before initialising, so this needs to work even on
+    // detached nodes. Cloned nodes copy attrs and (deep) clone
+    // children; listeners + custom-element state are intentionally
+    // *not* copied (matches HTML spec).
+    cloneNode(deep) {
+      const copy = this._cloneShell();
+      if (deep && this._children) {
+        for (const c of this._children) {
+          const cc = c.cloneNode(true);
+          cc._parent = copy;
+          copy._children.push(cc);
+        }
+      }
+      return copy;
+    }
+    _cloneShell() {
+      // Override in Element / Text.
+      return new this.constructor();
+    }
     get parentNode()    { return this._parent; }
     get parentElement() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
     get firstChild()    { return this._children[0] || null; }
@@ -142,6 +163,7 @@
       this.data     = String(data == null ? '' : data);
     }
     get nodeName()    { return '#text'; }
+    _cloneShell()     { return new Text(this.data); }
     get nodeValue()   { return this.data; }
     set nodeValue(v)  { this.data = String(v == null ? '' : v); }
     get textContent() { return this.data; }
@@ -161,6 +183,11 @@
       // the `new MyCustomElement()` path from createElement.
       this._tag    = String(tagName || __currentTag || '').toLowerCase();
       this._attrs  = {};   // name(lower) → value(string)
+    }
+    _cloneShell() {
+      const e = new Element(this._tag);
+      e._attrs = Object.assign({}, this._attrs);
+      return e;
     }
     get tagName()    { return this._tag.toUpperCase(); }
     get nodeName()   { return this.tagName; }
@@ -307,6 +334,26 @@
     get outerHTML() { return serializeElement(this); }
   }
 
+  // DocumentFragment: a Node-shaped subtree root that's *not* in the
+  // document tree. Standard appendChild / removeChild / etc. inherit
+  // from Node. nodeType=11 per spec. The unique twist: when a
+  // DocumentFragment is appended to a real parent, its children move
+  // and the fragment is left empty — Node.appendChild has to detect
+  // this and splice. v3 PoC keeps the simple form (a fragment can
+  // hold children; users typically iterate `.childNodes` themselves
+  // before splicing) so jQuery's "build then splice via firstChild"
+  // pattern works.
+  const NODE_FRAGMENT = 11;
+  class DocumentFragment extends Node {
+    constructor() {
+      super();
+      this.nodeType = NODE_FRAGMENT;
+    }
+    get nodeName()     { return '#document-fragment'; }
+    get ownerDocument(){ return globalThis.document; }
+  }
+  globalThis.DocumentFragment = DocumentFragment;
+
   class Document extends Node {
     constructor() {
       super();
@@ -357,6 +404,15 @@
     getElementsByName(name) {
       return this.documentElement ? this.documentElement.getElementsByName(name) : [];
     }
+    // DocumentFragment — a lightweight node container with no parent
+    // identity in the document. jQuery (and similar libraries) build
+    // off-document subtrees in fragments before splicing them into
+    // the live tree via `appendChild`. We give it just enough surface
+    // for `appendChild` / `childNodes` to work.
+    createDocumentFragment() {
+      return new DocumentFragment();
+    }
+
     // Minimal Range stub. wgxpath uses `document.createRange()` +
     // `compareBoundaryPoints` to sort XPath result sets into document
     // order. We don't model partial-range selection (start/end offsets
