@@ -84,24 +84,84 @@ module Capybara
         // via Ruby's URI. Sufficient for the bridge's own URL bookkeeping
         // (resolve, hostname, pathname, searchParams). Not WHATWG-spec-
         // compliant on edge cases.
+        //
+        // pathname / search / hash setters route through __csim_parseUrl
+        // again so that `url.pathname = '/new'` recomputes `url.href`.
+        // bridge.js's `document.location.pathname = '/x'` path relies on
+        // this: it assigns to a constructed `new URL(__locationUrl.href)`
+        // and then hands `url.href` to `__locationAssign` to navigate.
+        // Without setter-side recomputation the navigation goes to the
+        // *original* pathname, not the assigned one.
         globalThis.URL = class URL {
           constructor(input, base) {
             const r = __csim_parseUrl(String(input), base ? String(base) : null);
             if (r.error) throw new TypeError('Invalid URL: ' + input);
-            this.href     = r.href;
-            this.protocol = r.protocol;
-            this.username = r.username;
-            this.password = r.password;
-            this.host     = r.host;
-            this.hostname = r.hostname;
-            this.port     = r.port;
-            this.pathname = r.pathname;
-            this.search   = r.search;
-            this.hash     = r.hash;
-            this.origin   = r.origin;
+            this._setFromParsed(r);
             this._params  = null;
           }
-          get searchParams() { return this._params ||= new URLSearchParams(this.search); }
+          _setFromParsed(r) {
+            this.href     = r.href;
+            this._protocol = r.protocol;
+            this._username = r.username;
+            this._password = r.password;
+            this._host     = r.host;
+            this._hostname = r.hostname;
+            this._port     = r.port;
+            this._pathname = r.pathname;
+            this._search   = r.search;
+            this._hash     = r.hash;
+            this._origin   = r.origin;
+          }
+          get protocol() { return this._protocol; }
+          get username() { return this._username; }
+          get password() { return this._password; }
+          get host()     { return this._host; }
+          get hostname() { return this._hostname; }
+          get port()     { return this._port; }
+          get pathname() { return this._pathname; }
+          get search()   { return this._search; }
+          get hash()     { return this._hash; }
+          get origin()   { return this._origin; }
+          set protocol(v) { this._reparseWith({ protocol: String(v) }); }
+          set host(v)     { this._reparseWith({ host:     String(v) }); }
+          set hostname(v) { this._reparseWith({ hostname: String(v) }); }
+          set port(v)     { this._reparseWith({ port:     String(v) }); }
+          set pathname(v) { this._reparseWith({ pathname: String(v) }); }
+          set search(v)   {
+            let s = String(v);
+            if (s && !s.startsWith('?')) s = '?' + s;
+            this._reparseWith({ search: s });
+          }
+          set hash(v) {
+            let s = String(v);
+            if (s && !s.startsWith('#')) s = '#' + s;
+            this._reparseWith({ hash: s });
+          }
+          set username(v) { this._reparseWith({ username: String(v) }); }
+          set password(v) { this._reparseWith({ password: String(v) }); }
+          _reparseWith(patch) {
+            // Reassemble the candidate URL string from current components
+            // with the patched field overridden, then run it back through
+            // Ruby's parser. Keeps any normalisation logic (default ports,
+            // implicit trailing slashes) consistent with the constructor.
+            const protocol = patch.protocol  ?? this._protocol;
+            const username = patch.username  ?? this._username;
+            const password = patch.password  ?? this._password;
+            const host     = patch.host      ?? (patch.hostname != null || patch.port != null
+                              ? ((patch.hostname ?? this._hostname) + ((patch.port ?? this._port) ? ':' + (patch.port ?? this._port) : ''))
+                              : this._host);
+            const pathname = patch.pathname  ?? this._pathname;
+            const search   = patch.search    ?? this._search;
+            const hash     = patch.hash      ?? this._hash;
+            let userinfo = '';
+            if (username || password) userinfo = username + (password ? ':' + password : '') + '@';
+            const candidate = protocol + '//' + userinfo + host + pathname + search + hash;
+            const r = __csim_parseUrl(candidate, null);
+            if (r.error) return;
+            this._setFromParsed(r);
+            this._params = null;
+          }
+          get searchParams() { return this._params ||= new URLSearchParams(this._search); }
           toString()         { return this.href; }
           toJSON()           { return this.href; }
           static canParse(input, base) {
