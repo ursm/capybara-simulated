@@ -420,6 +420,48 @@
       }
       return false;
     }
+    // Common HTMLElement / form-control IDL attributes that mirror to
+    // their named attributes. jQuery 3.x's `.serialize()` filter keys
+    // on `this.name` / `this.type`; without these getters the filter
+    // rejects every form element (`.name` undefined → falsy → skip).
+    // Mirrors HTML spec's reflection rules: read returns the attribute
+    // value (or '' if absent), write goes through setAttribute so
+    // MutationObserver / attributeChangedCallback see the change.
+    get name()  { return this._attrs.name  != null ? this._attrs.name  : ''; }
+    set name(v) { this.setAttribute('name', String(v == null ? '' : v)); }
+    get type()  {
+      // <input>.type defaults to 'text' when the type attr is absent
+      // (spec). Other elements just reflect.
+      if (this._tag === 'input') {
+        const t = this._attrs.type;
+        return t != null ? t.toLowerCase() : 'text';
+      }
+      return this._attrs.type != null ? this._attrs.type : '';
+    }
+    set type(v) { this.setAttribute('type', String(v == null ? '' : v)); }
+    get title() { return this._attrs.title != null ? this._attrs.title : ''; }
+    set title(v){ this.setAttribute('title', String(v == null ? '' : v)); }
+
+    // HTMLFormElement.elements — collection of named form controls.
+    // jQuery's `.serialize()` reads this; without it, serialize returns
+    // empty even though the form has inputs (Redmine's context-menu
+    // AJAX sends an empty query string and the server 404s). Real
+    // browsers include input/select/textarea/button (and a few more);
+    // returning a length-bearing array is sufficient for jQuery.
+    get elements() {
+      if (this._tag !== 'form') return undefined;
+      const out = [];
+      walkSubtree(this, el => {
+        if (el === this || el.nodeType !== NODE_ELEMENT) return;
+        const t = el._tag;
+        if (t === 'input' || t === 'select' || t === 'textarea' ||
+            t === 'button' || t === 'fieldset' || t === 'object') {
+          out.push(el);
+        }
+      });
+      out.length = out.length;
+      return out;
+    }
     // Form-control IDL attributes. v2 leans on Nokogiri attribute
     // mirroring; here we expose the same pair-of-attr-and-IDL shape
     // so JS like `input.value = 'x'` / `input.checked = true` works
@@ -900,7 +942,34 @@
   };
   // Subclasses Capybara / framework code commonly checks for; for now
   // they're just `Event`-shaped with extra fields.
-  globalThis.MouseEvent      = class extends Event {};
+  globalThis.MouseEvent      = class extends Event {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      // Real MouseEvent defaults: button=0 (primary), which=1. Many
+      // legacy click handlers (Redmine's context_menu.js, jQuery 1.x
+      // probes) gate on `event.which === 1` to detect a primary click —
+      // without explicit defaults our synthetic click events looked
+      // like non-primary clicks and the handler bailed before
+      // running its body.
+      this.button    = init.button    != null ? init.button    : 0;
+      this.buttons   = init.buttons   != null ? init.buttons   : 0;
+      this.which     = init.which     != null ? init.which     : (this.button + 1);
+      this.clientX   = init.clientX   || 0;
+      this.clientY   = init.clientY   || 0;
+      this.pageX     = init.pageX     != null ? init.pageX     : this.clientX;
+      this.pageY     = init.pageY     != null ? init.pageY     : this.clientY;
+      this.screenX   = init.screenX   || 0;
+      this.screenY   = init.screenY   || 0;
+      this.movementX = init.movementX || 0;
+      this.movementY = init.movementY || 0;
+      this.altKey    = !!init.altKey;
+      this.ctrlKey   = !!init.ctrlKey;
+      this.metaKey   = !!init.metaKey;
+      this.shiftKey  = !!init.shiftKey;
+      this.relatedTarget = init.relatedTarget || null;
+    }
+  };
   globalThis.KeyboardEvent   = class extends Event {};
   globalThis.InputEvent      = class extends Event {};
   globalThis.SubmitEvent     = class extends Event {
@@ -3166,7 +3235,7 @@
       else if (type === 'radio') { setRadio(n);   preToggled = 'radio'; }
     }
 
-    const click = new Event('click', { bubbles: true, cancelable: true });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
     dispatchEvent(n, click);
     if (click.defaultPrevented) return null;
 
