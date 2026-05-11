@@ -1320,7 +1320,11 @@
         else n._attrs.value = v;
         kind = 'checked';
       } else {
-        n._attrs.value = v;
+        // Browsers truncate at maxlength when the user types; programmatic
+        // assignment via the IDL setter does the same when the input is
+        // a text-like control.
+        const maxlen = parseInt(n._attrs.maxlength || '', 10);
+        n._attrs.value = (maxlen > 0 && v.length > maxlen) ? v.slice(0, maxlen) : v;
       }
     } else if (tag === 'select') {
       // Match the first <option> whose value (or textContent fallback)
@@ -1377,7 +1381,20 @@
     if (!form || form._tag !== 'form') return null;
     const submitter = submitterHandle ? lookup(submitterHandle) : null;
     const fields = [];
-    const inputs = form.querySelectorAll('input,textarea,select,button');
+    // HTML's `form` IDL: controls participate via either DOM ancestry
+    // (descendant of the form) *or* an explicit `form="<form-id>"`
+    // attribute pointing at the form. Skip descendant controls whose
+    // `form` attr points elsewhere — they belong to another form.
+    const inputs = [];
+    for (const f of form.querySelectorAll('input,textarea,select,button')) {
+      if (f._attrs.form == null || f._attrs.form === form._attrs.id) inputs.push(f);
+    }
+    const formId = form._attrs.id;
+    if (formId) {
+      for (const f of globalThis.document.documentElement.querySelectorAll('input,textarea,select,button')) {
+        if (f._attrs.form === formId && !inputs.includes(f)) inputs.push(f);
+      }
+    }
     for (const f of inputs) {
       if (!f._attrs.name) continue;
       if (f._attrs.disabled != null) continue;
@@ -1398,7 +1415,9 @@
         if (type === 'file') continue; // PoC: skip until multipart support
         fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
       } else if (tag === 'textarea') {
-        fields.push([name, f._attrs.value != null ? f._attrs.value : f.textContent]);
+        // HTML form-submission spec normalizes textarea LF to CRLF.
+        const raw = f._attrs.value != null ? f._attrs.value : f.textContent;
+        fields.push([name, String(raw).replace(/\r\n|\r|\n/g, '\r\n')]);
       } else if (tag === 'select') {
         const multi = f._attrs.multiple != null;
         const opts = f.querySelectorAll('option');
