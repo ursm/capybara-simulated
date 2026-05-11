@@ -258,9 +258,9 @@ module Capybara
         @vm.eval_code(MICROTASK_PUMP_CODE)
       end
 
-      # Detect the OOM-poisoned state from PR hmsk/quickjs.rb#23 (typed
-      # via `vm.oom_poisoned?`) and rebuild the VM. Also catch the
-      # parser-stack overflow QuickJS reports as a SyntaxError at
+      # Detect the memory-poisoned state from PR hmsk/quickjs.rb#23
+      # (typed via `vm.memory_poisoned?`) and rebuild the VM. Also catch
+      # the parser-stack overflow QuickJS reports as a SyntaxError at
       # `<vm>:1:1` under sustained allocation — same fix (fresh VM).
       # Other Quickjs errors propagate so call sites can decide.
       def with_recycle
@@ -271,7 +271,7 @@ module Capybara
         boot_vm
         yield
       rescue Quickjs::RuntimeError
-        raise if @vm.nil? || !@vm.oom_poisoned?
+        raise if @vm.nil? || !@vm.memory_poisoned?
         warn '[capybara-simulated] QuickJS VM hit OOM — recycling'
         boot_vm
         yield

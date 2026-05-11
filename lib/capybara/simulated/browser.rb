@@ -2790,14 +2790,7 @@ module Capybara
       end
 
       def blob_body(url)
-        # `__getBlobBodyHex` builds the hex via `s += ...` in a loop,
-        # leaving QuickJS holding a rope (tree of concatenated
-        # segments). The current quickjs.rb bridge mangles non-trivial
-        # ropes during JS→Ruby string marshaling — the entire return
-        # becomes Ruby `nil`. `.normalize()` flattens the rope into a
-        # single canonical UTF-8 string before the marshal step.
-        # Drop once https://github.com/hmsk/quickjs.rb/pull/34 lands.
-        hex = js.eval("(globalThis.__getBlobBodyHex && globalThis.__getBlobBodyHex(#{url.to_json}) || '').normalize()")
+        hex = js.eval("globalThis.__getBlobBodyHex && globalThis.__getBlobBodyHex(#{url.to_json}) || ''")
         return nil if hex.nil? || hex.empty?
         [hex].pack('H*').force_encoding(Encoding::ASCII_8BIT)
       rescue StandardError
