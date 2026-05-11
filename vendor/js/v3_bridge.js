@@ -394,6 +394,25 @@
     return dispatchEvent(n, new Event(String(type), init || {}));
   };
 
+  // ── Modal dialogs ───────────────────────────────────────────────
+  //
+  // window.alert / confirm / prompt route through `__modalDialog`
+  // (Ruby host fn). The Ruby side checks the active accept_modal /
+  // dismiss_modal handler stack and returns whatever the handler
+  // produced — true/false for confirm, the response string for
+  // prompt, null for alert.
+
+  globalThis.alert   = function (message) {
+    __modalDialog('alert', String(message == null ? '' : message), null);
+  };
+  globalThis.confirm = function (message) {
+    return !!__modalDialog('confirm', String(message == null ? '' : message), null);
+  };
+  globalThis.prompt  = function (message, def) {
+    return __modalDialog('prompt', String(message == null ? '' : message),
+                         def == null ? '' : String(def));
+  };
+
   // ── MutationObserver ────────────────────────────────────────────
   //
   // Records are queued globally on every attribute / childList

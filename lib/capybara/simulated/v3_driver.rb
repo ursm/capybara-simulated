@@ -97,8 +97,38 @@ module Capybara
 
       def active_element ; nil ; end
       def send_keys(*_keys); nil ; end
-      def accept_modal(_type, **_opts) ; yield if block_given? ; nil ; end
-      def dismiss_modal(_type, **_opts); yield if block_given? ; nil ; end
+
+      def accept_modal(type, **options, &block) = run_modal(type, accept: true, **options, &block)
+      def dismiss_modal(type, **options, &block) = run_modal(type, accept: false, **options, &block)
+
+      private def run_modal(type, accept:, text: nil, with: nil, wait: nil)
+        captured = nil
+        # Dispatch by the *actual* modal type fired — `accept_alert
+        # do ... end` should also accept a confirm() raised by the
+        # block. Mirrors how selenium / cuprite route in real life.
+        handler = ->(actual_type, msg, default_value) {
+          captured = msg
+          case actual_type.to_sym
+          when :alert   then nil
+          when :confirm then accept
+          when :prompt  then accept ? (with.nil? ? default_value.to_s : with.to_s) : nil
+          end
+        }
+        browser.with_modal(handler) { yield if block_given? }
+        if captured.nil?
+          raise Capybara::ModalNotFound, "Unable to find modal dialog with #{text.inspect}"
+        end
+        if text && !modal_text_matches?(text, captured)
+          raise Capybara::ModalNotFound,
+            "Unable to find modal dialog with #{text.inspect} (got #{captured.inspect})"
+        end
+        captured
+      end
+
+      private def modal_text_matches?(matcher, message)
+        matcher.is_a?(Regexp) ? matcher.match?(message) : message.include?(matcher.to_s)
+      end
+      public
     end
   end
 end

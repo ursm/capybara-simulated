@@ -43,6 +43,7 @@ module Capybara
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until                = nil
         @ticking                      = false
+        @modal_handlers               = []
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
@@ -292,8 +293,7 @@ module Capybara
           return navigate(resolve_against_current(headers['location']))
         end
         @current_url = url
-        html         = resp_body.is_a?(Array) ? resp_body.join : resp_body.to_s
-        resp_body.close if resp_body.respond_to?(:close)
+        html         = read_rack_body(resp_body)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
 
@@ -312,12 +312,22 @@ module Capybara
         (headers || {}).each {|k, v| env["HTTP_#{k.to_s.upcase.tr('-', '_')}"] = v }
         @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
         status, resp_headers, resp_body = @app.call(env)
-        body_str = resp_body.is_a?(Array) ? resp_body.join : resp_body.to_s
-        resp_body.close if resp_body.respond_to?(:close)
+        body_str = read_rack_body(resp_body)
         {'status' => status, 'headers' => stringify(resp_headers), 'body' => body_str}
       rescue StandardError => e
         warn "[capybara-simulated v3] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
+      end
+
+      # Rack response bodies must respond to `each` (or be an Array of
+      # strings). `to_s` on a streaming body returns the inspect form,
+      # not the bytes — which silently shipped 43-byte `#<Rack::Files…>`
+      # strings to the JS engine for big assets like jquery.js.
+      def read_rack_body(body)
+        buf = +''
+        body.each {|chunk| buf << chunk.to_s } if body.respond_to?(:each)
+        body.close if body.respond_to?(:close)
+        buf
       end
 
       def location_assign(url) ; navigate(resolve_against_current(url.to_s)) ; end
@@ -330,7 +340,33 @@ module Capybara
         name, rest = s.split('=', 2)
         @cookies[name] = (rest || '').split(';', 2).first.to_s
       end
-      def handle_modal(*)      ; nil ; end
+      # Push a one-shot handler onto the modal-dialog stack — the next
+      # modal that fires consumes the topmost handler. Block exit pops
+      # in case the dialog never fired. Mirrors v2's `with_modal`.
+      def with_modal(handler)
+        @modal_handlers.push(handler)
+        yield if block_given?
+      ensure
+        @modal_handlers.delete(handler)
+      end
+
+      # JS-side `alert(...)` / `confirm(...)` / `prompt(...)` route here.
+      # If no handler is pushed (typical of apps under test), accept
+      # the dialog (Rails system-test default) so `data-turbo-confirm`
+      # / similar progress without an explicit `accept_confirm` in
+      # the test.
+      def handle_modal(type, message, default_value)
+        handler = @modal_handlers.pop
+        if handler
+          handler.call(type, message, default_value)
+        else
+          case type.to_s
+          when 'alert'   then nil
+          when 'confirm' then true
+          when 'prompt'  then default_value.to_s
+          end
+        end
+      end
 
       private
 
@@ -349,8 +385,7 @@ module Capybara
           return navigate(next_url, depth: depth + 1)
         end
         @current_url = url
-        html         = body.is_a?(Array) ? body.join : body.to_s
-        body.close if body.respond_to?(:close)
+        html         = read_rack_body(body)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
 
