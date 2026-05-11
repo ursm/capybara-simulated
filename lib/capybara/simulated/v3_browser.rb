@@ -104,13 +104,23 @@ module Capybara
       # per-element __dom callback storm.
       def find_xpath(xpath, context_handle = nil)
         tick_real_time
-        # When the query is rooted at an element, give Nokogiri a
-        # fragment; when it's document-rooted ("/html…") we need a full
-        # Document so `/html` resolves. Capybara's matchers emit both.
-        html = @runtime.call('__csimSerialize', context_handle || 0).to_s
+        # Always serialise the full document — XPath like `//p` is
+        # document-rooted in spec terms (libxml2 returns all matches
+        # from the doc root regardless of context), and Capybara's
+        # ancestor / sibling / scoped finders already filter the
+        # result list to those within the calling context. Scoping
+        # the serialise to the context subtree would strip away the
+        # exact ancestors Capybara needs.
+        html = @runtime.call('__csimSerialize', 0).to_s
         return [] if html.empty?
-        doc = context_handle ? Nokogiri::HTML5.fragment(html) : Nokogiri::HTML5.parse(html)
-        doc.xpath(xpath.to_s).filter_map {|n|
+        doc = Nokogiri::HTML5.parse(html)
+        # For context-scoped queries (Node#find_xpath emits `.//`),
+        # locate the context node in the parsed doc by handle so the
+        # current-node `.` resolves correctly. With nil context, the
+        # doc-root is fine.
+        root = context_handle ? doc.at_xpath("//*[@data-csim-handle='#{context_handle}']") : doc
+        return [] unless root
+        root.xpath(xpath.to_s).filter_map {|n|
           n.respond_to?(:[]) ? n['data-csim-handle']&.to_i : nil
         }.reject(&:zero?)
       end
@@ -207,7 +217,22 @@ module Capybara
       def pending_trace                   ; nil ; end
       def clear_trace!                    ; nil ; end
       def evaluate_script(code, args = [])
-        @runtime.call('__csimEvalScript', code.to_s, args || [])
+        @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
+      end
+
+      # Capybara passes Node instances directly as script args
+      # (`session.evaluate_script('arguments[0].click()', some_node)`).
+      # mini_racer can't marshal a Ruby Node, so wrap as a sentinel
+      # the JS side recognises and rehydrates via the handle registry.
+      def marshal_args(args)
+        args.map {|a|
+          case a
+          when Capybara::Simulated::V3Node then {'__elementHandle' => a.handle_id}
+          when Array                       then marshal_args(a)
+          when Hash                        then a.transform_values {|v| marshal_args([v]).first }
+          else a
+          end
+        }
       end
       def evaluate_async_script(_, _ = []); nil ; end
 

@@ -943,11 +943,33 @@
   // Capybara's `Session#evaluate_script` reaches here. Wrap the code
   // in a function so it sees `arguments[N]` and an implicit return
   // hands back the last expression. Mirrors v2's `__evalScript`
-  // contract closely enough for the smoke tests.
+  // contract closely enough for the smoke tests. Args coming over
+  // the wire may include `{__elementHandle: id}` sentinels (Capybara
+  // passing Node instances); rehydrate them to live Element refs so
+  // user scripts can call methods on them.
   globalThis.__csimEvalScript = function (code, args) {
     const fn = new Function('arguments', 'return (' + code + ')');
-    return fn(args || []);
+    return marshalReturn(fn(rehydrateArgs(args || [])));
   };
+  function rehydrateArgs(args) {
+    if (Array.isArray(args)) return args.map(rehydrateArgs);
+    if (args && typeof args === 'object') {
+      if (typeof args.__elementHandle === 'number') return lookup(args.__elementHandle);
+      const out = {};
+      for (const k of Object.keys(args)) out[k] = rehydrateArgs(args[k]);
+      return out;
+    }
+    return args;
+  }
+  // Inverse: when a script returns an Element / NodeList, marshal so
+  // the Ruby side can wrap the handles back into Node instances.
+  function marshalReturn(value) {
+    if (value && typeof value === 'object' && value.nodeType !== undefined && typeof value._id === 'number') {
+      return { __elementHandle: value._id };
+    }
+    if (Array.isArray(value)) return value.map(marshalReturn);
+    return value;
+  }
   globalThis.__csimDocumentTitle = function () {
     const head = globalThis.document.head;
     if (!head) return '';
