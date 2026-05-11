@@ -1054,7 +1054,22 @@
     for (const chain of splitTopLevel(String(sel).trim(), ',')) {
       const c = chain.trim();
       if (!c) continue;
-      out.push(c.split(/\s+/).map(parseSimple));
+      // Tokenise around `>` child combinators while keeping descendant
+      // (whitespace) combinators implicit. Each unit gets a `combinator`
+      // tag (`'descendant'` | `'child'`) that drives `matchChain`'s
+      // ancestor-walk vs direct-parent check.
+      const raw = c.split(/\s+/);
+      const units = [];
+      let combinator = 'descendant';
+      for (const tok of raw) {
+        if (!tok) continue;
+        if (tok === '>') { combinator = 'child'; continue; }
+        const u = parseSimple(tok);
+        u.combinator = combinator;
+        units.push(u);
+        combinator = 'descendant';
+      }
+      if (units.length) out.push(units);
     }
     return out;
   }
@@ -1133,14 +1148,24 @@
     }
     return true;
   }
-  // Match el against a single chain of units (joined by descendant).
+  // Match el against a single chain of units. Each non-first unit's
+  // `combinator` says how to bridge from its predecessor: `'descendant'`
+  // walks ancestors (any depth); `'child'` only accepts the immediate
+  // parent. The combinator stored on a unit refers to the relationship
+  // *with the preceding unit*, so we read it from the unit we're about
+  // to match.
   function matchChain(el, units) {
     if (!units.length) return false;
     if (!matchUnit(el, units[units.length - 1])) return false;
     let cur = el._parent;
     for (let i = units.length - 2; i >= 0; i--) {
-      while (cur && cur.nodeType === NODE_ELEMENT && !matchUnit(cur, units[i])) cur = cur._parent;
-      if (!cur || cur.nodeType !== NODE_ELEMENT) return false;
+      const next = units[i + 1];
+      if (next.combinator === 'child') {
+        if (!cur || cur.nodeType !== NODE_ELEMENT || !matchUnit(cur, units[i])) return false;
+      } else {
+        while (cur && cur.nodeType === NODE_ELEMENT && !matchUnit(cur, units[i])) cur = cur._parent;
+        if (!cur || cur.nodeType !== NODE_ELEMENT) return false;
+      }
       cur = cur._parent;
     }
     return true;
