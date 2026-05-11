@@ -967,11 +967,42 @@
   globalThis.__csimTag       = function (h) { const n = lookup(h); return n && n._tag ? n._tag : ''; };
   globalThis.__csimAttr      = function (h, name) { const n = lookup(h); return n && n.getAttribute ? n.getAttribute(name) : null; };
   globalThis.__csimHasAttr   = function (h, name) { const n = lookup(h); return !!(n && n.hasAttribute && n.hasAttribute(name)); };
-  globalThis.__csimVisible   = function (h) {
-    // PoC: every Element is "visible". Hidden-by-style and
-    // hidden-attribute filtering ports in a later milestone.
+  // Visibility walk mirroring v2's `self_hidden?` + ancestor chain:
+  // INVISIBLE_TAGS (head/script/style/template/noscript/title),
+  // `<input type=hidden>`, `hidden` attribute, inline `style=`
+  // `display:none` / `visibility:hidden`. Cascade-driven visibility
+  // (class-based hide rules from external stylesheets) is deferred —
+  // when we need it, port `class_hidden?` / cascade resolution from
+  // v2's Browser.
+  const INVISIBLE_TAGS = new Set(['head','script','style','template','noscript','title']);
+  const DISPLAY_NONE_RE       = /(^|;|\s)display\s*:\s*none\b/i;
+  const VISIBILITY_HIDDEN_RE  = /(^|;|\s)visibility\s*:\s*hidden\b/i;
+  function selfHidden(el) {
+    if (el._attrs.hidden != null) return true;
+    const style = el._attrs.style;
+    if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
+    return false;
+  }
+  globalThis.__csimVisible = function (h) {
     const n = lookup(h);
-    return !!(n && n.nodeType === NODE_ELEMENT);
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    if (INVISIBLE_TAGS.has(n._tag)) return false;
+    if (n._tag === 'input' && (n._attrs.type || '').toLowerCase() === 'hidden') return false;
+    let summarySeen = false;
+    let cur = n;
+    while (cur) {
+      if (cur.nodeType === NODE_DOC) return true;
+      if (cur.nodeType === NODE_ELEMENT) {
+        if (INVISIBLE_TAGS.has(cur._tag)) return false;
+        if (selfHidden(cur)) return false;
+        // <details> hides its content while closed *unless* the target
+        // sits inside <summary>.
+        if (cur._tag === 'details' && cur._attrs.open == null && !summarySeen) return false;
+        if (cur._tag === 'summary') summarySeen = true;
+      }
+      cur = cur._parent;
+    }
+    return true;
   };
   globalThis.__csimAttrs = function (h) {
     const n = lookup(h);

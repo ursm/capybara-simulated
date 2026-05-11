@@ -55,15 +55,44 @@ module Capybara
         @current_url || ''
       end
 
+      # Capybara routes plenty of compound CSS — `[type='submit']` /
+      # pseudo classes / sibling combinators — through `find_css` even
+      # when the resolved locator is XPath. The v3 JS selector parser
+      # is intentionally minimal (tag / id / class / attr / descendant
+      # / grouping). To get full Capybara coverage without growing
+      # the JS parser, route through Nokogiri's CSS → XPath translator
+      # and reuse `find_xpath`; the JS parser stays the fast path
+      # for the simple selectors customElements / framework code
+      # emits internally.
       def find_css(css, context_handle = nil)
         tick_real_time
-        @runtime.call('__csimQuery', context_handle || @document_handle, css.to_s).to_a
+        s = css.to_s
+        if xpath_shaped?(s)
+          return find_xpath(s, context_handle)
+        end
+        begin
+          xpath = Nokogiri::CSS.xpath_for(s).first
+          return find_xpath(xpath, context_handle) if xpath
+        rescue Nokogiri::CSS::SyntaxError, StandardError
+          # Fall back to the JS-side parser. Worth trying because
+          # `xpath_for` can choke on Capybara-emitted pseudo selectors
+          # (`:not(...)`, attribute case-insensitive flags) that our
+          # JS path either supports or ignores predictably.
+        end
+        @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
       end
 
       def find_first_css(css, context_handle = nil)
         tick_real_time
         h = @runtime.call('__csimQueryOne', context_handle || @document_handle, css.to_s).to_i
         h.zero? ? nil : h
+      end
+
+      def xpath_shaped?(s)
+        # Cheap probe: anything starting with `/` (absolute or relative
+        # XPath), `(` (grouped XPath like `(//a)[1]`), or `.` (XPath
+        # current-node) is XPath. Pure CSS never starts with these.
+        !!(s =~ %r{\A\s*(?:/|\(\s*/|\.)})
       end
 
       # XPath reverse-bridge (see V3_DESIGN.md "HTML parsing in v3"):
