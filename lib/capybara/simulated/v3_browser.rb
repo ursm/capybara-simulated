@@ -409,6 +409,7 @@ module Capybara
         @current_url = url
         html         = read_rack_body(resp_body)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        @runtime.call('__csimUpdateLocation', @current_url.to_s)
       end
 
       def reset!
@@ -502,6 +503,7 @@ module Capybara
         @current_url = url
         html         = read_rack_body(body)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        @runtime.call('__csimUpdateLocation', @current_url.to_s)
       end
 
       def merge_set_cookie(headers)

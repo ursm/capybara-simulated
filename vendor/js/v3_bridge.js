@@ -60,6 +60,13 @@
     // detached nodes. Cloned nodes copy attrs and (deep) clone
     // children; listeners + custom-element state are intentionally
     // *not* copied (matches HTML spec).
+    // Focus tracking is a stub: real browsers maintain document.activeElement
+    // and dispatch focus/blur events. v3 PoC just records the slot
+    // — enough to satisfy test code that calls `el.focus()` before
+    // typing. blur(), if anyone calls it, clears the slot.
+    focus() { globalThis.document._activeElement = this; }
+    blur()  { if (globalThis.document._activeElement === this) globalThis.document._activeElement = null; }
+
     cloneNode(deep) {
       const copy = this._cloneShell();
       if (deep && this._children) {
@@ -225,6 +232,12 @@
       const el    = this;
       const names = Object.keys(this._attrs);
       const list  = names.map(n => makeAttr(el, n));
+      // NamedNodeMap supports both numeric (`attributes[0]`) and named
+      // (`attributes['id']`) access. The array gives us numeric for
+      // free; assign named keys for getNamedItem-equivalent lookups
+      // that frameworks (jQuery 1.x, Sizzle) use during feature
+      // detection.
+      for (const n of names) list[n] = makeAttr(el, n);
       list.getNamedItem = name => {
         const lower = String(name).toLowerCase();
         return Object.prototype.hasOwnProperty.call(el._attrs, lower) ? makeAttr(el, lower) : null;
@@ -255,6 +268,21 @@
     // IDL `id` / `className` go through setAttribute so MO sees the
     // change record. Setting them directly on `_attrs` would skip the
     // hook and break observers that watch `attributes`.
+    // Minimal CSSStyleDeclaration. We don't parse / compute styles —
+    // `cssText` is just a mirror onto the `style="..."` attribute,
+    // and individual property access reads / writes the corresponding
+    // declaration in that string. Enough for jQuery / framework
+    // feature-detection (`el.style.cssText = '...'`); not enough for
+    // `getComputedStyle()`-style cascade resolution.
+    get style() {
+      if (!this._styleProxy) this._styleProxy = makeStyleProxy(this);
+      return this._styleProxy;
+    }
+    set style(v) {
+      this.setAttribute('style', String(v == null ? '' : v));
+      this._styleProxy = null;
+    }
+
     get id()        { return this._attrs.id || ''; }
     set id(v)       { this.setAttribute('id', String(v)); }
     get className() { return this._attrs['class'] || ''; }
@@ -357,7 +385,8 @@
   class Document extends Node {
     constructor() {
       super();
-      this.nodeType = NODE_DOC;
+      this.nodeType  = NODE_DOC;
+      this.readyState = 'complete';
       this.documentElement = null;
     }
     createElement(tag) {
@@ -486,6 +515,41 @@
   function classes(el) {
     const cls = el._attrs['class'];
     return cls ? cls.split(/\s+/).filter(Boolean) : [];
+  }
+
+  // Lightweight CSSStyleDeclaration proxy backed by `style="..."`.
+  // `cssText` is the round-trip serialization; individual property
+  // access (e.g. `style.display = 'none'`) parses / rebuilds the
+  // declaration string in place. jQuery 1.x sets `style.cssText`
+  // during feature detection, so the proxy has to at least support
+  // round-trip without throwing.
+  function makeStyleProxy(el) {
+    const p = {};
+    Object.defineProperty(p, 'cssText', {
+      get() { return el._attrs.style || ''; },
+      set(v) { el.setAttribute('style', String(v == null ? '' : v)); },
+      enumerable: true,
+      configurable: true
+    });
+    p.getPropertyValue = (name) => {
+      const css = el._attrs.style || '';
+      const re = new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:\\s*([^;]+)', 'i');
+      const m = re.exec(css);
+      return m ? m[1].trim() : '';
+    };
+    p.setProperty = (name, value) => {
+      const css  = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:[^;]*;?', 'i'), '');
+      const trimmed = css.replace(/^\s*;|;\s*$/g, '').trim();
+      const next = (trimmed ? trimmed + '; ' : '') + name + ': ' + String(value);
+      el.setAttribute('style', next);
+    };
+    p.removeProperty = (name) => {
+      const v = p.getPropertyValue(name);
+      const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:[^;]*;?', 'i'), '');
+      el.setAttribute('style', css.replace(/^\s*;|;\s*$/g, '').trim());
+      return v;
+    };
+    return p;
   }
 
   // Build an Attr-shaped object on demand. Returned from `attributes`
@@ -1096,6 +1160,34 @@
   globalThis.Text     = Text;
   globalThis.document = new Document();
   globalThis.window   = globalThis;
+  // location proxy. URL components mirror what Ruby's V3Browser
+  // tracks; updated on each `__csimLoadDocument(html, url)`. Library
+  // code (jQuery 1.x feature detect, Turbo Drive) reads `.href` early
+  // so we need at least a non-throwing initial value.
+  globalThis.location = makeLocation('http://www.example.com/');
+  function makeLocation(url) {
+    return parseUrlForLocation(url);
+  }
+  function parseUrlForLocation(url) {
+    try {
+      const u = __csim_parseUrl(url, null);
+      if (u && !u.error) return Object.assign({}, u, {
+        toString() { return this.href; },
+        assign:  (next) => __locationAssign(next),
+        replace: (next) => __locationAssign(next),
+        reload:  () => __locationReload()
+      });
+    } catch (_) {}
+    return { href: url || '', protocol: 'http:', host: '', hostname: '',
+             port: '', pathname: '/', search: '', hash: '', origin: '',
+             toString() { return this.href; },
+             assign:  (next) => __locationAssign(next),
+             replace: (next) => __locationAssign(next),
+             reload:  () => __locationReload() };
+  }
+  globalThis.__csimUpdateLocation = function (url) {
+    globalThis.location = makeLocation(String(url || ''));
+  };
 
   // Handle registry — Ruby keeps integer ids, looks up Element back
   // via `__csimGet*(handle)` accessors. Wired in `parseDocument`
@@ -1158,6 +1250,15 @@
       }
     }
     if (__observers.size && __pendingRecords.length) deliverMutations();
+    // After scripts have run, fire the readiness lifecycle events
+    // libraries hook into (`DOMContentLoaded` on document, `load` on
+    // window). jQuery 1.x's `$(handler)` short-circuits if
+    // `readyState === 'complete'` at the time it's called; but a
+    // library that registers via `addEventListener('DOMContentLoaded')`
+    // only sees the handler fire if we actually emit the event.
+    if (doc) {
+      try { dispatchEvent(doc, new Event('DOMContentLoaded', { bubbles: true, cancelable: false })); } catch (_) {}
+    }
   }
   function scriptText(el) {
     let s = '';
