@@ -12,6 +12,8 @@ require 'securerandom'
 require 'set'
 require 'digest'
 
+require_relative 'esm_rewriter'
+
 # V8 flag setup. Must run before the first `MiniRacer::Context.new`;
 # idempotent calls raise `PlatformAlreadyInitialized`.
 #
@@ -168,6 +170,50 @@ module Capybara
             return !__csim_parseUrl(String(input), base ? String(base) : null).error;
           }
         };
+        // ES-module loader — mini_racer doesn't expose V8's module API,
+        // so we synthesise it. EsmRewriter (Ruby) transforms each module
+        // body into a factory: imports become `__csim_require(url)`
+        // calls, exports become assignments on `__exports`. The factory
+        // source comes from Ruby via `__csim_fetchModuleSource`, which
+        // shares Browser's `@module_cache` with the QuickJS path so
+        // load_module already resolved every specifier to an absolute
+        // URL by the time we see it.
+        const __csim_modules    = Object.create(null);  // url -> exports
+        const __csim_factories  = Object.create(null);  // url -> factory fn
+        const __csim_inProgress = Object.create(null);  // url -> partially-built exports
+        // EsmRewriter collapses `import(spec)` into a regular call site
+        // — this is the function it points at.
+        globalThis.__csim_dynamicImport = function (spec) {
+          try {
+            return Promise.resolve(__csim_require(String(spec)));
+          } catch (e) {
+            return Promise.reject(e);
+          }
+        };
+        globalThis.__csim_require = function (url) {
+          if (url in __csim_modules)    return __csim_modules[url];
+          if (url in __csim_inProgress) return __csim_inProgress[url];
+          let factory = __csim_factories[url];
+          if (!factory) {
+            const src = __csim_fetchModuleSource(String(url));
+            if (src == null) throw new Error('module not registered: ' + url);
+            try {
+              factory = new Function('__exports', src);
+            } catch (e) {
+              throw new Error('module compile failed for ' + url + ': ' + (e && e.message ? e.message : e));
+            }
+            __csim_factories[url] = factory;
+          }
+          const exports = {};
+          __csim_inProgress[url] = exports;
+          try {
+            factory(exports);
+            __csim_modules[url] = exports;
+          } finally {
+            delete __csim_inProgress[url];
+          }
+          return exports;
+        };
         globalThis.URLSearchParams = class URLSearchParams {
           constructor(init) {
             this._pairs = [];
@@ -262,13 +308,33 @@ module Capybara
         end
       end
 
-      def run_module_script(_browser, _script)
-        # mini_racer doesn't expose ES-module loading. Avo / importmap-
-        # based apps need the QuickJS engine until this gap is filled.
+      def run_module_script(browser, script)
+        src = script['src']
+        if src && !src.empty?
+          url = browser.resolve(src)
+          # Pre-warm the cache the same way the QuickJS path does so the
+          # loader sees a fully-resolved module graph.
+          browser.load_module(url) or return
+          eval_module_entry(url)
+        else
+          inline = script.text.to_s
+          return if inline.strip.empty?
+          url = browser.resolve('inline-module-' + Digest::SHA256.hexdigest(inline)[0, 16] + '.mjs')
+          browser.cache_inline_module(url, inline)
+          eval_module_entry(url)
+        end
       end
 
-      def eval_module_entry(_url)
-        # See run_module_script.
+      # Triggering the entry module is just a `__csim_require(url)` call —
+      # the JS-side loader walks dependencies via the same callback and
+      # the body's `__exports.*` assignments fire as each module evaluates.
+      # We don't keep the returned namespace; module side-effects (custom-
+      # element define, Stimulus controller registration, etc.) are the
+      # whole point.
+      def eval_module_entry(url)
+        ctx.eval("__csim_require(#{url.to_json})")
+      rescue MiniRacer::RuntimeError, MiniRacer::ParseError => e
+        warn "[capybara-simulated] module #{url} failed: #{e.message[0, 200]}"
       end
 
       def eval_safely(code, label)
@@ -381,6 +447,19 @@ module Capybara
         c.attach('__csim_utf8Encode',  ->(*a) { a[0].to_s.b.bytes })
         c.attach('__csim_utf8Decode',  ->(*a) { a[0].pack('C*').force_encoding('UTF-8') })
         c.attach('__csim_parseUrl',    ->(*a) { parse_url_for_js(a[0], a[1]) })
+        c.attach('__csim_fetchModuleSource', ->(*a) { sc.() { fetch_module_source(browser, a[0]) } })
+      end
+
+      # Fetch the already-rewritten module source from the browser's
+      # cache, then run it through the ESM→function-body rewriter.
+      # Cached so `__csim_require` only pays the rewrite cost once per
+      # URL per Context.
+      def fetch_module_source(browser, url)
+        @module_source_cache ||= {}
+        @module_source_cache[url] ||= begin
+          raw = browser.load_module(url)
+          raw && EsmRewriter.rewrite(raw).first
+        end
       end
 
       def parse_url_for_js(input, base)
