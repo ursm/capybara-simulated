@@ -2038,6 +2038,21 @@ module Capybara
       # has actually passed since the last tick. The cap stops a
       # runaway interval from looping forever in a single tick.
       TICK_CAP_MS = 5_000
+      # Minimum virtual-clock advance per tick. Capybara polls find /
+      # has_? via `synchronize` and sleeps `default_retry_interval`
+      # between retries. Our driver is deterministic — every
+      # observable side-effect from the previous line has already
+      # settled by the time Capybara polls — so the sleep only exists
+      # to give wall-clock to setTimeout(N>0) waiting for an element
+      # to appear. Anchoring virtual-clock advance to wall-clock means
+      # Capybara's own retry-loop cost is the floor on test perf. By
+      # advancing at least `TICK_MIN_MS` per tick regardless of
+      # wall-clock, callers can lower `default_retry_interval` toward
+      # zero and have polling progress through virtual time without
+      # paying the sleep. 10 ms matches Capybara's historical default
+      # so existing `setTimeout(N)`-bound assertions still settle on
+      # roughly the same retry count.
+      TICK_MIN_MS = 10
       # Called from every find / find_xpath / find_css before the
       # selector evaluates, so Capybara's polling can advance the
       # virtual JS clock by however much wall-clock time has elapsed.
@@ -2054,8 +2069,9 @@ module Capybara
         now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         elapsed  = ((now - @last_tick_ts) * 1000).to_i
         @last_tick_ts = now
-        return if elapsed <= 0
-        js.drain_timers([elapsed, TICK_CAP_MS].min)
+        step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
+        return if step <= 0
+        js.drain_timers(step)
         deliver_pending_mutations
       end
 
