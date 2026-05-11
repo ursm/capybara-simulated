@@ -91,9 +91,12 @@ module Capybara
 
       def xpath_shaped?(s)
         # Cheap probe: anything starting with `/` (absolute or relative
-        # XPath), `(` (grouped XPath like `(//a)[1]`), or `.` (XPath
-        # current-node) is XPath. Pure CSS never starts with these.
-        !!(s =~ %r{\A\s*(?:/|\(\s*/|\.)})
+        # XPath), `(` (grouped XPath like `(//a)[1]`), or `./` /
+        # `..` (XPath current-node + step) is XPath. We can't treat a
+        # bare leading `.` as XPath because CSS class selectors look
+        # exactly like that (`.contextual`); only the `./` form is
+        # unambiguous.
+        !!(s =~ %r{\A\s*(?:/|\(\s*/|\./|\.\.)})
       end
 
       # XPath reverse-bridge (see V3_DESIGN.md "HTML parsing in v3"):

@@ -1221,8 +1221,14 @@
   // resource fetching ports to v3.
   globalThis.__csimLoadDocument = function (html) {
     __handles.clear();
+    __hideRules = [];
     globalThis.document = parseDocument(String(html == null ? '' : html));
     registerNode(globalThis.document);
+    // Cascade-derived hide rules need to land *before* scripts run —
+    // a script that tests visibility (`offsetWidth`-style probes) or
+    // queries Capybara-visible elements would otherwise see the
+    // pre-cascade state.
+    __hideRules = collectHideRules(globalThis.document);
     runInlineScripts(globalThis.document);
     return globalThis.document._id;
   };
@@ -1390,7 +1396,119 @@
     if (el._attrs.hidden != null) return true;
     const style = el._attrs.style;
     if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
+    // Cascade-derived hide rules collected at page-load time. We don't
+    // resolve the full CSS cascade (specificity / inheritance / media
+    // queries); we just check whether *any* parsed `display: none` /
+    // `visibility: hidden` rule's selector matches this element.
+    // Good enough for class-based hides (Tailwind `.hidden`, Bootstrap
+    // `.d-none`, Redmine `.contextual.collapsed > ul`), which is the
+    // common case for apps under test.
+    return matchesAnyHideRule(el);
+  }
+
+  // ── Hide-rule cascade (PoC) ─────────────────────────────────────
+  //
+  // Populated from `<style>` text and fetched `<link rel="stylesheet">`
+  // content during `__csimLoadDocument`. Each rule is `{ group, hide }`
+  // where `group` is a selector group parsed via `parseSelector` (the
+  // same JS-side parser our `querySelectorAll` already uses).
+
+  let __hideRules = [];
+
+  function matchesAnyHideRule(el) {
+    if (__hideRules.length === 0) return false;
+    for (const r of __hideRules) {
+      try { if (matchOne(el, r.group)) return true; } catch (_) {}
+    }
     return false;
+  }
+
+  // Strip CSS comments and at-rule blocks before regexing rule bodies.
+  // We don't model @media / @supports / @container; the inside-rules
+  // of common `@media (prefers-*)` blocks rarely toggle display:none
+  // for test-relevant elements, so dropping them keeps false-positives
+  // down rather than treating all @media rules as always-on.
+  function stripCssComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, ''); }
+  function stripAtRules(s) {
+    // Walk and remove balanced `@... { ... }` blocks at top level.
+    let out = '', i = 0, depth = 0, skipDepth = 0;
+    while (i < s.length) {
+      const ch = s[i];
+      if (skipDepth > 0) {
+        if (ch === '{') skipDepth++;
+        else if (ch === '}') skipDepth--;
+        i++;
+        continue;
+      }
+      if (ch === '@' && depth === 0) {
+        // Find the matching `{` or `;`.
+        let j = i + 1;
+        while (j < s.length && s[j] !== '{' && s[j] !== ';') j++;
+        if (j < s.length && s[j] === ';') { i = j + 1; continue; }
+        if (j < s.length && s[j] === '{') { skipDepth = 1; i = j + 1; continue; }
+        break;
+      }
+      out += ch;
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      i++;
+    }
+    return out;
+  }
+  function extractHideRules(cssText) {
+    const out = [];
+    const cleaned = stripAtRules(stripCssComments(cssText));
+    const re = /([^{}]+?)\s*\{\s*([^{}]*?)\s*\}/g;
+    let m;
+    while ((m = re.exec(cleaned)) !== null) {
+      const selector = m[1].trim();
+      const decls    = m[2];
+      if (!selector) continue;
+      const hides = DISPLAY_NONE_RE.test(decls) || VISIBILITY_HIDDEN_RE.test(decls);
+      if (!hides) continue;
+      // Split top-level commas into separate rules so the JS selector
+      // parser doesn't have to model multi-group selectors in a single
+      // `matchOne` call (it already supports groups, but emitting one
+      // rule per selector matches the on-mismatch-fail-fast behaviour
+      // we want for the visibility hot path).
+      for (const sel of splitTopLevel(selector, ',')) {
+        const trimmed = sel.trim();
+        if (!trimmed) continue;
+        let group;
+        try { group = parseSelector(trimmed); } catch (_) { continue; }
+        if (group && group.length) out.push({ group, hide: true });
+      }
+    }
+    return out;
+  }
+
+  function collectHideRules(doc) {
+    if (!doc || !doc.documentElement) return [];
+    const rules = [];
+    // <style> blocks first.
+    const styles = doc.documentElement.querySelectorAll('style');
+    for (const s of styles) {
+      const txt = scriptText(s); // re-use raw-text accessor
+      if (txt) rules.push(...extractHideRules(txt));
+    }
+    // <link rel="stylesheet" href="..."> — synchronously fetched via
+    // the same `__rackFetch` host fn used for external `<script src>`.
+    // Network errors fall through silently; cascade is best-effort
+    // for visibility resolution, not load-bearing.
+    const links = doc.documentElement.querySelectorAll('link');
+    for (const l of links) {
+      const rel = (l._attrs.rel || '').toLowerCase();
+      if (!rel.split(/\s+/).includes('stylesheet')) continue;
+      const href = l._attrs.href;
+      if (!href) continue;
+      try {
+        const resp = __rackFetch('GET', href, '', null, 'follow');
+        if (resp && resp.status < 400 && resp.body) {
+          rules.push(...extractHideRules(resp.body));
+        }
+      } catch (_) {}
+    }
+    return rules;
   }
   globalThis.__csimVisible = function (h) {
     const n = lookup(h);
