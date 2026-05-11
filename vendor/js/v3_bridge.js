@@ -67,6 +67,27 @@
     focus() { globalThis.document._activeElement = this; }
     blur()  { if (globalThis.document._activeElement === this) globalThis.document._activeElement = null; }
 
+    // Layout stubs — there's no rendering engine, so geometry is
+    // always zero. Returning a sensible shape lets feature-detection
+    // probes in jQuery / DOM libraries continue instead of throwing
+    // "not a function". `getBoundingClientRect()` is the canonical
+    // shape; `getClientRects()` returns a DOMRectList (an empty
+    // array works for callers that just iterate or check length).
+    getBoundingClientRect() {
+      return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+    }
+    getClientRects() { return []; }
+    get offsetWidth()  { return 0; }
+    get offsetHeight() { return 0; }
+    get clientWidth()  { return 0; }
+    get clientHeight() { return 0; }
+    get scrollWidth()  { return 0; }
+    get scrollHeight() { return 0; }
+    get offsetTop()    { return 0; }
+    get offsetLeft()   { return 0; }
+    get offsetParent() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
+    scrollIntoView() { /* no-op */ }
+
     cloneNode(deep) {
       const copy = this._cloneShell();
       if (deep && this._children) {
@@ -385,10 +406,16 @@
   class Document extends Node {
     constructor() {
       super();
-      this.nodeType  = NODE_DOC;
+      this.nodeType   = NODE_DOC;
       this.readyState = 'complete';
       this.documentElement = null;
     }
+    // jQuery's `mc(node)` helper resolves a node back to its window
+    // via `doc.defaultView || doc.parentWindow`; without these the
+    // offset / scroll path throws "Cannot read properties of
+    // undefined (reading 'pageYOffset')".
+    get defaultView()   { return globalThis; }
+    get parentWindow()  { return globalThis; }
     createElement(tag) {
       const t = String(tag).toLowerCase();
       const ctor = __customElementRegistry.get(t);
@@ -524,32 +551,74 @@
   // during feature detection, so the proxy has to at least support
   // round-trip without throwing.
   function makeStyleProxy(el) {
-    const p = {};
-    Object.defineProperty(p, 'cssText', {
-      get() { return el._attrs.style || ''; },
-      set(v) { el.setAttribute('style', String(v == null ? '' : v)); },
-      enumerable: true,
-      configurable: true
-    });
-    p.getPropertyValue = (name) => {
-      const css = el._attrs.style || '';
-      const re = new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:\\s*([^;]+)', 'i');
-      const m = re.exec(css);
-      return m ? m[1].trim() : '';
+    // A Proxy that intercepts both camelCase IDL property access
+    // (`style.backgroundColor`) and kebab-case (`style['background-color']`).
+    // Reads parse the `style="..."` attribute; writes update it.
+    // Frameworks that probe arbitrary CSS properties (jQuery UI's
+    // `p.style.backgroundColor.indexOf("rgba")`) now get a string
+    // back instead of `undefined`.
+    const target = function () {}; // dummy callable for compatibility
+    const handler = {
+      get(_t, prop) {
+        if (prop === 'cssText') return el._attrs.style || '';
+        if (prop === 'getPropertyValue') return name => readCssProp(el, String(name));
+        if (prop === 'setProperty')      return (n, v) => writeCssProp(el, String(n), String(v));
+        if (prop === 'removeProperty')   return name => removeCssProp(el, String(name));
+        if (prop === 'length') return Object.keys(parseStyleDecls(el._attrs.style || '')).length;
+        if (typeof prop !== 'string') return undefined;
+        // camelCase → kebab-case lookup
+        return readCssProp(el, camelToKebab(prop));
+      },
+      set(_t, prop, value) {
+        if (prop === 'cssText') {
+          el.setAttribute('style', String(value == null ? '' : value));
+          return true;
+        }
+        if (typeof prop === 'string') {
+          writeCssProp(el, camelToKebab(prop), String(value));
+        }
+        return true;
+      },
+      has(_t, prop) {
+        if (prop === 'cssText' || prop === 'getPropertyValue' ||
+            prop === 'setProperty' || prop === 'removeProperty' || prop === 'length') return true;
+        return readCssProp(el, camelToKebab(String(prop))) !== '';
+      }
     };
-    p.setProperty = (name, value) => {
-      const css  = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:[^;]*;?', 'i'), '');
-      const trimmed = css.replace(/^\s*;|;\s*$/g, '').trim();
-      const next = (trimmed ? trimmed + '; ' : '') + name + ': ' + String(value);
-      el.setAttribute('style', next);
-    };
-    p.removeProperty = (name) => {
-      const v = p.getPropertyValue(name);
-      const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\s*:[^;]*;?', 'i'), '');
-      el.setAttribute('style', css.replace(/^\s*;|;\s*$/g, '').trim());
-      return v;
-    };
-    return p;
+    return new Proxy(target, handler);
+  }
+  function camelToKebab(name) {
+    return name.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+  }
+  function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function readCssProp(el, name) {
+    const css = el._attrs.style || '';
+    const re = new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:\\s*([^;]+)', 'i');
+    const m = re.exec(css);
+    return m ? m[1].trim() : '';
+  }
+  function writeCssProp(el, name, value) {
+    const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:[^;]*;?', 'i'), '');
+    const trimmed = css.replace(/^\s*;|;\s*$/g, '').trim();
+    const next = (trimmed ? trimmed + '; ' : '') + name + ': ' + value;
+    el.setAttribute('style', next);
+  }
+  function removeCssProp(el, name) {
+    const v = readCssProp(el, name);
+    const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:[^;]*;?', 'i'), '');
+    el.setAttribute('style', css.replace(/^\s*;|;\s*$/g, '').trim());
+    return v;
+  }
+  function parseStyleDecls(css) {
+    const out = {};
+    for (const decl of css.split(';')) {
+      const i = decl.indexOf(':');
+      if (i < 0) continue;
+      const name = decl.slice(0, i).trim();
+      const val  = decl.slice(i + 1).trim();
+      if (name) out[name] = val;
+    }
+    return out;
   }
 
   // Build an Attr-shaped object on demand. Returned from `attributes`
@@ -1187,6 +1256,59 @@
   }
   globalThis.__csimUpdateLocation = function (url) {
     globalThis.location = makeLocation(String(url || ''));
+  };
+
+  // `getComputedStyle(el)` — minimal stub. We don't run a real cascade
+  // (cascade-derived visibility lives behind a separate code path),
+  // so this just exposes inline `style="..."` as the computed style.
+  // jQuery 1.x assigns its computed-style helper (`Ra`) only if
+  // `window.getComputedStyle` is truthy, so the stub also guards
+  // against `Ra is not a function` deep in jQuery UI's measurement
+  // path.
+  // navigator stub. jQuery UI / Stimulus / framework feature detection
+  // reads `navigator.userAgent` early. We pretend to be a modern
+  // browser with a JS-capable runtime; tests that inspect specific
+  // UA strings (mobile / Safari quirks) are out of scope.
+  globalThis.navigator = {
+    userAgent: 'capybara-simulated/v3 (V8-resident DOM)',
+    appName:   'Netscape',
+    appVersion:'5.0',
+    platform:  'Linux',
+    language:  'en-US',
+    languages: ['en-US', 'en'],
+    onLine:    true,
+    cookieEnabled: true
+  };
+  // History stub — Turbo Drive + many SPA libs read `history.length`
+  // and call `history.pushState` / `replaceState`. We thread through
+  // existing `__setCurrentUrl` for state changes.
+  // Window scroll / size stubs. No layout engine → all zero. Libraries
+  // (jQuery offset, Stimulus / Turbo scroll restoration) read these.
+  globalThis.pageXOffset = 0;
+  globalThis.pageYOffset = 0;
+  globalThis.scrollX     = 0;
+  globalThis.scrollY     = 0;
+  globalThis.innerWidth  = 1024;
+  globalThis.innerHeight = 768;
+  globalThis.outerWidth  = 1024;
+  globalThis.outerHeight = 768;
+  globalThis.scrollTo    = function () { /* no-op */ };
+  globalThis.scrollBy    = function () { /* no-op */ };
+  globalThis.scroll      = function () { /* no-op */ };
+
+  globalThis.history = {
+    length: 1,
+    state:  null,
+    pushState(state, _title, url) { this.state = state; if (url) __setCurrentUrl(String(url)); },
+    replaceState(state, _title, url) { this.state = state; if (url) __setCurrentUrl(String(url)); },
+    back()    { __locationReload(); },
+    forward() { __locationReload(); },
+    go()      { __locationReload(); }
+  };
+
+  globalThis.getComputedStyle = function (el) {
+    if (!el || el.nodeType !== NODE_ELEMENT) return makeStyleProxy({ _attrs: {} });
+    return el.style;
   };
 
   // Handle registry — Ruby keeps integer ids, looks up Element back
