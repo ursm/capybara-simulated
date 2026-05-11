@@ -302,6 +302,86 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)+attr(class:off)')
   end
 
+  it 'upgrades custom elements on define and on later insertion' do
+    ce_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <my-card id="a"></my-card>
+            <button id="add">Add</button>
+            <button id="rm">Remove</button>
+            <div id="dock"></div>
+            <div id="log"></div>
+            <script>
+              const log = document.querySelector('#log');
+              function append(t) { log.textContent = (log.textContent + ' ' + t).trim(); }
+
+              class MyCard extends HTMLElement {
+                connectedCallback()    { this.textContent = 'card'; append('connect:' + (this.id || '?')); }
+                disconnectedCallback() { append('disconnect:' + (this.id || '?')); }
+              }
+              customElements.define('my-card', MyCard);
+
+              document.querySelector('#add').addEventListener('click', () => {
+                const el = document.createElement('my-card');
+                el.id = 'b';
+                document.querySelector('#dock').appendChild(el);
+              });
+              document.querySelector('#rm').addEventListener('click', () => {
+                const el = document.querySelector('my-card#a');
+                el.parentNode.removeChild(el);
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, ce_app)
+    s.visit '/'
+
+    expect(s.find('#a').text).to eq('card')
+    expect(s.find('#log').text).to eq('connect:a')
+
+    s.click_button 'Add'
+    expect(s.find('#b').text).to eq('card')
+    expect(s.find('#log').text).to eq('connect:a connect:b')
+
+    s.click_button 'Remove'
+    expect(s.find('#log').text).to eq('connect:a connect:b disconnect:a')
+  end
+
+  it 'loads external <script src=...> through the same Rack app' do
+    src_app = Rack::Builder.new {
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><html><body>
+              <h1 id="t">init</h1>
+              <script src="/lib.js"></script>
+              <script>
+                window.__cap_loaded = (typeof window.__libExports === 'object');
+                if (window.__libExports) document.querySelector('#t').textContent = window.__libExports.greet('alice');
+              </script>
+            </body></html>
+          HTML
+        when '/lib.js'
+          [200, {'content-type' => 'application/javascript'}, [<<~JS]]
+            window.__libExports = {
+              greet: function(name) { return 'hello ' + name; }
+            };
+          JS
+        else
+          [404, {}, ['nope']]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, src_app)
+    s.visit '/'
+    expect(s.evaluate_script('window.__cap_loaded')).to be true
+    expect(s.find('#t').text).to eq('hello alice')
+  end
+
   describe 'forms' do
     let(:form_app) {
       Rack::Builder.new {

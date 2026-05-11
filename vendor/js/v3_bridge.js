@@ -22,6 +22,11 @@
   const NODE_DOC     = 9;
 
   let __nextId = 1;
+  // Carry the registered tag through `new SomeCustomElement()` so the
+  // Element base ctor can populate `_tag` even when the subclass
+  // doesn't call super(tag). Browsers do this via a per-construction
+  // queue; the single-threaded JS engine lets us collapse to a slot.
+  let __currentTag = null;
 
   class Node {
     constructor() {
@@ -73,15 +78,18 @@
       this._children.push(child);
       registerSubtree(child);
       recordChildList(this, [child], []);
+      if (isConnected(this)) fireCEConnect(child);
       return child;
     }
     removeChild(child) {
       const i = this._children.indexOf(child);
       if (i < 0) return null;
+      const wasConnected = isConnected(this);
       this._children.splice(i, 1);
       child._parent = null;
       unregisterSubtree(child);
       recordChildList(this, [], [child]);
+      if (wasConnected) fireCEDisconnect(child);
       return child;
     }
     insertBefore(child, ref) {
@@ -93,11 +101,13 @@
       this._children.splice(i, 0, child);
       registerSubtree(child);
       recordChildList(this, [child], []);
+      if (isConnected(this)) fireCEConnect(child);
       return child;
     }
     replaceChild(neu, old) {
       const i = this._children.indexOf(old);
       if (i < 0) return null;
+      const wasConnected = isConnected(this);
       if (neu._parent) neu._parent.removeChild(neu);
       neu._parent = this;
       old._parent = null;
@@ -105,6 +115,7 @@
       unregisterSubtree(old);
       registerSubtree(neu);
       recordChildList(this, [neu], [old]);
+      if (wasConnected) { fireCEDisconnect(old); fireCEConnect(neu); }
       return old;
     }
     // textContent collects descendant text; setter replaces children
@@ -138,7 +149,10 @@
   class Element extends Node {
     constructor(tagName) {
       super();
-      this._tag    = String(tagName).toLowerCase();
+      // Allow subclasses (custom elements) to call `super()` without
+      // a tagName — `__currentTag` carries the registered tag through
+      // the `new MyCustomElement()` path from createElement.
+      this._tag    = String(tagName || __currentTag || '').toLowerCase();
       this._attrs  = {};   // name(lower) → value(string)
     }
     get tagName()    { return this._tag.toUpperCase(); }
@@ -250,7 +264,16 @@
       this.nodeType = NODE_DOC;
       this.documentElement = null;
     }
-    createElement(tag)     { return new Element(tag); }
+    createElement(tag) {
+      const t = String(tag).toLowerCase();
+      const ctor = __customElementRegistry.get(t);
+      if (ctor) {
+        const prev = __currentTag;
+        __currentTag = t;
+        try { return new ctor(); } finally { __currentTag = prev; }
+      }
+      return new Element(t);
+    }
     createTextNode(data)   { return new Text(data); }
     get body() {
       const html = this.documentElement;
@@ -482,6 +505,84 @@
     }
   }
   globalThis.__deliverMutations = deliverMutations;
+
+  // ── Custom elements ─────────────────────────────────────────────
+  //
+  // `HTMLElement` is just an alias for our `Element`; user classes do
+  // `class MyThing extends HTMLElement`. `customElements.define(tag,
+  // ctor)` registers the constructor and upgrades any pre-existing
+  // elements with that tag (prototype swap + connectedCallback if
+  // they're in the document). `connectedCallback` /
+  // `disconnectedCallback` fire when nodes attach to / detach from
+  // the document — handled inside `appendChild` / `insertBefore` /
+  // `removeChild`.
+
+  globalThis.HTMLElement = Element;
+  const __customElementRegistry = new Map(); // tag → ctor
+
+  globalThis.customElements = {
+    define(tag, ctor) {
+      const t = String(tag).toLowerCase();
+      if (__customElementRegistry.has(t)) return;
+      __customElementRegistry.set(t, ctor);
+      // Upgrade existing matching elements in the document.
+      const doc = globalThis.document;
+      if (!doc || !doc.documentElement) return;
+      const matches = doc.documentElement.querySelectorAll(t);
+      for (const el of matches) {
+        upgradeElement(el, ctor);
+        if (isConnected(el)) fireCEHook(el, 'connectedCallback');
+      }
+    },
+    get(tag) { return __customElementRegistry.get(String(tag).toLowerCase()) || undefined; },
+    whenDefined(tag) {
+      const ctor = this.get(tag);
+      return ctor ? Promise.resolve(ctor) : Promise.resolve();
+    },
+    upgrade(_node) { /* no-op stub */ }
+  };
+
+  function upgradeElement(el, ctor) {
+    // Prototype-swap into the user's class so methods + hooks are
+    // visible. Skips running user constructor again — close enough for
+    // the smoke spec; full spec runs the ctor with `customElements
+    // upgrade` semantics.
+    try { Object.setPrototypeOf(el, ctor.prototype); } catch (_) {}
+  }
+  function fireCEHook(el, hookName) {
+    try {
+      const fn = el[hookName];
+      if (typeof fn === 'function') fn.call(el);
+    } catch (e) {
+      try { console.error('[csim v3] custom element ' + hookName + ' threw:', e && e.message); } catch (_) {}
+    }
+  }
+  function isConnected(node) {
+    let cur = node;
+    while (cur) { if (cur.nodeType === NODE_DOC) return true; cur = cur._parent; }
+    return false;
+  }
+  function walkSubtree(node, fn) {
+    if (!node) return;
+    fn(node);
+    if (node._children) for (const c of node._children) walkSubtree(c, fn);
+  }
+  function fireCEConnect(subtree) {
+    walkSubtree(subtree, el => {
+      if (el.nodeType !== NODE_ELEMENT) return;
+      const ctor = __customElementRegistry.get(el._tag);
+      if (!ctor) return;
+      // Upgrade if this came from HTML parse (still a plain Element).
+      if (Object.getPrototypeOf(el) !== ctor.prototype) upgradeElement(el, ctor);
+      fireCEHook(el, 'connectedCallback');
+    });
+  }
+  function fireCEDisconnect(subtree) {
+    walkSubtree(subtree, el => {
+      if (el.nodeType !== NODE_ELEMENT) return;
+      if (__customElementRegistry.has(el._tag)) fireCEHook(el, 'disconnectedCallback');
+    });
+  }
 
   // ── Selector parser (minimal) ───────────────────────────────────
   //
@@ -791,15 +892,22 @@
     if (!doc || !doc.documentElement) return;
     const scripts = doc.documentElement.querySelectorAll('script');
     for (const s of scripts) {
-      if (s._attrs.src) continue;            // PoC: skip external — milestone 4 (g)
       const type = (s._attrs.type || '').toLowerCase();
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
-      const body = scriptText(s);
+      let body;
+      if (s._attrs.src) {
+        // Synchronous fetch via Ruby Rack callback. mini_racer's attach
+        // is blocking, so this preserves the classic-script "block the
+        // parser until loaded" semantics without an event loop.
+        const resp = __rackFetch('GET', s._attrs.src, '', null, 'follow');
+        if (!resp || resp.status >= 400) continue;
+        body = resp.body || '';
+      } else {
+        body = scriptText(s);
+      }
       if (!body) continue;
       try { (0, eval)(body); } catch (e) {
-        // Surface to the host via console (Ruby side prints). Don't
-        // re-raise: real browsers continue parsing after a script throws.
-        try { console.error('[csim v3] inline script threw:', e && e.message); } catch (_) {}
+        try { console.error('[csim v3] script threw:', e && e.message); } catch (_) {}
       }
     }
     if (__observers.size && __pendingRecords.length) deliverMutations();
