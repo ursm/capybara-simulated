@@ -104,8 +104,28 @@
     contains(other)     { return !!__dom(this.__h, 'contains', [other && other.__h]); }
 
     // Tree pointers
-    get parentNode()             { return wrap(__dom(this.__h, 'parentNode')); }
-    get parentElement()          { return wrap(__dom(this.__h, 'parentElement')); }
+    // `parentNode` is the second-hottest `__dom` op on Stimulus suites
+    // (~2 k calls per Redmine test, mostly from jQuery's `.parents()`
+    // and Stimulus' event bubbling). The result is stable until a DOM
+    // mutation moves the child — JS-side `appendChild` / `removeChild`
+    // / `insertBefore` / `replaceChild` invalidate via
+    // `_invalidateParent` so a re-read goes back to Ruby. Ruby-side
+    // mutations that move existing elements are rare (innerHTML
+    // setter is the main one; we re-wrap fresh handles there so the
+    // old cache entry's wrapper is orphaned anyway).
+    get parentNode() {
+      if (this._parentH === undefined) this._parentH = __dom(this.__h, 'parentNode');
+      return wrap(this._parentH);
+    }
+    get parentElement() {
+      // parentElement is parentNode if it's an Element, else null.
+      // Same cache slot — reads parent's handle, then checks nodeType
+      // on the wrapper. The wrap-side nodeType cache (~free now)
+      // means the type check stays in JS.
+      const p = this.parentNode;
+      return (p && p.nodeType === 1) ? p : null;
+    }
+    _invalidateParent() { this._parentH = undefined; }
     get firstChild()             { return wrap(__dom(this.__h, 'firstChild')); }
     get lastChild()              { return wrap(__dom(this.__h, 'lastChild')); }
     get nextSibling()            { return wrap(__dom(this.__h, 'nextSibling')); }
@@ -685,6 +705,7 @@
       } else {
         __dom(this.__h, 'appendChild', [child.__h]);
       }
+      child._invalidateParent && child._invalidateParent();
       // Real browsers run CE upgrade + connectedCallback synchronously
       // on attach; relying on the MutationObserver-driven upgrade
       // delays those callbacks to microtask drain time, breaking
@@ -699,6 +720,7 @@
     removeChild(child) {
       if (child == null) return null;
       __dom(this.__h, 'removeChild', [child.__h]);
+      child._invalidateParent && child._invalidateParent();
       return child;
     }
     insertBefore(newChild, refChild) {
@@ -708,12 +730,15 @@
       } else {
         __dom(this.__h, 'insertBefore', [newChild.__h, refChild && refChild.__h]);
       }
+      newChild._invalidateParent && newChild._invalidateParent();
       if (__lazyUpgrade && __ceDefs.size > 0) ceUpgradeTree(newChild);
       return newChild;
     }
     replaceChild(newChild, oldChild) {
       if (newChild == null || oldChild == null) return null;
       __dom(this.__h, 'replaceChild', [newChild.__h, oldChild.__h]);
+      newChild._invalidateParent && newChild._invalidateParent();
+      oldChild._invalidateParent && oldChild._invalidateParent();
       return oldChild;
     }
 
