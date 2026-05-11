@@ -15,21 +15,22 @@ require 'digest'
 # V8 flag setup. Must run before the first `MiniRacer::Context.new`;
 # idempotent calls raise `PlatformAlreadyInitialized`.
 #
-# `single_threaded` is the load-bearing one: V8's default multi-thread
-# mode SIGSEGVs deep in V8 when our bridge.js + a Proxy-heavy library
-# bundle (Redmine's jQuery+UI 342 KB) executes a tight chain of DOM-
-# accessor proxies. The background JIT/GC threads race the foreground
-# Ruby callback path that mini_racer uses for `attach`. Reproducible at
-# any stack size; switching to single-threaded turns the SIGSEGV into
-# a clean `RangeError: Maximum call stack size exceeded` that
-# `eval_safely` catches.
+# `stack_size` widens V8's stack guard so deep jQuery 3 + Stimulus
+# event-handler chains fit. `CSIM_V8_STACK_KB=N` overrides; default 2
+# MiB fits comfortably inside the 8 MiB pthread cap.
 #
-# `stack_size` widens V8's stack guard so jQuery 3 + Stimulus event-
-# handler chains fit. `CSIM_V8_STACK_KB=N` overrides; default 2 MiB
-# fits comfortably inside the 8 MiB pthread cap.
+# We deliberately do *not* pass `:single_threaded` — that flag is
+# incompatible with mini_racer's rendezvous-based call model. With it
+# set, V8 has no worker thread to consume scheduled tasks, so
+# `Context#eval` blocks on `rendezvous_nogvl → pthread_mutex_lock`
+# forever inside the Rails test runner (confirmed via gdb backtrace).
+# The original reason we tried `:single_threaded` was that multi-
+# threaded V8 SIGSEGV'd on Redmine's jQuery+UI bundle, but that root
+# cause was actually `isPlainObject(globalThis)` recursion — fixed by
+# tagging globalThis [object Window] in `POLYFILL_PRELUDE`.
 begin
   stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
-  MiniRacer::Platform.set_flags!(:single_threaded, stack_size: stack_kb)
+  MiniRacer::Platform.set_flags!(stack_size: stack_kb)
 rescue MiniRacer::PlatformAlreadyInitialized
   # Another callsite beat us to it; either the prior caller picked a
   # compatible value or they're testing the platform-init path.
