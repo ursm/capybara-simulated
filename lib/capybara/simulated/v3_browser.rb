@@ -47,6 +47,16 @@ module Capybara
         @ticking                      = false
         @modal_handlers               = []
         @module_cache                 = {}
+        # ESM loading is correct on the wire — `<script type="module">`
+        # tags fetch, EsmRewriter rewrites, Stimulus boots. But on
+        # Redmine the same load order causes the legacy
+        # `$(document).ready` chain to register
+        # `addFormObserversForDoubleSubmit` twice, which then
+        # preventDefaults every form submission. `CSIM_V3_ESM=1` opts
+        # into the new path; default stays at "skip modules" so the
+        # Redmine 11/122 baseline is preserved while the regression
+        # is untangled.
+        @runtime.eval('globalThis.__csim_esm_enabled = ' + (ENV['CSIM_V3_ESM'] == '1').to_s)
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────

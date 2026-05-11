@@ -1447,13 +1447,20 @@
   function runInlineScripts(doc) {
     if (!doc || !doc.documentElement) return;
     // Importmaps land first so `<script type="module">` can resolve
-    // bare specifiers against them.
+    // bare specifiers against them. The module-execution path is
+    // gated by a Ruby-side env-var feature flag because activating
+    // Stimulus / Hotwire here surfaces a regression on Redmine where
+    // legacy jQuery handlers fire twice and intercept the form
+    // submit. Once that's untangled the default flips on.
     ingestImportmaps(doc);
     const scripts = doc.documentElement.querySelectorAll('script');
     for (const s of scripts) {
       const type = (s._attrs.type || '').toLowerCase();
       if (type === 'importmap') continue;  // already consumed
-      if (type === 'module') { runModuleScript(s); continue; }
+      if (type === 'module') {
+        if (globalThis.__csim_esm_enabled) runModuleScript(s);
+        continue;
+      }
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
       let body;
       if (s._attrs.src) {
