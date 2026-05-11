@@ -28,7 +28,26 @@
       this._id        = __nextId++;
       this._parent    = null;
       this._children  = [];      // ordered child nodes (Element + Text)
+      this._listeners = null;    // type → [{handler, capture}]; lazy
       this.nodeType   = NODE_ELEMENT;
+    }
+    addEventListener(type, handler, options) {
+      if (typeof handler !== 'function') return;
+      const capture = !!(options && (options === true || options.capture));
+      this._listeners = this._listeners || Object.create(null);
+      const list = this._listeners[type] || (this._listeners[type] = []);
+      // Per spec, identical {type, handler, capture} is deduped.
+      if (list.some(l => l.handler === handler && l.capture === capture)) return;
+      list.push({ handler, capture });
+    }
+    removeEventListener(type, handler, options) {
+      if (!this._listeners || !this._listeners[type]) return;
+      const capture = !!(options && (options === true || options.capture));
+      this._listeners[type] = this._listeners[type].filter(l =>
+        !(l.handler === handler && l.capture === capture));
+    }
+    dispatchEvent(event) {
+      return dispatchEvent(this, event);
     }
     get parentNode()    { return this._parent; }
     get parentElement() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
@@ -242,6 +261,89 @@
     const cls = el._attrs['class'];
     return cls ? cls.split(/\s+/).filter(Boolean) : [];
   }
+
+  // ── Event class + dispatch walk ─────────────────────────────────
+  //
+  // Capture / target / bubble per DOM4. PoC ignores listener `once` /
+  // `passive` and event-subclass IDL (KeyboardEvent / MouseEvent /
+  // InputEvent specifics) — enough to drive smoke-spec scenarios; v2's
+  // bridge.js has the full set when we need parity.
+
+  class Event {
+    constructor(type, init) {
+      init = init || {};
+      this.type             = String(type);
+      this.bubbles          = !!init.bubbles;
+      this.cancelable       = !!init.cancelable;
+      this.composed         = !!init.composed;
+      this.defaultPrevented = false;
+      this.target           = null;
+      this.currentTarget    = null;
+      this.eventPhase       = 0;
+      this._propagationStopped       = false;
+      this._immediatePropagationStopped = false;
+    }
+    preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
+    stopPropagation() { this._propagationStopped = true; }
+    stopImmediatePropagation() { this._propagationStopped = true; this._immediatePropagationStopped = true; }
+  }
+  globalThis.Event = Event;
+  globalThis.CustomEvent = class CustomEvent extends Event {
+    constructor(type, init) {
+      super(type, init);
+      this.detail = init && init.detail !== undefined ? init.detail : null;
+    }
+  };
+  // Subclasses Capybara / framework code commonly checks for; for now
+  // they're just `Event`-shaped with extra fields.
+  globalThis.MouseEvent      = class extends Event {};
+  globalThis.KeyboardEvent   = class extends Event {};
+  globalThis.InputEvent      = class extends Event {};
+  globalThis.SubmitEvent     = class extends Event {
+    constructor(type, init) { super(type, init); this.submitter = init && init.submitter || null; }
+  };
+
+  function dispatchEvent(target, event) {
+    event.target = target;
+    const path = [];
+    let cur = target;
+    while (cur) { path.push(cur); cur = cur._parent; }
+    // capture: root → target's parent
+    event.eventPhase = 1;
+    for (let i = path.length - 1; i > 0; i--) {
+      fireListeners(path[i], event, true);
+      if (event._propagationStopped) return !event.defaultPrevented;
+    }
+    // target
+    event.eventPhase = 2;
+    fireListeners(target, event, false);
+    fireListeners(target, event, true);
+    if (event._propagationStopped || !event.bubbles) return !event.defaultPrevented;
+    // bubble: target's parent → root
+    event.eventPhase = 3;
+    for (let i = 1; i < path.length; i++) {
+      fireListeners(path[i], event, false);
+      if (event._propagationStopped) return !event.defaultPrevented;
+    }
+    return !event.defaultPrevented;
+  }
+  function fireListeners(node, event, capture) {
+    const list = node._listeners && node._listeners[event.type];
+    if (!list || !list.length) return;
+    event.currentTarget = node;
+    for (const entry of list.slice()) {
+      if (entry.capture !== capture) continue;
+      if (event._immediatePropagationStopped) return;
+      try { entry.handler.call(node, event); } catch (e) {
+        try { console.error('[csim v3] listener threw:', e && e.message); } catch (_) {}
+      }
+    }
+  }
+  globalThis.__csimDispatchEvent = function (h, type, init) {
+    const n = lookup(h);
+    if (!n) return false;
+    return dispatchEvent(n, new Event(String(type), init || {}));
+  };
 
   // ── Selector parser (minimal) ───────────────────────────────────
   //
@@ -711,17 +813,32 @@
   globalThis.__csimClickResolve = function (h) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
+
+    // checkbox / radio: toggle *before* the click dispatch so listeners
+    // observe the new state. Mirrors what real browsers do (the IDL
+    // mutation precedes the click event chain when the user clicks
+    // a form control).
+    let preToggled = null;
+    if (n._tag === 'input') {
+      const type = (n._attrs.type || '').toLowerCase();
+      if (type === 'checkbox') { toggleChecked(n); preToggled = 'checkbox'; }
+      else if (type === 'radio') { setRadio(n);   preToggled = 'radio'; }
+    }
+
+    const click = new Event('click', { bubbles: true, cancelable: true });
+    dispatchEvent(n, click);
+    if (click.defaultPrevented) return null;
+
     if (n._tag === 'a' && n._attrs.href != null) {
       return { kind: 'navigate', url: n._attrs.href };
     }
     if (isSubmitButton(n)) {
       const form = ancestorForm(n);
-      if (form) return { kind: 'submit', formHandle: form._id, submitter: n._id };
-    }
-    if (n._tag === 'input') {
-      const type = (n._attrs.type || '').toLowerCase();
-      if (type === 'checkbox') { toggleChecked(n); return null; }
-      if (type === 'radio')    { setRadio(n);     return null; }
+      if (!form) return null;
+      const submit = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: n });
+      dispatchEvent(form, submit);
+      if (submit.defaultPrevented) return null;
+      return { kind: 'submit', formHandle: form._id, submitter: n._id };
     }
     return null;
   };
@@ -783,29 +900,39 @@
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
     const tag = n._tag;
     const v = value == null ? '' : String(value);
-    if (tag === 'textarea') { n._children = []; n._children.push(Object.assign(new Text(v), { _parent: n })); n._attrs.value = v; return true; }
-    if (tag === 'input') {
+    let kind = 'value';
+    if (tag === 'textarea') {
+      n._children = []; n._children.push(Object.assign(new Text(v), { _parent: n }));
+      n._attrs.value = v;
+    } else if (tag === 'input') {
       const type = (n._attrs.type || 'text').toLowerCase();
       if (type === 'checkbox' || type === 'radio') {
         if (value === true || value === 'true') n._attrs.checked = '';
         else if (value === false || value === 'false') delete n._attrs.checked;
         else n._attrs.value = v;
+        kind = 'checked';
       } else {
         n._attrs.value = v;
       }
-      return true;
-    }
-    if (tag === 'select') {
+    } else if (tag === 'select') {
       // Match the first <option> whose value (or textContent fallback)
       // equals v; mark it selected, clear siblings.
       const opts = n.querySelectorAll('option');
+      let hit = false;
       for (const o of opts) {
         const ov = o._attrs.value != null ? o._attrs.value : o.textContent;
-        if (ov === v) { selectOptionExclusive(n, o); return true; }
+        if (ov === v) { selectOptionExclusive(n, o); hit = true; break; }
       }
-      return false;
+      if (!hit) return false;
+    } else {
+      n._attrs.value = v;
     }
-    n._attrs.value = v;
+    // Fire `input` (cancellable, bubbles) then `change` (bubbles only).
+    // For checkbox / radio real browsers fire `change` only on a real
+    // user interaction, but Capybara's `set` mirrors what `selenium`
+    // does — both events, so listeners see the update either way.
+    dispatchEvent(n, new InputEvent('input',  { bubbles: true, cancelable: true }));
+    dispatchEvent(n, new Event('change', { bubbles: true, cancelable: false }));
     return true;
   };
   function selectOptionExclusive(select, opt) {
