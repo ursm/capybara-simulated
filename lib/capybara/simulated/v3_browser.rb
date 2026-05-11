@@ -20,6 +20,17 @@ module Capybara
       attr_reader :app, :runtime
       attr_accessor :timers_active, :intersection_observer_active
 
+      # Sticky window after timers finish: keep polling? true so a
+      # setTimeout firing mid-loop doesn't drop Capybara's synchronize
+      # block before its own `default_max_wait_time` kicks in.
+      POLLING_GRACE_S = 10
+      # Virtual clock advances on every find / has_?. Floor is 10 ms so
+      # tests with `default_retry_interval = 0` still make progress
+      # toward `setTimeout(N>0)` callbacks; cap is 5 s so a runaway
+      # setInterval can't loop indefinitely in a single tick.
+      TICK_MIN_MS = 10
+      TICK_CAP_MS = 5_000
+
       def initialize(app)
         @app                          = app
         @runtime                      = V3Runtime.new(self)
@@ -29,6 +40,9 @@ module Capybara
         @timers_active                = false
         @intersection_observer_active = false
         @document_handle              = 0
+        @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @polling_until                = nil
+        @ticking                      = false
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
@@ -42,10 +56,12 @@ module Capybara
       end
 
       def find_css(css, context_handle = nil)
+        tick_real_time
         @runtime.call('__csimQuery', context_handle || @document_handle, css.to_s).to_a
       end
 
       def find_first_css(css, context_handle = nil)
+        tick_real_time
         h = @runtime.call('__csimQueryOne', context_handle || @document_handle, css.to_s).to_i
         h.zero? ? nil : h
       end
@@ -57,6 +73,7 @@ module Capybara
       # plus one Nokogiri parse per query — still cheap vs v2's
       # per-element __dom callback storm.
       def find_xpath(xpath, context_handle = nil)
+        tick_real_time
         # When the query is rooted at an element, give Nokogiri a
         # fragment; when it's document-rooted ("/html…") we need a full
         # Document so `/html` resolves. Capybara's matchers emit both.
@@ -101,6 +118,7 @@ module Capybara
       # inline on the JS side (no Ruby trip). Everything else is a
       # no-op until milestone 4 lands event dispatch.
       def click(handle, _keys = [], **_opts)
+        tick_real_time
         action = @runtime.call('__csimClickResolve', handle)
         return unless action.is_a?(Hash)
         case action['kind']
@@ -110,20 +128,24 @@ module Capybara
       end
 
       def set_value_with_events(handle, value)
+        tick_real_time
         @runtime.call('__csimSetValue', handle, value)
       end
 
       def select_option(handle)
+        tick_real_time
         @runtime.call('__csimSelectOption', handle)
       end
 
       def unselect_option(handle)
+        tick_real_time
         @runtime.call('__csimUnselectOption', handle)
       end
 
       # `Node#submit(*)` (Capybara DSL) hits here. Find the enclosing
       # form, serialise, post.
       def submit_form(handle)
+        tick_real_time
         form_handle = @runtime.call('__csimAncestorForm', handle).to_i
         return if form_handle.zero?
         submit_form_handle(form_handle, nil)
@@ -147,7 +169,6 @@ module Capybara
       def viewport_height                 ; 768 ; end
       def go_back                         ; nil ; end
       def go_forward                      ; nil ; end
-      def polling?                        ; false ; end
       def active_element_handle           ; nil ; end
       def session_send_keys(_)            ; nil ; end
       def with_modal(_)                   ; yield ; end
@@ -165,6 +186,46 @@ module Capybara
         URI.parse(@current_url).path
       rescue URI::InvalidURIError
         ''
+      end
+
+      # Capybara polls find / has_? via `synchronize` while
+      # `Driver#wait?` is true. We stay true while there's any scheduled
+      # timer (`@timers_active` is flipped by the JS bridge's
+      # `__setTimersActive` callback), plus a sticky grace window after
+      # the last timer fires so a `setTimeout` firing mid-loop doesn't
+      # drop us off polling before Capybara's own retry deadline.
+      def polling?
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if @timers_active
+          @polling_until = now + POLLING_GRACE_S
+          true
+        elsif @polling_until && now < @polling_until
+          true
+        else
+          @polling_until = nil
+          false
+        end
+      end
+
+      # Advance the virtual JS clock by however much wall-clock has
+      # elapsed since the last tick, then fire any timers that came
+      # due. Each find / has_? path goes through here, so Capybara's
+      # polling cadence is what drives `setTimeout(N)` forward.
+      def tick_real_time
+        return unless @timers_active
+        # Re-entrancy guard. Capybara's `Result#each` triggers nested
+        # finds (visible? per element); the outermost tick has already
+        # advanced the clock, the inner calls would only re-drain
+        # already-fired timers.
+        return if @ticking
+        @ticking = true
+        now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        elapsed  = ((now - @last_tick_ts) * 1000).to_i
+        @last_tick_ts = now
+        step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
+        @runtime.drain_timers(step) if step > 0
+      ensure
+        @ticking = false
       end
 
       # Pulls the serialised form-state out of JS, encodes it, and

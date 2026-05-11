@@ -25,7 +25,11 @@ module Capybara
 
       def needs_server?       = false
       def javascript_enabled? = true
-      def wait?               = false
+      # Dynamic wait?: only poll when there's pending timer work that
+      # real-time advancement could resolve. With no timers queued,
+      # polling can't change anything, so we fail fast via the
+      # `wait? = false` synchronize path.
+      def wait?               = browser.polling?
 
       def visit(path)          = browser.visit(path)
       def refresh              = browser.refresh

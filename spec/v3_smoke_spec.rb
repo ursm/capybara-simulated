@@ -213,6 +213,46 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     expect(s.title).to eq('About')
   end
 
+  it 'drains setTimeout / setInterval / requestAnimationFrame on the virtual clock' do
+    timer_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <button id="b">Go</button>
+            <div id="out">init</div>
+            <div id="ticks">0</div>
+            <script>
+              const out   = document.querySelector('#out');
+              const ticks = document.querySelector('#ticks');
+              setTimeout(() => { out.textContent = 'ready'; }, 0);
+
+              document.querySelector('#b').addEventListener('click', () => {
+                out.textContent = 'A';
+                setTimeout(() => { out.textContent += 'B'; }, 50);
+                setTimeout(() => { out.textContent += 'C'; }, 100);
+                requestAnimationFrame(() => { out.textContent += 'R'; });
+
+                let n = 0;
+                const id = setInterval(() => {
+                  n++;
+                  ticks.textContent = String(n);
+                  if (n >= 3) clearInterval(id);
+                }, 30);
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, timer_app)
+    s.visit '/'
+    expect(s.find('#out').text).to eq('ready')
+
+    s.click_button 'Go'
+    expect(s).to have_css('#out', exact_text: 'ARBC')
+    expect(s).to have_css('#ticks', exact_text: '3')
+  end
+
   describe 'forms' do
     let(:form_app) {
       Rack::Builder.new {
