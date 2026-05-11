@@ -155,7 +155,9 @@ module Capybara
       def trace                           ; nil ; end
       def pending_trace                   ; nil ; end
       def clear_trace!                    ; nil ; end
-      def evaluate_script(_, _ = [])      ; nil ; end
+      def evaluate_script(code, args = [])
+        @runtime.call('__csimEvalScript', code.to_s, args || [])
+      end
       def evaluate_async_script(_, _ = []); nil ; end
 
       def current_path

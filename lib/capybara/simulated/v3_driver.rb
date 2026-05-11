@@ -58,9 +58,30 @@ module Capybara
       def resize_window_to(_, w, h) = browser.set_viewport(w, h)
       def maximize_window(_)       ; nil ; end
 
-      def evaluate_script(_script, *_args) = nil
-      def execute_script(_script, *_args)  = nil
+      def evaluate_script(script, *args)
+        unwrap(browser.evaluate_script(script, args))
+      end
+
+      # Capybara's `execute_script` contract is "run it, discard the
+      # return". Same wire path; we just throw the result away.
+      def execute_script(script, *args)
+        browser.evaluate_script(script, args)
+        nil
+      end
+
       def evaluate_async_script(_script, *_args) = nil
+
+      private def unwrap(value)
+        case value
+        when Hash
+          if (h = value['__elementHandle']) then V3Node.new(self, h)
+          else value.transform_values {|v| unwrap(v) }
+          end
+        when Array then value.map {|v| unwrap(v) }
+        else value
+        end
+      end
+      public
 
       def invalid_element_errors = [Capybara::Simulated::StaleElement]
       def no_such_window_error   = Capybara::WindowError

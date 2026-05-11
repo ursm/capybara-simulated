@@ -159,6 +159,15 @@
       }
       return false;
     }
+    // Form-control IDL attributes. v2 leans on Nokogiri attribute
+    // mirroring; here we expose the same pair-of-attr-and-IDL shape
+    // so JS like `input.value = 'x'` / `input.checked = true` works
+    // and reads back via `__csimValue` / serialised attrs alike.
+    get value()    { return this._attrs.value != null ? this._attrs.value : ''; }
+    set value(v)   { this._attrs.value = String(v == null ? '' : v); }
+    get checked()  { return this._attrs.checked != null; }
+    set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
+
     get innerHTML() { return serializeChildren(this); }
     set innerHTML(html) {
       this._children = [];
@@ -481,13 +490,51 @@
   function lookup(h) { return __handles.get(h) || null; }
 
   // Replace the document with a freshly-parsed one. Capybara's `visit`
-  // ends up here. Returns the document handle for the Ruby side to
-  // hold as a root reference.
+  // ends up here. After parse, walk top-level `<script>` elements and
+  // eval their text — that's enough to drive inline scripts that
+  // populate globals tests then read via evaluate_script. External
+  // `<script src>` / `defer` / `async` ordering lifts in once
+  // resource fetching ports to v3.
   globalThis.__csimLoadDocument = function (html) {
     __handles.clear();
     globalThis.document = parseDocument(String(html == null ? '' : html));
     registerNode(globalThis.document);
+    runInlineScripts(globalThis.document);
     return globalThis.document._id;
+  };
+
+  function runInlineScripts(doc) {
+    if (!doc || !doc.documentElement) return;
+    const scripts = doc.documentElement.querySelectorAll('script');
+    for (const s of scripts) {
+      if (s._attrs.src) continue;            // PoC: skip external — milestone 4 (b)
+      const type = (s._attrs.type || '').toLowerCase();
+      if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
+      const body = scriptText(s);
+      if (!body) continue;
+      try { (0, eval)(body); } catch (e) {
+        // Surface to the host via console (Ruby side prints). Don't
+        // re-raise: real browsers continue parsing after a script throws.
+        try { console.error('[csim v3] inline script threw:', e && e.message); } catch (_) {}
+      }
+    }
+  }
+  function scriptText(el) {
+    let s = '';
+    for (const c of el._children) if (c.nodeType === NODE_TEXT) s += c.data;
+    return s;
+  }
+  const SCRIPT_TYPES_CLASSIC = new Set([
+    '', 'text/javascript', 'application/javascript', 'application/ecmascript'
+  ]);
+
+  // Capybara's `Session#evaluate_script` reaches here. Wrap the code
+  // in a function so it sees `arguments[N]` and an implicit return
+  // hands back the last expression. Mirrors v2's `__evalScript`
+  // contract closely enough for the smoke tests.
+  globalThis.__csimEvalScript = function (code, args) {
+    const fn = new Function('arguments', 'return (' + code + ')');
+    return fn(args || []);
   };
   globalThis.__csimDocumentTitle = function () {
     const head = globalThis.document.head;
