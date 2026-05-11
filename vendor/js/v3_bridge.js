@@ -72,6 +72,7 @@
       child._parent = this;
       this._children.push(child);
       registerSubtree(child);
+      recordChildList(this, [child], []);
       return child;
     }
     removeChild(child) {
@@ -80,6 +81,7 @@
       this._children.splice(i, 1);
       child._parent = null;
       unregisterSubtree(child);
+      recordChildList(this, [], [child]);
       return child;
     }
     insertBefore(child, ref) {
@@ -90,6 +92,7 @@
       child._parent = this;
       this._children.splice(i, 0, child);
       registerSubtree(child);
+      recordChildList(this, [child], []);
       return child;
     }
     replaceChild(neu, old) {
@@ -101,6 +104,7 @@
       this._children[i] = neu;
       unregisterSubtree(old);
       registerSubtree(neu);
+      recordChildList(this, [neu], [old]);
       return old;
     }
     // textContent collects descendant text; setter replaces children
@@ -141,16 +145,30 @@
     get nodeName()   { return this.tagName; }
     get localName()  { return this._tag; }
     getAttribute(name)        { const v = this._attrs[String(name).toLowerCase()]; return v == null ? null : v; }
-    setAttribute(name, value) { this._attrs[String(name).toLowerCase()] = String(value); }
-    removeAttribute(name)     { delete this._attrs[String(name).toLowerCase()]; }
+    setAttribute(name, value) {
+      const n = String(name).toLowerCase();
+      const old = this._attrs[n];
+      this._attrs[n] = String(value);
+      recordAttrMutation(this, n, old == null ? null : old);
+    }
+    removeAttribute(name) {
+      const n = String(name).toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(this._attrs, n)) return;
+      const old = this._attrs[n];
+      delete this._attrs[n];
+      recordAttrMutation(this, n, old == null ? null : old);
+    }
     hasAttribute(name)        { return Object.prototype.hasOwnProperty.call(this._attrs, String(name).toLowerCase()); }
     get attributes() {
       return Object.keys(this._attrs).map(name => ({ name, value: this._attrs[name] }));
     }
+    // IDL `id` / `className` go through setAttribute so MO sees the
+    // change record. Setting them directly on `_attrs` would skip the
+    // hook and break observers that watch `attributes`.
     get id()        { return this._attrs.id || ''; }
-    set id(v)       { this._attrs.id = String(v); }
+    set id(v)       { this.setAttribute('id', String(v)); }
     get className() { return this._attrs['class'] || ''; }
-    set className(v){ this._attrs['class'] = String(v); }
+    set className(v){ this.setAttribute('class', String(v)); }
     get classList() {
       const el = this;
       // DOMTokenList — `add` / `remove` are variadic per the spec;
@@ -303,29 +321,37 @@
     constructor(type, init) { super(type, init); this.submitter = init && init.submitter || null; }
   };
 
+  // Each event dispatch is one "task". MutationObserver records that
+  // queue *during* the task deliver as a microtask at the end of the
+  // task — matching spec timing closely enough for tests that look at
+  // `addedNodes` / attribute changes from a click handler.
   function dispatchEvent(target, event) {
     event.target = target;
     const path = [];
     let cur = target;
     while (cur) { path.push(cur); cur = cur._parent; }
-    // capture: root → target's parent
-    event.eventPhase = 1;
-    for (let i = path.length - 1; i > 0; i--) {
-      fireListeners(path[i], event, true);
-      if (event._propagationStopped) return !event.defaultPrevented;
+    try {
+      // capture: root → target's parent
+      event.eventPhase = 1;
+      for (let i = path.length - 1; i > 0; i--) {
+        fireListeners(path[i], event, true);
+        if (event._propagationStopped) return !event.defaultPrevented;
+      }
+      // target
+      event.eventPhase = 2;
+      fireListeners(target, event, false);
+      fireListeners(target, event, true);
+      if (event._propagationStopped || !event.bubbles) return !event.defaultPrevented;
+      // bubble: target's parent → root
+      event.eventPhase = 3;
+      for (let i = 1; i < path.length; i++) {
+        fireListeners(path[i], event, false);
+        if (event._propagationStopped) return !event.defaultPrevented;
+      }
+      return !event.defaultPrevented;
+    } finally {
+      if (__observers.size && __pendingRecords.length) deliverMutations();
     }
-    // target
-    event.eventPhase = 2;
-    fireListeners(target, event, false);
-    fireListeners(target, event, true);
-    if (event._propagationStopped || !event.bubbles) return !event.defaultPrevented;
-    // bubble: target's parent → root
-    event.eventPhase = 3;
-    for (let i = 1; i < path.length; i++) {
-      fireListeners(path[i], event, false);
-      if (event._propagationStopped) return !event.defaultPrevented;
-    }
-    return !event.defaultPrevented;
   }
   function fireListeners(node, event, capture) {
     const list = node._listeners && node._listeners[event.type];
@@ -344,6 +370,118 @@
     if (!n) return false;
     return dispatchEvent(n, new Event(String(type), init || {}));
   };
+
+  // ── MutationObserver ────────────────────────────────────────────
+  //
+  // Records are queued globally on every attribute / childList
+  // mutation. At delivery time each observer filters by its observed
+  // targets' current containment of the record's target — this is
+  // what makes "set id on detached, then appendChild" deliver both
+  // records (matching v2's behaviour and what real browsers do for
+  // this pattern).
+
+  const __observers = new Set();
+  const __pendingRecords = [];
+
+  function recordAttrMutation(target, name, oldValue) {
+    if (__observers.size === 0) return;
+    __pendingRecords.push({
+      type:           'attributes',
+      target,
+      attributeName:  name,
+      attributeNamespace: null,
+      oldValue,
+      addedNodes:    [],
+      removedNodes:  [],
+      previousSibling: null,
+      nextSibling:    null
+    });
+  }
+  function recordChildList(target, added, removed) {
+    if (__observers.size === 0) return;
+    __pendingRecords.push({
+      type:           'childList',
+      target,
+      addedNodes:    added.slice(),
+      removedNodes:  removed.slice(),
+      attributeName: null,
+      attributeNamespace: null,
+      oldValue:      null,
+      previousSibling: null,
+      nextSibling:    null
+    });
+  }
+
+  function recordMatches(entry, rec) {
+    const opts = entry.options;
+    if (rec.type === 'childList' && !opts.childList) return false;
+    if (rec.type === 'attributes' &&
+        !opts.attributes && !opts.attributeFilter) return false;
+    if (rec.type === 'characterData' && !opts.characterData) return false;
+    if (rec.type === 'attributes' && opts.attributeFilter &&
+        opts.attributeFilter.indexOf(rec.attributeName) === -1) return false;
+    if (rec.target === entry.target) return true;
+    if (!opts.subtree) return false;
+    // contains() walks up rec.target's ancestors.
+    let cur = rec.target;
+    while (cur) { if (cur === entry.target) return true; cur = cur._parent; }
+    return false;
+  }
+
+  class MutationObserver {
+    constructor(callback) {
+      this._cb = callback;
+      this._observed = [];
+      this._records  = [];
+    }
+    observe(target, options) {
+      if (!target) return;
+      // Spec: attributeOldValue / characterDataOldValue imply
+      // attributes / characterData respectively.
+      const opts = Object.assign({}, options || {});
+      if (opts.attributeOldValue) opts.attributes = true;
+      if (opts.characterDataOldValue) opts.characterData = true;
+      this._observed.push({ target, options: opts });
+      __observers.add(this);
+    }
+    disconnect() {
+      this._observed = [];
+      this._records  = [];
+      __observers.delete(this);
+    }
+    takeRecords() {
+      const out = this._records;
+      this._records = [];
+      return out;
+    }
+  }
+  globalThis.MutationObserver = MutationObserver;
+
+  // Drain pending records into each observer's batch, then fire
+  // each observer's callback with its batch. Looped (bounded) so a
+  // mutation inside a callback re-delivers, mirroring spec microtask
+  // semantics.
+  function deliverMutations() {
+    let iter = 0;
+    while (__pendingRecords.length && iter++ < 16) {
+      const batch = __pendingRecords.splice(0, __pendingRecords.length);
+      for (const obs of __observers) {
+        const mine = [];
+        for (const rec of batch) {
+          for (const entry of obs._observed) {
+            if (recordMatches(entry, rec)) { mine.push(rec); break; }
+          }
+        }
+        if (mine.length) {
+          try { obs._cb(mine, obs); }
+          catch (e) {
+            try { console.error('[csim v3] MO callback threw:', e && e.message); } catch (_) {}
+          }
+        }
+      }
+    }
+  }
+  globalThis.__deliverMutations = deliverMutations;
 
   // ── Selector parser (minimal) ───────────────────────────────────
   //
@@ -653,7 +791,7 @@
     if (!doc || !doc.documentElement) return;
     const scripts = doc.documentElement.querySelectorAll('script');
     for (const s of scripts) {
-      if (s._attrs.src) continue;            // PoC: skip external — milestone 4 (b)
+      if (s._attrs.src) continue;            // PoC: skip external — milestone 4 (g)
       const type = (s._attrs.type || '').toLowerCase();
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
       const body = scriptText(s);
@@ -664,6 +802,7 @@
         try { console.error('[csim v3] inline script threw:', e && e.message); } catch (_) {}
       }
     }
+    if (__observers.size && __pendingRecords.length) deliverMutations();
   }
   function scriptText(el) {
     let s = '';
@@ -1091,6 +1230,7 @@
       catch (e) {
         try { console.error('[csim v3] timer threw:', e && e.message); } catch (_) {}
       }
+      if (__observers.size && __pendingRecords.length) deliverMutations();
     }
     // Pin clock at limit even when nothing fired, so a follow-up
     // drain reflects cumulative elapsed time.

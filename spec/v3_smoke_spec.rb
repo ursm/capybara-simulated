@@ -253,6 +253,55 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     expect(s).to have_css('#ticks', exact_text: '3')
   end
 
+  it 'delivers MutationObserver records for childList and attribute changes' do
+    mo_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <div id="root">
+              <span id="badge" class="off"></span>
+            </div>
+            <button id="add">Add</button>
+            <button id="flip">Flip</button>
+            <div id="audit"></div>
+            <script>
+              const audit = document.querySelector('#audit');
+              new MutationObserver(records => {
+                for (const r of records) {
+                  if (r.type === 'childList' && r.addedNodes.length) {
+                    audit.textContent += '+child(' + r.addedNodes[0].id + ')';
+                  } else if (r.type === 'attributes') {
+                    audit.textContent += '+attr(' + r.attributeName + ':' + r.oldValue + ')';
+                  }
+                }
+              }).observe(document.querySelector('#root'), {
+                childList: true, subtree: true,
+                attributes: true, attributeOldValue: true
+              });
+
+              document.querySelector('#add').addEventListener('click', () => {
+                const el = document.createElement('span');
+                el.id = 'leaf';
+                document.querySelector('#root').appendChild(el);
+              });
+              document.querySelector('#flip').addEventListener('click', () => {
+                document.querySelector('#badge').setAttribute('class', 'on');
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, mo_app)
+    s.visit '/'
+
+    s.click_button 'Add'
+    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)')
+
+    s.click_button 'Flip'
+    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)+attr(class:off)')
+  end
+
   describe 'forms' do
     let(:form_app) {
       Rack::Builder.new {
