@@ -1,11 +1,16 @@
 # capybara-simulated
 
-A lightweight Capybara driver that runs JavaScript in an embedded
-[QuickJS](https://github.com/hmsk/quickjs.rb) context against a
+A lightweight Capybara driver that runs JavaScript against a
 [Nokogiri](https://nokogiri.org/)-backed DOM. The driver sits between
 `rack-test` (zero JS) and full headless browsers like cuprite/selenium:
 in-process tests, no Chrome, inline `<script>` and event handlers run,
 the Capybara DSL works, and forms submit through `Rack::MockRequest`.
+
+The JavaScript engine is pluggable: pick
+[QuickJS](https://github.com/hmsk/quickjs.rb) (interpreted, low
+Ruby↔JS overhead), [V8 via mini_racer](https://github.com/rubyjs/mini_racer)
+(JIT-fast pure JS), or `none` (no `<script>` execution — rack-test
+parity with full DOM/forms/cookies). All three are soft dependencies.
 
 ## Status
 
@@ -34,10 +39,29 @@ click targets through explicit absolute / relative positioning.
 
 ```ruby
 gem 'capybara-simulated', group: :test
+
+# Pick a JS engine — one or both, or neither.
+gem 'quickjs',    '>= 0.17.0.pre', group: :test  # interpreted
+gem 'mini_racer',                  group: :test  # V8 (JIT)
 ```
 
 Then `bundle install`. The gem ships its JS bridge under `vendor/js/`,
 so there is no Node toolchain at consume time.
+
+With both gems installed the driver picks QuickJS by default. Override
+per `Driver.new` or globally via env:
+
+```ruby
+Capybara::Simulated::Driver.new(app, js_engine: :v8)
+# or
+CSIM_JS_ENGINE=v8 bundle exec rspec
+```
+
+Use `js_engine: :none` (or omit both gems) to disable script execution
+entirely — Capybara's `rack-test` behavior, but with a Nokogiri-parsed
+DOM and our matchers / event semantics. Useful for fast scans of
+JS-independent flows and for isolating "does this reproduce without
+JS?" bugs.
 
 ## Use
 
