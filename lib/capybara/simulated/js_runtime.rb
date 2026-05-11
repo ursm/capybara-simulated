@@ -317,6 +317,9 @@ module Capybara
         vm.define_function('__setListenedType') do |type, active|
           @browser.set_listened_type(type, !!active)
         end
+        vm.define_function('__setIntersectionObserverActive') do |active|
+          @browser.intersection_observer_active = !!active
+        end
         vm.define_function('__setTimersActive') do |active|
           @browser.timers_active = !!active
         end

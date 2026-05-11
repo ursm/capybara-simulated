@@ -3055,7 +3055,14 @@
       this._cb = cb;
       this._pending = new Set(); // observed but not yet intersecting
       this._fired   = new Set(); // already reported intersecting=true
+      const wasEmpty = __ioInstances.size === 0;
       __ioInstances.add(this);
+      // Mirror state to Ruby so `Browser#settle` can skip the
+      // `__pollIntersectionObservers` `Context#call` (1-2 ms /
+      // call) when nothing is being observed. Most Redmine tests
+      // never construct an IntersectionObserver — the savings
+      // amortise.
+      if (wasEmpty) __setIntersectionObserverActive(true);
     }
     observe(target) {
       if (!target) return;
@@ -3072,6 +3079,7 @@
       this._pending.clear();
       this._fired.clear();
       __ioInstances.delete(this);
+      if (__ioInstances.size === 0) __setIntersectionObserverActive(false);
     }
     takeRecords() { return []; }
     _maybeFire(target) {

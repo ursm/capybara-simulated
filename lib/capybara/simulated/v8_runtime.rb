@@ -397,6 +397,7 @@ module Capybara
         globalThis.__addMutationObserverId   = function () { return null; };
         globalThis.__removeMutationObserverId= function () { return null; };
         globalThis.__setListenedType         = function () { return null; };
+        globalThis.__setIntersectionObserverActive = function () { return null; };
         globalThis.__setTimersActive         = function () { return null; };
         globalThis.__modalDialog             = function () { return null; };
         globalThis.__setCurrentUrl           = function () { return null; };
@@ -500,6 +501,7 @@ module Capybara
         c.attach('__addMutationObserverId',     ->(*a) { sc.() { browser.add_mutation_observer_id(a[0].to_i); nil } })
         c.attach('__removeMutationObserverId',  ->(*a) { sc.() { browser.remove_mutation_observer_id(a[0].to_i); nil } })
         c.attach('__setListenedType',           ->(*a) { sc.() { browser.set_listened_type(a[0], !!a[1]); nil } })
+        c.attach('__setIntersectionObserverActive', ->(*a) { sc.() { browser.intersection_observer_active = !!a[0]; nil } })
         c.attach('__setTimersActive',           ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
         c.attach('__modalDialog',               ->(*a) { sc.() { coerce.(browser.handle_modal(a[0], a[1], a[2])) } })
         c.attach('__setCurrentUrl',             ->(*a) { sc.() { browser.history_state(a[0]); nil } })

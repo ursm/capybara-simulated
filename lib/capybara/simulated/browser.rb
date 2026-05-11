@@ -135,6 +135,12 @@ module Capybara
         @active_observer_ids          = Set.new
         @active_observer_ids_snapshot = nil
         @timers_active      = false
+        # bridge.js sets this true while at least one IntersectionObserver
+        # has been constructed. `settle` polls observers on every tick
+        # — but every poll round-trips into V8 (~1-2 ms on mini_racer),
+        # and most tests never construct one. Skip the call entirely
+        # when the flag is false.
+        @intersection_observer_active = false
         # Event types with at least one live listener — JS notifies us
         # via __setListenedType so dispatch_event can skip the JS hop
         # for events nobody cares about.
@@ -152,6 +158,8 @@ module Capybara
           @listened_types.delete(type.to_s)
         end
       end
+
+      attr_writer :intersection_observer_active
 
       # Engine resolution order: constructor `js_engine:` → env var
       # `CSIM_JS_ENGINE` → first loadable of {quickjs, v8} → none.
@@ -2007,8 +2015,10 @@ module Capybara
         # Lazy IntersectionObserver targets re-check visibility here so a
         # just-revealed tab pane / dropdown that contains a lazy
         # turbo-frame fetches its content without waiting for another
-        # observe() call.
-        js.call('__pollIntersectionObservers')
+        # observe() call. Skip the call when no observer has been
+        # constructed — most tests never use IO and every settle would
+        # otherwise pay a `Context#call` round-trip.
+        js.call('__pollIntersectionObservers') if @intersection_observer_active
         @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until = nil
       end
