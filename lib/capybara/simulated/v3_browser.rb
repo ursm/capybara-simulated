@@ -297,6 +297,12 @@ module Capybara
       def pending_trace                   ; nil ; end
       def clear_trace!                    ; nil ; end
       def evaluate_script(code, args = [])
+        # Drain timers first so ready handlers (jQuery `$(handler)`,
+        # framework `DOMContentLoaded` listeners) run before the
+        # user's script. Without this, `execute_script` can fire
+        # *before* the page's own setup code that the test expects
+        # to be active.
+        tick_real_time
         @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
       end
 
