@@ -12,7 +12,14 @@ module Capybara
       # `features` is appended to the QuickJS feature flags the runtime
       # already pins (URL / Encoding / Crypto). Pass e.g.
       # `[Quickjs::POLYFILL_INTL]` from your `register_driver` block to
-      # surface `Intl.DateTimeFormat` etc. inside the JS sandbox.
+      # surface `Intl.DateTimeFormat` etc. inside the JS sandbox. The
+      # array is silently ignored by the V8 / none runtimes.
+      #
+      # `js_engine` picks the JavaScript runtime: `:quickjs`, `:v8`, or
+      # `:none`. Leave unset to inherit `ENV['CSIM_JS_ENGINE']`, or
+      # (if that is also unset) to auto-detect whichever gem is
+      # loadable. `:none` skips `<script>` execution entirely — useful
+      # for fast scans of JS-independent flows.
       class << self
         # `Capybara.current_session.driver` is unreliable from RSpec
         # hooks — hosts swap sessions via `using_session` blocks, so by
@@ -22,9 +29,10 @@ module Capybara
         attr_accessor :current
       end
 
-      def initialize(app, features: [])
+      def initialize(app, features: [], js_engine: nil)
         @app             = app
         @features        = features
+        @js_engine       = js_engine
         @windows         = []     # [{handle:, browser:}]; first entry is the primary
         @active_handle   = nil    # picks current_browser; nil → primary
         @next_window_seq = 0      # monotonic so handles never repeat across open/close
@@ -73,7 +81,7 @@ module Capybara
       end
 
       def build_browser(shared_state: nil)
-        Browser.new(@app, features: @features, driver: self, shared_state: shared_state)
+        Browser.new(@app, features: @features, js_engine: @js_engine, driver: self, shared_state: shared_state)
       end
 
       # Opens an auxiliary window pointing at `url`. The new window

@@ -12,7 +12,6 @@ require 'set'
 require 'uri'
 require 'uri/mailto'
 require_relative 'handle_table'
-require_relative 'js_runtime'
 require_relative 'trace'
 
 module Capybara
@@ -25,6 +24,13 @@ module Capybara
 
     DEFAULT_HOST    = 'http://www.example.com'
     BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'
+
+    # MIME types treated as classic `<script>` content. `''` matches
+    # the (no-type) default; ES modules / importmaps / unknown types
+    # (`text/babel`, `text/template`, …) are routed through other code
+    # paths. Shared across runtimes so Browser can ask `runnable_script_type?`
+    # without forcing a JS engine to be loaded.
+    SCRIPT_TYPES_CLASSIC = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
 
     # Sentinel for "the page-cascade memo hasn't been computed yet" —
     # `nil` means "computed, no stylesheets present", so we can't use
@@ -70,9 +76,10 @@ module Capybara
         {cookies: @cookies, local_storage: @local_storage}
       end
 
-      def initialize(app, features: [], driver: nil, shared_state: nil)
+      def initialize(app, features: [], js_engine: nil, driver: nil, shared_state: nil)
         @app                = app
         @extra_js_features  = features
+        @js_engine_choice   = js_engine
         @driver             = driver
         @document           = Nokogiri::HTML5(BLANK_DOCUMENT)
         @handles            = HandleTable.new(@document)
@@ -146,19 +153,51 @@ module Capybara
         end
       end
 
-      # `CSIM_JS_ENGINE=v8` opts into the experimental mini_racer-backed
-      # runtime. Default is the QuickJS-backed `JsRuntime`.
+      # Engine resolution order: constructor `js_engine:` → env var
+      # `CSIM_JS_ENGINE` → first loadable of {quickjs, v8} → none.
+      # `quickjs` and `mini_racer` are soft dependencies, so only the
+      # selected gem gets required.
       def js
         @js ||= js_engine_class.new(self, extra_features: @extra_js_features)
       end
 
       def js_engine_class
-        if ENV['CSIM_JS_ENGINE'] == 'v8'
-          require_relative 'v8_runtime'
-          V8Runtime
+        @js_engine_class ||= self.class.resolve_js_engine(@js_engine_choice || ENV['CSIM_JS_ENGINE'])
+      end
+
+      def self.resolve_js_engine(name)
+        case name&.to_s
+        when 'v8'      then load_v8_runtime    || engine_missing!('v8',      'mini_racer')
+        when 'quickjs' then load_js_runtime    || engine_missing!('quickjs', 'quickjs')
+        when 'none'    then load_no_js_runtime
+        when nil, ''
+          load_js_runtime || load_v8_runtime || load_no_js_runtime
         else
-          JsRuntime
+          raise ArgumentError, "unknown JS engine #{name.inspect} — pick one of: quickjs, v8, none"
         end
+      end
+
+      def self.load_js_runtime
+        require_relative 'js_runtime'
+        JsRuntime
+      rescue LoadError
+        nil
+      end
+
+      def self.load_v8_runtime
+        require_relative 'v8_runtime'
+        V8Runtime
+      rescue LoadError
+        nil
+      end
+
+      def self.load_no_js_runtime
+        require_relative 'no_js_runtime'
+        NoJsRuntime
+      end
+
+      def self.engine_missing!(engine, gem_name)
+        raise LoadError, "JS engine #{engine.inspect} requires the `#{gem_name}` gem. Add `gem '#{gem_name}'` to your Gemfile."
       end
 
       def start_trace(metadata = {})
@@ -1293,7 +1332,7 @@ module Capybara
       # bodies once, on the post-splice walk.
       def runnable_script_type?(type)
         type = type.to_s.sub(%r{\A(?:true|false)/}, '')
-        JsRuntime::SCRIPT_TYPES_CLASSIC.include?(type)
+        SCRIPT_TYPES_CLASSIC.include?(type)
       end
 
       # Fire input + change after a user-driven value change. Mirrors what

@@ -181,8 +181,6 @@ module Capybara
         @ctx = nil
       end
 
-      SCRIPT_TYPES_CLASSIC = Set['', 'text/javascript', 'application/javascript', 'application/ecmascript'].freeze
-
       def run_scripts(browser, document)
         document.css('script').each do |script|
           case script['type'].to_s
