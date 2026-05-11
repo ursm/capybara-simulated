@@ -6,10 +6,12 @@
 # wired up so a `Capybara::Session` can `visit` and `find` against
 # the V8-resident DOM. Milestones 3+ grow this incrementally.
 
+require 'json'
 require 'nokogiri'
 require 'rack/mock'
 require 'uri'
 require_relative 'errors'
+require_relative 'esm_rewriter'
 require_relative 'v3_runtime'
 
 module Capybara
@@ -44,6 +46,7 @@ module Capybara
         @polling_until                = nil
         @ticking                      = false
         @modal_handlers               = []
+        @module_cache                 = {}
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
@@ -431,6 +434,93 @@ module Capybara
 
       # ── Host-fn callbacks invoked by v3_bridge.js ───────────────
 
+      # JS-side loader callback: hand back the raw module body for `url`.
+      # The runtime then runs `EsmRewriter.rewrite` on it. Cached per
+      # Browser instance so concurrent re-evals don't re-fetch.
+      # Inline modules are pre-registered via the JS-side
+      # `__csim_inlineSources` map, indexed by hashed-body URL —
+      # we surface them here so the same module cache covers both
+      # paths.
+      def load_module(url)
+        return @module_cache[url] if @module_cache.key?(url)
+        body =
+          if url.to_s.include?('#inline-')
+            # Inline-module sentinel: when the JS bridge sees a
+            # `<script type="module">` without `src`, it synthesises a
+            # URL of the form `<page>#inline-<hash>` and stashes the
+            # body in `__csim_inlineSources[url]`. Pull it back.
+            inline = @runtime.eval("(globalThis.__csim_inlineSources || {})[#{url.to_json}] || null")
+            inline&.to_s
+          else
+            rack_fetch_body(url)
+          end
+        return @module_cache[url] = nil unless body
+        @module_cache[url] = rewrite_module_imports(body, url)
+      end
+
+      def rack_fetch_body(url)
+        result = rack_fetch('GET', url, '', {}, 'follow')
+        return nil unless result && result['status'].to_i < 400
+        result['body'].to_s
+      end
+
+      # Resolve every static / dynamic import specifier in `source` to
+      # an absolute URL so EsmRewriter (and the JS-side loader) can
+      # treat them as opaque keys. Bare specifiers go through the
+      # importmap; everything else is URL-joined against the importer.
+      MODULE_IMPORT_RE = %r{
+        (?<lead>(?:^|[^\w$.]))
+        (?:
+          (?<static>(?:import|export)(?:\s+(?:[\w*${},\s]+)\s+from)?\s*) (?<q1>['"])(?<spec1>[^'"\n]+)\k<q1>
+          |
+          (?<dynamic>import\s*\(\s*) (?<q2>['"])(?<spec2>[^'"\n]+)\k<q2>
+        )
+      }x.freeze
+      def rewrite_module_imports(source, base_url)
+        source.gsub(MODULE_IMPORT_RE) do
+          m        = Regexp.last_match
+          spec     = m[:spec1] || m[:spec2]
+          quote    = m[:q1]    || m[:q2]
+          resolved = resolve_module_specifier(spec, base_url)
+          prefix   = m[:static] || m[:dynamic]
+          "#{m[:lead]}#{prefix}#{quote}#{resolved}#{quote}"
+        end
+      end
+
+      # JS-side `ingestImportmaps` calls this through the host fn so
+      # Ruby-side `resolve_module_specifier` and JS-side
+      # `__csim_resolveSpecifier` agree on the bare-specifier map.
+      def set_importmap(json)
+        @importmap = JSON.parse(json.to_s)
+      rescue JSON::ParserError
+        @importmap = {'imports' => {}, 'scopes' => {}}
+      end
+
+      def resolve_module_specifier(specifier, base_url)
+        @importmap ||= {'imports' => {}, 'scopes' => {}}
+        if (mapped = @importmap['imports'][specifier])
+          return resolve_against(mapped, base_url)
+        end
+        if specifier.start_with?('/', './', '../') || specifier.match?(%r{\A[a-z]+://}i)
+          return resolve_against(specifier, base_url)
+        end
+        specifier
+      end
+
+      def resolve_against(url, base)
+        return url if url =~ %r{\A[a-z]+://}i
+        require 'uri'
+        URI.join(base || @current_url || DEFAULT_HOST, url).to_s
+      rescue URI::InvalidURIError
+        url
+      end
+
+      def rack_fetch_body(url)
+        result = rack_fetch('GET', url, '', {}, 'follow')
+        return nil unless result && result['status'].to_i < 400
+        result['body'].to_s
+      end
+
       def rack_fetch(method, url, body, headers, _redirect_mode)
         env = Rack::MockRequest.env_for(url, method: method.to_s.upcase, input: body || '')
         (headers || {}).each {|k, v| env["HTTP_#{k.to_s.upcase.tr('-', '_')}"] = v }
@@ -511,8 +601,14 @@ module Capybara
         end
         @current_url = url
         html         = read_rack_body(body)
-        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        @module_cache = {}
+        @importmap    = {'imports' => {}, 'scopes' => {}}
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
+        # `__csimLoadDocument` walks importmaps + module scripts during
+        # `runInlineScripts`. The JS bridge pushes the importmap back
+        # to Ruby via `__csim_pushImportmap` before any module loads,
+        # so `load_module` sees the fully-merged map.
+        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
 
       def merge_set_cookie(headers)

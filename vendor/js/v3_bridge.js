@@ -88,6 +88,17 @@
     get offsetParent() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
     scrollIntoView() { /* no-op */ }
 
+    // DOM Node bitmask: DOCUMENT_POSITION_PRECEDING=2,
+    // DOCUMENT_POSITION_FOLLOWING=4. Stimulus / Sizzle / various
+    // libs use this for document-order sorting.
+    compareDocumentPosition(other) {
+      if (other === this) return 0;
+      const cmp = compareDocOrder(this, other);
+      if (cmp < 0) return 4;  // FOLLOWING
+      if (cmp > 0) return 2;  // PRECEDING
+      return 0;
+    }
+
     cloneNode(deep) {
       const copy = this._cloneShell();
       if (deep && this._children) {
@@ -366,6 +377,12 @@
     // and reads back via `__csimValue` / serialised attrs alike.
     get value()    { return this._attrs.value != null ? this._attrs.value : ''; }
     set value(v)   { this._attrs.value = String(v == null ? '' : v); }
+    // HTMLScriptElement / HTMLTitleElement / etc. expose `.text` as
+    // an alias for `textContent`. stimulus-rails' `parseImportmapJson`
+    // reads `script.text` to get the JSON; without this alias it
+    // gets `undefined`.
+    get text()     { return this.textContent; }
+    set text(v)    { this.textContent = v; }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
     // Constraint validation API — PoC stubs. We don't actually run
@@ -477,6 +494,34 @@
     // for `appendChild` / `childNodes` to work.
     createDocumentFragment() {
       return new DocumentFragment();
+    }
+    // `document.implementation.createHTMLDocument(title)` — DOMParser
+    // shims and Turbo Drive page-snapshot logic both probe it. We
+    // return a fresh Document with a minimal `<html><head><title>X</title>
+    // </head><body></body></html>` skeleton; full HTML-spec
+    // construction (DOCTYPE / quirks-mode flag) is out of scope.
+    get implementation() {
+      return {
+        createHTMLDocument: (title) => {
+          const d = new Document();
+          const html = new Element('html');
+          const head = new Element('head');
+          const body = new Element('body');
+          html._children = [head, body];
+          head._parent = html; body._parent = html;
+          d.documentElement = html;
+          html._parent = d;
+          d._children = [html];
+          if (title != null) {
+            const t = new Element('title');
+            t._children = [Object.assign(new Text(String(title)), { _parent: t })];
+            t._parent = head;
+            head._children.push(t);
+          }
+          return d;
+        },
+        hasFeature: () => true
+      };
     }
 
     // Minimal Range stub. wgxpath uses `document.createRange()` +
@@ -1217,12 +1262,17 @@
   }
 
   function serializeElement(el) {
+    // DocumentFragment / Comment / Unknown nodeTypes lack `_attrs` and
+    // `_tag` — they shouldn't be serialised as elements. Guard so a
+    // foreign node grafted into the tree doesn't crash the dump path.
+    if (!el || !el._tag || !el._attrs) return '';
     const attrs = Object.keys(el._attrs).map(n => ' ' + n + '="' + escapeAttr(el._attrs[n]) + '"').join('');
     if (VOID.has(el._tag)) return '<' + el._tag + attrs + '>';
     return '<' + el._tag + attrs + '>' + serializeChildren(el) + '</' + el._tag + '>';
   }
   function serializeChildren(el) {
     let s = '';
+    if (!el || !el._children) return s;
     for (const c of el._children) {
       s += c.nodeType === NODE_TEXT ? escapeText(c.data) : serializeElement(c);
     }
@@ -1232,6 +1282,35 @@
   function escapeText(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   // ── Globals seen by Ruby side via Context#call('__csim<Op>') ────
+
+  // Make `globalThis` (== window) listenable. Libraries register
+  // `window.addEventListener('DOMContentLoaded', ...)` /
+  // `window.addEventListener('load', ...)`; without these, every such
+  // call throws "addEventListener is not a function" and the listener
+  // chain dies.
+  const __windowListeners = Object.create(null);
+  globalThis.addEventListener = function (type, handler, options) {
+    if (typeof handler !== 'function') return;
+    const capture = !!(options && (options === true || options.capture));
+    const list = __windowListeners[type] || (__windowListeners[type] = []);
+    if (list.some(l => l.handler === handler && l.capture === capture)) return;
+    list.push({ handler, capture });
+  };
+  globalThis.removeEventListener = function (type, handler, options) {
+    const list = __windowListeners[type];
+    if (!list) return;
+    const capture = !!(options && (options === true || options.capture));
+    __windowListeners[type] = list.filter(l => !(l.handler === handler && l.capture === capture));
+  };
+  globalThis.dispatchEvent = function (event) {
+    const list = __windowListeners[event.type];
+    if (!list || !list.length) return true;
+    for (const { handler } of list.slice()) {
+      try { handler.call(globalThis, event); }
+      catch (e) { try { console.error('[csim v3] window listener threw:', e && e.message); } catch (_) {} }
+    }
+    return !event.defaultPrevented;
+  };
 
   globalThis.Document = Document;     // so wgxpath patches Document.prototype.evaluate
   globalThis.Element  = Element;
@@ -1367,9 +1446,14 @@
 
   function runInlineScripts(doc) {
     if (!doc || !doc.documentElement) return;
+    // Importmaps land first so `<script type="module">` can resolve
+    // bare specifiers against them.
+    ingestImportmaps(doc);
     const scripts = doc.documentElement.querySelectorAll('script');
     for (const s of scripts) {
       const type = (s._attrs.type || '').toLowerCase();
+      if (type === 'importmap') continue;  // already consumed
+      if (type === 'module') { runModuleScript(s); continue; }
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
       let body;
       if (s._attrs.src) {
@@ -1398,6 +1482,34 @@
       try { dispatchEvent(doc, new Event('DOMContentLoaded', { bubbles: true, cancelable: false })); } catch (_) {}
     }
   }
+  function runModuleScript(s) {
+    const baseUrl = (globalThis.location && globalThis.location.href) || null;
+    if (s._attrs.src) {
+      const url = resolveAgainst(s._attrs.src, baseUrl);
+      try { __csim_require(url); }
+      catch (e) {
+        try { console.error('[csim v3] module', url, 'failed:', e && e.message); } catch (_) {}
+      }
+    } else {
+      const body = scriptText(s);
+      if (!body) return;
+      // Inline modules have no URL — synthesise a stable one per
+      // body so module-cache hits work after a re-eval.
+      const url = (baseUrl || 'inline://') + '#inline-' + hashStr(body);
+      globalThis.__csim_inlineSources = globalThis.__csim_inlineSources || Object.create(null);
+      globalThis.__csim_inlineSources[url] = body;
+      try { __csim_require(url); }
+      catch (e) {
+        try { console.error('[csim v3] inline module failed:', e && e.message); } catch (_) {}
+      }
+    }
+  }
+  function hashStr(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(16);
+  }
+  globalThis.__csim_inlineSources = Object.create(null);
   function scriptText(el) {
     let s = '';
     for (const c of el._children) if (c.nodeType === NODE_TEXT) s += c.data;
@@ -1406,6 +1518,125 @@
   const SCRIPT_TYPES_CLASSIC = new Set([
     '', 'text/javascript', 'application/javascript', 'application/ecmascript'
   ]);
+
+  // ── ES module loader ────────────────────────────────────────────
+  //
+  // mini_racer doesn't expose V8's host-module callbacks, so we
+  // synthesise the loader in JS. EsmRewriter (Ruby) transforms each
+  // module body into a function whose `import` statements become
+  // `__csim_require(url)` calls and whose `export` statements become
+  // `__exports.*` assignments. Cached source comes back from Ruby via
+  // `__csim_fetchModuleSource(url)`.
+
+  // Exposed via globalThis so test / debug code can read them. Also
+  // because `evaluate_script` runs in a new `Function` scope that
+  // can't see IIFE-local constants.
+  globalThis.__csim_modules    = Object.create(null);  // url → exports
+  globalThis.__csim_factories  = Object.create(null);  // url → factory fn
+  globalThis.__csim_inProgress = Object.create(null);  // url → partially-built exports
+  globalThis.__csim_importmap  = { imports: Object.create(null), scopes: Object.create(null) };
+  const __csim_modules    = globalThis.__csim_modules;
+  const __csim_factories  = globalThis.__csim_factories;
+  const __csim_inProgress = globalThis.__csim_inProgress;
+  const __csim_importmap  = globalThis.__csim_importmap;
+
+  // EsmRewriter collapses `import(spec)` into a regular call site —
+  // this is the function it points at. Synchronous Promise wrapper
+  // matches what v2's V8 path does.
+  globalThis.__csim_dynamicImport = function (spec) {
+    try {
+      // Dynamic specifiers are computed at runtime; resolve via the
+      // importmap + base URL the same way the static-rewrite path
+      // does at load time.
+      const baseUrl = (globalThis.location && globalThis.location.href) || null;
+      const resolved = __csim_resolveSpecifier(String(spec), baseUrl);
+      return Promise.resolve(__csim_require(resolved));
+    } catch (e) { return Promise.reject(e); }
+  };
+
+  globalThis.__csim_require = function (url) {
+    if (url in __csim_modules)    return __csim_modules[url];
+    if (url in __csim_inProgress) return __csim_inProgress[url];
+    let factory = __csim_factories[url];
+    if (!factory) {
+      const src = __csim_fetchModuleSource(String(url));
+      if (src == null) throw new Error('module not registered: ' + url);
+      try { factory = new Function('__exports', src); }
+      catch (e) {
+        throw new Error('module compile failed for ' + url + ': ' + (e && e.message ? e.message : e));
+      }
+      __csim_factories[url] = factory;
+    }
+    const exports = {};
+    __csim_inProgress[url] = exports;
+    try {
+      factory(exports);
+      __csim_modules[url] = exports;
+    } finally {
+      delete __csim_inProgress[url];
+    }
+    return exports;
+  };
+
+  // Module specifier resolution: bare specifiers → importmap;
+  // anything else → URL-joined against the importer.
+  globalThis.__csim_resolveSpecifier = function (specifier, baseUrl) {
+    const mapped = __csim_importmap.imports[specifier];
+    if (mapped) return resolveAgainst(mapped, baseUrl);
+    if (specifier.charAt(0) === '/' ||
+        specifier.startsWith('./') || specifier.startsWith('../') ||
+        /^[a-z]+:\/\//i.test(specifier)) {
+      return resolveAgainst(specifier, baseUrl);
+    }
+    return specifier; // bare, no map — surface as-is so the loader errors usefully
+  };
+  function resolveAgainst(url, base) {
+    try {
+      const u = __csim_parseUrl(url, base || (globalThis.location && globalThis.location.href) || null);
+      return u && !u.error ? u.href : url;
+    } catch (_) { return url; }
+  }
+
+  // Ingest `<script type="importmap">` tags. Per HTML spec only the
+  // first map wins, but importmap-rails / Rails 8 can ship multi-pin
+  // output as separate tags; later maps override earlier keys.
+  function ingestImportmaps(doc) {
+    if (!doc || !doc.documentElement) return;
+    const tags = doc.documentElement.getElementsByTagName('script');
+    for (const t of tags) {
+      if ((t._attrs.type || '').toLowerCase() !== 'importmap') continue;
+      const src = t._attrs.src;
+      let text;
+      if (src) {
+        try {
+          const resp = __rackFetch('GET', src, '', null, 'follow');
+          text = resp && resp.status < 400 ? resp.body : null;
+        } catch (_) { text = null; }
+      } else {
+        text = scriptText(t);
+      }
+      if (!text) continue;
+      let parsed;
+      try { parsed = JSON.parse(text); } catch (_) { continue; }
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.imports && typeof parsed.imports === 'object') Object.assign(__csim_importmap.imports, parsed.imports);
+        if (parsed.scopes  && typeof parsed.scopes  === 'object') Object.assign(__csim_importmap.scopes,  parsed.scopes);
+      }
+    }
+    // Push the merged map to the Ruby side so `load_module`'s
+    // bare-specifier resolution agrees with JS-side
+    // `__csim_resolveSpecifier`. Best-effort: if Ruby hasn't
+    // wired the callback (e.g. snapshot path), the stub is a
+    // no-op.
+    try { __csim_pushImportmap(JSON.stringify(__csim_importmap)); } catch (_) {}
+  }
+
+  // Stub overridden by Ruby-attached host fn. The snapshot needs the
+  // symbol bound (otherwise the `new Function('return eval(...)')`
+  // wrap in `evaluate_script` can't reference it).
+  if (typeof globalThis.__csim_fetchModuleSource !== 'function') {
+    globalThis.__csim_fetchModuleSource = function () { return null; };
+  }
 
   // Capybara's `Session#evaluate_script` reaches here. Wrap the code
   // in a function so it sees `arguments[N]` and an implicit return
@@ -1806,6 +2037,7 @@
     return doc.documentElement ? serializeElementWithHandles(doc.documentElement) : '';
   }
   function serializeElementWithHandles(el) {
+    if (!el || !el._tag || !el._attrs) return '';
     const attrs = Object.keys(el._attrs)
       .map(n => ' ' + n + '="' + escapeAttr(el._attrs[n]) + '"').join('');
     const handle = ' data-csim-handle="' + el._id + '"';

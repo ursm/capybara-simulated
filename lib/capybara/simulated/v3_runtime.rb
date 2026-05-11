@@ -56,6 +56,11 @@ module Capybara
         globalThis.__getDocumentCookie      = function () { return ''; };
         globalThis.__setDocumentCookie      = function () { return null; };
         globalThis.__modalDialog            = function () { return null; };
+        // ESM loader callback — overridden by Ruby host fn at boot.
+        // Has to exist on the snapshot so `__csim_require` can
+        // reference it inside the bridge's IIFE.
+        globalThis.__csim_fetchModuleSource = function () { return null; };
+        globalThis.__csim_pushImportmap     = function () { return null; };
       JS
 
       @@snapshot_lock = Mutex.new
@@ -164,6 +169,21 @@ module Capybara
         c.attach('__csim_utf8Encode',  ->(*a) { a[0].to_s.b.bytes })
         c.attach('__csim_utf8Decode',  ->(*a) { a[0].pack('C*').force_encoding('UTF-8') })
         c.attach('__csim_parseUrl',    ->(*a) { parse_url_for_js(a[0], a[1]) })
+        c.attach('__csim_fetchModuleSource', ->(*a) { sc.() { fetch_module_source(browser, a[0]) } })
+        c.attach('__csim_pushImportmap',     ->(*a) { sc.() { browser.set_importmap(a[0]); nil } })
+      end
+
+      # Fetch the rewritten module source for `url`. Cached per Context
+      # so `__csim_require` only pays the EsmRewriter cost once per
+      # URL per Context. Bridges Ruby-side `Browser#load_module`
+      # (Rack fetch + rewrite) into the JS-side loader's
+      # `__csim_fetchModuleSource(url)` hook.
+      def fetch_module_source(browser, url)
+        @module_source_cache ||= {}
+        @module_source_cache[url] ||= begin
+          raw = browser.load_module(url)
+          raw && EsmRewriter.rewrite(raw).first
+        end
       end
 
       def parse_url_for_js(input, base)
