@@ -314,6 +314,7 @@
     const root = new Element('html');
     doc.documentElement = root;
     root._parent = doc;
+    doc._children.push(root);
     const body = new Element('body');
     // pre-create head + body so document.body / document.head work
     // even before the parsed tree is grafted in.
@@ -441,11 +442,24 @@
   globalThis.document = new Document();
   globalThis.window   = globalThis;
 
+  // Handle registry — Ruby keeps integer ids, looks up Element back
+  // via `__csimGet*(handle)` accessors. Wired in `parseDocument`
+  // and pushed during create / append paths once those exist.
+  const __handles = new Map();
+  function registerNode(n) {
+    __handles.set(n._id, n);
+    if (n._children) for (const c of n._children) registerNode(c);
+  }
+  function lookup(h) { return __handles.get(h) || null; }
+
   // Replace the document with a freshly-parsed one. Capybara's `visit`
-  // ends up here. Returns nothing — Ruby reads back state via separate
-  // `__csim*` getters.
+  // ends up here. Returns the document handle for the Ruby side to
+  // hold as a root reference.
   globalThis.__csimLoadDocument = function (html) {
+    __handles.clear();
     globalThis.document = parseDocument(String(html == null ? '' : html));
+    registerNode(globalThis.document);
+    return globalThis.document._id;
   };
   globalThis.__csimDocumentTitle = function () {
     const head = globalThis.document.head;
@@ -457,17 +471,43 @@
     const body = globalThis.document.body;
     return body ? body.textContent : '';
   };
-  globalThis.__csimQuery = function (selector) {
-    // PoC: returns a snapshot of matches as plain JS objects the Ruby
-    // side can inspect. Real binding would return a wrapper handle
-    // for further ops.
-    const matches = globalThis.document.querySelectorAll(selector);
-    return matches.map(el => ({
-      tag:  el._tag,
-      id:   el._attrs.id || '',
-      text: el.textContent,
-      attrs: Object.assign({}, el._attrs)
-    }));
+
+  // Query under `root` (handle, or 0 for document). Returns array of
+  // handles; Ruby resolves each via accessors below.
+  globalThis.__csimQuery = function (rootHandle, selector) {
+    const root = rootHandle ? lookup(rootHandle) : globalThis.document;
+    if (!root) return [];
+    const matches = root.nodeType === NODE_DOC
+      ? root.querySelectorAll(selector)
+      : (root.querySelectorAll ? root.querySelectorAll(selector) : []);
+    return matches.map(el => el._id);
+  };
+  globalThis.__csimQueryOne = function (rootHandle, selector) {
+    const root = rootHandle ? lookup(rootHandle) : globalThis.document;
+    if (!root) return 0;
+    const hit = root.nodeType === NODE_DOC
+      ? root.querySelector(selector)
+      : (root.querySelector ? root.querySelector(selector) : null);
+    return hit ? hit._id : 0;
+  };
+
+  // Element field accessors. Each is one V8 round-trip from Ruby
+  // (mini_racer's `Context#call`) — at the granularity of one
+  // Capybara DSL operation (`node.text`, `node.tag_name`, …), not
+  // per-internal-DOM-op.
+  globalThis.__csimText      = function (h) { const n = lookup(h); return n ? n.textContent : ''; };
+  globalThis.__csimTag       = function (h) { const n = lookup(h); return n && n._tag ? n._tag : ''; };
+  globalThis.__csimAttr      = function (h, name) { const n = lookup(h); return n && n.getAttribute ? n.getAttribute(name) : null; };
+  globalThis.__csimHasAttr   = function (h, name) { const n = lookup(h); return !!(n && n.hasAttribute && n.hasAttribute(name)); };
+  globalThis.__csimVisible   = function (h) {
+    // PoC: every Element is "visible". Hidden-by-style and
+    // hidden-attribute filtering ports in a later milestone.
+    const n = lookup(h);
+    return !!(n && n.nodeType === NODE_ELEMENT);
+  };
+  globalThis.__csimAttrs = function (h) {
+    const n = lookup(h);
+    return n && n._attrs ? Object.assign({}, n._attrs) : {};
   };
 
   // ── Virtual clock (placeholder until v2 bridge lifted in) ───────
