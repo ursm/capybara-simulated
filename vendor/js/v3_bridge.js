@@ -133,6 +133,26 @@
       return i > 0 ? sibs[i - 1] : null;
     }
     appendChild(child) {
+      // DocumentFragment splice: spec says appendChild(fragment) moves
+      // each child of the fragment to the new parent and leaves the
+      // fragment empty. The fragment itself is not inserted. Real-DOM
+      // libraries (jQuery's `.html(fragment)`, Stimulus's element
+      // templating) rely on this — without unwrapping we'd graft a
+      // bare DocumentFragment into the tree, breaking ancestor walks
+      // and Capybara's visibility / find_xpath paths.
+      if (child && child.nodeType === NODE_FRAGMENT) {
+        const moved = child._children.slice();
+        for (const c of moved) {
+          if (c._parent) c._parent.removeChild(c);
+          c._parent = this;
+          this._children.push(c);
+          registerSubtree(c);
+          recordChildList(this, [c], []);
+          if (isConnected(this)) fireCEConnect(c);
+        }
+        child._children.length = 0;
+        return child;
+      }
       if (child._parent) child._parent.removeChild(child);
       child._parent = this;
       this._children.push(child);
@@ -154,6 +174,22 @@
     }
     insertBefore(child, ref) {
       if (ref == null) return this.appendChild(child);
+      // DocumentFragment splice — same unwrap as appendChild, but
+      // inserting before `ref` rather than at the end.
+      if (child && child.nodeType === NODE_FRAGMENT) {
+        const moved = child._children.slice();
+        for (const c of moved) {
+          if (c._parent) c._parent.removeChild(c);
+          const idx = this._children.indexOf(ref);
+          c._parent = this;
+          this._children.splice(idx < 0 ? this._children.length : idx, 0, c);
+          registerSubtree(c);
+          recordChildList(this, [c], []);
+          if (isConnected(this)) fireCEConnect(c);
+        }
+        child._children.length = 0;
+        return child;
+      }
       if (child._parent) child._parent.removeChild(child);
       const i = this._children.indexOf(ref);
       if (i < 0) return this.appendChild(child);
@@ -1059,6 +1095,12 @@
         break;
       }
     }
+    // Anything left unparsed (pseudo-classes, combinators like `>`, …)
+    // signals an unsupported selector. Throwing lets callers fall back
+    // (jQuery's `.matches` wraps in try/catch and reverts to its own
+    // filter engine — without the throw, `:visible` parsed as `{}` and
+    // matched every element, breaking jQuery's responsive-menu probe).
+    if (i < s.length) throw new SyntaxError('csim v3: unsupported selector segment: ' + s.slice(i));
     return u;
   }
   function matchUnit(el, u) {
@@ -1796,12 +1838,24 @@
 
   let __hideRules = [];
 
+  // Source-order-last-wins resolution of `display` + `visibility`
+  // across all matching rules. Cheaper than a full cascade and good
+  // enough for the responsive overrides that are the common cause of
+  // false-positive hides (Redmine's `.flyout-menu{display:none}` →
+  // `.flyout-menu{display:block}` chain in responsive.css).
   function matchesAnyHideRule(el) {
     if (__hideRules.length === 0) return false;
+    let display = null;
+    let visibility = null;
     for (const r of __hideRules) {
-      try { if (matchOne(el, r.group)) return true; } catch (_) {}
+      try {
+        if (matchOne(el, r.group)) {
+          if (r.display    != null) display    = r.display;
+          if (r.visibility != null) visibility = r.visibility;
+        }
+      } catch (_) {}
     }
-    return false;
+    return display === 'none' || visibility === 'hidden';
   }
 
   // Strip CSS comments and at-rule blocks before regexing rule bodies.
@@ -1836,6 +1890,8 @@
     }
     return out;
   }
+  const DISPLAY_DECL_RE    = /(?:^|;|\s)display\s*:\s*([^;]+?)(?:;|$)/i;
+  const VISIBILITY_DECL_RE = /(?:^|;|\s)visibility\s*:\s*([^;]+?)(?:;|$)/i;
   function extractHideRules(cssText) {
     const out = [];
     const cleaned = stripAtRules(stripCssComments(cssText));
@@ -1845,19 +1901,22 @@
       const selector = m[1].trim();
       const decls    = m[2];
       if (!selector) continue;
-      const hides = DISPLAY_NONE_RE.test(decls) || VISIBILITY_HIDDEN_RE.test(decls);
-      if (!hides) continue;
-      // Split top-level commas into separate rules so the JS selector
-      // parser doesn't have to model multi-group selectors in a single
-      // `matchOne` call (it already supports groups, but emitting one
-      // rule per selector matches the on-mismatch-fail-fast behaviour
-      // we want for the visibility hot path).
+      const dm = DISPLAY_DECL_RE.exec(decls);
+      const vm = VISIBILITY_DECL_RE.exec(decls);
+      if (!dm && !vm) continue;
+      const display    = dm ? dm[1].trim().toLowerCase() : null;
+      const visibility = vm ? vm[1].trim().toLowerCase() : null;
+      // Source-order-last-wins resolution needs to keep reveal rules
+      // (display:block etc.) too, not just `display:none` — otherwise
+      // a later `.flyout-menu{display:block}` can't override an earlier
+      // `.flyout-menu{display:none}`. (Specificity is approximated by
+      // source order; good enough for class-based responsive overrides.)
       for (const sel of splitTopLevel(selector, ',')) {
         const trimmed = sel.trim();
         if (!trimmed) continue;
         let group;
         try { group = parseSelector(trimmed); } catch (_) { continue; }
-        if (group && group.length) out.push({ group, hide: true });
+        if (group && group.length) out.push({ group, display, visibility });
       }
     }
     return out;
