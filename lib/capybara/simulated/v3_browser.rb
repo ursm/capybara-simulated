@@ -241,6 +241,11 @@ module Capybara
           # the filename of the first chosen file (security-faked path).
           js_value = coerced.first ? File.basename(coerced.first) : ''
           @runtime.call('__csimSetValue', handle, js_value)
+          # File picker UIs (Redmine's attachments.js clones the input
+          # to surface attachments[1][...] fields) wait for `change`.
+          # Real browsers fire input + change after the value commits.
+          dispatch_event(handle, 'input',  'bubbles' => true, 'cancelable' => false)
+          dispatch_event(handle, 'change', 'bubbles' => true, 'cancelable' => false)
         else
           @runtime.call('__csimSetValue', handle, coerced)
         end

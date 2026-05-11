@@ -1009,6 +1009,37 @@
     }
   }
   function fireListeners(node, event, capture) {
+    // Inline `on<event>` attribute handler (e.g. `onclick="..."`) fires
+    // alongside the addEventListener-registered listeners in the
+    // bubble phase. We compile the attribute value to a function once
+    // and cache it on the node so the per-click cost is one closure
+    // call. Without this, Redmine's `onclick="showAndScrollTo(...);
+    // return false"` never runs and the issue-notes form stays
+    // collapsed (the "Quote" link is effectively a no-op).
+    if (!capture && node._attrs) {
+      const attrName = 'on' + event.type;
+      const attrVal  = node._attrs[attrName];
+      if (attrVal != null && !event._immediatePropagationStopped) {
+        let handler = node._onCompiled && node._onCompiled[attrName];
+        if (handler === undefined) {
+          try { handler = new Function('event', String(attrVal)); }
+          catch (_) { handler = null; }
+          (node._onCompiled = node._onCompiled || {})[attrName] = handler;
+        }
+        if (handler) {
+          event.currentTarget = node;
+          try {
+            const ret = handler.call(node, event);
+            // Returning false from an on-attribute handler cancels the
+            // event's default action (HTML spec; mirrored by jQuery's
+            // own behaviour for event handlers).
+            if (ret === false && event.cancelable) event.defaultPrevented = true;
+          } catch (e) {
+            try { console.error('[csim v3] on-attribute handler threw:', e && e.message); } catch (_) {}
+          }
+        }
+      }
+    }
     const list = node._listeners && node._listeners[event.type];
     if (!list || !list.length) return;
     event.currentTarget = node;
