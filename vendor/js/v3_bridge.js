@@ -767,31 +767,76 @@
   }
   function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   function readCssProp(el, name) {
-    const css = el._attrs.style || '';
-    const re = new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:\\s*([^;]+)', 'i');
-    const m = re.exec(css);
-    return m ? m[1].trim() : '';
+    const decls = parseStyleDecls(el._attrs.style || '');
+    return decls[name] != null ? decls[name] : '';
   }
   function writeCssProp(el, name, value) {
-    const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:[^;]*;?', 'i'), '');
-    const trimmed = css.replace(/^\s*;|;\s*$/g, '').trim();
-    const next = (trimmed ? trimmed + '; ' : '') + name + ': ' + value;
-    el.setAttribute('style', next);
+    // Round-trip through parseStyleDecls so the style string is
+    // canonical regardless of how the existing value was written
+    // (multiple writes can leave declarations without `;` separators
+    // when raw `cssText` setter pastes arbitrary strings). Removing a
+    // property collapses cleanly; setting overwrites.
+    const decls = parseStyleDecls(el._attrs.style || '');
+    if (value === '' || value == null) {
+      delete decls[name];
+    } else {
+      decls[name] = String(value);
+    }
+    el.setAttribute('style', serializeStyleDecls(decls));
   }
   function removeCssProp(el, name) {
     const v = readCssProp(el, name);
-    const css = (el._attrs.style || '').replace(new RegExp('(?:^|;)\\s*' + escapeRe(name) + '\\s*:[^;]*;?', 'i'), '');
-    el.setAttribute('style', css.replace(/^\s*;|;\s*$/g, '').trim());
+    const decls = parseStyleDecls(el._attrs.style || '');
+    delete decls[name];
+    el.setAttribute('style', serializeStyleDecls(decls));
     return v;
   }
+  function serializeStyleDecls(decls) {
+    return Object.entries(decls).map(([k, v]) => k + ': ' + v).join('; ');
+  }
   function parseStyleDecls(css) {
+    // Char-walking parser that tolerates inputs missing `;` between
+    // declarations. We scan `name: value` pairs, terminating each
+    // value at `;` *or* at a look-ahead `<word>:` pattern (which can
+    // only be the start of the next declaration). Existing CSS values
+    // never contain `:` outside of `url(...)` parens, so peeking for
+    // an unparenthesised `<word>:` is safe.
     const out = {};
-    for (const decl of css.split(';')) {
-      const i = decl.indexOf(':');
-      if (i < 0) continue;
-      const name = decl.slice(0, i).trim();
-      const val  = decl.slice(i + 1).trim();
-      if (name) out[name] = val;
+    let i = 0;
+    const n = css.length;
+    while (i < n) {
+      while (i < n && (css[i] === ';' || /\s/.test(css[i]))) i++;
+      if (i >= n) break;
+      const nameStart = i;
+      while (i < n && /[a-zA-Z-]/.test(css[i])) i++;
+      if (i === nameStart) { i++; continue; }
+      const name = css.slice(nameStart, i).toLowerCase();
+      while (i < n && /\s/.test(css[i])) i++;
+      if (css[i] !== ':') continue;
+      i++;
+      while (i < n && /\s/.test(css[i])) i++;
+      let value = '';
+      let parenDepth = 0;
+      while (i < n) {
+        const c = css[i];
+        if (c === '(') parenDepth++;
+        else if (c === ')') parenDepth--;
+        else if (c === ';' && parenDepth === 0) { i++; break; }
+        else if (parenDepth === 0 && /\s/.test(c)) {
+          let j = i + 1;
+          while (j < n && /\s/.test(css[j])) j++;
+          const wStart = j;
+          while (j < n && /[a-zA-Z-]/.test(css[j])) j++;
+          if (j > wStart) {
+            let k = j;
+            while (k < n && /\s/.test(css[k])) k++;
+            if (css[k] === ':') break; // next declaration begins
+          }
+        }
+        value += c;
+        i++;
+      }
+      if (name) out[name] = value.trim();
     }
     return out;
   }
