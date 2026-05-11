@@ -52,6 +52,7 @@
       if (child._parent) child._parent.removeChild(child);
       child._parent = this;
       this._children.push(child);
+      registerSubtree(child);
       return child;
     }
     removeChild(child) {
@@ -59,6 +60,7 @@
       if (i < 0) return null;
       this._children.splice(i, 1);
       child._parent = null;
+      unregisterSubtree(child);
       return child;
     }
     insertBefore(child, ref) {
@@ -68,6 +70,7 @@
       if (i < 0) return this.appendChild(child);
       child._parent = this;
       this._children.splice(i, 0, child);
+      registerSubtree(child);
       return child;
     }
     replaceChild(neu, old) {
@@ -77,6 +80,8 @@
       neu._parent = this;
       old._parent = null;
       this._children[i] = neu;
+      unregisterSubtree(old);
+      registerSubtree(neu);
       return old;
     }
     // textContent collects descendant text; setter replaces children
@@ -129,11 +134,31 @@
     set className(v){ this._attrs['class'] = String(v); }
     get classList() {
       const el = this;
+      // DOMTokenList — `add` / `remove` are variadic per the spec;
+      // libraries lean on that (`el.classList.add('a','b','c')`).
       return {
         contains(c) { return classes(el).includes(c); },
-        add(c)      { const cs = classes(el); if (!cs.includes(c)) { cs.push(c); el._attrs['class'] = cs.join(' '); } },
-        remove(c)   { const cs = classes(el).filter(x => x !== c); el._attrs['class'] = cs.join(' '); },
-        toggle(c)   { const cs = classes(el); const i = cs.indexOf(c); if (i >= 0) cs.splice(i, 1); else cs.push(c); el._attrs['class'] = cs.join(' '); }
+        add(...names) {
+          const cs = classes(el);
+          for (const n of names) if (!cs.includes(n)) cs.push(n);
+          el._attrs['class'] = cs.join(' ');
+        },
+        remove(...names) {
+          const drop = new Set(names);
+          el._attrs['class'] = classes(el).filter(x => !drop.has(x)).join(' ');
+        },
+        toggle(c, force) {
+          const cs = classes(el);
+          const i = cs.indexOf(c);
+          const present = i >= 0;
+          if (force === true || (force === undefined && !present)) {
+            if (!present) cs.push(c);
+          } else {
+            if (present) cs.splice(i, 1);
+          }
+          el._attrs['class'] = cs.join(' ');
+          return cs.includes(c);
+        }
       };
     }
     // querySelector / matches: PoC supports the small subset Capybara
@@ -170,9 +195,14 @@
 
     get innerHTML() { return serializeChildren(this); }
     set innerHTML(html) {
+      for (const c of this._children) unregisterSubtree(c);
       this._children = [];
       const frag = parseFragment(String(html == null ? '' : html));
-      for (const c of frag) { c._parent = this; this._children.push(c); }
+      for (const c of frag) {
+        c._parent = this;
+        this._children.push(c);
+        registerSubtree(c);
+      }
     }
     get outerHTML() { return serializeElement(this); }
   }
@@ -488,6 +518,20 @@
     if (n._children) for (const c of n._children) registerNode(c);
   }
   function lookup(h) { return __handles.get(h) || null; }
+  // Mutation hooks (called from Node.prototype.{appendChild, insertBefore,
+  // replaceChild, removeChild} and `innerHTML` setter). Keeps the
+  // handle registry in sync so Capybara's `find` results stay live
+  // and stale references invalidate after `removeChild`.
+  function registerSubtree(node) {
+    if (!node) return;
+    __handles.set(node._id, node);
+    if (node._children) for (const c of node._children) registerSubtree(c);
+  }
+  function unregisterSubtree(node) {
+    if (!node) return;
+    __handles.delete(node._id);
+    if (node._children) for (const c of node._children) unregisterSubtree(c);
+  }
 
   // Replace the document with a freshly-parsed one. Capybara's `visit`
   // ends up here. After parse, walk top-level `<script>` elements and

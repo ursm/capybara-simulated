@@ -103,6 +103,56 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     expect(s.evaluate_script('globalThis.__matches')).to be true
   end
 
+  it 'mutates the DOM from inline JS and the changes show up via Capybara' do
+    mut_app = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <h1 id="title">old</h1>
+            <ul id="list"><li id="first">One</li></ul>
+            <input id="name" value="">
+            <input id="terms" type="checkbox">
+            <button id="add" class="btn">Add</button>
+            <div id="rich"></div>
+            <script>
+              document.querySelector('#title').textContent = 'new';
+
+              const ul = document.querySelector('#list');
+              const li = document.createElement('li');
+              li.textContent = 'Two';
+              ul.appendChild(li);
+
+              const li3 = document.createElement('li');
+              li3.id = 'third';
+              li3.textContent = 'Three';
+              ul.insertBefore(li3, document.querySelector('#first'));
+
+              document.querySelector('#name').value   = 'alice';
+              document.querySelector('#terms').checked = true;
+
+              const btn = document.querySelector('#add');
+              btn.setAttribute('data-count', '5');
+              btn.classList.add('primary', 'big');
+              btn.classList.remove('big');
+              btn.classList.toggle('on');
+
+              document.querySelector('#rich').innerHTML = '<span class="tag">hi</span>';
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, mut_app)
+    s.visit '/'
+    expect(s.find('#title').text).to eq('new')
+    expect(s.all('#list li').map(&:text)).to eq(%w[Three One Two])
+    expect(s.find('#name').value).to eq('alice')
+    expect(s.evaluate_script("document.querySelector('#terms').checked")).to be true
+    expect(s.find('#add')['data-count']).to eq('5')
+    expect(s.find('#add')['class'].split.sort).to eq(%w[btn on primary])
+    expect(s.find('#rich .tag').text).to eq('hi')
+  end
+
   describe 'forms' do
     let(:form_app) {
       Rack::Builder.new {
