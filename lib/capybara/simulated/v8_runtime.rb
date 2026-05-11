@@ -355,10 +355,71 @@ module Capybara
 
       private
 
-      # Process-wide snapshot warmed with bridge.js so each fresh Context
-      # starts post-bridge-load.
+      # Process-wide snapshot pre-loaded with `POLYFILL_PRELUDE` +
+      # `bridge.js`. Each Context boots from this state instead of
+      # re-evaluating ~100 KB of bridge source from scratch. Cuts
+      # per-Context boot from ~30-50 ms to ~3-5 ms and lets V8's JIT
+      # carry over via `Snapshot#warmup!`.
       @@snapshot_lock = Mutex.new
       @@snapshot      = nil
+
+      # `Snapshot.new(code)` runs `code` to seed the V8 heap, then
+      # freezes it. The frozen heap has no Ruby callbacks — bridge.js's
+      # top-level invokes `new URL('http://placeholder/')` (uses the URL
+      # polyfill, which calls `__csim_parseUrl`) and one read of
+      # `systemTimeZone` (calls `__dom(0, 'systemTimeZone')`). Stub
+      # both pre-bridge so the snapshot build doesn't blow up. The
+      # `attach_host_fns` pass on each new Context replaces these
+      # stubs with the real Ruby-bound lambdas, and visit()'s
+      # `__syncLocation` rebuilds `__locationUrl` with the real URL.
+      SNAPSHOT_HOST_STUBS = <<~JS.freeze
+        globalThis.__csim_parseUrl = function (input, base) {
+          return {
+            href:     'http://placeholder/',
+            protocol: 'http:',
+            username: '', password: '',
+            host:     'placeholder',
+            hostname: 'placeholder',
+            port:     '',
+            pathname: '/',
+            search:   '', hash: '',
+            origin:   'http://placeholder'
+          };
+        };
+        globalThis.__csim_randomUUID  = function () { return '00000000-0000-0000-0000-000000000000'; };
+        globalThis.__csim_randomBytes = function (n) { return new Array(n).fill(0); };
+        globalThis.__csim_atob        = function (s) { return ''; };
+        globalThis.__csim_btoa        = function (s) { return ''; };
+        globalThis.__csim_utf8Encode  = function (s) { return []; };
+        globalThis.__csim_utf8Decode  = function (a) { return ''; };
+        globalThis.__csim_fetchModuleSource = function (url) { return null; };
+        globalThis.__dom                     = function () { return null; };
+        globalThis.__addMutationObserverId   = function () { return null; };
+        globalThis.__removeMutationObserverId= function () { return null; };
+        globalThis.__setListenedType         = function () { return null; };
+        globalThis.__setTimersActive         = function () { return null; };
+        globalThis.__modalDialog             = function () { return null; };
+        globalThis.__setCurrentUrl           = function () { return null; };
+        globalThis.__locationAssign          = function () { return null; };
+        globalThis.__locationReload          = function () { return null; };
+        globalThis.__rackFetch               = function () { return null; };
+        globalThis.__getDocumentCookie       = function () { return ''; };
+        globalThis.__setDocumentCookie       = function () { return null; };
+      JS
+
+      # Cheap, allocation-y JS that exercises the bridge's tree-builder
+      # and event-dispatch paths so V8's baseline JIT has type info
+      # for the methods that fire on every test. `attach` lambdas
+      # aren't bound yet, so the warmup can only touch JS that doesn't
+      # depend on Ruby state — element creation, the wrapper class,
+      # `__drainTimers` with no queued work, the listener registry.
+      SNAPSHOT_WARMUP = <<~JS.freeze
+        // Force V8 to compile the hot paths into baseline code.
+        for (let i = 0; i < 50; i++) {
+          __drainTimers(0);
+          __hasReadyTimer();
+        }
+      JS
 
       def self.snapshot
         @@snapshot_lock.synchronize {
@@ -367,11 +428,16 @@ module Capybara
       end
 
       def self.build_snapshot
-        # Snapshot can't capture Ruby-callback registration — host
-        # functions get re-attached on every Context. Polyfills that need
-        # Ruby callbacks (URL, base64, …) are deferred to post-attach
-        # eval; the snapshot only carries pure JS pieces.
-        snap = MiniRacer::Snapshot.new('')
+        bridge = File.read(BRIDGE_JS)
+        snap   = MiniRacer::Snapshot.new(SNAPSHOT_HOST_STUBS + POLYFILL_PRELUDE + bridge)
+        # `warmup!` runs the code inside the snapshot — V8 records
+        # optimisation feedback for the touched functions, which
+        # carries into every Context created from the snapshot.
+        begin
+          snap.warmup!(SNAPSHOT_WARMUP)
+        rescue StandardError => e
+          warn "[capybara-simulated] V8 snapshot warmup failed: #{e.message[0, 200]}"
+        end
         snap
       end
 
@@ -381,9 +447,11 @@ module Capybara
 
       def boot_ctx
         c = MiniRacer::Context.new(snapshot: self.class.snapshot)
+        # `attach` overwrites the snapshot-baked stubs with the real
+        # Ruby-bound versions. V8 inline-caches that were warmed up
+        # against the stubs will deopt on first call to the real
+        # callback, but that's a one-time cost per Context.
         attach_host_fns(c)
-        c.eval(POLYFILL_PRELUDE)
-        c.eval(File.read(BRIDGE_JS))
         @ctx = c
       end
 
