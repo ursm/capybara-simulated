@@ -2180,6 +2180,7 @@
   globalThis.__csimLoadDocument = function (html) {
     __handles.clear();
     __hideRules = [];
+    __hideRuleIdx = null;
     // Gate dynamic-script execution off for the duration of this
     // page-build call. fireCEConnect (which fires during child-move
     // below) would otherwise try to re-eval inline `<script>` bodies
@@ -2236,6 +2237,7 @@
     // queries Capybara-visible elements would otherwise see the
     // pre-cascade state.
     __hideRules = collectHideRules(globalThis.document);
+    __hideRuleIdx = null; // rebuilt lazily on first lookup
     runInlineScripts(globalThis.document);
     // Flip the dynamic-script gate on: post-load <script> appends
     // (Rails-UJS dataType:'script' eval into head, jQuery .html() of
@@ -3073,6 +3075,48 @@
     return rules;
   }
 
+  // Hide-rule index: bucket each rule by the terminal compound's
+  // most-discriminating signal (id > class > tag > universal). The
+  // resolver then only walks buckets the element can plausibly match,
+  // instead of scanning every rule on the page.
+  //
+  // Cost model: a Redmine-scale stylesheet has ~4000 rules, of which
+  // the vast majority pin a class or tag at the terminal. With the
+  // index, a visibility check for a `<div class="foo">` element
+  // typically inspects ~5–20 rules instead of all 4000. Cascade
+  // resolution (specificity + source order + !important) works the
+  // same — each rule already carries its `spec` / `source` /
+  // `displayImp` / `visibilityImp` so per-bucket order doesn't matter.
+  let __hideRuleIdx = null;
+  function buildHideRuleIndex(rules) {
+    const idx = {
+      byTag:     new Map(),
+      byId:      new Map(),
+      byClass:   new Map(),
+      universal: []
+    };
+    for (const r of rules) {
+      const seq = r.group[0];
+      const term = seq[seq.length - 1];
+      let bucket;
+      if (term.classes && term.classes.length) {
+        const key = term.classes[0];
+        bucket = idx.byClass.get(key);
+        if (!bucket) idx.byClass.set(key, bucket = []);
+      } else if (term.id) {
+        bucket = idx.byId.get(term.id);
+        if (!bucket) idx.byId.set(term.id, bucket = []);
+      } else if (term.tag) {
+        bucket = idx.byTag.get(term.tag);
+        if (!bucket) idx.byTag.set(term.tag, bucket = []);
+      } else {
+        bucket = idx.universal;
+      }
+      bucket.push(r);
+    }
+    return idx;
+  }
+
   // Cascade resolution for {display, visibility} on `el`. Priority
   // order (highest wins):
   //   1. !important declarations
@@ -3080,22 +3124,41 @@
   //   3. source order — later wins
   function matchesAnyHideRule(el) {
     if (__hideRules.length === 0) return false;
+    if (!__hideRuleIdx) __hideRuleIdx = buildHideRuleIndex(__hideRules);
+    const idx = __hideRuleIdx;
     let bestD = null, bestV = null;
-    for (const r of __hideRules) {
-      try {
-        if (!matchOne(el, r.group)) continue;
-      } catch (_) { continue; }
-      if (r.display != null) {
-        if (winsCascade(bestD, r, true)) {
+
+    function check(bucket) {
+      for (const r of bucket) {
+        let m;
+        try { m = matchOne(el, r.group); } catch (_) { continue; }
+        if (!m) continue;
+        if (r.display != null && winsCascade(bestD, r, true)) {
           bestD = { value: r.display, important: r.displayImp, spec: r.spec, source: r.source };
         }
-      }
-      if (r.visibility != null) {
-        if (winsCascade(bestV, r, false)) {
+        if (r.visibility != null && winsCascade(bestV, r, false)) {
           bestV = { value: r.visibility, important: r.visibilityImp, spec: r.spec, source: r.source };
         }
       }
     }
+
+    const tagBucket = idx.byTag.get(el._tag);
+    if (tagBucket) check(tagBucket);
+    const idAttr = el._attrs.id;
+    if (idAttr) {
+      const idBucket = idx.byId.get(idAttr);
+      if (idBucket) check(idBucket);
+    }
+    const clsAttr = el._attrs['class'];
+    if (clsAttr) {
+      for (const c of clsAttr.split(/\s+/)) {
+        if (!c) continue;
+        const cb = idx.byClass.get(c);
+        if (cb) check(cb);
+      }
+    }
+    if (idx.universal.length) check(idx.universal);
+
     if (bestD && bestD.value === 'none') return true;
     if (bestV && bestV.value === 'hidden') return true;
     return false;
