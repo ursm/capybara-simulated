@@ -1045,6 +1045,38 @@
     }
     return true;
   };
+
+  // visible_text walks the subtree like textContent does, but skips
+  // INVISIBLE_TAGS / hidden / display:none / `<input type=hidden>`
+  // children. Capybara's `has_text?` defaults to this path; without
+  // the skip, page titles and <script> source land in the visible-
+  // text string and trip "found N times including non-visible text"
+  // assertions.
+  globalThis.__csimVisibleText = function (h) {
+    const n = lookup(h);
+    return n ? collectVisibleText(n) : '';
+  };
+  function collectVisibleText(node) {
+    if (node.nodeType === NODE_TEXT) return node.data;
+    if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC) return '';
+    if (node.nodeType === NODE_ELEMENT) {
+      if (INVISIBLE_TAGS.has(node._tag)) return '';
+      if (node._tag === 'input' && (node._attrs.type || '').toLowerCase() === 'hidden') return '';
+      if (selfHidden(node)) return '';
+      if (node._tag === 'details' && node._attrs.open == null) {
+        // Closed details: only emit text inside <summary>.
+        let s = '';
+        for (const c of node._children) {
+          if (c.nodeType === NODE_ELEMENT && c._tag === 'summary') s += collectVisibleText(c);
+        }
+        return s;
+      }
+    }
+    let out = '';
+    for (const c of node._children) out += collectVisibleText(c);
+    return out;
+  }
+
   globalThis.__csimAttrs = function (h) {
     const n = lookup(h);
     return n && n._attrs ? Object.assign({}, n._attrs) : {};

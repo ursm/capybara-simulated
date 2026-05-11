@@ -135,7 +135,7 @@ module Capybara
       # PoC: text == all_text == visible_text. Cascade-driven visibility
       # filtering is deferred (V3_DESIGN.md milestone 5+).
       def all_text(handle)     = text(handle)
-      def visible_text(handle) = text(handle)
+      def visible_text(handle) = @runtime.call('__csimVisibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
       def value(handle)        = @runtime.call('__csimValue', handle)
       def disabled?(handle)    = !!attr(handle, 'disabled')
@@ -162,9 +162,36 @@ module Capybara
         action = @runtime.call('__csimClickResolve', handle)
         return unless action.is_a?(Hash)
         case action['kind']
-        when 'navigate' then navigate(resolve_against_current(action['url'].to_s))
-        when 'submit'   then submit_form_handle(action['formHandle'], action['submitter'])
+        when 'navigate'
+          url = action['url'].to_s
+          # In-page anchor links (`#frag` / current-page + `#frag`) move
+          # the hash but don't fetch a new document. Pure-fragment also
+          # short-circuits the `<a>`s test fixtures use as click sinks.
+          if pure_fragment_navigation?(url)
+            update_current_hash(url)
+          else
+            navigate(resolve_against_current(url))
+          end
+        when 'submit'
+          submit_form_handle(action['formHandle'], action['submitter'])
         end
+      end
+
+      def pure_fragment_navigation?(url)
+        return true  if url.start_with?('#')
+        return false if @current_url.nil?
+        target = resolve_against_current(url)
+        a = URI.parse(target)
+        b = URI.parse(@current_url)
+        a.scheme == b.scheme && a.host == b.host && a.port == b.port && a.path == b.path && a.query == b.query && !a.fragment.nil?
+      rescue URI::InvalidURIError
+        false
+      end
+
+      def update_current_hash(url)
+        return if @current_url.nil?
+        new_url = resolve_against_current(url)
+        @current_url = new_url
       end
 
       def set_value_with_events(handle, value)
@@ -310,6 +337,7 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         env['HTTP_COOKIE']    = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']   = @current_url    unless @current_url.nil? || @current_url.empty?
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, resp_body = @app.call(env)
         merge_set_cookie(headers)
@@ -400,7 +428,8 @@ module Capybara
       def navigate(url, depth: 0)
         raise 'too many redirects' if depth > 10
         env = Rack::MockRequest.env_for(url, method: 'GET')
-        env['HTTP_COOKIE'] = document_cookie unless @cookies.empty?
+        env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']  = @current_url    unless @current_url.nil? || @current_url.empty?
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, body = @app.call(env)
         merge_set_cookie(headers)
