@@ -26,7 +26,12 @@ module Capybara
         # the time `after(:each)` runs the active session is often back
         # to `:rack_test`. The auto-trace hook in `support/csim_rspec.rb`
         # reads this slot instead so it can always find the live driver.
-        attr_accessor :current
+        #
+        # Stored thread-locally so Rails' `parallelize(with: :threads)`
+        # (and any other intra-process parallel runner) doesn't have
+        # worker threads stomping on each other's "current" driver.
+        def current      = Thread.current[:capybara_simulated_driver]
+        def current=(d)  ; Thread.current[:capybara_simulated_driver] = d ; end
       end
 
       def initialize(app, features: [], js_engine: nil)

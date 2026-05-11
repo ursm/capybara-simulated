@@ -28,7 +28,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'nokogiri', '>= 1.18'
-  spec.add_dependency 'p_css',    '>= 0.1.7'
+  spec.add_dependency 'p_css',    '>= 0.1.8'
   spec.add_dependency 'rack',     '>= 2.2'
 
   # JS engines are soft dependencies. Pick one in your own Gemfile:
