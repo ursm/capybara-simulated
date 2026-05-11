@@ -85,7 +85,14 @@ module Capybara
           return find_xpath(s, context_handle)
         end
         begin
-          xpath = Nokogiri::CSS.xpath_for(s).first
+          # When scoped, emit context-relative XPath (`.//`) so wgxpath
+          # honors the context node. Without the prefix Nokogiri returns
+          # `//` (descendant-of-root) which ignores `context_handle` and
+          # collects matches across the whole document — surfaced as
+          # `Capybara::Ambiguous` whenever a within() block expected one
+          # element (e.g. Redmine's ReactionsSystemTest scoped to a span).
+          prefix = context_handle ? './/' : '//'
+          xpath = Nokogiri::CSS.xpath_for(s, prefix: prefix).first
           return find_xpath(xpath, context_handle) if xpath
         rescue Nokogiri::CSS::SyntaxError, StandardError
           # Fall back to the JS-side parser. Worth trying because
@@ -218,7 +225,37 @@ module Capybara
 
       def set_value_with_events(handle, value)
         tick_real_time
-        @runtime.call('__csimSetValue', handle, value)
+        # `attach_file` hands us a Pathname (or Array of Pathnames);
+        # mini_racer rejects non-primitive types. Coerce to a path-list
+        # form V8 can hold. File-input handling stops here for v3 — the
+        # form-submit multipart path is a follow-up (v2 stores these in
+        # `@file_picks` and reads them back during build_multipart). Most
+        # tests that reach this codepath assert the picker UI state
+        # after attaching, not the actual upload, so the coerce alone
+        # unblocks them.
+        coerced = coerce_set_value(value)
+        @file_picks ||= {}
+        if coerced.is_a?(Array)
+          @file_picks[handle] = coerced.reject(&:empty?)
+          # Mirror real browser: <input type=file>.value reflects only
+          # the filename of the first chosen file (security-faked path).
+          js_value = coerced.first ? File.basename(coerced.first) : ''
+          @runtime.call('__csimSetValue', handle, js_value)
+        else
+          @runtime.call('__csimSetValue', handle, coerced)
+        end
+      end
+
+      def coerce_set_value(v)
+        case v
+        when Pathname then v.to_s
+        when Array    then v.map {|x| x.is_a?(Pathname) ? x.to_s : x.to_s }
+        else v
+        end
+      end
+
+      def file_picks_for(handle)
+        (@file_picks && @file_picks[handle]) || []
       end
 
       def right_click(handle, *_)

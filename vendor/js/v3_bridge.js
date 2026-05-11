@@ -74,15 +74,28 @@
     // shape; `getClientRects()` returns a DOMRectList (an empty
     // array works for callers that just iterate or check length).
     getBoundingClientRect() {
+      // Non-zero dims for visible elements so libraries that probe
+      // layout to test visibility (jQuery 3.x's `:visible` filter,
+      // Stimulus targets, intersection observers' default behaviour)
+      // see "rendered" results that match real-browser-equivalent
+      // visibility. We don't model true layout; the 1×1 box at 0,0
+      // is just a sentinel.
+      if (__isVisibleNode(this)) {
+        return { top: 0, left: 0, right: 1, bottom: 1, width: 1, height: 1, x: 0, y: 0 };
+      }
       return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
     }
-    getClientRects() { return []; }
-    get offsetWidth()  { return 0; }
-    get offsetHeight() { return 0; }
-    get clientWidth()  { return 0; }
-    get clientHeight() { return 0; }
-    get scrollWidth()  { return 0; }
-    get scrollHeight() { return 0; }
+    getClientRects() {
+      return __isVisibleNode(this)
+        ? [{ top: 0, left: 0, right: 1, bottom: 1, width: 1, height: 1, x: 0, y: 0 }]
+        : [];
+    }
+    get offsetWidth()  { return __isVisibleNode(this) ? 1 : 0; }
+    get offsetHeight() { return __isVisibleNode(this) ? 1 : 0; }
+    get clientWidth()  { return __isVisibleNode(this) ? 1 : 0; }
+    get clientHeight() { return __isVisibleNode(this) ? 1 : 0; }
+    get scrollWidth()  { return __isVisibleNode(this) ? 1 : 0; }
+    get scrollHeight() { return __isVisibleNode(this) ? 1 : 0; }
     get offsetTop()    { return 0; }
     get offsetLeft()   { return 0; }
     get offsetParent() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
@@ -413,6 +426,22 @@
     // and reads back via `__csimValue` / serialised attrs alike.
     get value()    { return this._attrs.value != null ? this._attrs.value : ''; }
     set value(v)   { this._attrs.value = String(v == null ? '' : v); }
+    // <a> / <area> / <link>.href: IDL attribute returns the *resolved*
+    // URL against the document base (per HTML spec). Rails-UJS reads
+    // `element.href` to get the AJAX target; without this getter it
+    // would fall back to `location.href` (= current page URL) and
+    // every remote-link click would re-fetch the current page.
+    get href() {
+      if (this._tag !== 'a' && this._tag !== 'area' && this._tag !== 'link') return this._attrs.href;
+      const v = this._attrs.href;
+      if (v == null) return '';
+      try {
+        const base = (globalThis.location && globalThis.location.href) || null;
+        const u = __csim_parseUrl(v, base);
+        return u && !u.error ? u.href : v;
+      } catch (_) { return v; }
+    }
+    set href(v) { this._attrs.href = String(v == null ? '' : v); }
     // HTMLScriptElement / HTMLTitleElement / etc. expose `.text` as
     // an alias for `textContent`. stimulus-rails' `parseImportmapJson`
     // reads `script.text` to get the JSON; without this alias it
@@ -431,6 +460,27 @@
     checkValidity()         { return true; }
     reportValidity()        { return true; }
     setCustomValidity(msg)  { this._validationMessage = String(msg || ''); }
+
+    // Text-input selection — minimum HTMLInputElement / HTMLTextAreaElement
+    // surface. `setSelectionRange` is called by Redmine's "reply to issue"
+    // / partial-quote flow and by some libraries' "focus and select all"
+    // patterns; we just store the offsets so reads of selectionStart /
+    // selectionEnd are stable.
+    get selectionStart() { return this._selectionStart || 0; }
+    set selectionStart(v){ this._selectionStart = v | 0; }
+    get selectionEnd()   { return this._selectionEnd != null ? this._selectionEnd : (this._attrs.value || '').length; }
+    set selectionEnd(v)  { this._selectionEnd = v | 0; }
+    get selectionDirection() { return this._selectionDirection || 'none'; }
+    set selectionDirection(v){ this._selectionDirection = String(v || 'none'); }
+    setSelectionRange(start, end, direction) {
+      this._selectionStart     = start | 0;
+      this._selectionEnd       = end   | 0;
+      this._selectionDirection = direction != null ? String(direction) : 'none';
+    }
+    select() {
+      this._selectionStart = 0;
+      this._selectionEnd   = (this._attrs.value || '').length;
+    }
 
     get innerHTML() { return serializeChildren(this); }
     set innerHTML(html) {
@@ -576,6 +626,15 @@
     }
     setStart(node, offset)  { this.startContainer = node; this.startOffset = offset | 0; }
     setEnd(node, offset)    { this.endContainer   = node; this.endOffset   = offset | 0; }
+    // Boundary helpers — node-relative variants of setStart / setEnd.
+    // `setStartBefore(n)` puts the range start immediately before `n`
+    // inside `n.parentNode`; the offset semantics aren't fully tracked
+    // (we only need document order, not partial-text spans), so these
+    // approximate by pointing the boundary at the node itself.
+    setStartBefore(node) { this.startContainer = node._parent || node; this.startOffset = 0; }
+    setStartAfter(node)  { this.startContainer = node._parent || node; this.startOffset = 0; }
+    setEndBefore(node)   { this.endContainer   = node._parent || node; this.endOffset   = 0; }
+    setEndAfter(node)    { this.endContainer   = node._parent || node; this.endOffset   = 0; }
     // Real DOM: selectNode sets the range to span the given node
     // *within* its parent. Collapse moves both endpoints to one side.
     // wgxpath only cares that the start container ends up referring to
@@ -592,6 +651,31 @@
     collapse(toStart) {
       if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
       else         { this.startContainer = this.endContainer; this.startOffset = this.endOffset; }
+    }
+    cloneRange() {
+      const r = new DocumentOrderRange();
+      r.startContainer = this.startContainer; r.startOffset = this.startOffset;
+      r.endContainer   = this.endContainer;   r.endOffset   = this.endOffset;
+      return r;
+    }
+    toString() {
+      // Best-effort: emit textContent of the start container when the
+      // range collapses to a single element; otherwise empty. Partial-
+      // quote tests reach here but the apps under test typically guard
+      // on `selection.toString().length > 0`, so emitting empty mirrors
+      // the "no selection" state cleanly.
+      return '';
+    }
+    get collapsed() { return this.startContainer === this.endContainer && this.startOffset === this.endOffset; }
+    get commonAncestorContainer() {
+      if (!this.startContainer) return null;
+      if (this.startContainer === this.endContainer) return this.startContainer;
+      // Find LCA via ancestorChain.
+      const a = ancestorChain(this.startContainer);
+      const b = ancestorChain(this.endContainer);
+      let i = 0;
+      while (i < a.length && i < b.length && a[i] === b[i]) i++;
+      return i > 0 ? a[i - 1] : this.startContainer;
     }
     compareBoundaryPoints(_how, other) {
       return compareDocOrder(this.startContainer, other.startContainer);
@@ -978,7 +1062,6 @@
       const t = String(tag).toLowerCase();
       if (__customElementRegistry.has(t)) return;
       __customElementRegistry.set(t, ctor);
-      // Upgrade existing matching elements in the document.
       const doc = globalThis.document;
       if (!doc || !doc.documentElement) return;
       const matches = doc.documentElement.querySelectorAll(t);
@@ -1023,12 +1106,49 @@
   function fireCEConnect(subtree) {
     walkSubtree(subtree, el => {
       if (el.nodeType !== NODE_ELEMENT) return;
+      // Dynamically-inserted <script> elements should evaluate when
+      // they become part of the document. Rails-UJS's `dataType:
+      // 'script'` AJAX path creates a `<script>` with `.text = response`
+      // and appends to head; without this hook the response never runs
+      // and AJAX flows that depend on it (Redmine's show_api_key.js.erb
+      // toggling visibility) silently no-op. Only do this *after* the
+      // initial page-load script pass completes — otherwise the
+      // initial pass would double-eval scripts that appendChild
+      // surfaced via fireCEConnect during the page-build phase.
+      if (__initialScriptsDone && el._tag === 'script' && !el._csimRan) maybeRunScript(el);
       const ctor = __customElementRegistry.get(el._tag);
       if (!ctor) return;
       // Upgrade if this came from HTML parse (still a plain Element).
       if (Object.getPrototypeOf(el) !== ctor.prototype) upgradeElement(el, ctor);
       fireCEHook(el, 'connectedCallback');
     });
+  }
+  let __initialScriptsDone = false;
+
+  function maybeRunScript(el) {
+    const type = (el._attrs.type || '').toLowerCase();
+    // Same gate as the initial parse-time scripts: classic only, no
+    // modules (those go through `__csim_require`). Inline scripts in
+    // the original document parse run via `runInlineScripts`; this
+    // path is for dynamically-appended `<script>` elements.
+    if (type && type !== 'text/javascript' && type !== 'application/javascript' &&
+        type !== 'application/x-javascript' && type !== 'text/ecmascript') return;
+    el._csimRan = true;
+    let body;
+    if (el._attrs.src) {
+      try {
+        const resp = __rackFetch('GET', el._attrs.src, '', null, 'follow');
+        if (!resp || resp.status >= 400) return;
+        body = resp.body || '';
+      } catch (_) { return; }
+    } else {
+      body = scriptText(el);
+    }
+    if (!body) return;
+    try { (0, eval)(body); }
+    catch (e) {
+      try { console.error('[csim v3] dynamic script threw:', e && e.message); } catch (_) {}
+    }
   }
   function fireCEDisconnect(subtree) {
     walkSubtree(subtree, el => {
@@ -1796,6 +1916,38 @@
   globalThis.scrollBy    = function () { /* no-op */ };
   globalThis.scroll      = function () { /* no-op */ };
 
+  // Selection / `window.getSelection()` — minimal stub. Real apps
+  // reading `selection.toString()` for partial-quote / copy-on-select
+  // flows fall through to the "no selection" branch (length === 0)
+  // without crashing. `addRange` / `removeAllRanges` are noops so
+  // execCommand-style libraries don't trip over missing methods.
+  class CsimSelection {
+    constructor() { this._ranges = []; }
+    get rangeCount()  { return this._ranges.length; }
+    get isCollapsed() { return true; }
+    get anchorNode()  { return null; }
+    get focusNode()   { return null; }
+    get anchorOffset(){ return 0; }
+    get focusOffset() { return 0; }
+    get type()        { return this._ranges.length ? 'Range' : 'None'; }
+    toString()        { return ''; }
+    getRangeAt(i)     { return this._ranges[i] || null; }
+    addRange(r)       { this._ranges.push(r); }
+    removeRange(r)    { const i = this._ranges.indexOf(r); if (i >= 0) this._ranges.splice(i, 1); }
+    removeAllRanges() { this._ranges.length = 0; }
+    empty()           { this._ranges.length = 0; }
+    collapse()        { this._ranges.length = 0; }
+    collapseToStart() {}
+    collapseToEnd()   {}
+    selectAllChildren() {}
+    extend()          {}
+    containsNode()    { return false; }
+    deleteFromDocument() {}
+  }
+  globalThis.Selection = CsimSelection;
+  const __sharedSelection = new CsimSelection();
+  globalThis.getSelection = function () { return __sharedSelection; };
+
   globalThis.history = {
     length: 1,
     state:  null,
@@ -1844,6 +1996,14 @@
   globalThis.__csimLoadDocument = function (html) {
     __handles.clear();
     __hideRules = [];
+    // Gate dynamic-script execution off for the duration of this
+    // page-build call. fireCEConnect (which fires during child-move
+    // below) would otherwise try to re-eval inline `<script>` bodies
+    // that runInlineScripts is about to walk explicitly — leading to
+    // double execution. Flipped back on at the end so post-load AJAX
+    // responses (Rails-UJS dataType:'script') still trigger script
+    // eval when their <script> is appended dynamically.
+    __initialScriptsDone = false;
     // Drop pending timers from the prior page — otherwise stale
     // setTimeouts captured against the previous jQuery closure
     // fire under the new page's context. We saw this surface as
@@ -1851,18 +2011,53 @@
     // for the new page's ready resolution + leftovers from prior
     // visits' chained-Deferred .then setTimeouts).
     __resetTimers();
-    // Module cache survives __resetPage (the snapshot's `__csim_modules`
-    // is the cross-Context warm-up store), but per-page state in the
-    // page's modules should not. We don't have a clean way to dump
-    // it yet — left as a follow-up.
-    globalThis.document = parseDocument(String(html == null ? '' : html));
-    registerNode(globalThis.document);
+    // Reuse the existing Document instance and swap in a freshly
+    // parsed documentElement. Keeping the document's object identity
+    // stable across visits is critical for library init guards: e.g.
+    // rails-ujs sets `window._rails_loaded = true` after its first
+    // `delegate(document, ...)` call. The flag survives navigation
+    // (window/global state persists in v3's architecture), so the
+    // second visit's script re-run hits the guard and skips
+    // `start()`. If `document` were also replaced, those click
+    // delegates would point at the *previous* document and never see
+    // the new page's events. By keeping `document` stable, the
+    // delegates the library installed once stay live for every page.
+    const freshDoc = parseDocument(String(html == null ? '' : html));
+    if (globalThis.document) {
+      const d = globalThis.document;
+      // Detach old children (head/body/documentElement) and unregister.
+      for (const c of d._children.slice()) {
+        d.removeChild(c);
+      }
+      // Point `d.documentElement` at the new <html> BEFORE moving any
+      // children — appendChild fires fireCEConnect → maybeRunScript →
+      // (potentially) `customElements.define`, which needs to walk
+      // `doc.documentElement` to upgrade existing elements. Without
+      // documentElement set first, the upgrade query bails and pre-
+      // registered custom elements never get their connectedCallback.
+      d.documentElement = freshDoc.documentElement;
+      d.readyState = 'complete';
+      // Move freshDoc's children over.
+      const newKids = freshDoc._children.slice();
+      for (const c of newKids) {
+        c._parent = null;
+        d.appendChild(c);
+      }
+    } else {
+      globalThis.document = freshDoc;
+      registerNode(globalThis.document);
+    }
     // Cascade-derived hide rules need to land *before* scripts run —
     // a script that tests visibility (`offsetWidth`-style probes) or
     // queries Capybara-visible elements would otherwise see the
     // pre-cascade state.
     __hideRules = collectHideRules(globalThis.document);
     runInlineScripts(globalThis.document);
+    // Flip the dynamic-script gate on: post-load <script> appends
+    // (Rails-UJS dataType:'script' eval into head, jQuery .html() of
+    // a fragment containing <script>) will now run via the
+    // fireCEConnect → maybeRunScript path.
+    __initialScriptsDone = true;
     return globalThis.document._id;
   };
 
@@ -2190,6 +2385,30 @@
     if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
     return matchesAnyHideRule(el);
   }
+
+  // Visibility predicate exposed to the Element class for layout-shaped
+  // getters (offsetWidth, getBoundingClientRect, …). Mirrors the
+  // ancestor walk in `__csimVisible` but takes a node directly. We
+  // don't model real layout, so the answer is "true unless something
+  // says hidden": INVISIBLE_TAGS (head/script/style/template/…),
+  // `<input type=hidden>`, the `hidden` attribute, inline `display:none`
+  // / `visibility:hidden`, or a cascade rule the resolver agrees with.
+  function __isVisibleNode(el) {
+    if (!el || el.nodeType !== NODE_ELEMENT) return false;
+    if (INVISIBLE_TAGS.has(el._tag)) return false;
+    if (el._tag === 'input' && (el._attrs.type || '').toLowerCase() === 'hidden') return false;
+    let cur = el;
+    while (cur) {
+      if (cur.nodeType === NODE_DOC) return true;
+      if (cur.nodeType === NODE_ELEMENT) {
+        if (INVISIBLE_TAGS.has(cur._tag)) return false;
+        if (selfHidden(cur)) return false;
+      }
+      cur = cur._parent;
+    }
+    return false;
+  }
+  globalThis.__isVisibleNode = __isVisibleNode;
 
   // ── Display / visibility cascade ────────────────────────────────
   //
@@ -3238,6 +3457,154 @@
   // is unobservable for the workloads we care about.
   globalThis.queueMicrotask = function (cb) { scheduleTimer(cb, 0, [], null); };
 
+  // ── XMLHttpRequest (sync-backed) ────────────────────────────────
+  //
+  // Rails-UJS / jQuery.ajax / many older libraries lean on the XHR
+  // surface. We implement just enough of it to round-trip a Rack call
+  // through the existing `__rackFetch` host fn. The actual fetch is
+  // synchronous (mini_racer's attach() is blocking); we *defer* the
+  // readystatechange / load events through the virtual clock so the
+  // call site's "then" / .done handlers run after the current frame
+  // unwinds, matching real-async semantics for the listener ordering
+  // libraries assume.
+  function CsimXMLHttpRequest() {
+    this.readyState         = 0;   // UNSENT
+    this.status             = 0;
+    this.statusText         = '';
+    this.responseText       = '';
+    this.response           = '';
+    this.responseType       = '';
+    this.responseURL        = '';
+    this.responseXML        = null;
+    this.timeout            = 0;
+    this.withCredentials    = false;
+    this.upload             = { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} };
+    this.onreadystatechange = null;
+    this.onload             = null;
+    this.onloadstart        = null;
+    this.onloadend          = null;
+    this.onerror            = null;
+    this.onabort            = null;
+    this.ontimeout          = null;
+    this.onprogress         = null;
+    this._method            = 'GET';
+    this._url               = '';
+    this._async             = true;
+    this._headers           = {};
+    this._respHeaders       = {};
+    this._listeners         = Object.create(null);
+    this._aborted           = false;
+  }
+  CsimXMLHttpRequest.UNSENT           = 0;
+  CsimXMLHttpRequest.OPENED           = 1;
+  CsimXMLHttpRequest.HEADERS_RECEIVED = 2;
+  CsimXMLHttpRequest.LOADING          = 3;
+  CsimXMLHttpRequest.DONE             = 4;
+  CsimXMLHttpRequest.prototype.UNSENT           = 0;
+  CsimXMLHttpRequest.prototype.OPENED           = 1;
+  CsimXMLHttpRequest.prototype.HEADERS_RECEIVED = 2;
+  CsimXMLHttpRequest.prototype.LOADING          = 3;
+  CsimXMLHttpRequest.prototype.DONE             = 4;
+  CsimXMLHttpRequest.prototype.open = function (method, url, async) {
+    this._method    = String(method || 'GET').toUpperCase();
+    this._url       = String(url || '');
+    this._async     = async !== false;
+    this._headers   = {};
+    this.readyState = 1;
+    this._fireReady();
+  };
+  CsimXMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+    this._headers[String(name)] = String(value);
+  };
+  CsimXMLHttpRequest.prototype.getResponseHeader = function (name) {
+    const v = this._respHeaders[String(name).toLowerCase()];
+    return v == null ? null : v;
+  };
+  CsimXMLHttpRequest.prototype.getAllResponseHeaders = function () {
+    return Object.entries(this._respHeaders).map(([k, v]) => k + ': ' + v).join('\r\n');
+  };
+  CsimXMLHttpRequest.prototype.overrideMimeType = function () {};
+  CsimXMLHttpRequest.prototype.addEventListener = function (type, handler) {
+    if (typeof handler !== 'function') return;
+    (this._listeners[type] = this._listeners[type] || []).push(handler);
+  };
+  CsimXMLHttpRequest.prototype.removeEventListener = function (type, handler) {
+    const list = this._listeners[type];
+    if (!list) return;
+    this._listeners[type] = list.filter(h => h !== handler);
+  };
+  CsimXMLHttpRequest.prototype.abort = function () {
+    this._aborted = true;
+    this.readyState = 4;
+    this.status = 0;
+    this._fireReady();
+    this._fireEvent('abort');
+    this._fireEvent('loadend');
+  };
+  CsimXMLHttpRequest.prototype.send = function (body) {
+    const self = this;
+    const doFetch = () => {
+      if (self._aborted) return;
+      let resp;
+      try {
+        const bodyStr = body == null ? '' : (typeof body === 'string' ? body : String(body));
+        resp = __rackFetch(self._method, self._url, bodyStr, self._headers, 'follow');
+      } catch (_) { resp = null; }
+      if (!resp) {
+        self.readyState = 4;
+        self.status     = 0;
+        self._fireReady();
+        self._fireEvent('error');
+        self._fireEvent('loadend');
+        return;
+      }
+      self.status       = resp.status || 200;
+      self.statusText   = resp.statusText || '';
+      self.responseURL  = resp.url || self._url;
+      self.responseText = resp.body == null ? '' : String(resp.body);
+      self.response     = self.responseText;
+      // Normalise response headers to lowercase for getResponseHeader.
+      const headers = resp.headers || {};
+      const norm = {};
+      for (const k of Object.keys(headers)) norm[k.toLowerCase()] = String(headers[k]);
+      self._respHeaders = norm;
+      self.readyState = 2; self._fireReady();
+      self.readyState = 3; self._fireReady();
+      self.readyState = 4; self._fireReady();
+      self._fireEvent('load');
+      self._fireEvent('loadend');
+    };
+    // Real async: defer through the virtual clock so the current
+    // microtask completes before listeners run. Sync XHR (async=false)
+    // runs the fetch inline.
+    if (this._async) {
+      scheduleTimer(doFetch, 0, [], null);
+    } else {
+      doFetch();
+    }
+  };
+  CsimXMLHttpRequest.prototype._fireReady = function () {
+    // readystatechange goes through `_fireEvent`, which itself reads
+    // `this.onreadystatechange` — calling the handler here directly
+    // double-fires it. Rails-UJS keys on the DONE state to invoke its
+    // `done(xhr)` callback, so the second fire triggered `processResponse`
+    // a second time and re-eval'd the script response (toggling the
+    // visibility back to hidden). The single _fireEvent dispatch is
+    // enough.
+    this._fireEvent('readystatechange');
+  };
+  CsimXMLHttpRequest.prototype._fireEvent = function (type) {
+    const handler = this['on' + type];
+    if (typeof handler === 'function') {
+      try { handler.call(this, { type, target: this, currentTarget: this }); } catch (_) {}
+    }
+    const list = this._listeners[type];
+    if (list) for (const h of list.slice()) {
+      try { h.call(this, { type, target: this, currentTarget: this }); } catch (_) {}
+    }
+  };
+  globalThis.XMLHttpRequest = CsimXMLHttpRequest;
+
   globalThis.__virtualNow    = () => __virtualNow;
   globalThis.__hasReadyTimer = function () {
     for (const t of __timers.values()) if (t.due <= __virtualNow) return true;
@@ -3279,7 +3646,20 @@
   };
 
   globalThis.__resetPage = function () {
-    globalThis.document = new Document();
+    // Match __csimLoadDocument's strategy: keep the existing Document
+    // instance so library-installed listeners (Rails-UJS click
+    // delegates, jQuery handlers attached via $(document)) survive
+    // between visits and across test resets. We just clear its
+    // children and the registry; the next visit will rebuild via
+    // __csimLoadDocument.
+    if (globalThis.document) {
+      for (const c of globalThis.document._children.slice()) {
+        globalThis.document.removeChild(c);
+      }
+      globalThis.document.documentElement = null;
+    } else {
+      globalThis.document = new Document();
+    }
     __handles.clear();
     registerNode(globalThis.document);
     __resetTimers();
