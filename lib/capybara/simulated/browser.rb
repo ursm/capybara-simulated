@@ -11,16 +11,12 @@ require 'securerandom'
 require 'set'
 require 'uri'
 require 'uri/mailto'
+require_relative 'errors'
 require_relative 'handle_table'
 require_relative 'trace'
 
 module Capybara
   module Simulated
-    # Raised when a Nokogiri node held by a Node has been removed from
-    # the document (e.g. via `el.replaceWith(...)` from JS). Driver
-    # exposes this as an `invalid_element_error`, so Capybara's
-    # synchronize wrapper catches it and reloads the cached element.
-    class StaleElement < Capybara::ElementNotFound; end
 
     DEFAULT_HOST    = 'http://www.example.com'
     BLANK_DOCUMENT  = '<!doctype html><html><body></body></html>'

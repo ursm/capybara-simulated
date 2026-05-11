@@ -6,7 +6,10 @@
 # wired up so a `Capybara::Session` can `visit` and `find` against
 # the V8-resident DOM. Milestones 3+ grow this incrementally.
 
+require 'nokogiri'
 require 'rack/mock'
+require 'uri'
+require_relative 'errors'
 require_relative 'v3_runtime'
 
 module Capybara
@@ -47,10 +50,98 @@ module Capybara
         h.zero? ? nil : h
       end
 
-      def text(handle)    = @runtime.call('__csimText', handle).to_s
-      def tag(handle)     = @runtime.call('__csimTag', handle).to_s
-      def attr(handle, name) = @runtime.call('__csimAttr', handle, name.to_s)
-      def visible?(handle)= @runtime.call('__csimVisible', handle) ? true : false
+      # XPath reverse-bridge (see V3_DESIGN.md "HTML parsing in v3"):
+      # serialise the JS subtree with each Element's handle baked into a
+      # `data-csim-handle` attribute, run libxml2's XPath on the parsed
+      # HTML, recover JS handle ids from the attribute. One Context#call
+      # plus one Nokogiri parse per query — still cheap vs v2's
+      # per-element __dom callback storm.
+      def find_xpath(xpath, context_handle = nil)
+        # When the query is rooted at an element, give Nokogiri a
+        # fragment; when it's document-rooted ("/html…") we need a full
+        # Document so `/html` resolves. Capybara's matchers emit both.
+        html = @runtime.call('__csimSerialize', context_handle || 0).to_s
+        return [] if html.empty?
+        doc = context_handle ? Nokogiri::HTML5.fragment(html) : Nokogiri::HTML5.parse(html)
+        doc.xpath(xpath.to_s).filter_map {|n|
+          n.respond_to?(:[]) ? n['data-csim-handle']&.to_i : nil
+        }.reject(&:zero?)
+      end
+
+      def text(handle)        = @runtime.call('__csimText', handle).to_s
+      def tag(handle)         = @runtime.call('__csimTag', handle).to_s
+      def attr(handle, name)  = @runtime.call('__csimAttr', handle, name.to_s)
+      def visible?(handle)    = @runtime.call('__csimVisible', handle) ? true : false
+
+      # Capybara::Driver::Node surface ----------------------------------
+      #
+      # PoC: text == all_text == visible_text. Cascade-driven visibility
+      # filtering is deferred (V3_DESIGN.md milestone 5+).
+      def all_text(handle)     = text(handle)
+      def visible_text(handle) = text(handle)
+      def tag_name(handle)     = tag(handle)
+      def value(handle)        = @runtime.call('__csimValue', handle)
+      def disabled?(handle)    = !!attr(handle, 'disabled')
+      def option_selected?(h)  = !!attr(h, 'selected')
+      def shadow_root_handle(_) = nil
+      def computed_style(_, names) = names.to_h {|n| [n, ''] }
+      def node_path(_)         = ''
+
+      def lookup_node(handle)
+        handle if @runtime.call('__csimAlive', handle)
+      end
+
+      def check_stale(handle, initial)
+        return if initial && @runtime.call('__csimAlive', handle)
+        raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
+      end
+
+      # PoC click: anchors with href navigate; everything else is a no-op
+      # until milestone 4 (event dispatch) lands. That's enough to drive
+      # click_link / click_button on a server-rendered app.
+      def click(handle, _keys = [], **_opts)
+        action = @runtime.call('__csimClickResolve', handle)
+        return unless action.is_a?(Hash)
+        case action['kind']
+        when 'navigate' then navigate(resolve_against_current(action['url'].to_s))
+        end
+      end
+
+      def title
+        @runtime.call('__csimDocumentTitle').to_s
+      end
+
+      def html
+        @runtime.call('__csimDocumentHtml').to_s
+      end
+
+      def status_code      = 200
+      def response_headers = {}
+
+      # Driver surface bits that v2 Browser exposes; stubbed for v3 PoC.
+      def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
+      def set_viewport(*)                 ; nil ; end
+      def viewport_width                  ; 1024 ; end
+      def viewport_height                 ; 768 ; end
+      def go_back                         ; nil ; end
+      def go_forward                      ; nil ; end
+      def polling?                        ; false ; end
+      def active_element_handle           ; nil ; end
+      def session_send_keys(_)            ; nil ; end
+      def with_modal(_)                   ; yield ; end
+      def start_trace(_)                  ; nil ; end
+      def trace                           ; nil ; end
+      def pending_trace                   ; nil ; end
+      def clear_trace!                    ; nil ; end
+      def evaluate_script(_, _ = [])      ; nil ; end
+      def evaluate_async_script(_, _ = []); nil ; end
+
+      def current_path
+        return '' if @current_url.nil? || @current_url.empty?
+        URI.parse(@current_url).path
+      rescue URI::InvalidURIError
+        ''
+      end
 
       def reset!
         @cookies.clear

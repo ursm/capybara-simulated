@@ -509,6 +509,89 @@
     const n = lookup(h);
     return n && n._attrs ? Object.assign({}, n._attrs) : {};
   };
+  // Lifetime / stale check. v2 pins a Nokogiri node; here the handle is
+  // alive iff it's still in `__handles`. Detaches drop on the next
+  // GC walk; for now we treat "in map" as "alive".
+  globalThis.__csimAlive = function (h) { return __handles.has(h); };
+
+  // Form-field value reader. Mirrors what Capybara reads via
+  // Node#value: input/textarea use `.value`, select returns its
+  // selected option value, checkbox / radio surface their `.value` only
+  // when checked (rack-test parity). PoC: read `.value` attr / first
+  // option for select; refined as milestone-3 forms work lands.
+  globalThis.__csimValue = function (h) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return null;
+    const tag = n._tag;
+    if (tag === 'textarea') return n.textContent;
+    if (tag === 'select') {
+      // walk options in document order; return first explicitly-
+      // selected (selected attr) or the first non-disabled option's
+      // value as the implicit default.
+      const opts = n.querySelectorAll('option');
+      let implicit = null;
+      for (const o of opts) {
+        if (o._attrs.disabled != null) continue;
+        if (o._attrs.selected != null) return o._attrs.value != null ? o._attrs.value : o.textContent;
+        if (implicit == null) implicit = o._attrs.value != null ? o._attrs.value : o.textContent;
+      }
+      return implicit;
+    }
+    if (tag === 'input') {
+      const type = (n._attrs.type || 'text').toLowerCase();
+      if (type === 'checkbox' || type === 'radio') return n._attrs.value != null ? n._attrs.value : 'on';
+      return n._attrs.value != null ? n._attrs.value : '';
+    }
+    return n._attrs.value != null ? n._attrs.value : '';
+  };
+
+  // `__csimSerialize(h)` — outerHTML of the subtree, with each Element's
+  // handle id baked into a `data-csim-handle` attribute so the Ruby
+  // side can run libxml2-XPath against the serialised doc and recover
+  // node identities. One serialisation per `find_xpath` call; cheap
+  // compared to v2's per-element __dom callbacks.
+  globalThis.__csimSerialize = function (h) {
+    const root = h ? lookup(h) : globalThis.document;
+    if (!root) return '';
+    if (root.nodeType === NODE_DOC) return serializeDoc(root);
+    return serializeElementWithHandles(root);
+  };
+  function serializeDoc(doc) {
+    return doc.documentElement ? serializeElementWithHandles(doc.documentElement) : '';
+  }
+  function serializeElementWithHandles(el) {
+    const attrs = Object.keys(el._attrs)
+      .map(n => ' ' + n + '="' + escapeAttr(el._attrs[n]) + '"').join('');
+    const handle = ' data-csim-handle="' + el._id + '"';
+    if (VOID.has(el._tag)) return '<' + el._tag + handle + attrs + '>';
+    return '<' + el._tag + handle + attrs + '>' + serializeChildrenWithHandles(el) + '</' + el._tag + '>';
+  }
+  function serializeChildrenWithHandles(el) {
+    let s = '';
+    for (const c of el._children) {
+      s += c.nodeType === NODE_TEXT ? escapeText(c.data) : serializeElementWithHandles(c);
+    }
+    return s;
+  }
+
+  // Document-level reads that don't need a handle.
+  globalThis.__csimDocumentHtml = function () {
+    return globalThis.document.documentElement
+      ? serializeElement(globalThis.document.documentElement)
+      : '';
+  };
+
+  // Click resolver. PoC: if the handle is an <a href>, return the href
+  // for the Ruby side to navigate to. Otherwise no-op. Real event
+  // dispatch lifts in with milestone 4.
+  globalThis.__csimClickResolve = function (h) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return null;
+    if (n._tag === 'a' && n._attrs.href != null) {
+      return { kind: 'navigate', url: n._attrs.href };
+    }
+    return null;
+  };
 
   // ── Virtual clock (placeholder until v2 bridge lifted in) ───────
 
