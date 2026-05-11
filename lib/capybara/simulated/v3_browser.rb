@@ -235,17 +235,33 @@ module Capybara
         # unblocks them.
         coerced = coerce_set_value(value)
         @file_picks ||= {}
+        # File inputs may receive a single Pathname (most attach_file
+        # calls); promote to the file-list path so .files / @file_picks
+        # see it as one-element array.
+        coerced = [coerced.to_s] if value.is_a?(Pathname)
         if coerced.is_a?(Array)
-          @file_picks[handle] = coerced.reject(&:empty?)
+          paths = coerced.reject(&:empty?)
+          @file_picks[handle] = paths
+          # Expose File-list metadata to the JS side BEFORE setting the
+          # value: __csimSetValue fires input + change synchronously,
+          # and Redmine's onchange="addInputFiles(this)" reads
+          # `inputEl.files` — if we set files after, the handler sees
+          # an empty FileList and tears down the input.
+          file_infos = paths.map {|p|
+            stat = (File.stat(p) rescue nil)
+            {
+              'name'         => File.basename(p),
+              'size'         => stat ? stat.size : 0,
+              'type'         => '',
+              'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
+            }
+          }
+          @runtime.call('__csimSetFiles', handle, file_infos)
           # Mirror real browser: <input type=file>.value reflects only
           # the filename of the first chosen file (security-faked path).
-          js_value = coerced.first ? File.basename(coerced.first) : ''
+          # __csimSetValue dispatches input + change synchronously.
+          js_value = paths.first ? File.basename(paths.first) : ''
           @runtime.call('__csimSetValue', handle, js_value)
-          # File picker UIs (Redmine's attachments.js clones the input
-          # to surface attachments[1][...] fields) wait for `change`.
-          # Real browsers fire input + change after the value commits.
-          dispatch_event(handle, 'input',  'bubbles' => true, 'cancelable' => false)
-          dispatch_event(handle, 'change', 'bubbles' => true, 'cancelable' => false)
         else
           @runtime.call('__csimSetValue', handle, coerced)
         end

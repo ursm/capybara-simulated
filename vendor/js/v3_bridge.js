@@ -60,12 +60,28 @@
     // detached nodes. Cloned nodes copy attrs and (deep) clone
     // children; listeners + custom-element state are intentionally
     // *not* copied (matches HTML spec).
-    // Focus tracking is a stub: real browsers maintain document.activeElement
-    // and dispatch focus/blur events. v3 PoC just records the slot
-    // — enough to satisfy test code that calls `el.focus()` before
-    // typing. blur(), if anyone calls it, clears the slot.
-    focus() { globalThis.document._activeElement = this; }
-    blur()  { if (globalThis.document._activeElement === this) globalThis.document._activeElement = null; }
+    // Focus tracking: record `document.activeElement` and emit
+    // focus / focusin / blur / focusout events so listeners observing
+    // either path (`onfocus="..."` attribute, addEventListener, or
+    // jQuery's `.focus(handler)`) actually fire. `:focus` pseudo-
+    // class matches via `_activeElement` comparison in matchPseudo.
+    focus() {
+      const prev = globalThis.document._activeElement;
+      if (prev === this) return;
+      if (prev) {
+        try { dispatchEvent(prev, new Event('blur',     { bubbles: false, cancelable: false })); } catch (_) {}
+        try { dispatchEvent(prev, new Event('focusout', { bubbles: true,  cancelable: false })); } catch (_) {}
+      }
+      globalThis.document._activeElement = this;
+      try { dispatchEvent(this, new Event('focus',    { bubbles: false, cancelable: false })); } catch (_) {}
+      try { dispatchEvent(this, new Event('focusin',  { bubbles: true,  cancelable: false })); } catch (_) {}
+    }
+    blur() {
+      if (globalThis.document._activeElement !== this) return;
+      globalThis.document._activeElement = null;
+      try { dispatchEvent(this, new Event('blur',     { bubbles: false, cancelable: false })); } catch (_) {}
+      try { dispatchEvent(this, new Event('focusout', { bubbles: true,  cancelable: false })); } catch (_) {}
+    }
 
     // Layout stubs — there's no rendering engine, so geometry is
     // always zero. Returning a sensible shape lets feature-detection
@@ -522,6 +538,23 @@
     select() {
       this._selectionStart = 0;
       this._selectionEnd   = (this._attrs.value || '').length;
+    }
+
+    // File-input `.files` accessor. Set by `__csimSetFiles` after
+    // `attach_file`; each entry is a File-shaped object with name /
+    // size / type / lastModified. Libraries that iterate input.files
+    // (Redmine's `uploadAndAttachFiles`, drag-drop handlers reading
+    // `dataTransfer.files`) see something usable. The actual byte
+    // stream isn't carried here — the multipart serialiser pulls the
+    // file contents from `@file_picks` on the Ruby side at form-submit
+    // time.
+    get files() {
+      if (this._tag !== 'input') return null;
+      const t = (this._attrs.type || '').toLowerCase();
+      if (t !== 'file') return null;
+      const list = this._files || [];
+      list.item = function (i) { return this[i] || null; };
+      return list;
     }
 
     get innerHTML() { return serializeChildren(this); }
@@ -1703,9 +1736,15 @@
       // *reveal* content rather than hide it (so reporting false here
       // keeps the element visibility-stable until a real test cares).
       case 'hover':         return false;
-      case 'focus':         return false;
-      case 'focus-within':  return false;
-      case 'focus-visible': return false;
+      case 'focus':
+      case 'focus-visible': return globalThis.document && globalThis.document._activeElement === el;
+      case 'focus-within': {
+        const active = globalThis.document && globalThis.document._activeElement;
+        if (!active) return false;
+        let cur = active;
+        while (cur) { if (cur === el) return true; cur = cur._parent; }
+        return false;
+      }
       case 'active':        return false;
       case 'visited':       return false;
       case 'link':          return el._tag === 'a' && el._attrs.href != null;
@@ -3403,6 +3442,17 @@
     return f ? f._id : 0;
   };
 
+  // Called by the Ruby side after `attach_file` resolves a list of
+  // paths to {name, size, type, lastModified} entries. The list is
+  // attached to the input as a FileList-shaped array; `el.files`
+  // exposes it to JS consumers (jQuery file widgets, Redmine's
+  // attachments.js).
+  globalThis.__csimSetFiles = function (h, fileInfos) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    n._files = Array.isArray(fileInfos) ? fileInfos.slice() : [];
+    return true;
+  };
   globalThis.__csimSetValue = function (h, value) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
