@@ -56,12 +56,30 @@ module Capybara
         browser.click(handle_id)
       end
 
-      def right_click(*)         ; nil ; end
-      def double_click(*)        ; nil ; end
-      def hover(**_)             ; self ; end
+      def right_click(_keys = [], **_opts)
+        check_stale
+        browser.right_click(handle_id)
+      end
+
+      def double_click(_keys = [], **_opts)
+        check_stale
+        browser.double_click(handle_id)
+      end
+
+      def hover(**_opts)
+        check_stale
+        browser.hover(handle_id)
+        self
+      end
+
       def scroll_to(*, **)       ; self ; end
       def send_keys(*_keys)      ; true ; end
-      def trigger(_event)        ; true ; end
+
+      def trigger(event)
+        check_stale
+        browser.dispatch_event(handle_id, event.to_s)
+        true
+      end
       def drop(*_)               ; true ; end
       def set(value, **_)
         check_stale

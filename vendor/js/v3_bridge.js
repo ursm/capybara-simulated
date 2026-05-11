@@ -1315,8 +1315,12 @@
     } else if (tag === 'input') {
       const type = (n._attrs.type || 'text').toLowerCase();
       if (type === 'checkbox' || type === 'radio') {
-        if (value === true || value === 'true') n._attrs.checked = '';
-        else if (value === false || value === 'false') delete n._attrs.checked;
+        if (value === true || value === 'true') {
+          // Radio: setting one in a group clears the others on the
+          // same `name`.
+          if (type === 'radio') setRadio(n);
+          else                  n._attrs.checked = '';
+        } else if (value === false || value === 'false') delete n._attrs.checked;
         else n._attrs.value = v;
         kind = 'checked';
       } else {

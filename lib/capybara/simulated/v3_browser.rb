@@ -199,6 +199,27 @@ module Capybara
         @runtime.call('__csimSetValue', handle, value)
       end
 
+      def right_click(handle, *_)
+        tick_real_time
+        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', {'bubbles' => true, 'cancelable' => true})
+      end
+
+      def double_click(handle, *_)
+        tick_real_time
+        @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true})
+      end
+
+      def hover(handle)
+        tick_real_time
+        @runtime.call('__csimDispatchEvent', handle, 'mouseover', {'bubbles' => true, 'cancelable' => true})
+        @runtime.call('__csimDispatchEvent', handle, 'mouseenter', {'bubbles' => false, 'cancelable' => false})
+      end
+
+      def dispatch_event(handle, type, init = {})
+        tick_real_time
+        @runtime.call('__csimDispatchEvent', handle, type.to_s, init)
+      end
+
       def select_option(handle)
         tick_real_time
         @runtime.call('__csimSelectOption', handle)
