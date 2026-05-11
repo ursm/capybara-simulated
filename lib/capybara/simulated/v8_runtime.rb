@@ -32,7 +32,32 @@ require_relative 'esm_rewriter'
 # tagging globalThis [object Window] in `POLYFILL_PRELUDE`.
 begin
   stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
-  MiniRacer::Platform.set_flags!(stack_size: stack_kb)
+  # `CSIM_V8_SINGLE_THREADED=1` opts into mini_racer's same-thread
+  # call path (`v8_single_threaded_enter` in the extension), which
+  # replaces the pthread rendezvous with a direct call. Per-host-fn
+  # cost drops from ~3 µs to ~0.8 µs (~3.8× cheaper).
+  #
+  # **NOT SAFE on real test suites today.** In multi-threaded mode
+  # the rendezvous serialises DOM mutations made by JS-side timer
+  # callbacks so the Nokogiri iterator in
+  # `Capybara::Result#each` doesn't see them mid-walk. In single-
+  # threaded mode the mutation lands directly on the libxml2 child-
+  # list the iterator is on, the iterator's `next` pointer goes
+  # stale, and the process SIGSEGVs deep in libxml2 (offset 0x68
+  # from NULL — a child-list head ptr). Smoke spec at line 239
+  # (the setTimeout/setInterval test) reproduces reliably.
+  #
+  # The fix isn't on the mini_racer side — it's that our DOM model
+  # mixes "mutate Nokogiri eagerly from JS callbacks" with "Ruby
+  # iterates the same Nokogiri tree concurrently with retries". A
+  # deferred-mutation queue (apply DOM changes only at safe
+  # boundaries, not from inside an attached lambda) would make
+  # single-threaded mode safe and pay back the 3.8× IPC reduction.
+  if ENV['CSIM_V8_SINGLE_THREADED'] == '1'
+    MiniRacer::Platform.set_flags!(:single_threaded, stack_size: stack_kb)
+  else
+    MiniRacer::Platform.set_flags!(stack_size: stack_kb)
+  end
 rescue MiniRacer::PlatformAlreadyInitialized
   # Another callsite beat us to it; either the prior caller picked a
   # compatible value or they're testing the platform-init path.

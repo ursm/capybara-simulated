@@ -2076,13 +2076,31 @@ module Capybara
       def tick_real_time
         return unless @js
         return unless @timers_active
+        # Re-entrancy guard. Capybara's matchers call this once per
+        # `find` / `has_?` (good), but they also iterate the Result
+        # (`Capybara::Result#each`) and call `visible?` → `check_stale`
+        # → `tick_real_time` for every entry. In mini_racer's default
+        # multi-threaded mode the rendezvous serialises sufficiently
+        # that DOM mutations made by a firing timer don't race the
+        # Nokogiri iterator; in `:single_threaded` mode the timer
+        # callback runs on the same thread mid-iteration and corrupts
+        # the iterator state (SIGSEGV deep in libxml2). Skipping the
+        # nested calls is correct regardless of mini_racer mode: the
+        # outermost `tick_real_time` for this find already advanced
+        # the clock, the inner calls would only re-drain timers that
+        # already fired.
+        return if @ticking
+        @ticking = true
         now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         elapsed  = ((now - @last_tick_ts) * 1000).to_i
         @last_tick_ts = now
         step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
-        return if step <= 0
-        js.drain_timers(step)
-        deliver_pending_mutations
+        if step > 0
+          js.drain_timers(step)
+          deliver_pending_mutations
+        end
+      ensure
+        @ticking = false
       end
 
       # Flush whatever record_* calls have accumulated during the
