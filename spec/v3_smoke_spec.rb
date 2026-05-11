@@ -72,4 +72,72 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     session.visit '/about'
     expect(session.title).to eq('About')
   end
+
+  describe 'forms' do
+    let(:form_app) {
+      Rack::Builder.new {
+        run lambda {|env|
+          req = Rack::Request.new(env)
+          case req.path_info
+          when '/'
+            [200, {'content-type' => 'text/html'}, [<<~HTML]]
+              <!doctype html><html><head><title>Form</title></head><body>
+                <form action="/submit" method="post" id="profile-form">
+                  <label for="name">Name</label>
+                  <input type="text" id="name" name="name" value="">
+                  <label for="bio">Bio</label>
+                  <textarea id="bio" name="bio"></textarea>
+                  <fieldset>
+                    <legend>Plan</legend>
+                    <label><input type="radio" name="plan" value="free"> Free</label>
+                    <label><input type="radio" name="plan" value="pro"> Pro</label>
+                  </fieldset>
+                  <label><input type="checkbox" name="terms" value="yes"> Accept</label>
+                  <label for="role">Role</label>
+                  <select id="role" name="role">
+                    <option value="">Pick</option>
+                    <option value="dev">Developer</option>
+                    <option value="ops">Operator</option>
+                  </select>
+                  <button type="submit" id="save">Save</button>
+                </form>
+              </body></html>
+            HTML
+          when '/submit'
+            [200, {'content-type' => 'text/html'}, [<<~HTML]]
+              <!doctype html><html><head><title>Saved</title></head><body>
+                <h1>Saved</h1>
+                <pre id="r-name">#{req.params['name']}</pre>
+                <pre id="r-bio">#{req.params['bio']}</pre>
+                <pre id="r-plan">#{req.params['plan']}</pre>
+                <pre id="r-terms">#{req.params['terms']}</pre>
+                <pre id="r-role">#{req.params['role']}</pre>
+              </body></html>
+            HTML
+          else
+            [404, {}, ['nope']]
+          end
+        }
+      }.to_app
+    }
+
+    let(:form_session) { Capybara::Session.new(:simulated_v3, form_app) }
+
+    it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
+      form_session.visit '/'
+      form_session.fill_in 'Name', with: 'Daisy'
+      form_session.fill_in 'Bio',  with: 'hello world'
+      form_session.choose 'Pro'
+      form_session.check 'Accept'
+      form_session.select 'Operator', from: 'Role'
+      form_session.click_button 'Save'
+
+      expect(form_session.current_path).to eq('/submit')
+      expect(form_session.find('#r-name').text).to eq('Daisy')
+      expect(form_session.find('#r-bio').text).to  eq('hello world')
+      expect(form_session.find('#r-plan').text).to eq('pro')
+      expect(form_session.find('#r-terms').text).to eq('yes')
+      expect(form_session.find('#r-role').text).to eq('ops')
+    end
+  end
 end

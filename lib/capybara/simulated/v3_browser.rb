@@ -96,15 +96,37 @@ module Capybara
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
-      # PoC click: anchors with href navigate; everything else is a no-op
-      # until milestone 4 (event dispatch) lands. That's enough to drive
-      # click_link / click_button on a server-rendered app.
+      # PoC click: anchors with href navigate; submit buttons trigger a
+      # form submission through the Rack app. Checkbox / radio toggle
+      # inline on the JS side (no Ruby trip). Everything else is a
+      # no-op until milestone 4 lands event dispatch.
       def click(handle, _keys = [], **_opts)
         action = @runtime.call('__csimClickResolve', handle)
         return unless action.is_a?(Hash)
         case action['kind']
         when 'navigate' then navigate(resolve_against_current(action['url'].to_s))
+        when 'submit'   then submit_form_handle(action['formHandle'], action['submitter'])
         end
+      end
+
+      def set_value_with_events(handle, value)
+        @runtime.call('__csimSetValue', handle, value)
+      end
+
+      def select_option(handle)
+        @runtime.call('__csimSelectOption', handle)
+      end
+
+      def unselect_option(handle)
+        @runtime.call('__csimUnselectOption', handle)
+      end
+
+      # `Node#submit(*)` (Capybara DSL) hits here. Find the enclosing
+      # form, serialise, post.
+      def submit_form(handle)
+        form_handle = @runtime.call('__csimAncestorForm', handle).to_i
+        return if form_handle.zero?
+        submit_form_handle(form_handle, nil)
       end
 
       def title
@@ -141,6 +163,46 @@ module Capybara
         URI.parse(@current_url).path
       rescue URI::InvalidURIError
         ''
+      end
+
+      # Pulls the serialised form-state out of JS, encodes it, and
+      # drives the Rack app via `navigate` (for GET) or a POST. Mirrors
+      # the slice of <form> semantics rack-test supports — multipart
+      # uploads lift in with milestone 4+ once <input type=file> matters.
+      def submit_form_handle(form_handle, submitter_handle)
+        spec = @runtime.call('__csimFormSerialize', form_handle, submitter_handle || 0)
+        return unless spec.is_a?(Hash)
+        action  = spec['action'].to_s
+        method  = spec['method'].to_s.upcase
+        method  = 'GET' if method.empty?
+        fields  = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
+        body    = URI.encode_www_form(fields)
+        action_url = action.empty? ? (@current_url || DEFAULT_HOST) : resolve_against_current(action)
+        if method == 'GET'
+          uri = URI.parse(action_url)
+          uri.query = body unless body.empty?
+          navigate(uri.to_s)
+        else
+          navigate_post(action_url, body, spec['enctype'].to_s)
+        end
+      end
+
+      def navigate_post(url, body, content_type)
+        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
+        env['CONTENT_LENGTH'] = body.bytesize.to_s
+        env['HTTP_COOKIE']    = document_cookie unless @cookies.empty?
+        @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
+        status, headers, resp_body = @app.call(env)
+        merge_set_cookie(headers)
+        if (300..399).include?(status) && headers['location']
+          resp_body.close if resp_body.respond_to?(:close)
+          return navigate(resolve_against_current(headers['location']))
+        end
+        @current_url = url
+        html         = resp_body.is_a?(Array) ? resp_body.join : resp_body.to_s
+        resp_body.close if resp_body.respond_to?(:close)
+        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
 
       def reset!

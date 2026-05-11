@@ -63,10 +63,25 @@ module Capybara
       def send_keys(*_keys)      ; true ; end
       def trigger(_event)        ; true ; end
       def drop(*_)               ; true ; end
-      def set(_v, **_)           ; nil ; end
-      def select_option          ; nil ; end
-      def unselect_option        ; nil ; end
-      def submit(*_)             ; nil ; end
+      def set(value, **_)
+        check_stale
+        browser.set_value_with_events(handle_id, value)
+      end
+
+      def select_option
+        check_stale
+        browser.select_option(handle_id)
+      end
+
+      def unselect_option
+        check_stale
+        browser.unselect_option(handle_id)
+      end
+
+      def submit(*_)
+        check_stale
+        browser.submit_form(handle_id)
+      end
 
       def find_xpath(query)
         browser.find_xpath(query, handle_id).map {|id| self.class.new(driver, id) }

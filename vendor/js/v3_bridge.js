@@ -193,7 +193,7 @@
       return null;
     }
     getElementById(id) {
-      return findFirst(this.documentElement, [{ kind: 'id', value: String(id) }]);
+      return findFirst(this.documentElement, parseSelector('#' + String(id)));
     }
     querySelector(sel)    { return this.documentElement ? this.documentElement.querySelector(sel) : null; }
     querySelectorAll(sel) { return this.documentElement ? this.documentElement.querySelectorAll(sel) : []; }
@@ -211,8 +211,31 @@
   // beyond descendant (space). No pseudo-classes. Good enough to
   // unblock smoke-spec; replace with a real parser later.
 
+  // A "selector" here is a list of comma-separated chains; each chain
+  // is an array of simple-selector units joined by descendant (space).
+  // Capybara's compiled CSS uses commas (e.g. 'input,textarea,select')
+  // so we split on top-level commas — bracket-balanced so attribute
+  // selectors like '[data-x="a,b"]' aren't split mid-value.
   function parseSelector(sel) {
-    return String(sel).trim().split(/\s+/).map(parseSimple);
+    const out = [];
+    for (const chain of splitTopLevel(String(sel).trim(), ',')) {
+      const c = chain.trim();
+      if (!c) continue;
+      out.push(c.split(/\s+/).map(parseSimple));
+    }
+    return out;
+  }
+  function splitTopLevel(s, sep) {
+    const parts = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '[' || ch === '(') depth++;
+      else if (ch === ']' || ch === ')') depth--;
+      else if (ch === sep && depth === 0) { parts.push(s.slice(start, i)); start = i + 1; }
+    }
+    parts.push(s.slice(start));
+    return parts;
   }
   function parseSimple(s) {
     const u = { tag: null, id: null, classes: [], attrs: [] };
@@ -271,8 +294,8 @@
     }
     return true;
   }
-  // Match el against the full units chain (descendant).
-  function matchOne(el, units) {
+  // Match el against a single chain of units (joined by descendant).
+  function matchChain(el, units) {
     if (!units.length) return false;
     if (!matchUnit(el, units[units.length - 1])) return false;
     let cur = el._parent;
@@ -283,14 +306,19 @@
     }
     return true;
   }
-  function findAll(root, units) {
+  // Match against a group (array of chains) — any chain hits ⇒ match.
+  function matchOne(el, group) {
+    for (const chain of group) if (matchChain(el, chain)) return true;
+    return false;
+  }
+  function findAll(root, group) {
     const out = [];
-    walk(root, el => { if (matchOne(el, units)) out.push(el); });
+    walk(root, el => { if (matchOne(el, group)) out.push(el); });
     return out;
   }
-  function findFirst(root, units) {
+  function findFirst(root, group) {
     let hit = null;
-    walk(root, el => { if (!hit && matchOne(el, units)) hit = el; });
+    walk(root, el => { if (!hit && matchOne(el, group)) hit = el; });
     return hit;
   }
   function walk(node, fn) {
@@ -581,16 +609,205 @@
       : '';
   };
 
-  // Click resolver. PoC: if the handle is an <a href>, return the href
-  // for the Ruby side to navigate to. Otherwise no-op. Real event
-  // dispatch lifts in with milestone 4.
+  // Click resolver. PoC: maps an element click to one of three
+  // outcomes the Ruby side knows how to drive:
+  //   - {kind:'navigate', url}  — <a href>
+  //   - {kind:'submit',   formHandle}  — submit-button inside <form>
+  //   - null                    — everything else (checkbox/radio
+  //     toggling happens inline so Ruby sees the new state on the
+  //     follow-up read, and other clicks are no-ops until milestone 4
+  //     lands event dispatch).
   globalThis.__csimClickResolve = function (h) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
     if (n._tag === 'a' && n._attrs.href != null) {
       return { kind: 'navigate', url: n._attrs.href };
     }
+    if (isSubmitButton(n)) {
+      const form = ancestorForm(n);
+      if (form) return { kind: 'submit', formHandle: form._id, submitter: n._id };
+    }
+    if (n._tag === 'input') {
+      const type = (n._attrs.type || '').toLowerCase();
+      if (type === 'checkbox') { toggleChecked(n); return null; }
+      if (type === 'radio')    { setRadio(n);     return null; }
+    }
     return null;
+  };
+  function isSubmitButton(n) {
+    if (n._tag === 'button') {
+      const t = (n._attrs.type || 'submit').toLowerCase();
+      return t === 'submit';
+    }
+    if (n._tag === 'input') {
+      const t = (n._attrs.type || '').toLowerCase();
+      return t === 'submit' || t === 'image';
+    }
+    return false;
+  }
+  function ancestorForm(n) {
+    let cur = n._parent;
+    while (cur && cur.nodeType === NODE_ELEMENT) {
+      if (cur._tag === 'form') return cur;
+      cur = cur._parent;
+    }
+    return null;
+  }
+  function toggleChecked(n) {
+    if (n._attrs.checked != null) delete n._attrs.checked;
+    else n._attrs.checked = '';
+  }
+  function setRadio(n) {
+    const name = n._attrs.name;
+    if (name) {
+      // siblings in same form sharing name: clear, then set this one
+      const root = ancestorForm(n) || globalThis.document.documentElement;
+      const candidates = root && root.querySelectorAll
+        ? root.querySelectorAll('input')
+        : [];
+      for (const o of candidates) {
+        if ((o._attrs.type || '').toLowerCase() === 'radio' && o._attrs.name === name) {
+          delete o._attrs.checked;
+        }
+      }
+    }
+    n._attrs.checked = '';
+  }
+
+  // ── Form-field mutations ────────────────────────────────────────
+  //
+  // Ruby-side Capybara DSL (`fill_in 'X', with: 'Y'`, `choose`,
+  // `select`) all eventually call Node#set / select_option /
+  // unselect_option. Each is one Context#call into here.
+
+  globalThis.__csimAncestorForm = function (h) {
+    const n = lookup(h);
+    if (!n) return 0;
+    const f = ancestorForm(n);
+    return f ? f._id : 0;
+  };
+
+  globalThis.__csimSetValue = function (h, value) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    const tag = n._tag;
+    const v = value == null ? '' : String(value);
+    if (tag === 'textarea') { n._children = []; n._children.push(Object.assign(new Text(v), { _parent: n })); n._attrs.value = v; return true; }
+    if (tag === 'input') {
+      const type = (n._attrs.type || 'text').toLowerCase();
+      if (type === 'checkbox' || type === 'radio') {
+        if (value === true || value === 'true') n._attrs.checked = '';
+        else if (value === false || value === 'false') delete n._attrs.checked;
+        else n._attrs.value = v;
+      } else {
+        n._attrs.value = v;
+      }
+      return true;
+    }
+    if (tag === 'select') {
+      // Match the first <option> whose value (or textContent fallback)
+      // equals v; mark it selected, clear siblings.
+      const opts = n.querySelectorAll('option');
+      for (const o of opts) {
+        const ov = o._attrs.value != null ? o._attrs.value : o.textContent;
+        if (ov === v) { selectOptionExclusive(n, o); return true; }
+      }
+      return false;
+    }
+    n._attrs.value = v;
+    return true;
+  };
+  function selectOptionExclusive(select, opt) {
+    const multi = select._attrs.multiple != null;
+    const opts = select.querySelectorAll('option');
+    if (!multi) for (const o of opts) delete o._attrs.selected;
+    opt._attrs.selected = '';
+  }
+  globalThis.__csimSelectOption = function (h) {
+    const n = lookup(h);
+    if (!n || n._tag !== 'option') return false;
+    // walk up to <select>
+    let sel = n._parent;
+    while (sel && sel._tag !== 'select') sel = sel._parent;
+    if (!sel) { n._attrs.selected = ''; return true; }
+    selectOptionExclusive(sel, n);
+    return true;
+  };
+  globalThis.__csimUnselectOption = function (h) {
+    const n = lookup(h);
+    if (!n || n._tag !== 'option') return false;
+    delete n._attrs.selected;
+    return true;
+  };
+
+  // Form serialise — mirrors urlencoded submit semantics. Skips:
+  //   - inputs without `name`
+  //   - disabled controls
+  //   - unchecked checkbox / radio
+  //   - file inputs (PoC: no multipart yet)
+  //   - submit buttons other than the submitter
+  globalThis.__csimFormSerialize = function (formHandle, submitterHandle) {
+    const form = lookup(formHandle);
+    if (!form || form._tag !== 'form') return null;
+    const submitter = submitterHandle ? lookup(submitterHandle) : null;
+    const fields = [];
+    const inputs = form.querySelectorAll('input,textarea,select,button');
+    for (const f of inputs) {
+      if (!f._attrs.name) continue;
+      if (f._attrs.disabled != null) continue;
+      const tag = f._tag;
+      const name = f._attrs.name;
+      if (tag === 'input') {
+        const type = (f._attrs.type || 'text').toLowerCase();
+        if (type === 'submit' || type === 'image' || type === 'reset' || type === 'button') {
+          if (f !== submitter) continue;
+          fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
+          continue;
+        }
+        if (type === 'checkbox' || type === 'radio') {
+          if (f._attrs.checked == null) continue;
+          fields.push([name, f._attrs.value != null ? f._attrs.value : 'on']);
+          continue;
+        }
+        if (type === 'file') continue; // PoC: skip until multipart support
+        fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
+      } else if (tag === 'textarea') {
+        fields.push([name, f._attrs.value != null ? f._attrs.value : f.textContent]);
+      } else if (tag === 'select') {
+        const multi = f._attrs.multiple != null;
+        const opts = f.querySelectorAll('option');
+        let chose = false;
+        for (const o of opts) {
+          if (o._attrs.selected != null) {
+            const v = o._attrs.value != null ? o._attrs.value : o.textContent;
+            fields.push([name, v]);
+            chose = true;
+            if (!multi) break;
+          }
+        }
+        // Implicit selection: single-select non-multi falls back to
+        // first non-disabled option (mirrors browser submit).
+        if (!chose && !multi) {
+          for (const o of opts) {
+            if (o._attrs.disabled != null) continue;
+            const v = o._attrs.value != null ? o._attrs.value : o.textContent;
+            fields.push([name, v]);
+            break;
+          }
+        }
+      } else if (tag === 'button') {
+        const type = (f._attrs.type || 'submit').toLowerCase();
+        if (type !== 'submit') continue;
+        if (f !== submitter) continue;
+        fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
+      }
+    }
+    return {
+      action: form._attrs.action != null ? form._attrs.action : '',
+      method: (form._attrs.method || 'get').toLowerCase(),
+      enctype: (form._attrs.enctype || 'application/x-www-form-urlencoded').toLowerCase(),
+      fields: fields
+    };
   };
 
   // ── Virtual clock (placeholder until v2 bridge lifted in) ───────
