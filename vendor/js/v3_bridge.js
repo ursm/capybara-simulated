@@ -1049,30 +1049,117 @@
   // Capybara's compiled CSS uses commas (e.g. 'input,textarea,select')
   // so we split on top-level commas — bracket-balanced so attribute
   // selectors like '[data-x="a,b"]' aren't split mid-value.
-  function parseSelector(sel) {
-    const out = [];
-    for (const chain of splitTopLevel(String(sel).trim(), ',')) {
-      const c = chain.trim();
-      if (!c) continue;
-      // Tokenise around `>` child combinators while keeping descendant
-      // (whitespace) combinators implicit. Each unit gets a `combinator`
-      // tag (`'descendant'` | `'child'`) that drives `matchChain`'s
-      // ancestor-walk vs direct-parent check.
-      const raw = c.split(/\s+/);
-      const units = [];
-      let combinator = 'descendant';
-      for (const tok of raw) {
-        if (!tok) continue;
-        if (tok === '>') { combinator = 'child'; continue; }
-        const u = parseSimple(tok);
-        u.combinator = combinator;
-        units.push(u);
-        combinator = 'descendant';
+  // ── Selectors 4 subset ──────────────────────────────────────────
+  //
+  // Tokenizer + parser + matcher for the slice of CSS selectors real
+  // apps lean on (tag, *, #id, .class, [attr op? value?], pseudo
+  // classes, `>` / `+` / `~` / descendant combinators, comma groups).
+  // Each parsed unit is a `compound` plus the combinator that connects
+  // it to the previous compound in the same complex selector.
+  //
+  // Compound shape (kept compatible with the old PoC matcher so
+  // querySelector / closest / matches just keep working):
+  //   { tag: string|null, id: string|null, classes: string[],
+  //     attrs: [{name, op?, value?}], pseudos: [{name, args?}],
+  //     combinator: 'descendant'|'child'|'adjacent'|'sibling'|null }
+  //
+  // `parseSelector(s)` returns a *group* — an array of *complex*
+  // selectors. A complex selector is an array of compounds.
+  //
+  // Unsupported tokens / pseudos throw SyntaxError; callers that care
+  // (jQuery's `.is(':visible')`) catch and fall back to their own
+  // filter — that's preferable to silently matching everything (which
+  // was the pre-throw behaviour and broke Redmine's mobile probe).
+
+  function tokenizeSelector(s) {
+    const tokens = [];
+    let i = 0;
+    const len = s.length;
+    while (i < len) {
+      const c = s[i];
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f') {
+        while (i < len && /\s/.test(s[i])) i++;
+        tokens.push({ kind: 'ws' });
+        continue;
       }
-      if (units.length) out.push(units);
+      if (c === '>') { tokens.push({ kind: 'gt' }); i++; continue; }
+      if (c === '+') { tokens.push({ kind: 'plus' }); i++; continue; }
+      if (c === '~') { tokens.push({ kind: 'tilde' }); i++; continue; }
+      if (c === ',') { tokens.push({ kind: 'comma' }); i++; continue; }
+      if (c === '*') { tokens.push({ kind: 'star' }); i++; continue; }
+      if (c === '#') {
+        let j = i + 1;
+        while (j < len && /[\w-]/.test(s[j])) j++;
+        if (j === i + 1) throw new SyntaxError('csim v3: bad #id at ' + i);
+        tokens.push({ kind: 'hash', value: s.slice(i + 1, j) });
+        i = j; continue;
+      }
+      if (c === '.') {
+        let j = i + 1;
+        while (j < len && /[\w-]/.test(s[j])) j++;
+        if (j === i + 1) throw new SyntaxError('csim v3: bad .class at ' + i);
+        tokens.push({ kind: 'class', value: s.slice(i + 1, j) });
+        i = j; continue;
+      }
+      if (c === '[') {
+        let depth = 1, j = i + 1;
+        while (j < len && depth > 0) {
+          if (s[j] === '[') depth++;
+          else if (s[j] === ']') depth--;
+          if (depth > 0) j++;
+        }
+        if (j >= len) throw new SyntaxError('csim v3: unterminated [attr] at ' + i);
+        tokens.push({ kind: 'attr', value: s.slice(i + 1, j) });
+        i = j + 1; continue;
+      }
+      if (c === ':') {
+        // single `:` for pseudo-class; `::` collapses to pseudo-element
+        // which we just treat as the same (we don't model rendering
+        // boxes so `::before` etc. simply won't ever match a real DOM
+        // element — close enough for hide-rule extraction to ignore).
+        let j = i + 1;
+        if (s[j] === ':') j++;
+        const nameStart = j;
+        while (j < len && /[\w-]/.test(s[j])) j++;
+        const name = s.slice(nameStart, j);
+        if (!name) throw new SyntaxError('csim v3: bad pseudo at ' + i);
+        let args = null;
+        if (s[j] === '(') {
+          let depth = 1, k = j + 1;
+          while (k < len && depth > 0) {
+            if (s[k] === '(') depth++;
+            else if (s[k] === ')') depth--;
+            if (depth > 0) k++;
+          }
+          if (k >= len) throw new SyntaxError('csim v3: unterminated pseudo args at ' + i);
+          args = s.slice(j + 1, k);
+          j = k + 1;
+        }
+        tokens.push({ kind: 'pseudo', value: name, args });
+        i = j; continue;
+      }
+      if (/[a-zA-Z_]/.test(c)) {
+        let j = i;
+        while (j < len && /[\w-]/.test(s[j])) j++;
+        tokens.push({ kind: 'tag', value: s.slice(i, j) });
+        i = j; continue;
+      }
+      if (c === '&') {
+        // CSS nesting parent ref — only meaningful in nested-rule
+        // flattening; in stand-alone selectors we treat it as a sentinel
+        // the flattener will substitute before parsing. Reaching it here
+        // is a programming error.
+        throw new SyntaxError('csim v3: stray & in selector');
+      }
+      throw new SyntaxError('csim v3: unexpected selector char: ' + JSON.stringify(c) + ' at ' + i);
     }
-    return out;
+    return tokens;
   }
+
+  // Backward-compat: callers (extractHideRules, …) used to call
+  // splitTopLevel(selector, ',') to split before parsing. We keep the
+  // helper available because the CSS extractor still uses it to slice
+  // rule selectors before substitution.
   function splitTopLevel(s, sep) {
     const parts = [];
     let depth = 0, start = 0;
@@ -1085,95 +1172,352 @@
     parts.push(s.slice(start));
     return parts;
   }
-  function parseSimple(s) {
-    const u = { tag: null, id: null, classes: [], attrs: [] };
-    let i = 0;
-    // tag (or *)
-    let m = /^([a-zA-Z][\w-]*|\*)/.exec(s.slice(i));
-    if (m) { if (m[1] !== '*') u.tag = m[1].toLowerCase(); i += m[0].length; }
-    while (i < s.length) {
-      const c = s[i];
-      if (c === '#') {
-        m = /^#([\w-]+)/.exec(s.slice(i));
-        if (!m) break;
-        u.id = m[1]; i += m[0].length;
-      } else if (c === '.') {
-        m = /^\.([\w-]+)/.exec(s.slice(i));
-        if (!m) break;
-        u.classes.push(m[1]); i += m[0].length;
-      } else if (c === '[') {
-        m = /^\[([\w-]+)(?:([~|^$*]?=)(?:"([^"]*)"|'([^']*)'|([^\]]+)))?\]/.exec(s.slice(i));
-        if (!m) break;
-        u.attrs.push({ name: m[1].toLowerCase(), op: m[2] || null, value: m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[5] || '')) });
-        i += m[0].length;
-      } else {
-        break;
-      }
-    }
-    // Anything left unparsed (pseudo-classes, combinators like `>`, …)
-    // signals an unsupported selector. Throwing lets callers fall back
-    // (jQuery's `.matches` wraps in try/catch and reverts to its own
-    // filter engine — without the throw, `:visible` parsed as `{}` and
-    // matched every element, breaking jQuery's responsive-menu probe).
-    if (i < s.length) throw new SyntaxError('csim v3: unsupported selector segment: ' + s.slice(i));
-    return u;
+
+  function parseAttrToken(s) {
+    const m = /^\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*(?:[isIS])?\s*$/.exec(s);
+    if (!m) throw new SyntaxError('csim v3: bad attr selector: ' + s);
+    return {
+      name: m[1].toLowerCase(),
+      op: m[2] || null,
+      value: m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[5] || ''))
+    };
   }
+
+  // Recognised pseudo-class names. `:not(...)` / `:is(...)` / `:where(...)`
+  // accept a nested selector group; nth-* accept an An+B expression.
+  const PSEUDO_NO_ARG = new Set([
+    'first-child', 'last-child', 'only-child',
+    'first-of-type', 'last-of-type', 'only-of-type',
+    'empty', 'root', 'scope',
+    'checked', 'disabled', 'enabled',
+    'required', 'optional', 'read-only', 'read-write',
+    'hover', 'focus', 'focus-within', 'focus-visible',
+    'active', 'visited', 'link', 'target',
+    'placeholder-shown', 'default', 'indeterminate'
+  ]);
+  const PSEUDO_NTH = new Set([
+    'nth-child', 'nth-last-child', 'nth-of-type', 'nth-last-of-type'
+  ]);
+
+  function parsePseudoToken(name, args) {
+    const n = name.toLowerCase();
+    if (n === 'not' || n === 'is' || n === 'where') {
+      if (args == null) throw new SyntaxError('csim v3: ' + n + ' needs args');
+      return { name: n, list: parseSelector(args) };
+    }
+    if (PSEUDO_NTH.has(n)) {
+      if (args == null) throw new SyntaxError('csim v3: ' + n + ' needs args');
+      return { name: n, nth: parseNth(args) };
+    }
+    if (PSEUDO_NO_ARG.has(n)) return { name: n };
+    // Pseudo-elements (::before etc.) — drop on the floor; they can't
+    // match real DOM nodes anyway.
+    if (n === 'before' || n === 'after' || n === 'first-letter' || n === 'first-line' ||
+        n === 'placeholder' || n === 'selection' || n === 'marker' || n === 'backdrop') {
+      return { name: '__never_match__' };
+    }
+    throw new SyntaxError('csim v3: unsupported pseudo :' + n);
+  }
+
+  function parseNth(s) {
+    const t = s.trim().toLowerCase();
+    if (t === 'odd')  return { a: 2, b: 1 };
+    if (t === 'even') return { a: 2, b: 0 };
+    // an+b forms: -n+3, 2n, 2n+1, +3, -1, n+3, n, -n
+    const m = /^([+-]?\d*)n\s*([+-]\s*\d+)?$/.exec(t);
+    if (m) {
+      const aStr = m[1];
+      const a = aStr === '' || aStr === '+' ? 1 : aStr === '-' ? -1 : parseInt(aStr, 10);
+      const b = m[2] != null ? parseInt(m[2].replace(/\s+/g, ''), 10) : 0;
+      return { a, b };
+    }
+    const mb = /^([+-]?\d+)$/.exec(t);
+    if (mb) return { a: 0, b: parseInt(mb[1], 10) };
+    throw new SyntaxError('csim v3: bad nth expression: ' + s);
+  }
+
+  function parseSelector(sel) {
+    const tokens = tokenizeSelector(String(sel).trim());
+    const groups = [];
+    let i = 0;
+    while (i < tokens.length) {
+      while (i < tokens.length && (tokens[i].kind === 'ws' || tokens[i].kind === 'comma')) i++;
+      if (i >= tokens.length) break;
+      const parsed = parseComplex(tokens, i);
+      if (parsed.complex.length) groups.push(parsed.complex);
+      i = parsed.next;
+    }
+    return groups;
+  }
+
+  function parseComplex(tokens, i) {
+    const seq = [];
+    let pendingCombinator = null; // applied to the next compound
+    while (i < tokens.length) {
+      const t = tokens[i];
+      if (t.kind === 'comma') break;
+      if (t.kind === 'ws') {
+        // Peek next non-ws: if it's a combinator token, the whitespace is
+        // decorative; otherwise the whitespace itself is a descendant
+        // combinator (assuming there's another compound after).
+        let j = i + 1;
+        while (j < tokens.length && tokens[j].kind === 'ws') j++;
+        if (j >= tokens.length || tokens[j].kind === 'comma') { i = j; continue; }
+        if (tokens[j].kind === 'gt' || tokens[j].kind === 'plus' || tokens[j].kind === 'tilde') {
+          i = j; continue;
+        }
+        if (seq.length > 0 && pendingCombinator == null) pendingCombinator = 'descendant';
+        i = j; continue;
+      }
+      if (t.kind === 'gt')    { pendingCombinator = 'child';    i++; continue; }
+      if (t.kind === 'plus')  { pendingCombinator = 'adjacent'; i++; continue; }
+      if (t.kind === 'tilde') { pendingCombinator = 'sibling';  i++; continue; }
+      const parsed = parseCompound(tokens, i);
+      parsed.compound.combinator = seq.length === 0 ? null : (pendingCombinator || 'descendant');
+      seq.push(parsed.compound);
+      pendingCombinator = null;
+      i = parsed.next;
+    }
+    return { complex: seq, next: i };
+  }
+
+  function parseCompound(tokens, i) {
+    const c = { tag: null, id: null, classes: [], attrs: [], pseudos: [], combinator: null };
+    let consumed = false;
+    while (i < tokens.length) {
+      const t = tokens[i];
+      if (t.kind === 'tag')   { c.tag = t.value.toLowerCase(); consumed = true; i++; continue; }
+      if (t.kind === 'star')  { consumed = true; i++; continue; } // universal selector
+      if (t.kind === 'hash')  { c.id = t.value; consumed = true; i++; continue; }
+      if (t.kind === 'class') { c.classes.push(t.value); consumed = true; i++; continue; }
+      if (t.kind === 'attr')  { c.attrs.push(parseAttrToken(t.value)); consumed = true; i++; continue; }
+      if (t.kind === 'pseudo'){ c.pseudos.push(parsePseudoToken(t.value, t.args)); consumed = true; i++; continue; }
+      break;
+    }
+    if (!consumed) throw new SyntaxError('csim v3: empty compound selector');
+    return { compound: c, next: i };
+  }
+
   function matchUnit(el, u) {
     if (el.nodeType !== NODE_ELEMENT) return false;
     if (u.tag && el._tag !== u.tag) return false;
     if (u.id && el._attrs.id !== u.id) return false;
-    if (u.classes.length) {
+    if (u.classes && u.classes.length) {
       const cs = classes(el);
       for (const c of u.classes) if (!cs.includes(c)) return false;
     }
-    for (const a of u.attrs) {
-      const v = el._attrs[a.name];
-      if (a.op == null) {
-        if (v == null) return false;
-      } else if (a.op === '=') {
-        if (v !== a.value) return false;
-      } else if (a.op === '~=') {
-        if (!v) return false;
-        if (!v.split(/\s+/).includes(a.value)) return false;
-      } else if (a.op === '^=') {
-        if (v == null || !v.startsWith(a.value)) return false;
-      } else if (a.op === '$=') {
-        if (v == null || !v.endsWith(a.value)) return false;
-      } else if (a.op === '*=') {
-        if (v == null || v.indexOf(a.value) < 0) return false;
-      } else if (a.op === '|=') {
-        if (v == null) return false;
-        if (v !== a.value && !v.startsWith(a.value + '-')) return false;
-      }
-    }
+    if (u.attrs) for (const a of u.attrs) if (!matchAttr(el, a)) return false;
+    if (u.pseudos) for (const p of u.pseudos) if (!matchPseudo(el, p)) return false;
     return true;
   }
-  // Match el against a single chain of units. Each non-first unit's
-  // `combinator` says how to bridge from its predecessor: `'descendant'`
-  // walks ancestors (any depth); `'child'` only accepts the immediate
-  // parent. The combinator stored on a unit refers to the relationship
-  // *with the preceding unit*, so we read it from the unit we're about
-  // to match.
-  function matchChain(el, units) {
-    if (!units.length) return false;
-    if (!matchUnit(el, units[units.length - 1])) return false;
-    let cur = el._parent;
-    for (let i = units.length - 2; i >= 0; i--) {
-      const next = units[i + 1];
-      if (next.combinator === 'child') {
-        if (!cur || cur.nodeType !== NODE_ELEMENT || !matchUnit(cur, units[i])) return false;
+
+  function matchAttr(el, a) {
+    const v = el._attrs[a.name];
+    if (a.op == null) return v != null;
+    if (v == null) return false;
+    switch (a.op) {
+      case '=':  return v === a.value;
+      case '~=': return v.split(/\s+/).includes(a.value);
+      case '^=': return a.value !== '' && v.startsWith(a.value);
+      case '$=': return a.value !== '' && v.endsWith(a.value);
+      case '*=': return a.value !== '' && v.indexOf(a.value) >= 0;
+      case '|=': return v === a.value || v.startsWith(a.value + '-');
+    }
+    return false;
+  }
+
+  function elementSiblings(el) {
+    if (!el._parent) return [];
+    return el._parent._children.filter(n => n.nodeType === NODE_ELEMENT);
+  }
+  function elementSiblingsOfType(el) {
+    if (!el._parent) return [];
+    return el._parent._children.filter(n => n.nodeType === NODE_ELEMENT && n._tag === el._tag);
+  }
+  function prevElementSibling(el) {
+    if (!el._parent) return null;
+    const sibs = el._parent._children;
+    const idx = sibs.indexOf(el);
+    for (let i = idx - 1; i >= 0; i--) {
+      if (sibs[i].nodeType === NODE_ELEMENT) return sibs[i];
+    }
+    return null;
+  }
+
+  // an + b membership: positions are 1-based per CSS. n = 0, 1, 2, ...
+  // so `position` must equal `a*n + b` for some non-negative integer n.
+  function nthMatches(position, nth) {
+    const { a, b } = nth;
+    if (a === 0) return position === b;
+    const diff = position - b;
+    if (a > 0) return diff >= 0 && diff % a === 0;
+    return diff <= 0 && diff % a === 0;
+  }
+
+  function matchPseudo(el, p) {
+    switch (p.name) {
+      case '__never_match__': return false;
+      case 'not':   return !p.list.some(seq => matchComplex(el, seq));
+      case 'is':
+      case 'where': return p.list.some(seq => matchComplex(el, seq));
+      case 'first-child': {
+        const sibs = elementSiblings(el);
+        return sibs.length > 0 && sibs[0] === el;
+      }
+      case 'last-child': {
+        const sibs = elementSiblings(el);
+        return sibs.length > 0 && sibs[sibs.length - 1] === el;
+      }
+      case 'only-child': {
+        const sibs = elementSiblings(el);
+        return sibs.length === 1 && sibs[0] === el;
+      }
+      case 'first-of-type': {
+        const sibs = elementSiblingsOfType(el);
+        return sibs.length > 0 && sibs[0] === el;
+      }
+      case 'last-of-type': {
+        const sibs = elementSiblingsOfType(el);
+        return sibs.length > 0 && sibs[sibs.length - 1] === el;
+      }
+      case 'only-of-type': {
+        const sibs = elementSiblingsOfType(el);
+        return sibs.length === 1 && sibs[0] === el;
+      }
+      case 'nth-child': {
+        const sibs = elementSiblings(el);
+        const idx  = sibs.indexOf(el);
+        return idx >= 0 && nthMatches(idx + 1, p.nth);
+      }
+      case 'nth-last-child': {
+        const sibs = elementSiblings(el);
+        const idx  = sibs.indexOf(el);
+        return idx >= 0 && nthMatches(sibs.length - idx, p.nth);
+      }
+      case 'nth-of-type': {
+        const sibs = elementSiblingsOfType(el);
+        const idx  = sibs.indexOf(el);
+        return idx >= 0 && nthMatches(idx + 1, p.nth);
+      }
+      case 'nth-last-of-type': {
+        const sibs = elementSiblingsOfType(el);
+        const idx  = sibs.indexOf(el);
+        return idx >= 0 && nthMatches(sibs.length - idx, p.nth);
+      }
+      case 'empty':
+        // CSS :empty matches when the element has no children, or only
+        // comment children; whitespace-only text children DO disqualify.
+        for (const c of el._children) {
+          if (c.nodeType === NODE_TEXT) {
+            if (c.data && c.data.length > 0) return false;
+          } else if (c.nodeType === NODE_ELEMENT) {
+            return false;
+          }
+        }
+        return true;
+      case 'root': return el._parent && el._parent.nodeType === NODE_DOC;
+      case 'scope':
+        // No scoped-element tracking yet — treat as root-fallback.
+        return el._parent && el._parent.nodeType === NODE_DOC;
+      case 'checked': {
+        if (el._tag === 'option') return el._attrs.selected != null;
+        const t = (el._attrs.type || '').toLowerCase();
+        if (el._tag === 'input' && (t === 'checkbox' || t === 'radio')) return el._attrs.checked != null;
+        return false;
+      }
+      case 'disabled': return el._attrs.disabled != null;
+      case 'enabled':  return el._attrs.disabled == null;
+      case 'required': return el._attrs.required != null;
+      case 'optional': return el._attrs.required == null;
+      case 'read-only':  return el._attrs.readonly != null;
+      case 'read-write': return el._attrs.readonly == null;
+      // We don't drive a real focus/hover state machine yet, so these
+      // are conservatively false. jQuery's `:hover` / `:focus` filters
+      // fall back to its own DOM-state check, so this only affects
+      // cascade rules that gate on them — and those rules generally
+      // *reveal* content rather than hide it (so reporting false here
+      // keeps the element visibility-stable until a real test cares).
+      case 'hover':         return false;
+      case 'focus':         return false;
+      case 'focus-within':  return false;
+      case 'focus-visible': return false;
+      case 'active':        return false;
+      case 'visited':       return false;
+      case 'link':          return el._tag === 'a' && el._attrs.href != null;
+      case 'target':        return false;
+      case 'placeholder-shown': return false;
+      case 'default':       return false;
+      case 'indeterminate': return false;
+    }
+    return false;
+  }
+
+  function matchComplex(el, seq) {
+    if (!seq.length) return false;
+    if (!matchUnit(el, seq[seq.length - 1])) return false;
+    let cur = el;
+    for (let i = seq.length - 2; i >= 0; i--) {
+      // `combinator` on seq[i+1] describes how seq[i] connects to its
+      // successor — i.e. how we step from `cur` back toward seq[i].
+      const combinator = seq[i + 1].combinator;
+      if (combinator === 'child') {
+        cur = cur._parent;
+        if (!cur || cur.nodeType !== NODE_ELEMENT || !matchUnit(cur, seq[i])) return false;
+      } else if (combinator === 'adjacent') {
+        cur = prevElementSibling(cur);
+        if (!cur || !matchUnit(cur, seq[i])) return false;
+      } else if (combinator === 'sibling') {
+        let s = prevElementSibling(cur);
+        while (s && !matchUnit(s, seq[i])) s = prevElementSibling(s);
+        if (!s) return false;
+        cur = s;
       } else {
-        while (cur && cur.nodeType === NODE_ELEMENT && !matchUnit(cur, units[i])) cur = cur._parent;
+        // descendant (the default)
+        cur = cur._parent;
+        while (cur && cur.nodeType === NODE_ELEMENT && !matchUnit(cur, seq[i])) cur = cur._parent;
         if (!cur || cur.nodeType !== NODE_ELEMENT) return false;
       }
-      cur = cur._parent;
     }
     return true;
   }
-  // Match against a group (array of chains) — any chain hits ⇒ match.
+
   function matchOne(el, group) {
-    for (const chain of group) if (matchChain(el, chain)) return true;
+    for (const seq of group) if (matchComplex(el, seq)) return true;
     return false;
+  }
+
+  // Specificity (a, b, c) per CSS Selectors Level 4. Used by the
+  // display/visibility cascade resolver — last source-order wins among
+  // equal-specificity rules; `:not(...)` / `:is(...)` take the *max*
+  // specificity of their inner selector group; `:where(...)` contributes
+  // zero.
+  function specificity(seq) {
+    let a = 0, b = 0, c = 0;
+    for (const u of seq) {
+      if (u.id) a++;
+      if (u.classes && u.classes.length) b += u.classes.length;
+      if (u.attrs && u.attrs.length) b += u.attrs.length;
+      if (u.pseudos) for (const p of u.pseudos) {
+        if (p.name === 'where') continue;
+        if (p.name === 'not' || p.name === 'is') {
+          let max = [0, 0, 0];
+          for (const inner of p.list) {
+            const s = specificity(inner);
+            if (compareSpec(s, max) > 0) max = s;
+          }
+          a += max[0]; b += max[1]; c += max[2];
+          continue;
+        }
+        b++;
+      }
+      if (u.tag) c++;
+    }
+    return [a, b, c];
+  }
+  function compareSpec(s1, s2) {
+    if (s1[0] !== s2[0]) return s1[0] - s2[0];
+    if (s1[1] !== s2[1]) return s1[1] - s2[1];
+    return s1[2] - s2[2];
   }
   function findAll(root, group) {
     const out = [];
@@ -1833,10 +2177,10 @@
   // Visibility walk mirroring v2's `self_hidden?` + ancestor chain:
   // INVISIBLE_TAGS (head/script/style/template/noscript/title),
   // `<input type=hidden>`, `hidden` attribute, inline `style=`
-  // `display:none` / `visibility:hidden`. Cascade-driven visibility
-  // (class-based hide rules from external stylesheets) is deferred —
-  // when we need it, port `class_hidden?` / cascade resolution from
-  // v2's Browser.
+  // `display:none` / `visibility:hidden`. Cascade-derived rules
+  // (display / visibility from <style> + <link rel=stylesheet>) are
+  // resolved in `matchesAnyHideRule` with proper specificity + @media
+  // evaluation — see the "Display / visibility cascade" block below.
   const INVISIBLE_TAGS = new Set(['head','script','style','template','noscript','title']);
   const DISPLAY_NONE_RE       = /(^|;|\s)display\s*:\s*none\b/i;
   const VISIBILITY_HIDDEN_RE  = /(^|;|\s)visibility\s*:\s*hidden\b/i;
@@ -1844,104 +2188,443 @@
     if (el._attrs.hidden != null) return true;
     const style = el._attrs.style;
     if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
-    // Cascade-derived hide rules collected at page-load time. We don't
-    // resolve the full CSS cascade (specificity / inheritance / media
-    // queries); we just check whether *any* parsed `display: none` /
-    // `visibility: hidden` rule's selector matches this element.
-    // Good enough for class-based hides (Tailwind `.hidden`, Bootstrap
-    // `.d-none`, Redmine `.contextual.collapsed > ul`), which is the
-    // common case for apps under test.
     return matchesAnyHideRule(el);
   }
 
-  // ── Hide-rule cascade (PoC) ─────────────────────────────────────
+  // ── Display / visibility cascade ────────────────────────────────
   //
-  // Populated from `<style>` text and fetched `<link rel="stylesheet">`
-  // content during `__csimLoadDocument`. Each rule is `{ group, hide }`
-  // where `group` is a selector group parsed via `parseSelector` (the
-  // same JS-side parser our `querySelectorAll` already uses).
+  // Scope: just `display` and `visibility`. We don't model any other
+  // CSS property — selfHidden is the only consumer, so the resolver
+  // can throw away everything else at parse time.
+  //
+  // Pipeline:
+  //   1. parseCssTree(text)         — tokenise into nested {at-rule|rule}
+  //   2. flattenRules(tree, ctx)    — eval @media against viewport,
+  //                                   substitute & for parent selector,
+  //                                   drop @keyframes / @font-face / etc.
+  //   3. extractHideRules(text)     — flatten → one entry per (selector,
+  //                                   display, visibility, !important).
+  //   4. matchesAnyHideRule(el)     — for each matching rule, pick the
+  //                                   declaration with highest priority
+  //                                   (important > !important; among
+  //                                   equals, higher specificity wins;
+  //                                   among equals, later source order
+  //                                   wins). Element is hidden iff the
+  //                                   winning `display` is `none` or
+  //                                   `visibility` is `hidden`.
+  //
+  // We don't compute inheritance — `visibility` does inherit per spec
+  // but selfHidden walks the ancestor chain anyway, so the inheritance
+  // falls out naturally. `display` doesn't inherit.
 
   let __hideRules = [];
-
-  // Source-order-last-wins resolution of `display` + `visibility`
-  // across all matching rules. Cheaper than a full cascade and good
-  // enough for the responsive overrides that are the common cause of
-  // false-positive hides (Redmine's `.flyout-menu{display:none}` →
-  // `.flyout-menu{display:block}` chain in responsive.css).
-  function matchesAnyHideRule(el) {
-    if (__hideRules.length === 0) return false;
-    let display = null;
-    let visibility = null;
-    for (const r of __hideRules) {
-      try {
-        if (matchOne(el, r.group)) {
-          if (r.display    != null) display    = r.display;
-          if (r.visibility != null) visibility = r.visibility;
-        }
-      } catch (_) {}
-    }
-    return display === 'none' || visibility === 'hidden';
+  let __ruleSerial = 0;
+  const VIEWPORT_DEFAULT = { width: 1024, height: 768 };
+  function currentViewport() {
+    return {
+      width:  Number(globalThis.innerWidth)  || VIEWPORT_DEFAULT.width,
+      height: Number(globalThis.innerHeight) || VIEWPORT_DEFAULT.height
+    };
   }
 
-  // Strip CSS comments and at-rule blocks before regexing rule bodies.
-  // We don't model @media / @supports / @container; the inside-rules
-  // of common `@media (prefers-*)` blocks rarely toggle display:none
-  // for test-relevant elements, so dropping them keeps false-positives
-  // down rather than treating all @media rules as always-on.
   function stripCssComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, ''); }
-  function stripAtRules(s) {
-    // Walk and remove balanced `@... { ... }` blocks at top level.
-    let out = '', i = 0, depth = 0, skipDepth = 0;
+
+  // Parse CSS text into a tree. Returns an array of nodes:
+  //   { type: 'rule', selector, decls: [{prop, value, important}], children: [...] }
+  //   { type: 'at-rule', name, prelude, children: [...] | null, decls: [...] }
+  //
+  // CSS Nesting (Level 4) is supported: a rule can contain both
+  // declarations and child rules. The flattener composes child rule
+  // selectors against the parent's.
+  function parseCssTree(text) {
+    const s = stripCssComments(text);
+    const out = parseCssBody(s, 0, false);
+    return out.nodes;
+  }
+
+  function parseCssBody(s, start, inBlock) {
+    const nodes = [];
+    let i = start;
     while (i < s.length) {
-      const ch = s[i];
-      if (skipDepth > 0) {
-        if (ch === '{') skipDepth++;
-        else if (ch === '}') skipDepth--;
-        i++;
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (i >= s.length) break;
+      if (inBlock && s[i] === '}') { i++; return { nodes, next: i }; }
+      if (s[i] === '@') {
+        const at = parseAtRule(s, i);
+        nodes.push(at.node);
+        i = at.next;
         continue;
       }
-      if (ch === '@' && depth === 0) {
-        // Find the matching `{` or `;`.
-        let j = i + 1;
-        while (j < s.length && s[j] !== '{' && s[j] !== ';') j++;
-        if (j < s.length && s[j] === ';') { i = j + 1; continue; }
-        if (j < s.length && s[j] === '{') { skipDepth = 1; i = j + 1; continue; }
-        break;
+      // Look ahead to decide if this is a declaration or a qualified
+      // rule. Track top-level `{`/`;`/`}` (i.e. depth == 0 for [], ()).
+      const probe = scanToBreaker(s, i);
+      if (probe.kind === 'lbrace') {
+        const selector = s.slice(i, probe.at).trim();
+        const body = parseDeclsAndNested(s, probe.at + 1);
+        nodes.push({ type: 'rule', selector, decls: body.decls, children: body.children });
+        i = body.next;
+        continue;
       }
-      out += ch;
-      if (ch === '{') depth++;
-      else if (ch === '}') depth--;
+      // Stray declaration at top level (or no terminator) — skip past.
+      i = probe.at + (probe.kind === 'semi' ? 1 : 0);
+      if (i <= start) i = s.length;
+    }
+    return { nodes, next: i };
+  }
+
+  function scanToBreaker(s, i) {
+    let depth = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"' || c === "'") {
+        const q = c; i++;
+        while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
+        i++; continue;
+      }
+      if (c === '(' || c === '[') depth++;
+      else if (c === ')' || c === ']') depth--;
+      else if (depth === 0 && (c === '{' || c === ';' || c === '}')) {
+        return { kind: c === '{' ? 'lbrace' : c === ';' ? 'semi' : 'rbrace', at: i };
+      }
       i++;
     }
+    return { kind: 'eof', at: i };
+  }
+
+  function parseAtRule(s, i) {
+    i++; // skip @
+    const start = i;
+    while (i < s.length && /[a-zA-Z-]/.test(s[i])) i++;
+    const name = s.slice(start, i).toLowerCase();
+    const preStart = i;
+    while (i < s.length && /\s/.test(s[i])) i++;
+    // prelude until ; or {
+    const pStart = i;
+    let depth = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"' || c === "'") {
+        const q = c; i++;
+        while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
+        i++; continue;
+      }
+      if (c === '(' || c === '[') depth++;
+      else if (c === ')' || c === ']') depth--;
+      else if (depth === 0 && (c === ';' || c === '{')) break;
+      i++;
+    }
+    const prelude = s.slice(pStart, i).trim();
+    if (i >= s.length || s[i] === ';') {
+      return { node: { type: 'at-rule', name, prelude, children: null }, next: i + 1 };
+    }
+    // s[i] === '{'
+    i++;
+    // For @keyframes / @font-face / @page / etc. we just want to skip
+    // the body without descending. Everything else can carry nested
+    // rules + declarations.
+    if (name === 'keyframes' || name === 'font-face' || name === 'page' ||
+        name === 'counter-style' || name === 'property' || name === 'font-feature-values') {
+      const skipped = skipBalancedBlock(s, i);
+      return { node: { type: 'at-rule', name, prelude, children: null }, next: skipped };
+    }
+    const body = parseDeclsAndNested(s, i);
+    return {
+      node: { type: 'at-rule', name, prelude, children: body.children, decls: body.decls },
+      next: body.next
+    };
+  }
+
+  function skipBalancedBlock(s, i) {
+    let depth = 1;
+    while (i < s.length && depth > 0) {
+      const c = s[i];
+      if (c === '"' || c === "'") {
+        const q = c; i++;
+        while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
+        i++; continue;
+      }
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      i++;
+    }
+    return i;
+  }
+
+  function parseDeclsAndNested(s, i) {
+    const decls = [];
+    const children = [];
+    while (i < s.length) {
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (i >= s.length) break;
+      if (s[i] === '}') return { decls, children, next: i + 1 };
+      if (s[i] === '@') {
+        const at = parseAtRule(s, i);
+        children.push(at.node);
+        i = at.next;
+        continue;
+      }
+      const probe = scanToBreaker(s, i);
+      if (probe.kind === 'lbrace') {
+        // nested rule
+        const selector = s.slice(i, probe.at).trim();
+        const body = parseDeclsAndNested(s, probe.at + 1);
+        children.push({ type: 'rule', selector, decls: body.decls, children: body.children });
+        i = body.next;
+        continue;
+      }
+      if (probe.kind === 'semi' || probe.kind === 'rbrace') {
+        const declText = s.slice(i, probe.at).trim();
+        if (declText) {
+          const colonIdx = declText.indexOf(':');
+          if (colonIdx > 0) {
+            const prop = declText.slice(0, colonIdx).trim().toLowerCase();
+            let value = declText.slice(colonIdx + 1).trim();
+            let important = false;
+            if (/!important\s*$/i.test(value)) {
+              important = true;
+              value = value.replace(/!important\s*$/i, '').trim();
+            }
+            // Only retain display / visibility; the rest is ignored to
+            // keep the resolver's matching loop short.
+            if (prop === 'display' || prop === 'visibility') {
+              decls.push({ prop, value: value.toLowerCase(), important });
+            }
+          }
+        }
+        if (probe.kind === 'rbrace') return { decls, children, next: probe.at + 1 };
+        i = probe.at + 1;
+        continue;
+      }
+      // EOF / no terminator
+      break;
+    }
+    return { decls, children, next: i };
+  }
+
+  // ── @media evaluator ────────────────────────────────────────────
+  //
+  // Common-subset only: media types (`all` / `screen` / `print`),
+  // `and` / `not` / `only` joins (`,` is media-query-list), and the
+  // following feature expressions:
+  //   (min-width: N), (max-width: N), (width: N)
+  //   (min-height: N), (max-height: N), (height: N)
+  //   (orientation: landscape|portrait)
+  //   (hover: hover|none), (pointer: fine|coarse|none)
+  //   (prefers-color-scheme: light|dark)
+  //   (prefers-reduced-motion: reduce|no-preference)
+  //   (min-resolution: 1dppx etc.)
+  // Anything else falls back to *false* (i.e. the block doesn't apply).
+  // Conservative bias: a desktop viewport at 1× / no-touch / no-dark.
+  function mediaMatches(text, vp) {
+    if (!text) return true; // empty media list = matches all
+    for (const q of splitTopLevel(text, ',')) {
+      if (singleMediaMatches(q.trim(), vp)) return true;
+    }
+    return false;
+  }
+
+  function singleMediaMatches(q, vp) {
+    if (!q) return true;
+    let negate = false;
+    const lower = q.toLowerCase();
+    if (/^only\s+/.test(lower)) q = q.replace(/^\s*only\s+/i, '');
+    if (/^not\s+/.test(lower))  { negate = true; q = q.replace(/^\s*not\s+/i, ''); }
+    const parts = splitMediaAnd(q);
+    let result = true;
+    for (const p of parts) {
+      if (!matchMediaPart(p.trim(), vp)) { result = false; break; }
+    }
+    return negate ? !result : result;
+  }
+
+  function splitMediaAnd(s) {
+    // Splits on top-level " and " (case-insensitive), respecting
+    // parentheses.
+    const out = [];
+    let depth = 0, start = 0;
+    const lower = s.toLowerCase();
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (depth === 0 && lower.startsWith(' and ', i)) {
+        out.push(s.slice(start, i));
+        i += 4;
+        start = i + 1;
+      }
+    }
+    out.push(s.slice(start));
     return out;
   }
-  const DISPLAY_DECL_RE    = /(?:^|;|\s)display\s*:\s*([^;]+?)(?:;|$)/i;
-  const VISIBILITY_DECL_RE = /(?:^|;|\s)visibility\s*:\s*([^;]+?)(?:;|$)/i;
-  function extractHideRules(cssText) {
+
+  function matchMediaPart(p, vp) {
+    if (!p) return true;
+    if (p[0] !== '(') {
+      // media type
+      const t = p.toLowerCase().trim();
+      if (t === 'all' || t === '' || t === 'screen') return true;
+      if (t === 'print' || t === 'speech') return false;
+      return false; // unknown media type
+    }
+    // feature expression: (name) | (name: value) | (range)
+    if (p[p.length - 1] !== ')') return false;
+    const inside = p.slice(1, -1).trim();
+    const m = /^([a-zA-Z-]+)\s*:\s*(.*)$/.exec(inside);
+    if (!m) {
+      // Bare feature like (hover) — treat as truthy if we'd answer
+      // yes to its `(name: <any-value>)` form. Few tests rely on this.
+      const name = inside.toLowerCase().trim();
+      if (name === 'hover' || name === 'any-hover') return true;
+      if (name === 'pointer' || name === 'any-pointer') return true;
+      return false;
+    }
+    const feat = m[1].toLowerCase();
+    const val  = m[2].trim().toLowerCase();
+    if (feat === 'min-width')  return vp.width  >= parsePx(val);
+    if (feat === 'max-width')  return vp.width  <= parsePx(val);
+    if (feat === 'width')      return vp.width  === parsePx(val);
+    if (feat === 'min-height') return vp.height >= parsePx(val);
+    if (feat === 'max-height') return vp.height <= parsePx(val);
+    if (feat === 'height')     return vp.height === parsePx(val);
+    if (feat === 'orientation') return val === (vp.width >= vp.height ? 'landscape' : 'portrait');
+    if (feat === 'hover' || feat === 'any-hover')     return val === 'hover';
+    if (feat === 'pointer' || feat === 'any-pointer') return val === 'fine';
+    if (feat === 'prefers-color-scheme')              return val === 'light';
+    if (feat === 'prefers-reduced-motion')            return val === 'no-preference';
+    if (feat === 'min-resolution' || feat === 'max-resolution' || feat === 'resolution') {
+      // 1dppx baseline. min-resolution matches when test ≤ 1; etc.
+      const t = parseDppx(val);
+      if (feat === 'min-resolution') return 1 >= t;
+      if (feat === 'max-resolution') return 1 <= t;
+      return 1 === t;
+    }
+    return false;
+  }
+
+  function parsePx(s) {
+    const n = parseFloat(s);
+    if (Number.isNaN(n)) return 0;
+    if (/em$/.test(s)) return n * 16; // approximate
+    if (/rem$/.test(s)) return n * 16;
+    return n;
+  }
+  function parseDppx(s) {
+    const n = parseFloat(s);
+    if (Number.isNaN(n)) return 1;
+    if (/dppx$/.test(s)) return n;
+    if (/dpi$/.test(s))  return n / 96;
+    if (/dpcm$/.test(s)) return n / 37.795;
+    return n;
+  }
+
+  // Flatten the parsed CSS tree to a list of {selectorText, decls,
+  // sourceIdx, important}. Resolves @media (drops non-matching),
+  // @supports (always-true, descend), CSS nesting via `&` substitution.
+  function flattenCssTree(tree, vp) {
     const out = [];
-    const cleaned = stripAtRules(stripCssComments(cssText));
-    const re = /([^{}]+?)\s*\{\s*([^{}]*?)\s*\}/g;
-    let m;
-    while ((m = re.exec(cleaned)) !== null) {
-      const selector = m[1].trim();
-      const decls    = m[2];
-      if (!selector) continue;
-      const dm = DISPLAY_DECL_RE.exec(decls);
-      const vm = VISIBILITY_DECL_RE.exec(decls);
-      if (!dm && !vm) continue;
-      const display    = dm ? dm[1].trim().toLowerCase() : null;
-      const visibility = vm ? vm[1].trim().toLowerCase() : null;
-      // Source-order-last-wins resolution needs to keep reveal rules
-      // (display:block etc.) too, not just `display:none` — otherwise
-      // a later `.flyout-menu{display:block}` can't override an earlier
-      // `.flyout-menu{display:none}`. (Specificity is approximated by
-      // source order; good enough for class-based responsive overrides.)
+    const stack = []; // parent selector groups for nesting context
+    function walk(nodes) {
+      for (const node of nodes) {
+        if (node.type === 'at-rule') {
+          if (node.name === 'media') {
+            if (mediaMatches(node.prelude, vp)) {
+              if (node.decls && node.decls.length && stack.length) {
+                // Decls inside @media inside a rule attach to the
+                // enclosing rule's selector.
+                out.push({ selectorText: stack[stack.length - 1], decls: node.decls });
+              }
+              walk(node.children || []);
+            }
+            continue;
+          }
+          if (node.name === 'supports' || node.name === 'container') {
+            // Always-on fallback: descend.
+            if (node.decls && node.decls.length && stack.length) {
+              out.push({ selectorText: stack[stack.length - 1], decls: node.decls });
+            }
+            walk(node.children || []);
+            continue;
+          }
+          // @keyframes / @font-face / @import / etc. — skip.
+          continue;
+        }
+        // node.type === 'rule'
+        const parentSel = stack.length ? stack[stack.length - 1] : null;
+        const resolved = composeNestedSelector(node.selector, parentSel);
+        if (node.decls && node.decls.length) {
+          out.push({ selectorText: resolved, decls: node.decls });
+        }
+        if (node.children && node.children.length) {
+          stack.push(resolved);
+          walk(node.children);
+          stack.pop();
+        }
+      }
+    }
+    walk(tree);
+    return out;
+  }
+
+  // CSS nesting: `&` in a nested selector substitutes the parent
+  // selector list. Without `&`, the nested selector is implicitly
+  // `& <descendant> child`. Multi-selector lists distribute.
+  function composeNestedSelector(child, parent) {
+    if (!parent) return child;
+    const childParts = splitTopLevel(child, ',').map(p => p.trim()).filter(Boolean);
+    const parentParts = splitTopLevel(parent, ',').map(p => p.trim()).filter(Boolean);
+    const out = [];
+    for (const cp of childParts) {
+      const hasAmpersand = /&/.test(cp);
+      for (const pp of parentParts) {
+        if (hasAmpersand) {
+          // Parentheses around pp so that `& .foo` keeps `pp` as a
+          // single compound chunk in the descendant join. Real CSS uses
+          // `:is(pp)` for this; the in-house matcher supports `:is`.
+          out.push(cp.replace(/&/g, ':is(' + pp + ')'));
+        } else {
+          out.push(pp + ' ' + cp);
+        }
+      }
+    }
+    return out.join(', ');
+  }
+
+  function extractHideRules(cssText, vp) {
+    const out = [];
+    let tree;
+    try { tree = parseCssTree(cssText); }
+    catch (_) { return out; }
+    const flat = flattenCssTree(tree, vp);
+    for (const r of flat) {
+      const selector = r.selectorText;
+      const decls = r.decls;
+      if (!selector || !decls.length) continue;
+      // Pick out only display + visibility — done at parse time, so
+      // the loop below already sees pre-filtered decls.
+      let display = null, displayImp = false;
+      let visibility = null, visibilityImp = false;
+      for (const d of decls) {
+        if (d.prop === 'display')    { display = d.value; displayImp = d.important; }
+        if (d.prop === 'visibility') { visibility = d.value; visibilityImp = d.important; }
+      }
+      if (display == null && visibility == null) continue;
+      // Split the selector group so each match-test is one chain — the
+      // resolver iterates flat and ties break on (specificity, order).
       for (const sel of splitTopLevel(selector, ',')) {
         const trimmed = sel.trim();
         if (!trimmed) continue;
         let group;
         try { group = parseSelector(trimmed); } catch (_) { continue; }
-        if (group && group.length) out.push({ group, display, visibility });
+        if (!group || !group.length) continue;
+        // group has exactly one complex selector here (we split the
+        // comma list above). Compute its specificity.
+        const seq = group[0];
+        const spec = specificity(seq);
+        out.push({
+          group, spec, source: __ruleSerial++,
+          display, displayImp,
+          visibility, visibilityImp
+        });
       }
     }
     return out;
@@ -1949,17 +2632,14 @@
 
   function collectHideRules(doc) {
     if (!doc || !doc.documentElement) return [];
+    __ruleSerial = 0;
+    const vp = currentViewport();
     const rules = [];
-    // <style> blocks first.
     const styles = doc.documentElement.querySelectorAll('style');
     for (const s of styles) {
-      const txt = scriptText(s); // re-use raw-text accessor
-      if (txt) rules.push(...extractHideRules(txt));
+      const txt = scriptText(s);
+      if (txt) rules.push(...extractHideRules(txt, vp));
     }
-    // <link rel="stylesheet" href="..."> — synchronously fetched via
-    // the same `__rackFetch` host fn used for external `<script src>`.
-    // Network errors fall through silently; cascade is best-effort
-    // for visibility resolution, not load-bearing.
     const links = doc.documentElement.querySelectorAll('link');
     for (const l of links) {
       const rel = (l._attrs.rel || '').toLowerCase();
@@ -1969,11 +2649,49 @@
       try {
         const resp = __rackFetch('GET', href, '', null, 'follow');
         if (resp && resp.status < 400 && resp.body) {
-          rules.push(...extractHideRules(resp.body));
+          rules.push(...extractHideRules(resp.body, vp));
         }
       } catch (_) {}
     }
     return rules;
+  }
+
+  // Cascade resolution for {display, visibility} on `el`. Priority
+  // order (highest wins):
+  //   1. !important declarations
+  //   2. specificity (a, b, c) — higher wins
+  //   3. source order — later wins
+  function matchesAnyHideRule(el) {
+    if (__hideRules.length === 0) return false;
+    let bestD = null, bestV = null;
+    for (const r of __hideRules) {
+      try {
+        if (!matchOne(el, r.group)) continue;
+      } catch (_) { continue; }
+      if (r.display != null) {
+        if (winsCascade(bestD, r, true)) {
+          bestD = { value: r.display, important: r.displayImp, spec: r.spec, source: r.source };
+        }
+      }
+      if (r.visibility != null) {
+        if (winsCascade(bestV, r, false)) {
+          bestV = { value: r.visibility, important: r.visibilityImp, spec: r.spec, source: r.source };
+        }
+      }
+    }
+    if (bestD && bestD.value === 'none') return true;
+    if (bestV && bestV.value === 'hidden') return true;
+    return false;
+  }
+
+  function winsCascade(current, candidate, isDisplay) {
+    const candImp = isDisplay ? candidate.displayImp : candidate.visibilityImp;
+    if (!current) return true;
+    if (candImp && !current.important) return true;
+    if (!candImp && current.important) return false;
+    const cmp = compareSpec(candidate.spec, current.spec);
+    if (cmp !== 0) return cmp > 0;
+    return candidate.source >= current.source;
   }
   globalThis.__csimVisible = function (h) {
     const n = lookup(h);
