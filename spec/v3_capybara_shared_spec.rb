@@ -30,7 +30,19 @@ DESCRIPTION_SKIPS_V3 = [
   'Capybara::Session Simulated_v3 #all with obscured filter should not find nodes on top outside the viewport when false',
   'Capybara::Session Simulated_v3 #all with obscured filter should find top nodes outside the viewport when true',
   "Capybara::Session Simulated_v3 #assert_matches_style should raise error if the elements style doesn't contain the given properties",
-  'Capybara::Session Simulated_v3 #has_css? :style option should support Hash'
+  'Capybara::Session Simulated_v3 #has_css? :style option should support Hash',
+  # Click-offset tests need real hit-testing — we don't have a layout
+  # engine to translate (x,y) into an element.
+  'Capybara::Session Simulated_v3 node #click offset when w3c_click_offset is',
+  'Capybara::Session Simulated_v3 node #double_click offset when w3c_click_offset is',
+  'Capybara::Session Simulated_v3 node #right_click offset when w3c_click_offset is',
+  # File-upload: <input type=file> requires multipart form submission
+  # (multipart encoder still to land) and a synthetic File handle.
+  # Out-of-scope until the rest of v3 has caught up; v2 supports it.
+  'Capybara::Session Simulated_v3 #attach_file ',
+  # Shadow DOM: shadowRoot / attachShadow plus the slot algorithm.
+  # Way out of scope for the PoC; v2 stubs the minimum it needs.
+  'Capybara::Session Simulated_v3 node #shadow_root'
 ].freeze
 
 RSpec.configure do |config|

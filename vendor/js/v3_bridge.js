@@ -1344,12 +1344,30 @@
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
     const tag = n._tag;
-    if (tag === 'textarea') return n.textContent;
+    if (tag === 'textarea') {
+      // HTML spec: when initialised from parsed text, the textarea
+      // value drops one leading newline that immediately follows the
+      // open tag (the spec calls this "first newline removal"). After
+      // a `set`, `_attrs.value` carries the user's intent verbatim,
+      // so prefer that.
+      if (n._attrs.value != null) return n._attrs.value;
+      const txt = n.textContent;
+      return txt.length && txt.charCodeAt(0) === 10 ? txt.slice(1) : txt;
+    }
     if (tag === 'select') {
-      // walk options in document order; return first explicitly-
-      // selected (selected attr) or the first non-disabled option's
-      // value as the implicit default.
       const opts = n.querySelectorAll('option');
+      const multi = n._attrs.multiple != null;
+      // `<select multiple>` returns an array of every selected
+      // option's value; single-select returns the first explicitly-
+      // selected option, or the first non-disabled option as the
+      // implicit default.
+      if (multi) {
+        const out = [];
+        for (const o of opts) {
+          if (o._attrs.selected != null) out.push(o._attrs.value != null ? o._attrs.value : o.textContent);
+        }
+        return out;
+      }
       let implicit = null;
       for (const o of opts) {
         if (o._attrs.disabled != null) continue;
@@ -1442,6 +1460,21 @@
     }
     return null;
   };
+  function isContenteditable(n) {
+    let cur = n;
+    while (cur && cur.nodeType === NODE_ELEMENT) {
+      const v = cur._attrs.contenteditable;
+      if (v != null) {
+        // contenteditable="" / "true" → editable; "false" → not.
+        const lower = String(v).toLowerCase();
+        if (lower === '' || lower === 'true' || lower === 'plaintext-only') return true;
+        if (lower === 'false') return false;
+      }
+      cur = cur._parent;
+    }
+    return false;
+  }
+
   function isSubmitButton(n) {
     if (n._tag === 'button') {
       const t = (n._attrs.type || 'submit').toLowerCase();
@@ -1560,6 +1593,13 @@
         if (ov === v) { selectOptionExclusive(n, o); hit = true; break; }
       }
       if (!hit) return false;
+    } else if (isContenteditable(n)) {
+      // Capybara `.set('text')` on a contenteditable element replaces
+      // the text content. Real browsers fire `input` (no `change`)
+      // and don't touch a `value` attribute.
+      n.textContent = v;
+      dispatchEvent(n, new InputEvent('input', { bubbles: true, cancelable: true }));
+      return true;
     } else {
       n._attrs.value = v;
     }
@@ -1671,10 +1711,16 @@
         fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
       }
     }
+    // HTML 5: a `<button formaction="...">` / `<button formmethod>` /
+    // `<button formenctype>` on the submitter overrides the form's
+    // attributes for that one submission.
+    const subAction  = submitter && submitter._attrs && submitter._attrs.formaction;
+    const subMethod  = submitter && submitter._attrs && submitter._attrs.formmethod;
+    const subEnctype = submitter && submitter._attrs && submitter._attrs.formenctype;
     return {
-      action: form._attrs.action != null ? form._attrs.action : '',
-      method: (form._attrs.method || 'get').toLowerCase(),
-      enctype: (form._attrs.enctype || 'application/x-www-form-urlencoded').toLowerCase(),
+      action:  subAction  != null ? subAction  : (form._attrs.action  != null ? form._attrs.action  : ''),
+      method:  (subMethod  || form._attrs.method  || 'get').toLowerCase(),
+      enctype: (subEnctype || form._attrs.enctype || 'application/x-www-form-urlencoded').toLowerCase(),
       fields: fields
     };
   };

@@ -385,7 +385,8 @@ module Capybara
         end
       end
 
-      def navigate_post(url, body, content_type)
+      def navigate_post(url, body, content_type, depth: 0)
+        raise 'too many redirects' if depth > 10
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -395,8 +396,15 @@ module Capybara
         status, headers, resp_body = @app.call(env)
         merge_set_cookie(headers)
         if (300..399).include?(status) && headers['location']
+          next_url = resolve_against_current(headers['location'])
           resp_body.close if resp_body.respond_to?(:close)
-          return navigate(resolve_against_current(headers['location']))
+          # HTTP semantics: 301/302/303 → method becomes GET; 307/308
+          # require the method (and body) to be preserved.
+          if [307, 308].include?(status)
+            return navigate_post(next_url, body, content_type, depth: depth + 1)
+          else
+            return navigate(next_url, depth: depth + 1)
+          end
         end
         @current_url = url
         html         = read_rack_body(resp_body)
