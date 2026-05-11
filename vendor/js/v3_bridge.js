@@ -1433,6 +1433,17 @@
   globalThis.__csimLoadDocument = function (html) {
     __handles.clear();
     __hideRules = [];
+    // Drop pending timers from the prior page — otherwise stale
+    // setTimeouts captured against the previous jQuery closure
+    // fire under the new page's context. We saw this surface as
+    // Redmine's `addFormObserversForDoubleSubmit` running 3× (once
+    // for the new page's ready resolution + leftovers from prior
+    // visits' chained-Deferred .then setTimeouts).
+    __resetTimers();
+    // Module cache survives __resetPage (the snapshot's `__csim_modules`
+    // is the cross-Context warm-up store), but per-page state in the
+    // page's modules should not. We don't have a clean way to dump
+    // it yet — left as a follow-up.
     globalThis.document = parseDocument(String(html == null ? '' : html));
     registerNode(globalThis.document);
     // Cascade-derived hide rules need to land *before* scripts run —
