@@ -138,7 +138,7 @@ module Capybara
       def visible_text(handle) = @runtime.call('__csimVisibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
       def value(handle)        = @runtime.call('__csimValue', handle)
-      def disabled?(handle)    = !!attr(handle, 'disabled')
+      def disabled?(handle)    = @runtime.call('__csimDisabled', handle)
       def option_selected?(h)  = !!attr(h, 'selected')
       def shadow_root_handle(_) = nil
       def computed_style(_, names) = names.to_h {|n| [n, ''] }

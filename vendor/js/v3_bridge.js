@@ -947,9 +947,22 @@
   // the wire may include `{__elementHandle: id}` sentinels (Capybara
   // passing Node instances); rehydrate them to live Element refs so
   // user scripts can call methods on them.
+  // `eval(code)` inside the function body sees that function's
+  // `arguments`, so user scripts referencing `arguments[i]` work the
+  // same way as selenium / chrome. eval also handles statements vs
+  // expressions uniformly — the `return <expr>` wrapping breaks the
+  // moment a script starts with `var ...;` or similar.
+  const __evalCache = new Map();
+  function compileScript(code) {
+    let fn = __evalCache.get(code);
+    if (!fn) {
+      fn = new Function('return eval(' + JSON.stringify(code) + ');');
+      __evalCache.set(code, fn);
+    }
+    return fn;
+  }
   globalThis.__csimEvalScript = function (code, args) {
-    const fn = new Function('arguments', 'return (' + code + ')');
-    return marshalReturn(fn(rehydrateArgs(args || [])));
+    return marshalReturn(compileScript(code).apply(null, rehydrateArgs(args || [])));
   };
   function rehydrateArgs(args) {
     if (Array.isArray(args)) return args.map(rehydrateArgs);
@@ -1076,6 +1089,44 @@
     for (const c of node._children) out += collectVisibleText(c);
     return out;
   }
+
+  // `disabled?` mirrors v2's logic: only form controls (+ fieldset)
+  // can be disabled; an `<option>` inherits disabled from an ancestor
+  // `<select>` / `<optgroup>`; form controls inherit from an ancestor
+  // `<fieldset disabled>` unless they sit inside its first `<legend>`.
+  const FORM_CONTROLS = new Set(['input','select','textarea','button','optgroup','option']);
+  globalThis.__csimDisabled = function (h) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    if ((FORM_CONTROLS.has(n._tag) || n._tag === 'fieldset') && n._attrs.disabled != null) return true;
+    if (n._tag === 'option') {
+      let cur = n._parent;
+      while (cur && cur.nodeType === NODE_ELEMENT && (cur._tag === 'optgroup' || cur._tag === 'select')) {
+        if (cur._attrs.disabled != null) return true;
+        cur = cur._parent;
+      }
+    }
+    if (FORM_CONTROLS.has(n._tag)) {
+      let cur = n._parent;
+      while (cur && cur.nodeType === NODE_ELEMENT) {
+        if (cur._tag === 'fieldset' && cur._attrs.disabled != null) {
+          // Find the fieldset's first <legend>; if n sits inside it,
+          // it stays enabled.
+          let legend = null;
+          for (const c of cur._children) {
+            if (c.nodeType === NODE_ELEMENT && c._tag === 'legend') { legend = c; break; }
+          }
+          if (legend) {
+            let p = n;
+            while (p) { if (p === legend) return false; p = p._parent; }
+          }
+          return true;
+        }
+        cur = cur._parent;
+      }
+    }
+    return false;
+  };
 
   globalThis.__csimAttrs = function (h) {
     const n = lookup(h);
@@ -1250,6 +1301,12 @@
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
     const tag = n._tag;
+    // readonly / disabled inputs reject programmatic value changes —
+    // mirrors what real browsers + selenium do.
+    if ((tag === 'input' || tag === 'textarea') &&
+        (n._attrs.readonly != null || n._attrs.disabled != null)) {
+      return false;
+    }
     const v = value == null ? '' : String(value);
     let kind = 'value';
     if (tag === 'textarea') {
