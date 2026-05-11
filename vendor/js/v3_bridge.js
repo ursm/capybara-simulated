@@ -924,15 +924,25 @@
 
   function parseFragment(html) {
     const out = [];
-    const stack = []; // { el, children: out-or-parent's-children }
+    const stack = []; // { el }
     let target = out;
+    // Text / nested-element pushes inside `target` need `_parent` set
+    // to the owning Element so `firstChild` / `nextSibling` traversal
+    // (the path wgxpath uses) walks the full sibling chain. Without
+    // this, text nodes were created with `_parent = null` and the
+    // sibling walk fell off after the first text child.
+    const pushChild = (child) => {
+      const parent = stack.length ? stack[stack.length - 1].el : null;
+      child._parent = parent;
+      target.push(child);
+    };
     let i = 0;
     const re = /<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g;
     let m, last = 0;
     while ((m = re.exec(html)) !== null) {
       if (m.index > last) {
         const text = html.slice(last, m.index);
-        if (text.length) target.push(makeText(text));
+        if (text.length) pushChild(makeText(text));
       }
       const closing = m[1] === '/';
       const tag = m[2].toLowerCase();
@@ -951,15 +961,18 @@
       }
       const el = new Element(tag);
       applyAttributes(el, rest);
-      el._parent = stack.length ? stack[stack.length - 1].el : null;
-      target.push(el);
+      pushChild(el);
       if (VOID.has(tag) || /\/\s*$/.test(rest)) continue;
       if (RAWTEXT.has(tag)) {
         const closeRe = new RegExp('</' + tag + '\\s*>', 'i');
         const closeIdx = html.search.call(html.slice(last), closeRe);
         const absIdx   = closeIdx < 0 ? html.length : last + closeIdx;
         const raw = html.slice(last, absIdx);
-        if (raw.length) el._children.push(Object.assign(makeText(raw), { _parent: el }));
+        if (raw.length) {
+          const t = makeText(raw);
+          t._parent = el;
+          el._children.push(t);
+        }
         const end = closeIdx < 0 ? html.length : (last + closeIdx + ('</' + tag + '>').length);
         last = end; re.lastIndex = end;
         continue;
@@ -969,9 +982,10 @@
     }
     if (last < html.length) {
       const tail = html.slice(last);
-      if (tail.length) target.push(makeText(tail));
+      if (tail.length) pushChild(makeText(tail));
     }
-    // re-stitch parents for the top-level returned nodes
+    // Top-level nodes have no fragment-level parent; the caller
+    // (parseDocument or `innerHTML` setter) re-parents them.
     for (const n of out) n._parent = null;
     return out;
   }
