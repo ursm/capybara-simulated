@@ -2206,6 +2206,16 @@
     return globalThis.document._id;
   };
 
+  // External script URLs that have been evaluated in this Context.
+  // Persists across page loads. Once an app-wide bundle (jQuery,
+  // application-legacy.js, rails-ujs, etc.) has run its IIFE — which
+  // typically attaches listeners to `document` via `$(document).on(...)`
+  // — re-evaluating it on the next visit would attach the *same*
+  // listeners again, duplicating delegated handlers. Real browsers
+  // don't re-run cached scripts on bf-cache / SPA navigation, and we
+  // keep `document` stable across visits, so the resulting semantics
+  // match.
+  const __externalScriptsRun = new Set();
   function runInlineScripts(doc) {
     if (!doc || !doc.documentElement) return;
     // Importmaps land first so `<script type="module">` can resolve
@@ -2226,12 +2236,16 @@
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
       let body;
       if (s._attrs.src) {
+        // De-dupe across page loads: each app-wide bundle runs once
+        // per Context. See `__externalScriptsRun` comment above.
+        if (__externalScriptsRun.has(s._attrs.src)) continue;
         // Synchronous fetch via Ruby Rack callback. mini_racer's attach
         // is blocking, so this preserves the classic-script "block the
         // parser until loaded" semantics without an event loop.
         const resp = __rackFetch('GET', s._attrs.src, '', null, 'follow');
         if (!resp || resp.status >= 400) continue;
         body = resp.body || '';
+        __externalScriptsRun.add(s._attrs.src);
       } else {
         body = scriptText(s);
       }
@@ -3791,23 +3805,32 @@
   };
 
   globalThis.__resetPage = function () {
-    // Match __csimLoadDocument's strategy: keep the existing Document
-    // instance so library-installed listeners (Rails-UJS click
-    // delegates, jQuery handlers attached via $(document)) survive
-    // between visits and across test resets. We just clear its
-    // children and the registry; the next visit will rebuild via
-    // __csimLoadDocument.
+    // Inter-test reset. Wipe document children (the per-page DOM) AND
+    // its installed listeners (jQuery / Rails-UJS delegates attached
+    // via `$(document).on(...)`); each test starts with a clean slate.
+    // We do keep the Document instance — only its content state
+    // resets. Intra-test `visit()` calls go through __csimLoadDocument,
+    // which preserves listeners so library init guards keep working
+    // across page transitions inside a single test.
     if (globalThis.document) {
       for (const c of globalThis.document._children.slice()) {
         globalThis.document.removeChild(c);
       }
       globalThis.document.documentElement = null;
+      globalThis.document._listeners = null;
     } else {
       globalThis.document = new Document();
     }
     __handles.clear();
     registerNode(globalThis.document);
     __resetTimers();
+    // External scripts that initialise per-document state (jQuery
+    // delegates, Rails-UJS auto-start, etc.) need to re-run on the
+    // next test's first visit. Inter-test reset is the right boundary.
+    __externalScriptsRun.clear();
+    // Rails-UJS's auto-start guard. Cleared here so the second test
+    // in a class re-installs delegates on the fresh document.
+    delete globalThis._rails_loaded;
   };
 
 })();
