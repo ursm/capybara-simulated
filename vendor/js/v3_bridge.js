@@ -966,7 +966,31 @@
     selectNodeContents(node) {
       this.startContainer = this.endContainer = node;
       this.startOffset    = 0;
-      this.endOffset      = node._children ? node._children.length : 0;
+      // For a Text node, the upper bound is the character length;
+      // for elements, the number of child nodes.
+      this.endOffset = node.nodeType === NODE_TEXT
+        ? (node.data || '').length
+        : (node._children ? node._children.length : 0);
+    }
+    // `Range.intersectsNode(node)` — true if any part of node overlaps
+    // the range. quote-reply uses this to find which of the
+    // window.getSelection() ranges intersects the issue description.
+    intersectsNode(node) {
+      return rangeIntersectsNode(this, node);
+    }
+    // `Range.cloneContents()` — returns a DocumentFragment cloned from
+    // the range. quote-reply walks the fragment's textContent / HTML
+    // to build the quoted reply. The full DOM spec algorithm is
+    // intricate (partial container splits, text-node boundary
+    // handling, …); we implement the common-case subset that Redmine's
+    // partial-quote tests exercise.
+    cloneContents() {
+      return cloneRangeContents(this);
+    }
+    extractContents() {
+      // For our PoC consumers, extract == clone (no actual deletion);
+      // quote-reply doesn't follow up with mutating the source tree.
+      return cloneRangeContents(this);
     }
     collapse(toStart) {
       if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
@@ -1007,6 +1031,124 @@
   DocumentOrderRange.START_TO_START = 0;
   DocumentOrderRange.START_TO_END   = 1;
   DocumentOrderRange.END_TO_END     = 2;
+
+  // Helper: is `descendant` either equal to or contained in `ancestor`?
+  function nodeContains(ancestor, descendant) {
+    let cur = descendant;
+    while (cur) {
+      if (cur === ancestor) return true;
+      cur = cur._parent;
+    }
+    return false;
+  }
+  // True if `range` overlaps with `node` (the node is partially or
+  // fully covered by the range). The DOM-spec algorithm is "node and
+  // range share at least one boundary point or one is inside the
+  // other"; we implement a conservative subset that handles the
+  // single-Text-node and within-an-element cases the partial-quote
+  // tests use.
+  function rangeIntersectsNode(range, node) {
+    if (!range.startContainer) return false;
+    if (nodeContains(node, range.startContainer)) return true;
+    if (nodeContains(node, range.endContainer))   return true;
+    if (nodeContains(range.startContainer, node) && nodeContains(range.endContainer, node)) return true;
+    // Document-order overlap: node sits between start and end at the
+    // same tree level.
+    const s = compareDocOrder(range.startContainer, node);
+    const e = compareDocOrder(range.endContainer,   node);
+    if (s <= 0 && e >= 0) return true;
+    return false;
+  }
+  // Clone the content covered by `range` into a DocumentFragment.
+  // The DOM spec splits partial text nodes at the offsets and walks
+  // the boundary chain; for the partial-quote tests we just need the
+  // single-Text-node case (most common) and a basic multi-element
+  // walk between start and end at the same parent.
+  function cloneRangeContents(range) {
+    const frag = new DocumentFragment();
+    if (!range.startContainer) return frag;
+    // Case 1: range fully inside one Text node — slice the substring.
+    if (range.startContainer === range.endContainer &&
+        range.startContainer.nodeType === NODE_TEXT) {
+      const data = range.startContainer.data || '';
+      const t = new Text(data.slice(range.startOffset, range.endOffset));
+      t._parent = frag;
+      frag._children.push(t);
+      return frag;
+    }
+    // Case 2: range fully inside one Element — clone children
+    // between offsets.
+    if (range.startContainer === range.endContainer &&
+        range.startContainer.nodeType === NODE_ELEMENT) {
+      const kids = range.startContainer._children || [];
+      for (let i = range.startOffset; i < Math.min(range.endOffset, kids.length); i++) {
+        const cloned = kids[i].cloneNode(true);
+        cloned._parent = frag;
+        frag._children.push(cloned);
+      }
+      return frag;
+    }
+    // Case 3: range spans an arbitrary subtree. Walk every node from
+    // the start container's deepest left-edge to the end container's
+    // deepest right-edge in document order; collect intermediates.
+    // We capture partial Text on the boundaries (start offset onward
+    // for the start node, up to end offset for the end node) and
+    // clone full nodes in between.
+    const collected = [];
+    let started = false;
+    let done    = false;
+    function visit(node) {
+      if (done) return;
+      if (node === range.endContainer) {
+        if (node.nodeType === NODE_TEXT) {
+          const data = node.data || '';
+          collected.push(new Text(data.slice(0, range.endOffset)));
+        } else if (started) {
+          // Element end boundary: capture children up to endOffset.
+          const kids = node._children || [];
+          for (let i = 0; i < Math.min(range.endOffset, kids.length); i++) {
+            collected.push(kids[i].cloneNode(true));
+          }
+        }
+        done = true;
+        return;
+      }
+      if (node === range.startContainer) {
+        started = true;
+        if (node.nodeType === NODE_TEXT) {
+          const data = node.data || '';
+          collected.push(new Text(data.slice(range.startOffset)));
+          return;
+        }
+        // Element start boundary: skip into children at startOffset.
+        const kids = node._children || [];
+        for (let i = range.startOffset; i < kids.length; i++) {
+          visit(kids[i]);
+          if (done) return;
+        }
+        return;
+      }
+      if (started) {
+        // Wholly between boundaries: take the entire subtree.
+        collected.push(node.cloneNode(true));
+        return;
+      }
+      // Before start: descend into the start path.
+      if (nodeContains(node, range.startContainer) || nodeContains(node, range.endContainer)) {
+        for (const c of (node._children || [])) {
+          visit(c);
+          if (done) return;
+        }
+      }
+    }
+    const root = range.commonAncestorContainer || globalThis.document.documentElement;
+    if (root) visit(root);
+    for (const c of collected) {
+      c._parent = frag;
+      frag._children.push(c);
+    }
+    return frag;
+  }
   DocumentOrderRange.END_TO_START   = 3;
   DocumentOrderRange.prototype.START_TO_START = 0;
   DocumentOrderRange.prototype.START_TO_END   = 1;
@@ -2431,13 +2573,25 @@
   class CsimSelection {
     constructor() { this._ranges = []; }
     get rangeCount()  { return this._ranges.length; }
-    get isCollapsed() { return true; }
-    get anchorNode()  { return null; }
-    get focusNode()   { return null; }
-    get anchorOffset(){ return 0; }
-    get focusOffset() { return 0; }
-    get type()        { return this._ranges.length ? 'Range' : 'None'; }
-    toString()        { return ''; }
+    get isCollapsed() {
+      if (!this._ranges.length) return true;
+      const r = this._ranges[0];
+      return r.collapsed;
+    }
+    get anchorNode()  { return this._ranges.length ? this._ranges[0].startContainer : null; }
+    get focusNode()   { return this._ranges.length ? this._ranges[0].endContainer   : null; }
+    get anchorOffset(){ return this._ranges.length ? this._ranges[0].startOffset    : 0; }
+    get focusOffset() { return this._ranges.length ? this._ranges[0].endOffset      : 0; }
+    get type()        { return this._ranges.length ? (this.isCollapsed ? 'Caret' : 'Range') : 'None'; }
+    toString() {
+      if (!this._ranges.length) return '';
+      // Best-effort: emit the textContent of cloneContents() for the
+      // first range. This isn't the spec algorithm (which walks the
+      // range with whitespace collapsing) but matches what quote-reply
+      // and the partial-quote tests actually inspect.
+      const frag = cloneRangeContents(this._ranges[0]);
+      return frag.textContent || '';
+    }
     getRangeAt(i)     { return this._ranges[i] || null; }
     addRange(r)       { this._ranges.push(r); }
     removeRange(r)    { const i = this._ranges.indexOf(r); if (i >= 0) this._ranges.splice(i, 1); }
@@ -2448,12 +2602,268 @@
     collapseToEnd()   {}
     selectAllChildren() {}
     extend()          {}
-    containsNode()    { return false; }
+    // True if `node` is contained (fully if `partial` is false, or
+    // even partially if `partial` is true) within any range of the
+    // selection. quote-reply gates `isSelected` on this for the
+    // "selection partially covers target element" check before
+    // walking the range.
+    containsNode(node, partial) {
+      for (const r of this._ranges) {
+        if (rangeIntersectsNode(r, node)) {
+          if (partial) return true;
+          // Strict full containment: range start must be at or before
+          // node, end must be at or after.
+          if (nodeContains(r.startContainer, node) === false &&
+              nodeContains(r.endContainer, node) === false &&
+              nodeContains(node, r.startContainer) === true &&
+              nodeContains(node, r.endContainer) === true) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
     deleteFromDocument() {}
   }
   globalThis.Selection = CsimSelection;
   const __sharedSelection = new CsimSelection();
   globalThis.getSelection = function () { return __sharedSelection; };
+
+  // `DOMParser` — parse an HTML / XML string into a Document. Turndown
+  // (used by quote-reply Stimulus controller) checks `new DOMParser()`
+  // at module-load time; without it, Turndown falls back to
+  // `document.implementation.createHTMLDocument('').open()` which then
+  // throws because we don't implement the legacy `Document.open()`.
+  // Providing native DOMParser keeps Turndown on its fast path.
+  globalThis.DOMParser = class DOMParser {
+    parseFromString(input, mimeType) {
+      const html = String(input == null ? '' : input);
+      const t = String(mimeType || 'text/html').toLowerCase();
+      if (t.indexOf('html') >= 0) return parseDocument(html);
+      // XML / SVG / etc.: parse with the same loose parser, just for
+      // the shape — Capybara-driven tests rarely poke past the root.
+      return parseDocument(html);
+    }
+  };
+
+  // ── Fetch / URL / Headers / FormData / URLSearchParams ──────────
+  //
+  // Modern Stimulus controllers + `@rails/request.js` lean on
+  // `window.fetch(url, opts)` + `URL` / `Headers` / `FormData`. The
+  // PoC implementation is synchronous-under-the-hood — `__rackFetch`
+  // resolves the Rack app inline — but the public surface looks like
+  // the real async fetch (returns a Promise; `Response#text/json`
+  // also return Promises). V8 microtasks drain after each Context#eval
+  // so the `await fetch(...)` chains in request.js progress without
+  // any explicit ticking.
+  globalThis.URL = function URL (input, base) {
+    const u = __csim_parseUrl(String(input), base != null ? String(base) : null);
+    if (!u || u.error) throw new TypeError('Invalid URL: ' + input);
+    this.href     = u.href;
+    this.protocol = u.protocol;
+    this.username = u.username;
+    this.password = u.password;
+    this.host     = u.host;
+    this.hostname = u.hostname;
+    this.port     = u.port;
+    this.pathname = u.pathname;
+    this.search   = u.search;
+    this.hash     = u.hash;
+    this.origin   = u.origin;
+    this.searchParams = new URLSearchParams(this.search);
+  };
+  globalThis.URL.prototype.toString = function () { return this.href; };
+  globalThis.URL.createObjectURL = function () { return ''; };
+  globalThis.URL.revokeObjectURL = function () { };
+
+  globalThis.URLSearchParams = function URLSearchParams (init) {
+    this._entries = [];
+    if (typeof init === 'string') {
+      let s = init;
+      if (s.charAt(0) === '?') s = s.slice(1);
+      if (s.length) {
+        for (const pair of s.split('&')) {
+          const idx = pair.indexOf('=');
+          const k = idx >= 0 ? pair.slice(0, idx) : pair;
+          const v = idx >= 0 ? pair.slice(idx + 1)   : '';
+          this._entries.push([decodeURIComponent(k.replace(/\+/g, ' ')), decodeURIComponent(v.replace(/\+/g, ' '))]);
+        }
+      }
+    } else if (init && typeof init.forEach === 'function') {
+      init.forEach((v, k) => this._entries.push([String(k), String(v)]));
+    } else if (Array.isArray(init)) {
+      for (const e of init) this._entries.push([String(e[0]), String(e[1])]);
+    } else if (init && typeof init === 'object') {
+      for (const k of Object.keys(init)) this._entries.push([k, String(init[k])]);
+    }
+  };
+  globalThis.URLSearchParams.prototype = {
+    append (k, v) { this._entries.push([String(k), String(v)]); },
+    delete (k) { this._entries = this._entries.filter(e => e[0] !== String(k)); },
+    get (k) { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; },
+    getAll (k) { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); },
+    has (k) { return this._entries.some(e => e[0] === String(k)); },
+    set (k, v) { this.delete(k); this.append(k, v); },
+    entries () { return this._entries[Symbol.iterator] ? this._entries[Symbol.iterator]() : this._entries.values(); },
+    keys ()   { return this._entries.map(e => e[0])[Symbol.iterator](); },
+    values () { return this._entries.map(e => e[1])[Symbol.iterator](); },
+    forEach (fn) { for (const e of this._entries) fn(e[1], e[0], this); },
+    toString () { return this._entries.map(e => encodeURIComponent(e[0]) + '=' + encodeURIComponent(e[1])).join('&'); }
+  };
+  globalThis.URLSearchParams.prototype[Symbol.iterator] = function () { return this.entries(); };
+
+  function __normaliseHeaderName (k) { return String(k).toLowerCase(); }
+  globalThis.Headers = function Headers (init) {
+    this._map = new Map();
+    if (init) {
+      if (init instanceof globalThis.Headers) {
+        init.forEach((v, k) => this.append(k, v));
+      } else if (Array.isArray(init)) {
+        for (const e of init) this.append(e[0], e[1]);
+      } else if (typeof init === 'object') {
+        for (const k of Object.keys(init)) this.append(k, init[k]);
+      }
+    }
+  };
+  globalThis.Headers.prototype = {
+    append (k, v) {
+      const key = __normaliseHeaderName(k);
+      const prev = this._map.get(key);
+      this._map.set(key, prev == null ? String(v) : prev + ', ' + String(v));
+    },
+    delete (k) { this._map.delete(__normaliseHeaderName(k)); },
+    get (k)    { const v = this._map.get(__normaliseHeaderName(k)); return v == null ? null : v; },
+    has (k)    { return this._map.has(__normaliseHeaderName(k)); },
+    set (k, v) { this._map.set(__normaliseHeaderName(k), String(v)); },
+    forEach (fn) { this._map.forEach((v, k) => fn(v, k, this)); },
+    entries () { return this._map.entries(); },
+    keys ()    { return this._map.keys(); },
+    values ()  { return this._map.values(); }
+  };
+  globalThis.Headers.prototype[Symbol.iterator] = function () { return this.entries(); };
+
+  globalThis.FormData = function FormData () {
+    this._entries = [];
+  };
+  globalThis.FormData.prototype = {
+    append (k, v) { this._entries.push([String(k), v]); },
+    delete (k)    { this._entries = this._entries.filter(e => e[0] !== String(k)); },
+    get (k)       { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; },
+    getAll (k)    { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); },
+    has (k)       { return this._entries.some(e => e[0] === String(k)); },
+    set (k, v)    { this.delete(k); this.append(k, v); },
+    forEach (fn)  { for (const e of this._entries) fn(e[1], e[0], this); },
+    entries ()    { return this._entries[Symbol.iterator](); },
+    keys ()       { return this._entries.map(e => e[0])[Symbol.iterator](); },
+    values ()     { return this._entries.map(e => e[1])[Symbol.iterator](); }
+  };
+  globalThis.FormData.prototype[Symbol.iterator] = function () { return this.entries(); };
+
+  globalThis.AbortController = function AbortController () {
+    this.signal = { aborted: false, addEventListener () {}, removeEventListener () {}, dispatchEvent () {} };
+  };
+  globalThis.AbortController.prototype.abort = function () { this.signal.aborted = true; };
+
+  function __makeFetchResponse (raw, url) {
+    let consumed = false;
+    const headers = new globalThis.Headers(raw && raw.headers || {});
+    const bodyText = (raw && raw.body) || '';
+    const status   = raw ? raw.status : 0;
+    const resp = {
+      url,
+      status,
+      statusText: '',
+      ok: status >= 200 && status < 300,
+      redirected: false,
+      type: 'basic',
+      headers,
+      bodyUsed: false,
+      _raw: raw,
+      text () {
+        if (consumed) return Promise.reject(new TypeError('Body already consumed'));
+        consumed = true; this.bodyUsed = true;
+        return Promise.resolve(bodyText);
+      },
+      json () {
+        if (consumed) return Promise.reject(new TypeError('Body already consumed'));
+        consumed = true; this.bodyUsed = true;
+        try { return Promise.resolve(JSON.parse(bodyText || 'null')); }
+        catch (e) { return Promise.reject(e); }
+      },
+      blob () {
+        if (consumed) return Promise.reject(new TypeError('Body already consumed'));
+        consumed = true; this.bodyUsed = true;
+        return Promise.resolve(bodyText);
+      },
+      arrayBuffer () {
+        if (consumed) return Promise.reject(new TypeError('Body already consumed'));
+        consumed = true; this.bodyUsed = true;
+        const buf = new ArrayBuffer(bodyText.length);
+        const view = new Uint8Array(buf);
+        for (let i = 0; i < bodyText.length; i++) view[i] = bodyText.charCodeAt(i) & 0xff;
+        return Promise.resolve(buf);
+      },
+      formData () {
+        const fd = new globalThis.FormData();
+        return Promise.resolve(fd);
+      },
+      clone () { return __makeFetchResponse(raw, url); }
+    };
+    return resp;
+  }
+
+  globalThis.fetch = function fetch (input, init) {
+    init = init || {};
+    let url, method = 'GET', body = null, headers = {};
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input && input.url) {
+      url = input.url;
+      if (input.method) method = input.method;
+      if (input.body != null) body = input.body;
+      if (input.headers) headers = input.headers;
+    } else {
+      url = String(input);
+    }
+    if (init.method)        method = init.method;
+    if (init.body != null)  body   = init.body;
+    if (init.headers) {
+      if (init.headers instanceof globalThis.Headers) {
+        init.headers.forEach((v, k) => { headers[k] = v; });
+      } else if (typeof init.headers === 'object') {
+        Object.assign(headers, init.headers);
+      }
+    }
+    let bodyStr = '';
+    if (body != null) {
+      if (typeof body === 'string') {
+        bodyStr = body;
+      } else if (body instanceof globalThis.FormData) {
+        const parts = [];
+        body.forEach((v, k) => parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v))));
+        bodyStr = parts.join('&');
+        if (!('Content-Type' in headers) && !('content-type' in headers)) {
+          headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        }
+      } else if (body instanceof globalThis.URLSearchParams) {
+        bodyStr = body.toString();
+        if (!('Content-Type' in headers) && !('content-type' in headers)) {
+          headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        }
+      } else if (body && typeof body === 'object' && typeof body.toString === 'function') {
+        bodyStr = String(body);
+      } else {
+        bodyStr = String(body);
+      }
+    }
+    return new Promise(function (resolve, reject) {
+      try {
+        const resp = __rackFetch(method.toUpperCase(), url, bodyStr, headers, 'follow');
+        if (!resp) { reject(new TypeError('Network request failed: ' + url)); return; }
+        resolve(__makeFetchResponse(resp, url));
+      } catch (e) { reject(e); }
+    });
+  };
 
   globalThis.history = {
     length: 1,

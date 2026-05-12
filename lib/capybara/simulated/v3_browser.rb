@@ -86,27 +86,37 @@ module Capybara
       # and reuse `find_xpath`; the JS parser stays the fast path
       # for the simple selectors customElements / framework code
       # emits internally.
+      # Dynamic pseudo-classes that depend on runtime state (focus,
+      # interaction) instead of static DOM shape. Nokogiri's CSS-to-
+      # XPath emits `nokogiri:focus(...)` for these, which wgxpath
+      # can't evaluate (extension functions aren't registered),
+      # silently returning empty. The JS-side parser DOES handle them,
+      # so we shortcut around the XPath path entirely when we see one.
+      DYNAMIC_PSEUDO_RE = /:(focus|focus-within|focus-visible|hover|active|checked|disabled|enabled|valid|invalid|required|optional|read-only|read-write|placeholder-shown|target)\b/
+
       def find_css(css, context_handle = nil)
         tick_real_time
         s = css.to_s
         if xpath_shaped?(s)
           return find_xpath(s, context_handle)
         end
-        begin
-          # When scoped, emit context-relative XPath (`.//`) so wgxpath
-          # honors the context node. Without the prefix Nokogiri returns
-          # `//` (descendant-of-root) which ignores `context_handle` and
-          # collects matches across the whole document — surfaced as
-          # `Capybara::Ambiguous` whenever a within() block expected one
-          # element (e.g. Redmine's ReactionsSystemTest scoped to a span).
-          prefix = context_handle ? './/' : '//'
-          xpath = Nokogiri::CSS.xpath_for(s, prefix: prefix).first
-          return find_xpath(xpath, context_handle) if xpath
-        rescue Nokogiri::CSS::SyntaxError, StandardError
-          # Fall back to the JS-side parser. Worth trying because
-          # `xpath_for` can choke on Capybara-emitted pseudo selectors
-          # (`:not(...)`, attribute case-insensitive flags) that our
-          # JS path either supports or ignores predictably.
+        unless s.match?(DYNAMIC_PSEUDO_RE)
+          begin
+            # When scoped, emit context-relative XPath (`.//`) so wgxpath
+            # honors the context node. Without the prefix Nokogiri returns
+            # `//` (descendant-of-root) which ignores `context_handle` and
+            # collects matches across the whole document — surfaced as
+            # `Capybara::Ambiguous` whenever a within() block expected one
+            # element (e.g. Redmine's ReactionsSystemTest scoped to a span).
+            prefix = context_handle ? './/' : '//'
+            xpath = Nokogiri::CSS.xpath_for(s, prefix: prefix).first
+            return find_xpath(xpath, context_handle) if xpath
+          rescue Nokogiri::CSS::SyntaxError, StandardError
+            # Fall back to the JS-side parser. Worth trying because
+            # `xpath_for` can choke on Capybara-emitted pseudo selectors
+            # (`:not(...)`, attribute case-insensitive flags) that our
+            # JS path either supports or ignores predictably.
+          end
         end
         @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
       end
@@ -606,7 +616,21 @@ module Capybara
 
       def rack_fetch(method, url, body, headers, _redirect_mode)
         env = Rack::MockRequest.env_for(url, method: method.to_s.upcase, input: body || '')
-        (headers || {}).each {|k, v| env["HTTP_#{k.to_s.upcase.tr('-', '_')}"] = v }
+        (headers || {}).each {|k, v|
+          name = k.to_s.upcase.tr('-', '_')
+          # CGI convention: `Content-Type` and `Content-Length` land in
+          # the env *without* the HTTP_ prefix. Rails / Rack params
+          # parsing reads `CONTENT_TYPE` and dispatches JSON / multipart
+          # parsers off it; sending it as `HTTP_CONTENT_TYPE` lets the
+          # request through but with the default `text/plain`, so JSON
+          # bodies from `@rails/request.js` never deserialise and the
+          # server reads an empty params hash.
+          if name == 'CONTENT_TYPE' || name == 'CONTENT_LENGTH'
+            env[name] = v.to_s
+          else
+            env["HTTP_#{name}"] = v.to_s
+          end
+        }
         @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
         status, resp_headers, resp_body = @app.call(env)
         body_str = read_rack_body(resp_body)
