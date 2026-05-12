@@ -65,7 +65,7 @@ module Capybara
       # `__csimLoadDocument`, so the flag has to land before the doc
       # parse runs.
       def apply_esm_flag
-        @runtime.eval("globalThis.__csim_esm_enabled = #{@esm_enabled.inspect}")
+        @runtime.call('__csimSetEsmEnabled', @esm_enabled)
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
@@ -380,7 +380,7 @@ module Capybara
       # select_option). Without this hop the intent sits on the slot
       # forever and the form never actually navigates / POSTs.
       def consume_pending_form_submit
-        pending = @runtime.eval('(function(){const p = globalThis.__csimPendingFormSubmit; globalThis.__csimPendingFormSubmit = null; return p ? {formHandle: p.form && p.form._id, submitterHandle: p.submitter && p.submitter._id} : null})()')
+        pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
       end
@@ -779,22 +779,24 @@ module Capybara
       # back from `tmp/downloads/`; routing the response through the
       # save path here keeps the page state unchanged (no rebuild),
       # mirroring what a real browser does after a download.
+      def content_disposition_header(headers)
+        headers['content-disposition'] || headers['Content-Disposition']
+      end
+
       def download_response?(headers)
-        cd = headers['content-disposition'] || headers['Content-Disposition']
-        return false unless cd
-        cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
+        cd = content_disposition_header(headers)
+        cd && cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
       end
 
       def save_downloaded_response(url, headers, body)
-        cd = headers['content-disposition'] || headers['Content-Disposition'] || ''
-        filename = cd.to_s[/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i, 1] ||
-                   cd.to_s[/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i, 2]
-        filename = filename ? filename.strip : File.basename(URI.parse(url.to_s).path.to_s)
-        filename = 'download' if filename.nil? || filename.empty?
+        cd = content_disposition_header(headers).to_s
+        m = cd.match(/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i)
+        filename = (m && (m[1] || m[2]) || '').strip
+        filename = File.basename(URI.parse(url.to_s).path.to_s) if filename.empty?
+        filename = 'download' if filename.empty?
         dir = downloads_directory
         FileUtils.mkdir_p(dir)
-        bytes = read_rack_body(body)
-        File.binwrite(File.join(dir, filename), bytes)
+        File.binwrite(File.join(dir, filename), read_rack_body(body))
       end
 
       def downloads_directory

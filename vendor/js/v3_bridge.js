@@ -638,14 +638,6 @@
       }
       return null;
     }
-    contains(other) {
-      let cur = other;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur._parent;
-      }
-      return false;
-    }
     // Common HTMLElement / form-control IDL attributes that mirror to
     // their named attributes. jQuery 3.x's `.serialize()` filter keys
     // on `this.name` / `this.type`; without these getters the filter
@@ -712,27 +704,8 @@
     // available_...)"` to wire up its column-mover buttons — without
     // `this.form` the onclick threw and the columns never moved.
     get form() {
-      if (this._tag !== 'input' && this._tag !== 'select' &&
-          this._tag !== 'textarea' && this._tag !== 'button' &&
-          this._tag !== 'fieldset' && this._tag !== 'object' &&
-          this._tag !== 'output') return undefined;
-      const explicit = this._attrs.form;
-      let form = null;
-      if (explicit) {
-        const root = globalThis.document.documentElement;
-        if (root) {
-          for (const f of root.getElementsByTagName('form')) {
-            if (f._attrs && f._attrs.id === explicit) { form = f; break; }
-          }
-        }
-      }
-      if (!form) {
-        let cur = this._parent;
-        while (cur && cur.nodeType === NODE_ELEMENT) {
-          if (cur._tag === 'form') { form = cur; break; }
-          cur = cur._parent;
-        }
-      }
+      if (!FORM_ASSOCIATED_TAGS.has(this._tag)) return undefined;
+      const form = formForControl(this);
       return form ? __formNamedAccess(form) : null;
     }
     // Form-control IDL attributes. v2 leans on Nokogiri attribute
@@ -1251,12 +1224,21 @@
 
   // Helper: is `descendant` either equal to or contained in `ancestor`?
   function nodeContains(ancestor, descendant) {
-    let cur = descendant;
-    while (cur) {
-      if (cur === ancestor) return true;
-      cur = cur._parent;
-    }
-    return false;
+    return ancestor != null && ancestor.contains ? ancestor.contains(descendant) : false;
+  }
+  // Tags whose IDL exposes `.form` to point at the owning HTMLFormElement.
+  const FORM_ASSOCIATED_TAGS = new Set([
+    'input', 'select', 'textarea', 'button', 'fieldset', 'object', 'output'
+  ]);
+  // HTML spec "first newline removal" for textarea contents: a single
+  // leading line terminator (CR LF / CR / LF) that immediately follows
+  // the open tag is dropped from the IDL value. Same rule applies to
+  // the form-submission serialization.
+  function __stripOneLeadingNewline (s) {
+    if (typeof s !== 'string' || s.length === 0) return s;
+    if (s.length >= 2 && s.charCodeAt(0) === 13 && s.charCodeAt(1) === 10) return s.slice(2);
+    if (s.charCodeAt(0) === 13 || s.charCodeAt(0) === 10) return s.slice(1);
+    return s;
   }
   // True if `range` overlaps with `node` (the node is partially or
   // fully covered by the range). The DOM-spec algorithm is "node and
@@ -2918,40 +2900,26 @@
   globalThis.NodeList            = Array;
   globalThis.HTMLCollection      = Array;
   globalThis.NamedNodeMap        = Array;
-  globalThis.HTMLFormElement     = Element;
-  globalThis.HTMLInputElement    = Element;
-  globalThis.HTMLTextAreaElement = Element;
-  globalThis.HTMLSelectElement   = Element;
-  globalThis.HTMLOptionElement   = Element;
-  globalThis.HTMLButtonElement   = Element;
-  globalThis.HTMLAnchorElement   = Element;
-  globalThis.HTMLImageElement    = Element;
-  globalThis.HTMLScriptElement   = Element;
-  globalThis.HTMLDivElement      = Element;
-  globalThis.HTMLSpanElement     = Element;
-  globalThis.HTMLTableElement    = Element;
-  globalThis.HTMLLabelElement    = Element;
-  globalThis.HTMLLIElement       = Element;
-  globalThis.HTMLUListElement    = Element;
-  globalThis.HTMLOListElement    = Element;
-  // Additional element subtype aliases — same alias-to-Element pattern
-  // for the ones library `instanceof` probes reach. Ported from v2.
-  globalThis.HTMLAreaElement     = Element;
-  globalThis.HTMLBodyElement     = Element;
-  globalThis.HTMLCanvasElement   = Element;
-  globalThis.HTMLDialogElement   = Element;
-  globalThis.HTMLHeadElement     = Element;
-  globalThis.HTMLHtmlElement     = Element;
-  globalThis.HTMLIFrameElement   = Element;
-  globalThis.HTMLLinkElement     = Element;
-  globalThis.HTMLMetaElement     = Element;
-  globalThis.HTMLStyleElement    = Element;
-  globalThis.HTMLTemplateElement = Element;
-  globalThis.HTMLDocument        = Document;
-  globalThis.ShadowRoot          = Element;
-  globalThis.SVGElement          = Element;
-  globalThis.CharacterData       = Text;
-  globalThis.Comment             = Text;
+  // `instanceof Foo` / `el.constructor === Foo` checks across DOMPurify,
+  // Tribute, Stimulus, jQuery — alias every typed-element name to
+  // `Element` (or `Text` for character-data subtypes) so the probes
+  // don't ReferenceError. Real subclass shapes are out of scope; the
+  // structural check is the only consumer.
+  for (const name of [
+    'HTMLFormElement', 'HTMLInputElement', 'HTMLTextAreaElement',
+    'HTMLSelectElement', 'HTMLOptionElement', 'HTMLButtonElement',
+    'HTMLAnchorElement', 'HTMLImageElement', 'HTMLScriptElement',
+    'HTMLDivElement', 'HTMLSpanElement', 'HTMLTableElement',
+    'HTMLLabelElement', 'HTMLLIElement', 'HTMLUListElement',
+    'HTMLOListElement', 'HTMLAreaElement', 'HTMLBodyElement',
+    'HTMLCanvasElement', 'HTMLDialogElement', 'HTMLHeadElement',
+    'HTMLHtmlElement', 'HTMLIFrameElement', 'HTMLLinkElement',
+    'HTMLMetaElement', 'HTMLStyleElement', 'HTMLTemplateElement',
+    'ShadowRoot', 'SVGElement'
+  ]) globalThis[name] = Element;
+  globalThis.HTMLDocument  = Document;
+  globalThis.CharacterData = Text;
+  globalThis.Comment       = Text;
   // `Window` global class — sandboxes / wrappers do `instanceof Window`
   // to distinguish a window from other globals. Real Window has many
   // members; we just need the constructor for the identity check.
@@ -3732,10 +3700,14 @@
     }
     return '';
   }
-  globalThis.getComputedStyle = function (el) {
-    if (!el || el.nodeType !== NODE_ELEMENT) return makeStyleProxy({ _attrs: {} });
-    const inline = el.style;
-    return new Proxy(inline, {
+  // jQuery 3.x calls `getComputedStyle(elem).display` on every
+  // `.css()` / `:visible` query — i.e., the hot path. Cache the
+  // proxy per element so we're not minting one (+ closure + inner
+  // `getPropertyValue` closure) per call. The closure captures `el`
+  // by reference, so any subsequent `_attrs.style` mutation is
+  // reflected without invalidating the cache.
+  function __makeComputedStyleProxy (el) {
+    return new Proxy(el.style, {
       get (target, key) {
         if (key === 'display')    return __computedDisplayFor(el);
         if (key === 'visibility') return __computedVisibilityFor(el);
@@ -3750,6 +3722,10 @@
         return target[key];
       }
     });
+  }
+  globalThis.getComputedStyle = function (el) {
+    if (!el || el.nodeType !== NODE_ELEMENT) return makeStyleProxy({ _attrs: {} });
+    return el._computedStyleProxy || (el._computedStyleProxy = __makeComputedStyleProxy(el));
   };
 
   // Handle registry — Ruby keeps integer ids, looks up Element back
@@ -3779,6 +3755,26 @@
     try { dispatchEvent(n, new MouseEvent('mouseenter', { bubbles: false, cancelable: false })); } catch (_) {}
     return true;
   };
+  // Drain the JS-side pending-submit slot for the Ruby side. Returns
+  // `{formHandle, submitterHandle}` shape so callers don't have to
+  // know about the internal `{form, submitter}` Node refs. Used by
+  // `Browser#consume_pending_form_submit` after each user action
+  // that might have triggered `<select onchange="$('#f').submit()">`.
+  function __takePendingFormSubmit () {
+    const p = globalThis.__csimPendingFormSubmit;
+    if (!p) return null;
+    globalThis.__csimPendingFormSubmit = null;
+    return {
+      formHandle:      p.form && p.form._id,
+      submitterHandle: p.submitter && p.submitter._id
+    };
+  }
+  globalThis.__csimTakePendingFormSubmit = __takePendingFormSubmit;
+  // Toggle the ESM-script-execution flag. Ruby-side `apply_esm_flag`
+  // calls this after each per-visit Context rebuild so the snapshot's
+  // (uninitialised) state gets the current setting without paying a
+  // `Context#eval` string compile per visit.
+  globalThis.__csimSetEsmEnabled = function (v) { globalThis.__csim_esm_enabled = !!v; };
   // Mutation hooks (called from Node.prototype.{appendChild, insertBefore,
   // replaceChild, removeChild} and `innerHTML` setter). Keeps the
   // handle registry in sync so Capybara's `find` results stay live
@@ -3819,6 +3815,13 @@
     __initialScriptsDone = false;
     __hideRules = [];
     __hideRuleIdx = null;
+    // Hover / pending-submit slots are per-visit transient state —
+    // clear them so a stale `_hoverElement` from the previous page
+    // can't keep matching `:hover` cascade rules against detached
+    // nodes, and a never-consumed `__csimPendingFormSubmit` doesn't
+    // pin the old form/submitter pair alive across the rebuild.
+    globalThis.document._hoverElement = null;
+    globalThis.__csimPendingFormSubmit = null;
     const freshDoc = parseDocument(String(html == null ? '' : html));
     const d = globalThis.document;
     // Preserve document / documentElement / head / body identity across
@@ -4939,10 +4942,7 @@
       // CR + LF as a pair when Redmine sends a textarea body with CRLF
       // line endings (the default for forms responding via AJAX).
       if (n._attrs.value != null) return n._attrs.value;
-      const txt = n.textContent;
-      if (txt.length >= 2 && txt.charCodeAt(0) === 13 && txt.charCodeAt(1) === 10) return txt.slice(2);
-      if (txt.length >= 1 && (txt.charCodeAt(0) === 13 || txt.charCodeAt(0) === 10)) return txt.slice(1);
-      return txt;
+      return __stripOneLeadingNewline(n.textContent);
     }
     if (tag === 'select') {
       const opts = n.querySelectorAll('option');
@@ -5064,11 +5064,8 @@
     // A click handler that ended in `form.submit()` (Rails-UJS
     // data-method link → builds synthetic form → submit) takes
     // precedence: the page intent is to submit, not navigate.
-    if (globalThis.__csimPendingFormSubmit) {
-      const p = globalThis.__csimPendingFormSubmit;
-      globalThis.__csimPendingFormSubmit = null;
-      return { kind: 'submit', formHandle: p.form._id, submitter: p.submitter ? p.submitter._id : 0 };
-    }
+    const pendingSubmit = __takePendingFormSubmit();
+    if (pendingSubmit) return { kind: 'submit', formHandle: pendingSubmit.formHandle, submitter: pendingSubmit.submitterHandle || 0 };
     if (click.defaultPrevented) return null;
 
     if (n._tag === 'a' && n._attrs.href != null) {
@@ -5222,7 +5219,7 @@
     return:     { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n', inputType: 'insertLineBreak' },
     tab:        { key: 'Tab',       code: 'Tab',       keyCode:  9, char: '\t', inputType: 'insertText'      },
     space:      { key: ' ',         code: 'Space',     keyCode: 32, char: ' ',  inputType: 'insertText'      },
-    backspace:  { key: 'Backspace', code: 'Backspace', keyCode:  8, char: null, inputType: 'deleteContentBackward', backspace: true },
+    backspace:  { key: 'Backspace', code: 'Backspace', keyCode:  8, char: null, inputType: 'deleteContentBackward' },
     delete:     { key: 'Delete',    code: 'Delete',    keyCode: 46, char: null, inputType: 'deleteContentForward'  },
     escape:     { key: 'Escape',    code: 'Escape',    keyCode: 27, char: null, inputType: null },
     up:         { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38, char: null, inputType: null },
@@ -5520,37 +5517,41 @@
     if (!multi) for (const o of opts) delete o._attrs.selected;
     opt._attrs.selected = '';
   }
+  // Real browsers (and selenium's `.select_by(...)`) fire `input`
+  // and `change` on the parent `<select>` when the user picks a
+  // different option. Redmine's `<select onchange=
+  // "updateIssueFrom(...)">` relies on `change` to refire the form
+  // AJAX; without these dispatches the form stays stale. We gate on
+  // a "did the selected state change" check so a redundant
+  // `select_option` against the already-selected option doesn't
+  // re-fire AJAX on every Capybara call.
+  function __fireSelectChange (sel) {
+    try { dispatchEvent(sel, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
+    try { dispatchEvent(sel, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
+  }
+  function __ancestorSelect (option) {
+    let cur = option._parent;
+    while (cur && cur._tag !== 'select') cur = cur._parent;
+    return cur && cur._tag === 'select' ? cur : null;
+  }
   globalThis.__csimSelectOption = function (h) {
     const n = lookup(h);
     if (!n || n._tag !== 'option') return false;
-    // walk up to <select>
-    let sel = n._parent;
-    while (sel && sel._tag !== 'select') sel = sel._parent;
+    const sel = __ancestorSelect(n);
     if (!sel) { n._attrs.selected = ''; return true; }
+    const wasSelected = n._attrs.selected != null;
     selectOptionExclusive(sel, n);
-    // Real browsers (and selenium's `.select_by(...)`) fire `input`
-    // and `change` on the parent `<select>` when the user picks a
-    // different option. Redmine's `<select onchange=
-    // "updateIssueFrom(...)">` relies on `change` to refire the form
-    // AJAX; without these dispatches the form stays stale and tests
-    // that hinge on a tracker/project switch (form_update / activity
-    // refresh / bulk-edit project move) all fail at the next assertion.
-    try { dispatchEvent(sel, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
-    try { dispatchEvent(sel, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
+    if (!wasSelected) __fireSelectChange(sel);
     return true;
   };
   globalThis.__csimUnselectOption = function (h) {
     const n = lookup(h);
     if (!n || n._tag !== 'option') return false;
+    const wasSelected = n._attrs.selected != null;
     delete n._attrs.selected;
-    // Mirror `__csimSelectOption`: when the user toggles an option
-    // off in a multi-select, fire input + change on the owning
-    // `<select>` so onchange handlers see the new state.
-    let sel = n._parent;
-    while (sel && sel._tag !== 'select') sel = sel._parent;
-    if (sel) {
-      try { dispatchEvent(sel, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
-      try { dispatchEvent(sel, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
+    if (wasSelected) {
+      const sel = __ancestorSelect(n);
+      if (sel) __fireSelectChange(sel);
     }
     return true;
   };
@@ -5602,14 +5603,10 @@
       } else if (tag === 'textarea') {
         // HTML form-submission spec normalizes textarea LF to CRLF.
         // Strip the same single leading line terminator that
-        // `__csimValue` strips so the serialized payload matches what
-        // the textarea IDL reports (no phantom `\r\n` prefix from the
-        // post-parse `<textarea>\nbody</textarea>` whitespace).
-        let raw = f._attrs.value != null ? f._attrs.value : f.textContent;
-        if (f._attrs.value == null && typeof raw === 'string' && raw.length) {
-          if (raw.length >= 2 && raw.charCodeAt(0) === 13 && raw.charCodeAt(1) === 10) raw = raw.slice(2);
-          else if (raw.charCodeAt(0) === 13 || raw.charCodeAt(0) === 10) raw = raw.slice(1);
-        }
+        // `__csimValue` strips, then re-normalize line endings.
+        const raw = f._attrs.value != null
+          ? f._attrs.value
+          : __stripOneLeadingNewline(f.textContent);
         fields.push([name, String(raw).replace(/\r\n|\r|\n/g, '\r\n')]);
       } else if (tag === 'select') {
         const multi = f._attrs.multiple != null;
