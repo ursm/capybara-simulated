@@ -4830,6 +4830,16 @@
   // Capybara's whitespace normaliser (which only squeezes ` `, not
   // `\n`) can't recover the expected output.
   const INLINE_WS_RE = /[\t\n\v\f\r]+/g;
+  // Tags that introduce a block boundary in the rendered text. Real
+  // browsers' innerText inserts a newline between adjacent block
+  // boxes; Capybara's text comparisons depend on `<p>` / `<div>` /
+  // `<h1>` content being newline-separated rather than concatenated.
+  const BLOCK_TAGS = new Set([
+    'address','article','aside','blockquote','dd','div','dl','dt',
+    'figcaption','figure','footer','form','h1','h2','h3','h4','h5',
+    'h6','header','hr','li','main','nav','ol','p','pre','section',
+    'table','tbody','td','tfoot','th','thead','tr','ul'
+  ]);
   function collectVisibleText(node) {
     if (node.nodeType === NODE_TEXT) return String(node.data || '').replace(INLINE_WS_RE, ' ');
     if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC) return '';
@@ -4837,6 +4847,7 @@
       if (INVISIBLE_TAGS.has(node._tag)) return '';
       if (node._tag === 'input' && (node._attrs.type || '').toLowerCase() === 'hidden') return '';
       if (selfHidden(node)) return '';
+      if (node._tag === 'br') return '\n';
       if (node._tag === 'details' && node._attrs.open == null) {
         // Closed details: only emit text inside <summary>.
         let s = '';
@@ -4847,7 +4858,18 @@
       }
     }
     let out = '';
-    for (const c of node._children) out += collectVisibleText(c);
+    for (const c of node._children) {
+      const part = collectVisibleText(c);
+      if (!part) continue;
+      // Insert a newline at block boundaries (before the block if
+      // there's preceding output, after the block's content for the
+      // next sibling). Avoid doubling when neighbours already end
+      // with `\n`.
+      const isBlock = c.nodeType === NODE_ELEMENT && BLOCK_TAGS.has(c._tag);
+      if (isBlock && out && !out.endsWith('\n')) out += '\n';
+      out += part;
+      if (isBlock && !part.endsWith('\n')) out += '\n';
+    }
     return out;
   }
 
