@@ -148,6 +148,7 @@
     get firstChild()    { return this._children[0] || null; }
     get lastChild()     { return this._children[this._children.length - 1] || null; }
     get childNodes()    { return this._children.slice(); }
+    hasChildNodes()     { return this._children.length > 0; }
     get children()      { return this._children.filter(c => c.nodeType === NODE_ELEMENT); }
     get nextSibling() {
       if (!this._parent) return null;
