@@ -170,6 +170,21 @@
     get lastChild()     { return this._children[this._children.length - 1] || null; }
     get childNodes()    { return this._children.slice(); }
     hasChildNodes()     { return this._children.length > 0; }
+    // `Node.contains(other)` — true if other is inclusively `this` or
+    // descendant. Per DOM spec lives on Node (Document inherits).
+    // jQuery 3.x's `isAttached(elem)` calls
+    // `jQuery.contains(elem.ownerDocument, elem)`, and jQuery.contains
+    // internally calls `document.contains(elem)`; without the method
+    // on Document the isHidden path threw and `.toggle()` mis-decided
+    // its direction (always hide).
+    contains(other) {
+      let cur = other;
+      while (cur) {
+        if (cur === this) return true;
+        cur = cur._parent;
+      }
+      return false;
+    }
     // `form.submit()` — programmatic form submission. Per HTML spec
     // this does NOT fire a `submit` event (selenium-mode submit-via-
     // button fires submit; programmatic skips it; memory
@@ -1458,7 +1473,13 @@
     // Frameworks that probe arbitrary CSS properties (jQuery UI's
     // `p.style.backgroundColor.indexOf("rgba")`) now get a string
     // back instead of `undefined`.
-    const target = function () {}; // dummy callable for compatibility
+    // Proxy target is an object so `typeof el.style === 'object'`.
+    // The original `function(){}` target made it `'function'`, which
+    // broke jQuery 3.x's `isHiddenWithinTree` (reads
+    // `elem.style.display` after a typeof check — when `elem.style`
+    // is a function jQuery skipped the inline-style branch and
+    // toggle() routed to the wrong direction).
+    const target = {};
     const handler = {
       get(_t, prop) {
         if (prop === 'cssText') return el._attrs.style || '';
@@ -3543,9 +3564,77 @@
     go()      { __locationReload(); }
   };
 
+  // `getComputedStyle(el)` — minimal cascade-aware proxy. For the
+  // properties we actually have answers for (`display`, `visibility`),
+  // return the resolved value from the inline-or-cascade pipeline.
+  // For every other property fall back to whatever the inline style
+  // proxy reports. jQuery 3.x's `isHiddenWithinTree` reads
+  // `jQuery.css(elem, 'display')` which lands here; without the
+  // resolved 'none' answer for a class-hidden div, `$.fn.toggle()`
+  // mis-direction-detects and ends up hiding an already-hidden div.
+  // Tag → default `display` lookup. jQuery 3.x's `defaultDisplay`
+  // probes this synthetically by mounting an element and reading its
+  // computed display; without a default our `__computedDisplayFor`
+  // returned '' for a "shown" element, jQuery resolved that as
+  // hidden again, and `.show()` left a misleading empty inline
+  // display on the element.
+  const __DEFAULT_DISPLAY = {
+    a: 'inline', abbr: 'inline', b: 'inline', bdi: 'inline', bdo: 'inline',
+    br: 'inline', cite: 'inline', code: 'inline', data: 'inline',
+    dfn: 'inline', em: 'inline', i: 'inline', kbd: 'inline', mark: 'inline',
+    q: 'inline', rp: 'inline', rt: 'inline', ruby: 'inline', s: 'inline',
+    samp: 'inline', small: 'inline', span: 'inline', strong: 'inline',
+    sub: 'inline', sup: 'inline', time: 'inline', u: 'inline', var: 'inline',
+    wbr: 'inline', label: 'inline', input: 'inline-block', img: 'inline',
+    button: 'inline-block', select: 'inline-block', textarea: 'inline-block',
+    table: 'table', thead: 'table-header-group', tbody: 'table-row-group',
+    tfoot: 'table-footer-group', tr: 'table-row', th: 'table-cell', td: 'table-cell',
+    li: 'list-item', summary: 'list-item',
+    template: 'none', script: 'none', style: 'none', noscript: 'none',
+    head: 'none', title: 'none', meta: 'none', link: 'none',
+    option: 'block', optgroup: 'block'
+  };
+  function __computedDisplayFor (el) {
+    const inlineStyle = el._attrs.style;
+    if (inlineStyle) {
+      const m = /(^|;|\s)display\s*:\s*([^;]+)/i.exec(inlineStyle);
+      if (m) return m[2].trim();
+    }
+    // Cascade-derived hidden? `matchesAnyHideRule` returns true when
+    // the winning display rule is 'none' OR visibility rule is
+    // 'hidden'. We approximate by reading it for 'display:none' only.
+    if (el._attrs.hidden != null) return 'none';
+    if (matchesAnyHideRule(el)) return 'none';
+    // Default-display table: jQuery uses this resolved value to
+    // restore visibility on a `.show()`-after-class-hide.
+    return __DEFAULT_DISPLAY[el._tag] || 'block';
+  }
+  function __computedVisibilityFor (el) {
+    const inlineStyle = el._attrs.style;
+    if (inlineStyle) {
+      const m = /(^|;|\s)visibility\s*:\s*([^;]+)/i.exec(inlineStyle);
+      if (m) return m[2].trim();
+    }
+    return '';
+  }
   globalThis.getComputedStyle = function (el) {
     if (!el || el.nodeType !== NODE_ELEMENT) return makeStyleProxy({ _attrs: {} });
-    return el.style;
+    const inline = el.style;
+    return new Proxy(inline, {
+      get (target, key) {
+        if (key === 'display')    return __computedDisplayFor(el);
+        if (key === 'visibility') return __computedVisibilityFor(el);
+        if (key === 'getPropertyValue') {
+          return function (name) {
+            const n = String(name).toLowerCase();
+            if (n === 'display')    return __computedDisplayFor(el);
+            if (n === 'visibility') return __computedVisibilityFor(el);
+            return target.getPropertyValue ? target.getPropertyValue(name) : (target[n] || '');
+          };
+        }
+        return target[key];
+      }
+    });
   };
 
   // Handle registry — Ruby keeps integer ids, looks up Element back
@@ -3999,10 +4088,21 @@
   const INVISIBLE_TAGS = new Set(['head','script','style','template','noscript','title']);
   const DISPLAY_NONE_RE       = /(^|;|\s)display\s*:\s*none\b/i;
   const VISIBILITY_HIDDEN_RE  = /(^|;|\s)visibility\s*:\s*hidden\b/i;
+  // Inline `display` / `visibility` declarations that AREN'T `none` /
+  // `hidden` — anything else (block, inline, inline-block, …) wins
+  // over a class-derived `display: none` (per spec, inline style has
+  // higher specificity than ordinary author rules). jQuery's
+  // `.show()` over a `.hidden`-classed element ends up writing
+  // `style="display: block"`; without this branch the element stayed
+  // invisible because matchesAnyHideRule kept asserting hidden.
+  const DISPLAY_OTHER_RE      = /(^|;|\s)display\s*:\s*(?!none\b)[^;]+/i;
+  const VISIBILITY_OTHER_RE   = /(^|;|\s)visibility\s*:\s*(?!hidden\b)[^;]+/i;
   function selfHidden(el) {
     if (el._attrs.hidden != null) return true;
     const style = el._attrs.style;
     if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
+    // Inline display:<other> overrides any class-derived display:none.
+    if (style && DISPLAY_OTHER_RE.test(style)) return false;
     return matchesAnyHideRule(el);
   }
 
