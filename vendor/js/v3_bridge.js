@@ -258,6 +258,16 @@
       t._parent = this;
       this._children.push(t);
     }
+    // `innerText` is the "as rendered" sibling of textContent — line
+    // breaks from `<br>` / block boundaries, whitespace collapsed,
+    // visibility-aware. Without a layout engine we can't compute the
+    // rendered form, so we fall back to textContent — what Chromium
+    // does anyway for detached / not-being-rendered subtrees per spec
+    // note. Critical because Redmine's jstoolbar builds its Edit /
+    // Preview tabs via `link.innerText = tabName`, and without the
+    // setter the tabs end up empty and `click_link 'Preview'` fails.
+    get innerText() { return this.textContent; }
+    set innerText(v) { this.textContent = v; }
   }
 
   class Text extends Node {
@@ -1136,27 +1146,36 @@
     // call. Without this, Redmine's `onclick="showAndScrollTo(...);
     // return false"` never runs and the issue-notes form stays
     // collapsed (the "Quote" link is effectively a no-op).
-    if (!capture && node._attrs) {
+    if (!capture && node._attrs && !event._immediatePropagationStopped) {
       const attrName = 'on' + event.type;
-      const attrVal  = node._attrs[attrName];
-      if (attrVal != null && !event._immediatePropagationStopped) {
-        let handler = node._onCompiled && node._onCompiled[attrName];
+      // Property assignment (`el.onclick = fn`) takes precedence over
+      // any `onclick="..."` attribute per HTML spec — the setter
+      // *replaces* the inline handler. jstoolbar registers its Edit /
+      // Preview tab handlers via `this.previewTab.onclick = ...` and
+      // the click_link 'Preview' chain depends on that running.
+      // Plain property access works for the read; the only thing the
+      // bridge has to do is dispatch through it during the bubble.
+      const propHandler = typeof node[attrName] === 'function' ? node[attrName] : null;
+      const attrVal     = propHandler ? null : node._attrs[attrName];
+      let handler = propHandler;
+      if (!handler && attrVal != null) {
+        handler = node._onCompiled && node._onCompiled[attrName];
         if (handler === undefined) {
           try { handler = new Function('event', String(attrVal)); }
           catch (_) { handler = null; }
           (node._onCompiled = node._onCompiled || {})[attrName] = handler;
         }
-        if (handler) {
-          event.currentTarget = node;
-          try {
-            const ret = handler.call(node, event);
-            // Returning false from an on-attribute handler cancels the
-            // event's default action (HTML spec; mirrored by jQuery's
-            // own behaviour for event handlers).
-            if (ret === false && event.cancelable) event.defaultPrevented = true;
-          } catch (e) {
-            try { console.error('[csim v3] on-attribute handler threw:', e && e.message); } catch (_) {}
-          }
+      }
+      if (handler) {
+        event.currentTarget = node;
+        try {
+          const ret = handler.call(node, event);
+          // Returning false from an on-attribute handler cancels the
+          // event's default action (HTML spec; mirrored by jQuery's
+          // own behaviour for event handlers).
+          if (ret === false && event.cancelable) event.defaultPrevented = true;
+        } catch (e) {
+          try { console.error('[csim v3] on-attribute handler threw:', e && e.message); } catch (_) {}
         }
       }
     }
