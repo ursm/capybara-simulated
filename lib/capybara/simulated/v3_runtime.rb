@@ -12,7 +12,6 @@ require 'json'
 require 'securerandom'
 require 'set'
 
-require_relative 'esm_rewriter'
 
 begin
   stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
@@ -183,20 +182,21 @@ module Capybara
       def call(name, *args)  = ctx.call(name, *args)
 
       # bridge.js owns the virtual clock; Ruby still drives it because
-      # Capybara's polling cadence is wall-clock-anchored.
+      # Capybara's polling cadence is wall-clock-anchored. Use `call`
+      # (function reference) rather than `eval` (string compile) — the
+      # polling loop hits these every retry tick.
       def drain_timers(max_ms = nil)
-        arg = max_ms.nil? ? '' : max_ms.to_i.to_s
-        ctx.eval("__drainTimers(#{arg})")
+        max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
       def has_ready_timer?
         return false if @ctx.nil?
-        ctx.eval('!!__hasReadyTimer()')
+        !!ctx.call('__hasReadyTimer')
       end
 
       def reset_timers
         return if @ctx.nil?
-        ctx.eval('__resetTimers()')
+        ctx.call('__resetTimers')
       end
 
       # Tears down the current Context and brings up a fresh one from
@@ -222,7 +222,6 @@ module Capybara
           rescue StandardError
           end }
         end
-        @module_source_cache = nil
         @ctx = checkout_ctx
         refill_pool_async
         @ctx
@@ -424,18 +423,11 @@ module Capybara
         c.attach('__csim_pushImportmap',     ->(*a) { sc.() { browser.set_importmap(a[0]); nil } })
       end
 
-      # Fetch the rewritten module source for `url`. Cached per Context
-      # so `__csim_require` only pays the EsmRewriter cost once per
-      # URL per Context. Bridges Ruby-side `Browser#load_module`
-      # (Rack fetch + rewrite) into the JS-side loader's
-      # `__csim_fetchModuleSource(url)` hook.
-      def fetch_module_source(browser, url)
-        @module_source_cache ||= {}
-        @module_source_cache[url] ||= begin
-          raw = browser.load_module(url)
-          raw && EsmRewriter.rewrite(raw).first
-        end
-      end
+      # Bridges Ruby-side `Browser#load_module` (Rack fetch +
+      # rewrite_module_imports + EsmRewriter) into the JS-side loader's
+      # `__csim_fetchModuleSource(url)` hook. Caching lives on Browser
+      # so it survives Context rebuilds.
+      def fetch_module_source(browser, url) = browser.load_module(url)
 
       def parse_url_for_js(input, base)
         require 'uri'

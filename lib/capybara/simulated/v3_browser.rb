@@ -563,13 +563,15 @@ module Capybara
 
       # ── Host-fn callbacks invoked by v3_bridge.js ───────────────
 
-      # JS-side loader callback: hand back the raw module body for `url`.
-      # The runtime then runs `EsmRewriter.rewrite` on it. Cached per
-      # Browser instance so concurrent re-evals don't re-fetch.
-      # Inline modules are pre-registered via the JS-side
-      # `__csim_inlineSources` map, indexed by hashed-body URL —
-      # we surface them here so the same module cache covers both
-      # paths.
+      # JS-side loader callback: hand back the rewritten module body
+      # for `url` (import specifiers resolved through the active
+      # importmap + EsmRewriter applied). Cached at Browser scope so
+      # the rewrite cost is paid once per (URL, importmap) — the cache
+      # survives Context rebuilds (between-test reset + per-navigate
+      # rebuild) and is flushed only when `set_importmap` detects a
+      # change. Inline modules are pre-registered via the JS-side
+      # `__csim_inlineSources` map, indexed by hashed-body URL — we
+      # surface them here so the same cache covers both paths.
       def load_module(url)
         return @module_cache[url] if @module_cache.key?(url)
         body =
@@ -584,7 +586,9 @@ module Capybara
             rack_fetch_body(url)
           end
         return @module_cache[url] = nil unless body
-        @module_cache[url] = rewrite_module_imports(body, url)
+        resolved  = rewrite_module_imports(body, url)
+        rewritten = EsmRewriter.rewrite(resolved).first
+        @module_cache[url] = rewritten
       end
 
       def rack_fetch_body(url)
@@ -619,10 +623,19 @@ module Capybara
       # JS-side `ingestImportmaps` calls this through the host fn so
       # Ruby-side `resolve_module_specifier` and JS-side
       # `__csim_resolveSpecifier` agree on the bare-specifier map.
+      # Flush `@module_cache` whenever the importmap actually changes —
+      # cached module bodies embed import URLs that were resolved
+      # against the previous map. For apps with a stable importmap
+      # across pages (the common case) this preserves cache hits
+      # across navigations.
       def set_importmap(json)
-        @importmap = JSON.parse(json.to_s)
-      rescue JSON::ParserError
-        @importmap = {'imports' => {}, 'scopes' => {}}
+        parsed = begin
+          JSON.parse(json.to_s)
+        rescue JSON::ParserError
+          {'imports' => {}, 'scopes' => {}}
+        end
+        @module_cache = {} if @importmap && @importmap != parsed
+        @importmap = parsed
       end
 
       def resolve_module_specifier(specifier, base_url)
@@ -748,8 +761,9 @@ module Capybara
         end
         @current_url = url
         html         = read_rack_body(body)
-        @module_cache = {}
-        @importmap    = {'imports' => {}, 'scopes' => {}}
+        # @module_cache and @importmap survive across navigates;
+        # set_importmap flushes the cache only when the new page
+        # ships a different importmap (handles cross-app navigation).
         # Full-reload navigation rebuilds the JS Context from the warm
         # snapshot. Mirrors v2's pool-checkout model: per-visit fresh VM
         # avoids the partial-reset drift (jQuery `.ready`, rails-ujs
