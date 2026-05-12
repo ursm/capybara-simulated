@@ -4946,6 +4946,21 @@
   // Build an XPath that uniquely targets this element. Each step uses
   // `tag[index]` keyed by the position among same-tag siblings, so the
   // result resolves back to the same node when handed to `find_xpath`.
+  // Return the document's `<base href>` (or '' if absent / unset).
+  // Ruby resolves link / form-action URLs against this when the page
+  // declares one, but `visit` skips it — same as real browsers'
+  // address-bar navigation semantics.
+  globalThis.__csimBaseHref = function () {
+    const doc = globalThis.document;
+    if (!doc || !doc.head) return '';
+    for (const c of doc.head._children || []) {
+      if (c.nodeType === NODE_ELEMENT && c._tag === 'base' && c._attrs.href != null) {
+        return String(c._attrs.href);
+      }
+    }
+    return '';
+  };
+
   globalThis.__csimNodePath = function (h) {
     const start = __handles.get(h);
     if (!start || start.nodeType !== NODE_ELEMENT) return '';

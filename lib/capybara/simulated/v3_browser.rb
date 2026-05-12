@@ -91,9 +91,24 @@ module Capybara
       def visit(url)
         # Address-bar navigation: no Referer, even if we already had
         # a page loaded. Link clicks / form submits / `location.assign`
-        # routes do carry the current URL as Referer, which the default
+        # routes carry the current URL as Referer, which the default
         # `navigate` arg handles.
-        navigate(resolve_against_current(url), referer: nil)
+        # A relative path on visit is resolved against the host root
+        # (`http://www.example.com/<path>`), not the current page's
+        # directory — that's "I typed this in the address bar", and
+        # we don't want a previous `/base/foo` page to make
+        # `visit('with_html')` land at `/base/with_html`.
+        navigate(resolve_visit_url(url), referer: nil)
+      end
+
+      def resolve_visit_url(url)
+        s = url.to_s
+        return s if s =~ %r{\A[a-z]+://}i
+        require 'uri'
+        host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || DEFAULT_HOST
+        host_root = host_root.sub(/\/+$/, '')
+        s = "/#{s}" unless s.start_with?('/')
+        "#{host_root}#{s}"
       end
 
       def current_url
@@ -305,7 +320,9 @@ module Capybara
           if pure_fragment_navigation?(url)
             update_current_hash(url)
           else
-            navigate(resolve_against_current(url))
+            # Link clicks honour `<base href>` (HTML spec); `visit`
+            # does not — that's address-bar navigation.
+            navigate(resolve_against_current(url, use_base: true))
           end
         when 'submit'
           submit_form_handle(action['formHandle'], action['submitter'])
@@ -1134,13 +1151,27 @@ module Capybara
         out
       end
 
-      def resolve_against_current(url)
+      def resolve_against_current(url, use_base: false)
         return url if url =~ %r{\A[a-z]+://}i
         require 'uri'
-        base = @current_url || DEFAULT_HOST
+        base =
+          if use_base && (bh = base_href) && !bh.empty?
+            # The document's `<base href>` takes precedence over the
+            # request URL when the page's own links / form actions are
+            # being resolved — HTML's base-tag semantics. `visit` skips
+            # this branch so an address-bar navigation reaches the URL
+            # the test typed.
+            URI.join(@current_url || DEFAULT_HOST, bh).to_s
+          else
+            @current_url || DEFAULT_HOST
+          end
         URI.join(base, url.to_s).to_s
       rescue URI::InvalidURIError
         url
+      end
+
+      def base_href
+        @runtime.call('__csimBaseHref').to_s
       end
     end
   end
