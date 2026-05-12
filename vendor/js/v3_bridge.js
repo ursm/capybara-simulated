@@ -5220,6 +5220,12 @@
   globalThis.__csimNodePath = function (h) {
     const start = __handles.get(h);
     if (!start || start.nodeType !== NODE_ELEMENT) return '';
+    // A node living inside a ShadowRoot doesn't have a stable
+    // document-level XPath. Capybara uses the same marker string for
+    // these as selenium/cuprite.
+    for (let cur = start; cur; cur = cur._parent) {
+      if (cur instanceof ShadowRoot) return '(: Shadow DOM element - no XPath :)';
+    }
     const segments = [];
     let cur = start;
     while (cur && cur.nodeType === NODE_ELEMENT) {
@@ -5674,6 +5680,16 @@
   const __MODIFIER_NAMES = new Set([
     'control', 'ctrl', 'command', 'cmd', 'meta', 'shift', 'alt', 'option'
   ]);
+  const __MODIFIER_KEY_INFO = {
+    shift:   { key: 'Shift',    code: 'ShiftLeft',   keyCode: 16 },
+    control: { key: 'Control',  code: 'ControlLeft', keyCode: 17 },
+    ctrl:    { key: 'Control',  code: 'ControlLeft', keyCode: 17 },
+    alt:     { key: 'Alt',      code: 'AltLeft',     keyCode: 18 },
+    option:  { key: 'Alt',      code: 'AltLeft',     keyCode: 18 },
+    meta:    { key: 'Meta',     code: 'MetaLeft',    keyCode: 91 },
+    command: { key: 'Meta',     code: 'MetaLeft',    keyCode: 91 },
+    cmd:     { key: 'Meta',     code: 'MetaLeft',    keyCode: 91 }
+  };
   function __resolveKey(spec) {
     // Try the named-key table first so callers can pass 'enter' /
     // 'tab' / 'escape' interchangeably as strings or symbols — the
@@ -5815,8 +5831,16 @@
         for (let i = parts.length - 1; i >= 0; i--) {
           if (!__MODIFIER_NAMES.has(String(parts[i]).toLowerCase())) { lastKeyIdx = i; break; }
         }
-        const mods    = __modifierFlags(parts.slice(0, lastKeyIdx >= 0 ? lastKeyIdx : parts.length));
-        const keyName = lastKeyIdx >= 0 ? parts[lastKeyIdx] : '';
+        const modNames = parts.slice(0, lastKeyIdx >= 0 ? lastKeyIdx : parts.length);
+        const mods     = __modifierFlags(modNames);
+        const keyName  = lastKeyIdx >= 0 ? parts[lastKeyIdx] : '';
+        // Real keyboards send a keydown for each modifier first.
+        // Capybara's `should generate key events` checks for the
+        // 16/17/18 etc. keyCodes alongside the printable key's.
+        const modInfos = modNames.map(m => __MODIFIER_KEY_INFO[String(m).toLowerCase()]).filter(Boolean);
+        for (const mi of modInfos) {
+          try { dispatchEvent(n, new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: mi.key, code: mi.code, keyCode: mi.keyCode, which: mi.keyCode, ...mods })); } catch (_) {}
+        }
         // `[:shift, 'side']` means "hold shift, type each character" —
         // unfold the string into per-character presses with the
         // modifier flags applied. Real keyboards send one keydown per
@@ -5833,6 +5857,10 @@
           const single = String(keyName);
           const cooked = mods.shiftKey && single.length === 1 ? single.toUpperCase() : single;
           pressKey(__resolveKey(cooked), mods);
+        }
+        for (let i = modInfos.length - 1; i >= 0; i--) {
+          const mi = modInfos[i];
+          try { dispatchEvent(n, new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: mi.key, code: mi.code, keyCode: mi.keyCode, which: mi.keyCode })); } catch (_) {}
         }
         // Clipboard paste: Ctrl+V / Cmd+V should fire a `paste` event
         // with the system clipboard's text content. Real browsers do
