@@ -5985,6 +5985,23 @@
           try { dispatchEvent(n, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 })); } catch (_) {}
         }
         kind = 'checked';
+      } else if (type === 'range' || type === 'number') {
+        // Range / number inputs snap to min/max/step. Browsers clamp
+        // out-of-range values to the nearest valid step boundary.
+        const num    = parseFloat(v);
+        const min    = parseFloat(n._attrs.min);
+        const max    = parseFloat(n._attrs.max);
+        const step   = parseFloat(n._attrs.step) || 1;
+        let clamped  = isNaN(num) ? (isNaN(min) ? 0 : min) : num;
+        if (!isNaN(min) && clamped < min) clamped = min;
+        if (!isNaN(max) && clamped > max) clamped = max;
+        if (!isNaN(min) && step > 0) {
+          const k = Math.round((clamped - min) / step);
+          clamped = min + k * step;
+          // Floating-point round to avoid 37.500000000004.
+          clamped = parseFloat(clamped.toFixed(10));
+        }
+        n._attrs.value = String(clamped);
       } else {
         // Browsers truncate at maxlength when the user types; programmatic
         // assignment via the IDL setter does the same when the input is

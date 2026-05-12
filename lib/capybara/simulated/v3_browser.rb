@@ -6,6 +6,7 @@
 # wired up so a `Capybara::Session` can `visit` and `find` against
 # the V8-resident DOM. Milestones 3+ grow this incrementally.
 
+require 'date'
 require 'fileutils'
 require 'json'
 require 'nokogiri'
@@ -357,6 +358,12 @@ module Capybara
         # after attaching, not the actual upload, so the coerce alone
         # unblocks them.
         coerced = coerce_set_value(value)
+        # For date/time-shaped inputs we need the type-specific
+        # string. Probe the handle's `type` and re-format Date / Time
+        # accordingly — `Date.today` → `2026-05-13` (date input) is
+        # already right via to_s, but `Time` needs the input-type-
+        # specific format.
+        coerced = format_temporal_value(value, handle) if value.is_a?(Date) || value.is_a?(Time)
         @file_picks ||= {}
         # Capybara `attach_file` calls `Node#set` with a Pathname; some
         # callers pass a String path through directly. When the target
@@ -400,6 +407,19 @@ module Capybara
         when Pathname then v.to_s
         when Array    then v.map {|x| x.is_a?(Pathname) ? x.to_s : x.to_s }
         else v
+        end
+      end
+
+      def format_temporal_value(v, handle)
+        type = attr(handle, 'type').to_s.downcase
+        case type
+        when 'date'           then v.respond_to?(:strftime) ? v.strftime('%Y-%m-%d') : v.to_s
+        when 'time'           then v.respond_to?(:strftime) ? v.strftime('%H:%M') : v.to_s
+        when 'datetime-local' then v.respond_to?(:strftime) ? v.strftime('%Y-%m-%dT%H:%M') : v.to_s
+        when 'month'          then v.respond_to?(:strftime) ? v.strftime('%Y-%m')  : v.to_s
+        when 'week'           then v.respond_to?(:strftime) ? v.strftime('%Y-W%V') : v.to_s
+        else
+          v.is_a?(Date) ? v.strftime('%Y-%m-%d') : v.to_s
         end
       end
 
