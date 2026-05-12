@@ -6632,59 +6632,6 @@
     if (had) __setTimersActive(false);
   };
 
-  // Ruby side calls this after the first visit completes to harvest
-  // the list of external `<script src>` URLs that were evaluated +
-  // their bodies. Feeds the app-warm snapshot build.
-  globalThis.__csim_dumpExternalScripts = function () {
-    const out = [];
-    for (const [url, body] of __externalScriptsRun) out.push({ url, body });
-    return out;
-  };
-
-  // Used by the warmup snapshot build script to mark a URL as already
-  // evaluated — `__externalScriptsRun` is IIFE-scoped, so per-visit
-  // pages that try to load the same `<script src>` need to consult
-  // through this hook instead of touching the variable directly.
-  globalThis.__csim_markScriptLoaded = function (url) {
-    __externalScriptsRun.set(String(url), '');
-  };
-
-  // Called as the last line of the app-warm snapshot build script.
-  // The snapshot freezes a Context in "library bundles evaluated but
-  // no page loaded yet" state, so the per-visit side effects that
-  // accumulated during warmup eval (queued timers / microtasks,
-  // pending MutationObserver records, scratch handles for warmup-only
-  // nodes, virtual clock advance) all need to roll back to a clean
-  // baseline. What we *keep*: library globals (jQuery, Rails, …),
-  // `document._listeners` (`$(document).on(...)` delegates),
-  // `__externalScriptsRun` (so per-visit script lists skip already-
-  // baked URLs), `__customElementRegistry`, `__hideRules`.
-  globalThis.__csimEnterSnapshotState = function () {
-    __resetTimers();
-    __nextTimerId      = 1;
-    __pendingRecords.length = 0;
-    if (globalThis.document) {
-      // Keep `document.readyState = 'loading'` so the first per-visit
-      // `__csimLoadDocument` can flip to 'complete' and dispatch
-      // DOMContentLoaded — that's the trigger jQuery-style ready cbs
-      // were parked behind during warmup.
-      globalThis.document.readyState = 'loading';
-      // Strip body content but leave the html / head / body skeleton
-      // intact. Library IIFEs captured `documentElement` references
-      // that must remain valid in any Context spawned from this
-      // snapshot.
-      const html = globalThis.document.documentElement;
-      if (html) {
-        const head = html._children.find(c => c._tag === 'head');
-        const body = html._children.find(c => c._tag === 'body');
-        if (head) for (const c of head._children.slice()) head.removeChild(c);
-        if (body) for (const c of body._children.slice()) body.removeChild(c);
-      }
-    }
-    __handles.clear();
-    if (globalThis.document) registerNode(globalThis.document);
-  };
-
   // Vestigial: the Ruby side now rebuilds the Context from the warm
   // snapshot on every visit (and on inter-test reset), so this JS-
   // side reset is unreachable. Kept as a no-op for any latent caller.
