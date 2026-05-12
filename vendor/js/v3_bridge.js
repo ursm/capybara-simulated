@@ -475,15 +475,15 @@
     getElementsByTagName(tag) {
       const t = String(tag).toLowerCase();
       const all = t === '*' ? this.querySelectorAll('*') : this.querySelectorAll(t);
-      return all.filter(n => n !== this);
+      return __htmlCollection(all.filter(n => n !== this));
     }
     getElementsByClassName(cls) {
       const sel = String(cls).split(/\s+/).filter(Boolean).map(c => '.' + c).join('');
-      return this.querySelectorAll(sel).filter(n => n !== this);
+      return __htmlCollection(this.querySelectorAll(sel).filter(n => n !== this));
     }
     getElementsByName(name) {
       const sel = '[name="' + String(name).replace(/"/g, '\\"') + '"]';
-      return this.querySelectorAll(sel).filter(n => n !== this);
+      return __htmlCollection(this.querySelectorAll(sel).filter(n => n !== this));
     }
     // IDL `id` / `className` go through setAttribute so MO sees the
     // change record. Setting them directly on `_attrs` would skip the
@@ -2509,6 +2509,17 @@
   function makeText(s) {
     return new Text(decodeEntities(s));
   }
+  // Tag the returned Array as HTMLCollection-shaped (Array + `.item(i)`
+  // + `.namedItem(name)`). DOM spec returns HTMLCollection; lots of
+  // Redmine code paths (updateSVGIcon, etc.) do `collection.item(0)`.
+  function __htmlCollection (arr) {
+    arr.item = function (i) { return this[i] || null; };
+    arr.namedItem = function (n) {
+      for (const el of this) if (el && (el._attrs && (el._attrs.id === n || el._attrs.name === n))) return el;
+      return null;
+    };
+    return arr;
+  }
   // Used by `ChildNode.before/after/replaceWith` + `ParentNode.append
   // /prepend` to accept strings (auto-wrap as Text) alongside nodes.
   function toNode(v) {
@@ -2621,8 +2632,336 @@
   globalThis.HTMLLIElement       = Element;
   globalThis.HTMLUListElement    = Element;
   globalThis.HTMLOListElement    = Element;
+  // Additional element subtype aliases — same alias-to-Element pattern
+  // for the ones library `instanceof` probes reach. Ported from v2.
+  globalThis.HTMLAreaElement     = Element;
+  globalThis.HTMLBodyElement     = Element;
+  globalThis.HTMLCanvasElement   = Element;
+  globalThis.HTMLDialogElement   = Element;
+  globalThis.HTMLHeadElement     = Element;
+  globalThis.HTMLHtmlElement     = Element;
+  globalThis.HTMLIFrameElement   = Element;
+  globalThis.HTMLLinkElement     = Element;
+  globalThis.HTMLMetaElement     = Element;
+  globalThis.HTMLStyleElement    = Element;
+  globalThis.HTMLTemplateElement = Element;
+  globalThis.HTMLDocument        = Document;
+  globalThis.ShadowRoot          = Element;
+  globalThis.SVGElement          = Element;
+  globalThis.CharacterData       = Text;
+  globalThis.Comment             = Text;
+  // `Window` global class — sandboxes / wrappers do `instanceof Window`
+  // to distinguish a window from other globals. Real Window has many
+  // members; we just need the constructor for the identity check.
+  globalThis.Window = function Window () {};
+  // `new Option(text, value, defaultSelected, selected)` — old DOM
+  // constructor still used by some Stimulus controllers / select
+  // refresh paths to build replacement options.
+  globalThis.Option = function Option (text, value, defaultSelected, selected) {
+    const o = globalThis.document.createElement('option');
+    if (text !== undefined)  o.textContent = String(text);
+    if (value !== undefined) o.setAttribute('value', String(value));
+    if (defaultSelected)     o.setAttribute('selected', '');
+    if (selected)            o.selected = true;
+    return o;
+  };
+
   globalThis.document = new Document();
   globalThis.window   = globalThis;
+  // Window self-references that frame-aware code consults at boot:
+  // `top`, `parent`, `self`, `frames`, `frameElement`. We're a
+  // single-window runtime, so all of them point at the same global
+  // (or null for frameElement — we're not framed).
+  globalThis.self    = globalThis;
+  globalThis.top     = globalThis;
+  globalThis.parent  = globalThis;
+  globalThis.frames  = globalThis;
+  globalThis.frameElement = null;
+  // Layout-driven stubs — no real layout, so device pixel ratio is 1
+  // and `screen` is a fixed viewport. Libraries probe these for HiDPI
+  // / responsive decisions; we let everything fall to the "small
+  // desktop" branch.
+  globalThis.devicePixelRatio = 1;
+  globalThis.screen = {
+    width: 1024, height: 768,
+    availWidth: 1024, availHeight: 768,
+    colorDepth: 24, pixelDepth: 24,
+    orientation: { angle: 0, type: 'landscape-primary' }
+  };
+  // `matchMedia(query)` — returns a MediaQueryList-shaped object with
+  // `matches=false` (we don't have layout, so no query matches).
+  globalThis.matchMedia = function matchMedia (query) {
+    return {
+      media: String(query || ''),
+      matches: false,
+      onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {},
+      dispatchEvent: () => false
+    };
+  };
+  // `performance.now()` returns ms since the runtime started — not the
+  // virtual JS clock, since most callers (perf timing, jitter
+  // smoothing) want monotonic wall time, not virtual ticks.
+  const __perfStart = Date.now();
+  globalThis.performance = {
+    now ()        { return Date.now() - __perfStart; },
+    timeOrigin:    __perfStart,
+    timing:       { navigationStart: __perfStart },
+    mark ()       {},
+    measure ()    {},
+    getEntries () { return []; },
+    getEntriesByName () { return []; },
+    getEntriesByType () { return []; },
+    clearMarks ()    {},
+    clearMeasures () {}
+  };
+  // `structuredClone` — deep clone via JSON for the JSON-safe subset.
+  // Real structuredClone covers Map/Set/Date/typed arrays/cycles;
+  // we fall back to a no-clone passthrough on JSON failure.
+  globalThis.structuredClone = function structuredClone (v) {
+    if (v == null || typeof v !== 'object') return v;
+    try { return JSON.parse(JSON.stringify(v)); }
+    catch (_) { return v; }
+  };
+  // `reportError(error)` — spec: dispatch error event on global, log
+  // if unhandled. Logging is enough for our scenarios.
+  globalThis.reportError = function reportError (e) {
+    try { console.error(e && e.stack ? e.stack : String(e)); } catch (_) {}
+  };
+  // `requestIdleCallback` / `cancelIdleCallback` — fall back to
+  // `setTimeout(0)` so libraries that defer expensive setup to idle
+  // (Turbo Drive prefetch, Stimulus debounced renders) make progress.
+  globalThis.requestIdleCallback = function (cb) {
+    return setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 }), 0);
+  };
+  globalThis.cancelIdleCallback = function (id) { clearTimeout(id); };
+
+  // `NodeFilter` constants — DOMPurify constructs TreeWalker /
+  // NodeIterator with these masks. We don't ship a full TreeWalker
+  // yet (no consumer in Redmine's failing set), but the constants
+  // need to exist so the constructor call doesn't throw.
+  globalThis.NodeFilter = {
+    SHOW_ALL:                    0xFFFFFFFF,
+    SHOW_ELEMENT:                1,
+    SHOW_ATTRIBUTE:              2,
+    SHOW_TEXT:                   4,
+    SHOW_CDATA_SECTION:          8,
+    SHOW_PROCESSING_INSTRUCTION: 64,
+    SHOW_COMMENT:                128,
+    SHOW_DOCUMENT:               256,
+    SHOW_DOCUMENT_TYPE:          512,
+    SHOW_DOCUMENT_FRAGMENT:      1024,
+    FILTER_ACCEPT: 1,
+    FILTER_REJECT: 2,
+    FILTER_SKIP:   3
+  };
+  // Layout-driven observers — apps construct these at module init
+  // (Turbo's FrameController is the canonical case); they expect the
+  // constructor to succeed and `observe()` to be a no-op when there's
+  // no layout. `takeRecords()` returns empty so dirty-tracking code
+  // doesn't loop.
+  class CsimStubObserver {
+    constructor (cb)         { this._cb = cb; }
+    observe ()               {}
+    unobserve ()             {}
+    disconnect ()            {}
+    takeRecords ()           { return []; }
+  }
+  globalThis.IntersectionObserver  = class extends CsimStubObserver {};
+  globalThis.ResizeObserver        = class extends CsimStubObserver {};
+  globalThis.PerformanceObserver   = class extends CsimStubObserver {};
+
+  // `AbortSignal` — pair with AbortController; instanceof checks fall
+  // back to a "never aborted" signal.
+  globalThis.AbortSignal = function AbortSignal () {
+    this.aborted = false;
+  };
+  globalThis.AbortSignal.abort = function (reason) {
+    const s = new globalThis.AbortSignal();
+    s.aborted = true; s.reason = reason;
+    return s;
+  };
+  globalThis.AbortSignal.timeout = function () {
+    return new globalThis.AbortSignal();
+  };
+
+  // `EventTarget` global class — apps do `class Foo extends
+  // EventTarget` (Avo's date-picker, mapbox shims, Stimulus base in
+  // some versions). Per-instance handler-list dispatch.
+  globalThis.EventTarget = class EventTarget {
+    constructor () {
+      Object.defineProperty(this, '_etListeners', { value: new Map(), enumerable: false });
+    }
+    addEventListener (type, handler) {
+      if (typeof handler !== 'function' && !(handler && typeof handler.handleEvent === 'function')) return;
+      const arr = this._etListeners.get(type) || [];
+      if (!arr.includes(handler)) arr.push(handler);
+      this._etListeners.set(type, arr);
+    }
+    removeEventListener (type, handler) {
+      const arr = this._etListeners.get(type);
+      if (!arr) return;
+      const i = arr.indexOf(handler);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    dispatchEvent (event) {
+      if (event && event.target == null) event.target = this;
+      const list = this._etListeners.get(event && event.type);
+      if (!list) return true;
+      for (const h of list.slice()) {
+        try {
+          if (typeof h === 'function') h.call(this, event);
+          else                          h.handleEvent.call(h, event);
+        } catch (e) {
+          try { console.error('[csim v3] EventTarget listener threw:', e && e.message); } catch (_) {}
+        }
+      }
+      return !event.defaultPrevented;
+    }
+  };
+
+  // ── Blob / File / FileReader ────────────────────────────────────
+  //
+  // Used by file-attachment paths + dynamic asset generation (Avo's
+  // export-to-CSV blob, image-cropper widgets, FileSaver.js). The
+  // Blob bytes are stored as concatenated string parts; binary
+  // round-trips aren't supported (no FileReader async streaming),
+  // but `.text()` / `.arrayBuffer()` / `.size` / `.type` work.
+  globalThis.Blob = class Blob {
+    constructor (parts, opts) {
+      const i = opts || {};
+      this._parts = (parts || []).map(p => {
+        if (typeof p === 'string') return p;
+        if (p && p.text) return ''; // Nested Blob — defer fetching
+        if (p instanceof ArrayBuffer) {
+          const view = new Uint8Array(p);
+          let s = '';
+          for (let k = 0; k < view.length; k++) s += String.fromCharCode(view[k]);
+          return s;
+        }
+        return String(p);
+      });
+      this.size = this._parts.reduce((s, p) => s + (p ? p.length : 0), 0);
+      this.type = i.type || '';
+    }
+    text ()        { return Promise.resolve(this._parts.join('')); }
+    arrayBuffer () {
+      return this.text().then(t => {
+        const b = new ArrayBuffer(t.length);
+        const v = new Uint8Array(b);
+        for (let i = 0; i < t.length; i++) v[i] = t.charCodeAt(i) & 0xff;
+        return b;
+      });
+    }
+    slice (start, end, type) {
+      const all = this._parts.join('');
+      return new globalThis.Blob([all.slice(start || 0, end == null ? undefined : end)], { type: type || this.type });
+    }
+    stream () { return null; }
+  };
+  globalThis.File = class File extends globalThis.Blob {
+    constructor (parts, name, opts) {
+      super(parts, opts);
+      const i = opts || {};
+      this.name = String(name == null ? '' : name);
+      this.lastModified = i.lastModified || Date.now();
+    }
+  };
+  // `URL.createObjectURL` / `revokeObjectURL` for Blob URLs. The
+  // installer runs after `globalThis.URL` is defined further below,
+  // and the Blob registry is stored on a hidden symbol so subsequent
+  // installs share the same table.
+  const __csimBlobs = globalThis.__csimBlobs = globalThis.__csimBlobs || new Map();
+  globalThis.__csimBlobCounter = globalThis.__csimBlobCounter || { n: 0 };
+  function __csimInstallBlobURL () {
+    if (!globalThis.URL || globalThis.URL.__csimBlobInstalled) return;
+    globalThis.URL.createObjectURL = function (blob) {
+      const url = 'blob:csim-' + (++globalThis.__csimBlobCounter.n);
+      __csimBlobs.set(url, blob);
+      return url;
+    };
+    globalThis.URL.revokeObjectURL = function (url) { __csimBlobs.delete(url); };
+    globalThis.URL.__csimBlobInstalled = true;
+  }
+  if (globalThis.URL) __csimInstallBlobURL();
+  // Minimal FileReader — apps that mount file pickers (image preview
+  // widgets) read the chosen File via `reader.readAsDataURL` /
+  // `readAsText`. We feed the synchronous Blob.text() result back via
+  // the event the next microtask.
+  globalThis.FileReader = class FileReader extends globalThis.EventTarget {
+    constructor () { super(); this.result = null; this.readyState = 0; this.error = null; }
+    readAsText (blob) { this._read(blob, t => t); }
+    readAsDataURL (blob) { this._read(blob, t => 'data:' + (blob.type || 'application/octet-stream') + ';base64,' + (__csim_btoa ? __csim_btoa(t) : '')); }
+    readAsArrayBuffer (blob) { this._read(blob, t => { const b = new ArrayBuffer(t.length); const v = new Uint8Array(b); for (let i = 0; i < t.length; i++) v[i] = t.charCodeAt(i) & 0xff; return b; }); }
+    readAsBinaryString (blob) { this._read(blob, t => t); }
+    abort () { this.readyState = 2; this._fire('abort'); }
+    _read (blob, transform) {
+      const self = this;
+      self.readyState = 1;
+      Promise.resolve(blob && blob.text ? blob.text() : '').then(t => {
+        try { self.result = transform(t); self.readyState = 2; self._fire('load'); self._fire('loadend'); }
+        catch (e) { self.error = e; self.readyState = 2; self._fire('error'); self._fire('loadend'); }
+      });
+    }
+    _fire (type) {
+      const ev = { type, target: this, currentTarget: this };
+      if (typeof this['on' + type] === 'function') {
+        try { this['on' + type](ev); } catch (_) {}
+      }
+      try { this.dispatchEvent(ev); } catch (_) {}
+    }
+  };
+
+  // ── Web Storage ─────────────────────────────────────────────────
+  //
+  // localStorage / sessionStorage — in-process Map per Browser. Per
+  // memory `web_storage_persistence`, v2 routes these through Ruby so
+  // they survive `boot_vm` rebuilds; v3 rebuilds per visit too, so
+  // we'd need the same Ruby-backed model for cross-visit persistence.
+  // For same-visit reads/writes the JS-side map is enough.
+  function __csimMakeStorage () {
+    const m = new Map();
+    const storage = {
+      get length () { return m.size; },
+      key (i) {
+        const keys = Array.from(m.keys());
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+      getItem (k)    { return m.has(String(k)) ? m.get(String(k)) : null; },
+      setItem (k, v) { m.set(String(k), String(v == null ? '' : v)); },
+      removeItem (k) { m.delete(String(k)); },
+      clear ()       { m.clear(); }
+    };
+    return storage;
+  }
+  globalThis.localStorage   = __csimMakeStorage();
+  globalThis.sessionStorage = __csimMakeStorage();
+
+  // ── ClipboardEvent ──────────────────────────────────────────────
+  //
+  // Apps that handle paste / copy with a real ClipboardEvent (Trix,
+  // Avo's image-cropper paste) check `event.clipboardData.getData(...)`.
+  // We construct a minimal DataTransfer shape from `init.clipboardData`
+  // or a flat `init.clipboardDataText` string.
+  globalThis.ClipboardEvent = class ClipboardEvent extends Event {
+    constructor (type, init) {
+      super(type, init);
+      const i = init || {};
+      let cd = null;
+      if (i.clipboardData) {
+        cd = i.clipboardData;
+      } else if ('clipboardDataText' in i) {
+        const text = i.clipboardDataText == null ? '' : String(i.clipboardDataText);
+        cd = {
+          types: ['text/plain'],
+          getData (kind) { return (kind === 'text' || kind === 'text/plain') ? text : ''; },
+          setData () {}
+        };
+      }
+      Object.defineProperty(this, 'clipboardData', { value: cd, writable: true, configurable: true, enumerable: true });
+    }
+  };
   // location proxy. URL components mirror what Ruby's V3Browser
   // tracks; updated on each `__csimLoadDocument(html, url)`. Library
   // code (jQuery 1.x feature detect, Turbo Drive) reads `.href` early
@@ -2818,8 +3157,11 @@
     this.searchParams = new URLSearchParams(this.search);
   };
   globalThis.URL.prototype.toString = function () { return this.href; };
-  globalThis.URL.createObjectURL = function () { return ''; };
-  globalThis.URL.revokeObjectURL = function () { };
+  // Real Blob URL bindings — `__csimInstallBlobURL` wires
+  // createObjectURL / revokeObjectURL to the shared Blob registry
+  // defined further up. The earlier conditional install is a no-op
+  // when this section is the first definer of `globalThis.URL`.
+  __csimInstallBlobURL();
 
   globalThis.URLSearchParams = function URLSearchParams (init) {
     this._entries = [];

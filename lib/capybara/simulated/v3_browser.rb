@@ -175,6 +175,9 @@ module Capybara
       def text(handle)        = @runtime.call('__csimText', handle).to_s
       def tag(handle)         = @runtime.call('__csimTag', handle).to_s
       def attr(handle, name)  = @runtime.call('__csimAttr', handle, name.to_s)
+      def file_input?(handle)
+        tag(handle) == 'input' && attr(handle, 'type').to_s.downcase == 'file'
+      end
       def visible?(handle)    = @runtime.call('__csimVisible', handle) ? true : false
 
       # Capybara::Driver::Node surface ----------------------------------
@@ -253,10 +256,14 @@ module Capybara
         # unblocks them.
         coerced = coerce_set_value(value)
         @file_picks ||= {}
-        # File inputs may receive a single Pathname (most attach_file
-        # calls); promote to the file-list path so .files / @file_picks
-        # see it as one-element array.
+        # Capybara `attach_file` calls `Node#set` with a Pathname; some
+        # callers pass a String path through directly. When the target
+        # IS a file input, promote either form into the file-list path
+        # so `.files` / `@file_picks` reflect the chosen file.
         coerced = [coerced.to_s] if value.is_a?(Pathname)
+        if !coerced.is_a?(Array) && coerced.is_a?(String) && file_input?(handle)
+          coerced = [coerced]
+        end
         if coerced.is_a?(Array)
           paths = coerced.reject(&:empty?)
           @file_picks[handle] = paths
