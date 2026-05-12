@@ -288,7 +288,7 @@ module Capybara
       def click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        action = @runtime.call('__csimClickResolve', handle, click_event_init(keys, opts))
+        action = @runtime.call('__csimClickResolve', handle, click_event_init(handle, keys, opts))
         return unless action.is_a?(Hash)
         case action['kind']
         when 'navigate'
@@ -410,14 +410,14 @@ module Capybara
       def right_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(keys, opts))
+        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'contextmenu', init)
       end
 
       def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(keys, opts))
+        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
       end
 
@@ -438,15 +438,24 @@ module Capybara
         }
       end
 
-      # Capybara passes `:x` / `:y` for click-with-offset. We don't run
-      # a layout engine; just propagate the offset as `clientX/clientY`
-      # so handlers reading the event get back what the test passed
-      # (Capybara's `should allow to adjust the click offset` tests
-      # match `within(1).of(5)` against base-zero rects).
-      def click_event_init(keys, opts)
+      # Resolve click offset against the element's CSS-declared box.
+      # `opts[:offset] == :center` means "x/y is relative to the
+      # element's centre" (Capybara's w3c_click_offset semantics);
+      # otherwise the offset is relative to the top-left. We don't run
+      # a real layout engine — `__csimElementRect` reads
+      # top / left / width / height from the cascade so tests that
+      # declare those values via CSS see honest coordinates.
+      def click_event_init(handle, keys, opts)
         out = modifier_flags(keys)
-        out['clientX'] = opts[:x].to_f if opts[:x]
-        out['clientY'] = opts[:y].to_f if opts[:y]
+        has_xy = opts[:x] || opts[:y]
+        center = opts[:offset] == :center || !has_xy
+        if has_xy || center
+          rect = @runtime.call('__csimElementRect', handle)
+          base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
+          base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
+          out['clientX'] = base_x + opts[:x].to_f
+          out['clientY'] = base_y + opts[:y].to_f
+        end
         out
       end
 

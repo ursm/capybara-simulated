@@ -3856,6 +3856,7 @@
     __initialScriptsDone = false;
     __hideRules = [];
     __hideRuleIdx = null;
+    __layoutRules = [];
     // Hover / pending-submit slots are per-visit transient state —
     // clear them so a stale `_hoverElement` from the previous page
     // can't keep matching `:hover` cascade rules against detached
@@ -3914,6 +3915,7 @@
     // pre-cascade state.
     __hideRules = collectHideRules(globalThis.document);
     __hideRuleIdx = null; // rebuilt lazily on first lookup
+    __layoutRules = collectLayoutRules(globalThis.document);
     runInlineScripts(globalThis.document);
     // Flip the dynamic-script gate on: post-load <script> appends
     // (Rails-UJS dataType:'script' eval into head, jQuery .html() of
@@ -4334,6 +4336,7 @@
   // falls out naturally. `display` doesn't inherit.
 
   let __hideRules = [];
+  let __layoutRules = [];
   let __ruleSerial = 0;
   const VIEWPORT_DEFAULT = { width: 1024, height: 768 };
   function currentViewport() {
@@ -4500,10 +4503,13 @@
               important = true;
               value = value.replace(/!important\s*$/i, '').trim();
             }
-            // Only retain display / visibility; the rest is ignored to
-            // keep the resolver's matching loop short.
+            // Retain only the properties the cascade resolvers care
+            // about — display / visibility (hide rules) and
+            // top / left / width / height (layout for click-offset).
             if (prop === 'display' || prop === 'visibility') {
               decls.push({ prop, value: value.toLowerCase(), important });
+            } else if (prop === 'top' || prop === 'left' || prop === 'width' || prop === 'height') {
+              decls.push({ prop, value: value.trim(), important });
             }
           }
         }
@@ -4819,6 +4825,100 @@
   //   1. !important declarations
   //   2. specificity (a, b, c) — higher wins
   //   3. source order — later wins
+  // Parallel to collectHideRules but capturing layout properties
+  // (top/left/width/height) instead of display/visibility. Used by
+  // getBoundingClientRect-equivalent path so click-offset tests can
+  // translate `click(x: 10, y: 5)` into MouseEvent.clientX/clientY
+  // against the element's CSS-declared position.
+  const LAYOUT_PROPS = ['top', 'left', 'width', 'height'];
+  function collectLayoutRules(doc) {
+    if (!doc || !doc.documentElement) return [];
+    const vp = currentViewport();
+    const rules = [];
+    for (const s of doc.documentElement.querySelectorAll('style')) {
+      const txt = scriptText(s);
+      if (!txt) continue;
+      let tree;
+      try { tree = parseCssTree(txt); } catch (_) { continue; }
+      for (const r of flattenCssTree(tree, vp)) {
+        if (!r.selectorText || !r.decls.length) continue;
+        const captured = {};
+        for (const d of r.decls) {
+          if (LAYOUT_PROPS.includes(d.prop)) captured[d.prop] = { value: d.value, important: d.important };
+        }
+        if (Object.keys(captured).length === 0) continue;
+        for (const sel of splitTopLevel(r.selectorText, ',')) {
+          const trimmed = sel.trim();
+          if (!trimmed) continue;
+          let group;
+          try { group = parseSelector(trimmed); } catch (_) { continue; }
+          if (!group || !group.length) continue;
+          const spec = specificity(group[0]);
+          rules.push({ group, spec, source: __ruleSerial++, captured });
+        }
+      }
+    }
+    return rules;
+  }
+  // Inline `style="top: 100px; left: 100px"` parsing for one element.
+  function parseInlineLayout (el) {
+    const out = {};
+    const s = el._attrs && el._attrs.style;
+    if (!s) return out;
+    for (const part of String(s).split(';')) {
+      const m = /^\s*(top|left|width|height)\s*:\s*([^;]+?)\s*$/.exec(part);
+      if (m) out[m[1]] = { value: m[2], important: /\s+!important\s*$/.test(m[2]) };
+    }
+    return out;
+  }
+  function parsePx (v) {
+    if (v == null) return null;
+    const m = /^(-?\d+(?:\.\d+)?)px$/.exec(String(v).trim());
+    return m ? parseFloat(m[1]) : (/^(-?\d+(?:\.\d+)?)$/.test(v) ? parseFloat(v) : null);
+  }
+  function resolveLayoutProp (el, prop) {
+    const inline = parseInlineLayout(el)[prop];
+    let best = inline ? { spec: [1,0,0,0], source: Infinity, ...inline } : null;
+    for (const r of __layoutRules) {
+      const cap = r.captured[prop];
+      if (!cap) continue;
+      let m;
+      try { m = matchOne(el, r.group); } catch (_) { continue; }
+      if (!m) continue;
+      if (!best ||
+          (cap.important && !best.important) ||
+          (cap.important === best.important &&
+           (specCompare(r.spec, best.spec) > 0 ||
+            (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
+        best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
+      }
+    }
+    return best ? parsePx(best.value) : null;
+  }
+  function specCompare(a, b) {
+    for (let i = 0; i < 4; i++) {
+      if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return 0;
+  }
+  // Sum each ancestor's top/left to translate an element's CSS-declared
+  // box into an absolute "viewport" position. We don't run a layout
+  // engine; this is just "if a test declares position via px values,
+  // honour those values" — enough for the click-offset specs.
+  globalThis.__csimElementRect = function (h) {
+    const el = __handles.get(h);
+    if (!el || el.nodeType !== NODE_ELEMENT) return { x: 0, y: 0, width: 0, height: 0 };
+    let x = resolveLayoutProp(el, 'left') || 0;
+    let y = resolveLayoutProp(el, 'top')  || 0;
+    const w = resolveLayoutProp(el, 'width')  || 0;
+    const h2 = resolveLayoutProp(el, 'height') || 0;
+    for (let cur = el._parent; cur && cur.nodeType === NODE_ELEMENT; cur = cur._parent) {
+      x += resolveLayoutProp(cur, 'left') || 0;
+      y += resolveLayoutProp(cur, 'top')  || 0;
+    }
+    return { x, y, width: w, height: h2 };
+  };
+
   function matchesAnyHideRule(el) {
     if (__hideRules.length === 0) return false;
     if (!__hideRuleIdx) __hideRuleIdx = buildHideRuleIndex(__hideRules);
