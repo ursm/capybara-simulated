@@ -492,6 +492,18 @@ module Capybara
         @ticking = false
       end
 
+      # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
+      # context. The JS bridge resets `__virtualNow` to 0 and clears
+      # all timers on every context rebuild; if `@last_tick_ts` stayed
+      # at its pre-rebuild value, the next `tick_real_time` would
+      # treat the entire app-boot interval as elapsed wall time and
+      # drain up to 5 s of virtual clock in one step — firing wait-
+      # duration timers prematurely. Resetting `@last_tick_ts` keeps
+      # the first post-rebuild tick honest.
+      def reset_timer_state
+        @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
+
       # Pulls the serialised form-state out of JS, encodes it, and
       # drives the Rack app via `navigate` (for GET) or a POST. Mirrors
       # the slice of <form> semantics rack-test supports — multipart
@@ -547,6 +559,7 @@ module Capybara
         # semantics and bring up a fresh VM rather than papering over
         # the previous one's state.
         @runtime.rebuild_ctx
+        reset_timer_state
         apply_esm_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
@@ -559,6 +572,7 @@ module Capybara
         @current_url     = nil
         @document_handle = 0
         @runtime.reset_page
+        reset_timer_state
       end
 
       # ── Host-fn callbacks invoked by v3_bridge.js ───────────────
@@ -772,6 +786,7 @@ module Capybara
         # keeps the rebuild cost at a few ms; the cost dominator is
         # re-evaluating app bundles, which is what we want.
         @runtime.rebuild_ctx
+        reset_timer_state
         apply_esm_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
