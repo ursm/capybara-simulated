@@ -4932,6 +4932,40 @@
   }
   globalThis.__pollAsyncResult = function () { return __asyncResult; };
 
+  // Walk up to the nearest <select> ancestor and report whether
+  // it's a `multiple` select. Drives Ruby-side
+  // `Capybara::UnselectNotAllowed` decisions without a second
+  // round-trip to read the attribute.
+  // Build an XPath that uniquely targets this element. Each step uses
+  // `tag[index]` keyed by the position among same-tag siblings, so the
+  // result resolves back to the same node when handed to `find_xpath`.
+  globalThis.__csimNodePath = function (h) {
+    const start = __handles.get(h);
+    if (!start || start.nodeType !== NODE_ELEMENT) return '';
+    const segments = [];
+    let cur = start;
+    while (cur && cur.nodeType === NODE_ELEMENT) {
+      const parent = cur._parent;
+      if (!parent) break;
+      const sibs = (parent._children || []).filter(c =>
+        c.nodeType === NODE_ELEMENT && c._tag === cur._tag
+      );
+      const idx = sibs.indexOf(cur) + 1;
+      segments.unshift(`${cur._tag}[${idx}]`);
+      cur = parent;
+    }
+    return '/' + segments.join('/');
+  };
+
+  globalThis.__csimOptionContext = function (h) {
+    const n = __handles.get(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return { hasSelect: false, multiple: false };
+    let cur = n._parent;
+    while (cur && cur._tag !== 'select') cur = cur._parent;
+    if (!cur || cur._tag !== 'select') return { hasSelect: false, multiple: false };
+    return { hasSelect: true, multiple: cur._attrs.multiple != null };
+  };
+
   globalThis.__csimActiveElement = function () {
     const doc = globalThis.document;
     if (!doc) return 0;

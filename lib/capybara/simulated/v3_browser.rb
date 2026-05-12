@@ -263,7 +263,7 @@ module Capybara
         return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
         result.transform_keys(&:to_s)
       end
-      def node_path(_)         = ''
+      def node_path(handle)    = @runtime.call('__csimNodePath', handle).to_s
 
       def lookup_node(handle)
         handle if @runtime.call('__csimAlive', handle)
@@ -510,6 +510,15 @@ module Capybara
       def unselect_option(handle)
         tick_real_time
         invalidate_find_cache
+        # Single-select <select>s can't have a selection cleared per
+        # HTML — Capybara surfaces this as `UnselectNotAllowed`. Ask
+        # the JS side whether the option's parent select is `multiple`
+        # before issuing the unselect; the answer doubles as the
+        # "found the right ancestor" check.
+        info = @runtime.call('__csimOptionContext', handle)
+        if info.is_a?(Hash) && info['hasSelect'] && !info['multiple']
+          raise Capybara::UnselectNotAllowed, 'Cannot unselect option from single select box.'
+        end
         @runtime.call('__csimUnselectOption', handle)
         consume_pending_form_submit
       end

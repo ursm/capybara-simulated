@@ -126,7 +126,10 @@ module Capybara
         check_stale
         browser.computed_style(handle_id, Array(names))
       end
-      def path             = ''
+      def path
+        check_stale
+        browser.node_path(handle_id)
+      end
 
       def ==(other)
         other.is_a?(V3Node) && other.handle_id == @handle_id
