@@ -846,6 +846,21 @@
     // gets `undefined`.
     get text()     { return this.textContent; }
     set text(v)    { this.textContent = v; }
+    // `<input list="<id>">` exposes the associated <datalist> via
+    // `input.list`. Capybara's `select` for datalist inputs reads
+    // `this.list.options` to enumerate choices.
+    get list() {
+      if (this._tag !== 'input') return null;
+      const id = this._attrs.list;
+      if (!id) return null;
+      return globalThis.document && globalThis.document.getElementById(id);
+    }
+    // HTMLDataListElement.options: live HTMLCollection of <option>
+    // descendants.
+    get options() {
+      if (this._tag !== 'datalist' && this._tag !== 'select') return undefined;
+      return __htmlCollection(this.querySelectorAll('option'));
+    }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
     // Boolean IDL reflections — `el.disabled = true` mirrors to the
