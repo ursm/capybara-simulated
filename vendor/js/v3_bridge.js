@@ -413,6 +413,54 @@
         }
       };
     }
+    // HTMLElement.dataset — DOMStringMap-shaped live view of every
+    // `data-*` attribute on the element. Real-browser equivalents:
+    // `el.dataset.fooBar` ↔ `data-foo-bar` attribute (camelCase
+    // ↔ kebab-case). Libraries lean on it heavily (Tribute checks
+    // `element.dataset.tribute === 'true'` to avoid double-attach,
+    // Stimulus stores controller / target / action data, Trix mirrors
+    // its editor state, etc.) — without the getter, the read throws
+    // `Cannot read properties of undefined (reading 'fooBar')` and the
+    // library short-circuits silently. Proxy reads `_attrs` lazily so
+    // setAttribute / removeAttribute mutations show through without
+    // cache invalidation.
+    get dataset() {
+      if (this._datasetProxy) return this._datasetProxy;
+      const el = this;
+      const toAttr   = (k) => 'data-' + String(k).replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
+      const fromAttr = (n) => n.slice(5).replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
+      this._datasetProxy = new Proxy({}, {
+        get(_t, key) {
+          if (typeof key !== 'string') return undefined;
+          const v = el._attrs[toAttr(key)];
+          return v == null ? undefined : v;
+        },
+        set(_t, key, value) {
+          if (typeof key !== 'string') return false;
+          el.setAttribute(toAttr(key), String(value));
+          return true;
+        },
+        deleteProperty(_t, key) {
+          if (typeof key !== 'string') return false;
+          el.removeAttribute(toAttr(key));
+          return true;
+        },
+        has(_t, key) {
+          return typeof key === 'string' &&
+                 Object.prototype.hasOwnProperty.call(el._attrs, toAttr(key));
+        },
+        ownKeys() {
+          return Object.keys(el._attrs).filter((n) => n.startsWith('data-')).map(fromAttr);
+        },
+        getOwnPropertyDescriptor(_t, key) {
+          if (typeof key !== 'string') return undefined;
+          const attr = toAttr(key);
+          if (!Object.prototype.hasOwnProperty.call(el._attrs, attr)) return undefined;
+          return { enumerable: true, configurable: true, value: el._attrs[attr] };
+        }
+      });
+      return this._datasetProxy;
+    }
     // querySelector / matches: PoC supports the small subset Capybara
     // emits internally (tag, #id, .class, [attr=value], descendant
     // combinator). Full CSS3 deferred to a proper port.
@@ -626,6 +674,15 @@
     // undefined (reading 'pageYOffset')".
     get defaultView()   { return globalThis; }
     get parentWindow()  { return globalThis; }
+    // Public accessor over the internal `_activeElement` slot that the
+    // Element focus/blur methods write to. Returns the document's
+    // body as a sentinel when no element is focused, matching real
+    // browsers (HTMLBodyElement is the fallback `activeElement` per
+    // the HTML spec, and libraries occasionally test for non-null
+    // before reading properties).
+    get activeElement() {
+      return this._activeElement || this.body || null;
+    }
     createElement(tag) {
       const t = String(tag).toLowerCase();
       const ctor = __customElementRegistry.get(t);
@@ -1040,6 +1097,13 @@
     const path = [];
     let cur = target;
     while (cur) { path.push(cur); cur = cur._parent; }
+    // Legacy `window.event` — IE-era global that handlers reach for
+    // when no event parameter is in scope. Redmine's inline-autocomplete
+    // `values()` callback (`event.target.type === 'text'`) and a few
+    // other library entry points rely on it. Save / restore so nested
+    // dispatches don't shadow each other.
+    const prevWinEvent = globalThis.event;
+    globalThis.event = event;
     try {
       // capture: root → target's parent
       event.eventPhase = 1;
@@ -1061,6 +1125,7 @@
       return !event.defaultPrevented;
     } finally {
       if (__observers.size && __pendingRecords.length) deliverMutations();
+      globalThis.event = prevWinEvent;
     }
   }
   function fireListeners(node, event, capture) {
@@ -2053,6 +2118,33 @@
   globalThis.Element  = Element;
   globalThis.Node     = Node;
   globalThis.Text     = Text;
+  // DOM collection / element-subtype aliases. Libraries do constructor
+  // identity tests (`x.constructor === NodeList`, `x instanceof
+  // HTMLCollection`) to discriminate collections from plain arrays.
+  // Aliasing each to its closest live shape (Array for index-and-
+  // length collections, Element for typed-element checks) keeps those
+  // probes from throwing ReferenceError. Tribute hits this on
+  // `e.constructor === NodeList`; DOMPurify on `NamedNodeMap` /
+  // `HTMLFormElement`.
+  globalThis.NodeList            = Array;
+  globalThis.HTMLCollection      = Array;
+  globalThis.NamedNodeMap        = Array;
+  globalThis.HTMLFormElement     = Element;
+  globalThis.HTMLInputElement    = Element;
+  globalThis.HTMLTextAreaElement = Element;
+  globalThis.HTMLSelectElement   = Element;
+  globalThis.HTMLOptionElement   = Element;
+  globalThis.HTMLButtonElement   = Element;
+  globalThis.HTMLAnchorElement   = Element;
+  globalThis.HTMLImageElement    = Element;
+  globalThis.HTMLScriptElement   = Element;
+  globalThis.HTMLDivElement      = Element;
+  globalThis.HTMLSpanElement     = Element;
+  globalThis.HTMLTableElement    = Element;
+  globalThis.HTMLLabelElement    = Element;
+  globalThis.HTMLLIElement       = Element;
+  globalThis.HTMLUListElement    = Element;
+  globalThis.HTMLOListElement    = Element;
   globalThis.document = new Document();
   globalThis.window   = globalThis;
   // location proxy. URL components mirror what Ruby's V3Browser
@@ -3406,6 +3498,18 @@
       else if (type === 'radio') { setRadio(n);   preToggled = 'radio'; }
     }
 
+    // Real clicks fire `mousedown` → `mouseup` → `click` (with
+    // `pointerdown` / `pointerup` for Pointer-Event-aware listeners).
+    // Libraries listen on the down-half of the pair: Tribute attaches
+    // its menu-click handler to `mousedown` (so the menu select fires
+    // before the textarea's `blur` chain commits), and jQuery's
+    // `:active` selector + sortable plugins drag-detect off mousedown.
+    // Without these dispatches, clicking a Tribute `<li>` does not
+    // call `selectItemAtIndex` and the autocomplete never inserts.
+    const mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, which: 1 });
+    dispatchEvent(n, mdown);
+    const mup   = new MouseEvent('mouseup',   { bubbles: true, cancelable: true, button: 0, which: 1 });
+    dispatchEvent(n, mup);
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
     dispatchEvent(n, click);
     if (click.defaultPrevented) return null;
@@ -3550,11 +3654,31 @@
         (n._attrs.readonly != null || n._attrs.disabled != null)) {
       return false;
     }
+    // Selenium implicitly focuses the field before typing into it
+    // (`feedback_send_keys_focus` memory). Without that, delegated
+    // focus handlers — Redmine's inline-autocomplete attachment lives
+    // on `$(document).on('focus', '[data-auto-complete=true]', ...)`,
+    // Trix's editor focus path, Stimulus actionable-on-focus
+    // controllers — never wire up, and the `input` event we're about
+    // to dispatch has no observer. Skip for elements that don't accept
+    // focus (option/optgroup/select-with-no-focus); checkboxes /
+    // radios get focused for parity with selenium's `.click()` path.
+    if (tag === 'input' || tag === 'textarea' || isContenteditable(n)) {
+      try { n.focus(); } catch (_) {}
+    }
     const v = value == null ? '' : String(value);
     let kind = 'value';
     if (tag === 'textarea') {
       n._children = []; n._children.push(Object.assign(new Text(v), { _parent: n }));
       n._attrs.value = v;
+      // Mirror real browsers: typing-style value updates leave the
+      // caret at the end of the new content. Tribute / inline-
+      // autocomplete read `selectionStart` to find the trigger
+      // character before the cursor; without advancing the caret,
+      // selectionStart stays at 0 and the trigger detection sees
+      // an empty "text before cursor" slice.
+      n._selectionStart = v.length;
+      n._selectionEnd   = v.length;
     } else if (tag === 'input') {
       const type = (n._attrs.type || 'text').toLowerCase();
       if (type === 'checkbox' || type === 'radio') {
@@ -3572,6 +3696,9 @@
         // a text-like control.
         const maxlen = parseInt(n._attrs.maxlength || '', 10);
         n._attrs.value = (maxlen > 0 && v.length > maxlen) ? v.slice(0, maxlen) : v;
+        // Caret-at-end, same rationale as textarea above.
+        n._selectionStart = n._attrs.value.length;
+        n._selectionEnd   = n._attrs.value.length;
       }
     } else if (tag === 'select') {
       // Match the first <option> whose value (or textContent fallback)
@@ -3593,12 +3720,27 @@
     } else {
       n._attrs.value = v;
     }
+    // Selenium's `.send_keys(text)` fires keydown + (beforeinput) +
+    // input + keyup per character; libraries like Tribute initialise
+    // their per-keystroke state (`commandEvent = false`) inside the
+    // keydown handler, so without keydown firing first the keyup
+    // check `false === commandEvent` reads `false === undefined`
+    // and the show-menu branch never enters. Fire one keydown / keyup
+    // pair around the value-change for the whole `set('text')` (we
+    // don't have a per-character chain to lean on); the keyCode is 0
+    // because we don't simulate a specific character.
+    if (tag === 'input' || tag === 'textarea' || isContenteditable(n)) {
+      try { dispatchEvent(n, new KeyboardEvent('keydown', { bubbles: true, cancelable: true })); } catch (_) {}
+    }
     // Fire `input` (cancellable, bubbles) then `change` (bubbles only).
     // For checkbox / radio real browsers fire `change` only on a real
     // user interaction, but Capybara's `set` mirrors what `selenium`
     // does — both events, so listeners see the update either way.
     dispatchEvent(n, new InputEvent('input',  { bubbles: true, cancelable: true }));
     dispatchEvent(n, new Event('change', { bubbles: true, cancelable: false }));
+    if (tag === 'input' || tag === 'textarea' || isContenteditable(n)) {
+      try { dispatchEvent(n, new KeyboardEvent('keyup', { bubbles: true, cancelable: true })); } catch (_) {}
+    }
     return true;
   };
   function selectOptionExclusive(select, opt) {

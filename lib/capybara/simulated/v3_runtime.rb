@@ -343,16 +343,17 @@ module Capybara
 
       def self.build_app_snapshot(scripts)
         # Build the snapshot source: same prologue as the base snapshot,
-        # then evaluate each captured library body at top level so
-        # `function fooBar() {}` / `var foo = ...` declarations hoist
-        # to the global scope. Wrapping each body in an IIFE silently
-        # confines those declarations and breaks call sites like
-        # `showModal(...)` that the on-attribute handlers rely on.
-        # `eval(body)` invoked at module top runs in the surrounding
-        # scope, which is what `<script>` tags do in real browsers.
-        # We isolate failures per script via separate `eval(body)`
-        # calls with try/catch so one bad bundle doesn't abort the
-        # whole warmup.
+        # then evaluate each captured library body via indirect eval so
+        # top-level `function fooBar() {}` / `var foo = ...` declarations
+        # land on globalThis just like a real `<script src>` would
+        # (V8 hoists function declarations inside `try { ... }` blocks
+        # to the block, not to the script — wrapping the raw body in a
+        # try block was silently swallowing those bindings, so call
+        # sites like `inlineAutoComplete(...)` from delegated handlers
+        # found nothing at runtime). `(0, eval)(body)` is the spec form
+        # for "run this string in global scope," and gives us a
+        # try-around-the-call boundary for failure isolation that
+        # doesn't move the body into a non-global scope.
         src = +SNAPSHOT_HOST_STUBS.dup
         src << File.read(BRIDGE_JS)
         src << File.read(WGXPATH_JS) << ";\n"
@@ -360,11 +361,8 @@ module Capybara
         scripts.each {|s|
           url  = s['url'].to_s
           body = s['body'].to_s
-          # Top-level body inside a try block; declarations hoist to
-          # the enclosing (global) scope just like a real `<script>`.
-          src << ";try {\n"
-          src << body
-          src << "\n} catch (e) { try { console.error('[csim warmup script]', #{url.to_json}, ':', e && e.message); } catch (_) {} }\n"
+          src << ";try { (0, eval)(#{body.to_json}); }"
+          src << " catch (e) { try { console.error('[csim warmup script]', #{url.to_json}, ':', e && e.message); } catch (_) {} }\n"
           src << "__csim_markScriptLoaded(#{url.to_json});\n"
         }
         src << "__csimEnterSnapshotState();\n"
