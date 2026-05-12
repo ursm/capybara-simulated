@@ -596,7 +596,24 @@ module Capybara
           end
         }
       end
-      def evaluate_async_script(_, _ = []); nil ; end
+      def evaluate_async_script(code, args = [])
+        tick_real_time
+        invalidate_find_cache
+        @runtime.call('__evalAsyncScript', code.to_s, marshal_args(args || []))
+        # Pump virtual time so any setTimeout-driven completion lands.
+        # Capybara's polling can't help here — we're inside one session
+        # call, not a retry loop.
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) +
+                   Capybara.default_max_wait_time.to_f
+        loop do
+          result = @runtime.call('__pollAsyncResult')
+          return result['value'] if result.is_a?(Hash) && result.key?('value')
+          break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          sleep 0.01
+          tick_real_time
+        end
+        nil
+      end
 
       def current_path
         tick_real_time

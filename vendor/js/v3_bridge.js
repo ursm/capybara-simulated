@@ -4900,6 +4900,38 @@
   // falls back to `<body>` (or `<html>` if there's no body). Capybara's
   // `Session#active_element` expects a concrete Element handle, so the
   // host-fn surface returns the body's handle when nothing has focus.
+  // Async script support: the supplied callback is appended as the
+  // last argument. The script invokes it with the eventual result,
+  // which Ruby polls (advancing virtual time first to let any
+  // setTimeout-driven completion fire). Element returns rehydrate
+  // through the same `{__elementHandle: id}` sentinel used by
+  // synchronous evaluate_script.
+  let __asyncResult = null;
+  globalThis.__evalAsyncScript = function (code, args) {
+    __asyncResult = null;
+    const list = (args || []).map(a =>
+      (a && typeof a === 'object' && '__elementHandle' in a)
+        ? __handles.get(a.__elementHandle) || null
+        : a
+    );
+    list.push(function (v) { __asyncResult = { value: __marshalAsyncResult(v) }; });
+    try {
+      (new Function('args', 'return (function (' +
+        list.map((_, i) => 'a' + i).join(', ') +
+        ') { ' + String(code) + ' }).apply(null, args);'))(list);
+    } catch (e) {
+      __asyncResult = { value: null, error: e && e.message };
+    }
+  };
+  function __marshalAsyncResult (v) {
+    if (v && typeof v === 'object') {
+      if (v.nodeType === NODE_ELEMENT) return { __elementHandle: v._id };
+      if (Array.isArray(v)) return v.map(__marshalAsyncResult);
+    }
+    return v;
+  }
+  globalThis.__pollAsyncResult = function () { return __asyncResult; };
+
   globalThis.__csimActiveElement = function () {
     const doc = globalThis.document;
     if (!doc) return 0;

@@ -73,7 +73,9 @@ module Capybara
         nil
       end
 
-      def evaluate_async_script(_script, *_args) = nil
+      def evaluate_async_script(script, *args)
+        unwrap(browser.evaluate_async_script(script, args))
+      end
 
       private def unwrap(value)
         case value
