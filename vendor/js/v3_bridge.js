@@ -277,6 +277,27 @@
     }
     append (...nodes) { for (const n of nodes) this.appendChild(toNode(n)); }
     get children()      { return this._children.filter(c => c.nodeType === NODE_ELEMENT); }
+    // ParentNode mixin (DOM spec): the element-only child accessors.
+    // Turndown's list rule checks `parentLi.lastElementChild === thisUl`
+    // to decide whether the nested list runs tight (single newline
+    // prefix) or loose (blank line padding) — without these, every
+    // `<li><ul>…</ul></li>` rendered as Markdown gets spurious blank
+    // lines around the nested list.
+    get firstElementChild() {
+      for (const c of this._children) if (c.nodeType === NODE_ELEMENT) return c;
+      return null;
+    }
+    get lastElementChild() {
+      for (let i = this._children.length - 1; i >= 0; i--) {
+        if (this._children[i].nodeType === NODE_ELEMENT) return this._children[i];
+      }
+      return null;
+    }
+    get childElementCount() {
+      let n = 0;
+      for (const c of this._children) if (c.nodeType === NODE_ELEMENT) n++;
+      return n;
+    }
     get nextSibling() {
       if (!this._parent) return null;
       const sibs = this._parent._children;
