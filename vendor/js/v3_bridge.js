@@ -5942,6 +5942,7 @@
     } else if (tag === 'input') {
       const type = (n._attrs.type || 'text').toLowerCase();
       if (type === 'checkbox' || type === 'radio') {
+        const wasChecked = n._attrs.checked != null;
         if (value === true || value === 'true') {
           // Radio: setting one in a group clears the others on the
           // same `name`.
@@ -5949,6 +5950,12 @@
           else                  n._attrs.checked = '';
         } else if (value === false || value === 'false') delete n._attrs.checked;
         else n._attrs.value = v;
+        // Selenium parity: `set(true)` on a checkbox / radio fires
+        // the same `click` event a real user click would, so page
+        // handlers attached via `.click` see the change.
+        if ((n._attrs.checked != null) !== wasChecked) {
+          try { dispatchEvent(n, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 })); } catch (_) {}
+        }
         kind = 'checked';
       } else {
         // Browsers truncate at maxlength when the user types; programmatic
