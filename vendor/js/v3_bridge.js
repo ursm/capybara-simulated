@@ -4823,8 +4823,15 @@
     }
     return collectVisibleText(n);
   };
+  // Replace non-space whitespace (tabs, newlines, vertical tabs) with
+  // a single regular space inside each text node. The HTML rendering
+  // model treats inline-whitespace runs as a single space; without
+  // this collapse, raw newlines from the source leak through and
+  // Capybara's whitespace normaliser (which only squeezes ` `, not
+  // `\n`) can't recover the expected output.
+  const INLINE_WS_RE = /[\t\n\v\f\r]+/g;
   function collectVisibleText(node) {
-    if (node.nodeType === NODE_TEXT) return node.data;
+    if (node.nodeType === NODE_TEXT) return String(node.data || '').replace(INLINE_WS_RE, ' ');
     if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC) return '';
     if (node.nodeType === NODE_ELEMENT) {
       if (INVISIBLE_TAGS.has(node._tag)) return '';
