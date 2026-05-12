@@ -2559,7 +2559,53 @@
       const headNodes = parseFragment(stripped.head);
       for (const n of headNodes) { n._parent = head; head._children.push(n); }
     }
+    // Real HTML parsers wrap loose `<tr>` children of `<table>` in
+    // an implicit `<tbody>`. Without this, `tr:first-child` against
+    // a table whose `<caption>` precedes the first `<tr>` reports
+    // no match (the caption is "first child", not the tr).
+    insertImplicitTbodies(body);
     return doc;
+  }
+  function insertImplicitTbodies (root) {
+    if (!root || !root._children) return;
+    if (root.nodeType === NODE_ELEMENT && root._tag === 'table') {
+      const kids = root._children;
+      let i = 0;
+      while (i < kids.length) {
+        const c = kids[i];
+        if (c.nodeType === NODE_ELEMENT && c._tag === 'tr') {
+          const tbody = new Element('tbody');
+          tbody._parent = root;
+          // Sweep up consecutive `<tr>` siblings (real HTML parsers
+          // produce one implicit `<tbody>` per run). Inter-`<tr>`
+          // whitespace text nodes are *part of* the run — without
+          // absorbing them too, two `<tr>`s with a newline between
+          // become two `<tbody>`s and break `tr:first-child`.
+          let j = i;
+          while (j < kids.length) {
+            const k = kids[j];
+            const isTr   = k.nodeType === NODE_ELEMENT && k._tag === 'tr';
+            const isWs   = k.nodeType === NODE_TEXT && /^\s*$/.test(String(k.data || ''));
+            if (!isTr && !isWs) break;
+            // Stop if a non-`tr` element follows (caption / thead / etc.).
+            if (!isTr && j > i) {
+              // peek next non-ws: if not tr, end the run here.
+              let p = j + 1;
+              while (p < kids.length && kids[p].nodeType === NODE_TEXT && /^\s*$/.test(String(kids[p].data || ''))) p++;
+              if (p >= kids.length || !(kids[p].nodeType === NODE_ELEMENT && kids[p]._tag === 'tr')) break;
+            }
+            k._parent = tbody;
+            tbody._children.push(k);
+            j++;
+          }
+          kids.splice(i, j - i, tbody);
+          i++;
+        } else {
+          i++;
+        }
+      }
+    }
+    for (const c of root._children) insertImplicitTbodies(c);
   }
 
   function stripHtmlWrapper(html) {
