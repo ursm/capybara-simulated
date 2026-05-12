@@ -848,6 +848,18 @@
     set text(v)    { this.textContent = v; }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
+    // HTML IDL boolean-attribute reflections. Setting via property
+    // mirrors to the underlying content attribute — without this,
+    // `input.disabled = true` (the canonical way to disable a control
+    // from script) would be a no-op as far as `:disabled` /
+    // `getAttribute('disabled')` see, and Capybara's `assert_matches_selector(:css, 'input:disabled')`
+    // never settles.
+    get disabled() { return this._attrs.disabled != null; }
+    set disabled(v){ if (v) this._attrs.disabled = ''; else delete this._attrs.disabled; }
+    get readOnly() { return this._attrs.readonly != null; }
+    set readOnly(v){ if (v) this._attrs.readonly = ''; else delete this._attrs.readonly; }
+    get required() { return this._attrs.required != null; }
+    set required(v){ if (v) this._attrs.required = ''; else delete this._attrs.required; }
     // Constraint validation API — PoC stubs. We don't actually run
     // the validation algorithm, so `valid` is always true and the
     // message is empty. Frameworks (Stimulus form controllers,
@@ -5018,6 +5030,14 @@
     if (click.defaultPrevented) return null;
 
     if (n._tag === 'a' && n._attrs.href != null) {
+      // `<a download>` (any value) signals that the linked resource
+      // should be saved rather than rendered. Real browsers honour
+      // this regardless of the response's Content-Disposition, so we
+      // tell Ruby to take the download path even if the server only
+      // sets a Content-Type.
+      if (n._attrs.download != null) {
+        return { kind: 'download', url: n._attrs.href, filename: String(n._attrs.download || '') };
+      }
       return { kind: 'navigate', url: n._attrs.href };
     }
     // `<label>` activation: clicking a label clicks its labeled

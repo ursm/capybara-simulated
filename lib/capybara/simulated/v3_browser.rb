@@ -285,7 +285,27 @@ module Capybara
           end
         when 'submit'
           submit_form_handle(action['formHandle'], action['submitter'])
+        when 'download'
+          download_link(resolve_against_current(action['url'].to_s), action['filename'].to_s)
         end
+      end
+
+      def download_link(url, filename_hint = '')
+        env = Rack::MockRequest.env_for(url, method: 'GET')
+        env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']  = @current_url    unless @current_url.nil? || @current_url.empty?
+        status, headers, body = @app.call(env)
+        return unless status.to_i == 200
+        # Fall back to the link's `download="filename"` value or the
+        # URL path tail when Content-Disposition is absent — `<a download>`
+        # is the spec hook for naming a download independently of the
+        # response headers.
+        forced_headers = headers.dup
+        if content_disposition_header(forced_headers).to_s.empty?
+          name = filename_hint.empty? ? File.basename(URI.parse(url).path.to_s) : filename_hint
+          forced_headers['Content-Disposition'] = %(attachment; filename="#{name}") unless name.empty?
+        end
+        save_downloaded_response(url, forced_headers, body)
       end
 
       def pure_fragment_navigation?(url)
@@ -947,8 +967,12 @@ module Capybara
         File.binwrite(File.join(dir, filename), read_rack_body(body))
       end
 
+      # Honour `Capybara.save_path` when set so tests using the Capybara
+      # download contract (`Capybara.save_path/<filename>`) find the
+      # file we wrote. `CSIM_DOWNLOADS_DIR` is the explicit override;
+      # `tmp/downloads/` is the legacy fallback for vs-world apps.
       def downloads_directory
-        ENV['CSIM_DOWNLOADS_DIR'] || File.join(Dir.pwd, 'tmp', 'downloads')
+        ENV['CSIM_DOWNLOADS_DIR'] || Capybara.save_path || File.join(Dir.pwd, 'tmp', 'downloads')
       end
 
       def merge_set_cookie(headers)
