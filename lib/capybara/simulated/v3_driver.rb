@@ -95,8 +95,18 @@ module Capybara
         path
       end
 
-      def active_element ; nil ; end
-      def send_keys(*_keys); nil ; end
+      def active_element
+        handle = browser.active_element_handle
+        handle ? V3Node.new(self, handle) : nil
+      end
+      # `Capybara::Session#send_keys(:tab, …)` and other session-level
+       # keystrokes route here. Tab / shift-tab move focus through the
+       # tabbable chain; everything else falls through to the currently
+       # focused element if any.
+      def send_keys(*keys)
+        keys.flatten.each {|k| browser.send_session_key(k) }
+        nil
+      end
 
       def accept_modal(type, **options, &block) = run_modal(type, accept: true, **options, &block)
       def dismiss_modal(type, **options, &block) = run_modal(type, accept: false, **options, &block)

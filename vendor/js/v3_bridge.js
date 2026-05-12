@@ -4896,9 +4896,60 @@
   // Capybara's stale-node detection (#reload / invalid_element_errors)
   // depends on this: a node that's been removed from the DOM must
   // report as stale on the next read.
+  // Spec: when no element is explicitly focused, `document.activeElement`
+  // falls back to `<body>` (or `<html>` if there's no body). Capybara's
+  // `Session#active_element` expects a concrete Element handle, so the
+  // host-fn surface returns the body's handle when nothing has focus.
   globalThis.__csimActiveElement = function () {
-    const el = globalThis.document && globalThis.document._activeElement;
+    const doc = globalThis.document;
+    if (!doc) return 0;
+    const el = doc._activeElement || doc.body || doc.documentElement;
     return el && el._id != null ? el._id : 0;
+  };
+
+  // Tab-key focus traversal. Walk the document in tree order, pull
+  // out tabbable elements (tabindex >= 0 or default-tabbable form
+  // controls / anchors), then move focus to the next (or previous,
+  // for shift-tab) entry relative to the current `_activeElement`.
+  const __TABBABLE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea']);
+  function __isTabbable (el) {
+    if (!el || el.nodeType !== NODE_ELEMENT) return false;
+    if (el._attrs.disabled != null) return false;
+    if (el._attrs.hidden != null) return false;
+    if (selfHidden(el)) return false;
+    const ti = el._attrs.tabindex;
+    if (ti != null) {
+      const n = parseInt(ti, 10);
+      return !isNaN(n) && n >= 0;
+    }
+    if (!__TABBABLE_TAGS.has(el._tag)) return false;
+    if (el._tag === 'input' && (el._attrs.type || '').toLowerCase() === 'hidden') return false;
+    if (el._tag === 'a' && el._attrs.href == null) return false;
+    return true;
+  }
+  function __collectTabbables () {
+    const out = [];
+    function walk (node) {
+      if (!node || !node._children) return;
+      for (const c of node._children) {
+        if (__isTabbable(c)) out.push(c);
+        walk(c);
+      }
+    }
+    if (globalThis.document) walk(globalThis.document);
+    return out;
+  }
+  globalThis.__csimAdvanceFocus = function (reverse) {
+    const list = __collectTabbables();
+    if (list.length === 0) return false;
+    const current = globalThis.document && globalThis.document._activeElement;
+    let idx = current ? list.indexOf(current) : -1;
+    idx = reverse ? (idx <= 0 ? list.length - 1 : idx - 1) : (idx + 1) % list.length;
+    const next = list[idx];
+    if (next && typeof next.focus === 'function') {
+      try { next.focus(); } catch (_) {}
+    }
+    return true;
   };
 
   globalThis.__csimAlive = function (h) {

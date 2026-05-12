@@ -552,6 +552,20 @@ module Capybara
         h.zero? ? nil : h
       end
       def session_send_keys(_)            ; nil ; end
+
+      # Session-level keystroke. Tab / shift-tab cycle focus; everything
+       # else is routed to the currently focused element (if any) as a
+       # plain keydown/keyup pair.
+      def send_session_key(key)
+        sym = key.is_a?(Symbol) ? key : (key.respond_to?(:to_sym) ? key.to_sym : nil)
+        case sym
+        when :tab       then @runtime.call('__csimAdvanceFocus',  false)
+        when :backtab   then @runtime.call('__csimAdvanceFocus',  true)
+        else
+          handle = active_element_handle
+          send_keys(handle, [key]) if handle
+        end
+      end
       def with_modal(_)                   ; yield ; end
       def start_trace(_)                  ; nil ; end
       def trace                           ; nil ; end
