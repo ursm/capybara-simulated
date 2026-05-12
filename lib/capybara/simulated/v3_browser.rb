@@ -6,6 +6,7 @@
 # wired up so a `Capybara::Session` can `visit` and `find` against
 # the V8-resident DOM. Milestones 3+ grow this incrementally.
 
+require 'fileutils'
 require 'json'
 require 'nokogiri'
 require 'rack/mock'
@@ -534,6 +535,10 @@ module Capybara
             return navigate(next_url, depth: depth + 1)
           end
         end
+        if download_response?(headers)
+          save_downloaded_response(url, headers, resp_body)
+          return
+        end
         @current_url = url
         html         = read_rack_body(resp_body)
         # Same rebuild-on-full-load contract as `navigate`. POST
@@ -737,6 +742,10 @@ module Capybara
           body.close if body.respond_to?(:close)
           return navigate(next_url, depth: depth + 1)
         end
+        if download_response?(headers)
+          save_downloaded_response(url, headers, body)
+          return
+        end
         @current_url = url
         html         = read_rack_body(body)
         @module_cache = {}
@@ -761,6 +770,35 @@ module Capybara
         # snapshot. Subsequent visits skip library re-eval; the
         # snapshot already has them.
         @runtime.install_app_snapshot_if_needed
+      end
+
+      # `Content-Disposition: attachment` (or any explicit filename
+      # in inline form) is the canonical "save to disk" signal that
+      # browsers honour. Tests that exercise CSV / PDF / etc. exports
+      # use Redmine's `downloaded_file` helper to read the bytes
+      # back from `tmp/downloads/`; routing the response through the
+      # save path here keeps the page state unchanged (no rebuild),
+      # mirroring what a real browser does after a download.
+      def download_response?(headers)
+        cd = headers['content-disposition'] || headers['Content-Disposition']
+        return false unless cd
+        cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
+      end
+
+      def save_downloaded_response(url, headers, body)
+        cd = headers['content-disposition'] || headers['Content-Disposition'] || ''
+        filename = cd.to_s[/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i, 1] ||
+                   cd.to_s[/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i, 2]
+        filename = filename ? filename.strip : File.basename(URI.parse(url.to_s).path.to_s)
+        filename = 'download' if filename.nil? || filename.empty?
+        dir = downloads_directory
+        FileUtils.mkdir_p(dir)
+        bytes = read_rack_body(body)
+        File.binwrite(File.join(dir, filename), bytes)
+      end
+
+      def downloads_directory
+        ENV['CSIM_DOWNLOADS_DIR'] || File.join(Dir.pwd, 'tmp', 'downloads')
       end
 
       def merge_set_cookie(headers)
