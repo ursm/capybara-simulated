@@ -1733,10 +1733,19 @@
       }
     }
   }
+  // Mouse-event types need MouseEvent so click-handler readers see
+  // `.button` / `.shiftKey` / `.ctrlKey` / `.altKey` / `.metaKey`
+  // alongside the bubbling flags. Falls back to Event for keyboard /
+  // generic events.
+  const MOUSE_EVENT_TYPES = new Set([
+    'click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout',
+    'mouseenter', 'mouseleave', 'mousemove', 'contextmenu'
+  ]);
   globalThis.__csimDispatchEvent = function (h, type, init) {
     const n = lookup(h);
     if (!n) return false;
-    return dispatchEvent(n, new Event(String(type), init || {}));
+    const ctor = MOUSE_EVENT_TYPES.has(String(type)) ? MouseEvent : Event;
+    return dispatchEvent(n, new ctor(String(type), init || {}));
   };
 
   // ── Modal dialogs ───────────────────────────────────────────────
@@ -4980,9 +4989,10 @@
   //     toggling happens inline so Ruby sees the new state on the
   //     follow-up read, and other clicks are no-ops until milestone 4
   //     lands event dispatch).
-  globalThis.__csimClickResolve = function (h) {
+  globalThis.__csimClickResolve = function (h, modifiers) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
+    const mods = modifiers || {};
 
     // checkbox / radio: toggle *before* the click dispatch so listeners
     // observe the new state. Mirrors what real browsers do (the IDL
@@ -5016,11 +5026,12 @@
     // click handler can populate it if it ends in `form.submit()`
     // (Rails-UJS data-method / data-confirm chain).
     globalThis.__csimPendingFormSubmit = null;
-    const mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, which: 1 });
-    dispatchEvent(n, mdown);
-    const mup   = new MouseEvent('mouseup',   { bubbles: true, cancelable: true, button: 0, which: 1 });
-    dispatchEvent(n, mup);
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
+    const base = { bubbles: true, cancelable: true, button: 0, which: 1,
+                   shiftKey: !!mods.shiftKey, ctrlKey: !!mods.ctrlKey,
+                   altKey: !!mods.altKey, metaKey: !!mods.metaKey };
+    dispatchEvent(n, new MouseEvent('mousedown', base));
+    dispatchEvent(n, new MouseEvent('mouseup',   base));
+    const click = new MouseEvent('click', base);
     dispatchEvent(n, click);
     // A click handler that ended in `form.submit()` (Rails-UJS
     // data-method link → builds synthetic form → submit) takes

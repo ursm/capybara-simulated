@@ -114,7 +114,18 @@ module Capybara
           when :prompt  then accept ? (with.nil? ? default_value.to_s : with.to_s) : nil
           end
         }
-        browser.with_modal(handler) { yield if block_given? }
+        browser.with_modal(handler) do
+          yield if block_given?
+          # Async alerts (`setTimeout(() => alert(...), N)`) don't
+          # fire inside the block — they sit on the virtual clock.
+          # Pump timers until the modal lands or the wait expires.
+          timeout = (wait || Capybara.default_max_wait_time).to_f
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+          while captured.nil? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+            sleep 0.01
+            browser.send(:tick_real_time)
+          end
+        end
         if captured.nil?
           raise Capybara::ModalNotFound, "Unable to find modal dialog with #{text.inspect}"
         end

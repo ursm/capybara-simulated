@@ -83,7 +83,11 @@ module Capybara
       # ── Capybara DSL surface (just enough for milestone 2) ──────
 
       def visit(url)
-        navigate(resolve_against_current(url))
+        # Address-bar navigation: no Referer, even if we already had
+        # a page loaded. Link clicks / form submits / `location.assign`
+        # routes do carry the current URL as Referer, which the default
+        # `navigate` arg handles.
+        navigate(resolve_against_current(url), referer: nil)
       end
 
       def current_url
@@ -281,10 +285,10 @@ module Capybara
       # form submission through the Rack app. Checkbox / radio toggle
       # inline on the JS side (no Ruby trip). Everything else is a
       # no-op until milestone 4 lands event dispatch.
-      def click(handle, _keys = [], **_opts)
+      def click(handle, keys = [], **_opts)
         tick_real_time
         invalidate_find_cache
-        action = @runtime.call('__csimClickResolve', handle)
+        action = @runtime.call('__csimClickResolve', handle, modifier_flags(keys))
         return unless action.is_a?(Hash)
         case action['kind']
         when 'navigate'
@@ -401,16 +405,35 @@ module Capybara
         (@file_picks && @file_picks[handle]) || []
       end
 
-      def right_click(handle, *_)
+      def right_click(handle, keys = [], **_opts)
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', {'bubbles' => true, 'cancelable' => true})
+        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', {'bubbles' => true, 'cancelable' => true}.merge(modifier_flags(keys)))
       end
 
-      def double_click(handle, *_)
+      def double_click(handle, keys = [], **_opts)
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true})
+        @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true}.merge(modifier_flags(keys)))
+      end
+
+      # Capybara passes a flat array of modifier symbols (`[:shift,
+      # :control]`) to `click` / `right_click` / `double_click`. Map
+      # them to the MouseEventInit fields the JS dispatch path reads.
+      MODIFIER_KEYS = {
+        shift:    'shiftKey',
+        control:  'ctrlKey',
+        ctrl:     'ctrlKey',
+        alt:      'altKey',
+        option:   'altKey',
+        meta:     'metaKey',
+        command:  'metaKey'
+      }.freeze
+      def modifier_flags(keys)
+        Array(keys).each_with_object({}) {|k, h|
+          field = MODIFIER_KEYS[k.is_a?(Symbol) ? k : k.to_sym]
+          h[field] = true if field
+        }
       end
 
       def hover(handle)
@@ -910,12 +933,12 @@ module Capybara
 
       # PoC navigate: fetch via the Rack app, hand the body to V8 for
       # parsing. Only follows 3xx redirects up to a small depth.
-      def navigate(url, depth: 0)
+      def navigate(url, depth: 0, referer: @current_url)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']  = @current_url    unless @current_url.nil? || @current_url.empty?
+        env['HTTP_REFERER']  = referer         unless referer.nil? || referer.empty?
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, body = @app.call(env)
         merge_set_cookie(headers)

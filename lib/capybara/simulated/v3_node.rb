@@ -52,19 +52,19 @@ module Capybara
         browser.attr(handle_id, name.to_s)
       end
 
-      def click(_keys = [], **_opts)
+      def click(keys = [], **_opts)
         check_stale
-        browser.click(handle_id)
+        browser.click(handle_id, keys)
       end
 
-      def right_click(_keys = [], **_opts)
+      def right_click(keys = [], **_opts)
         check_stale
-        browser.right_click(handle_id)
+        browser.right_click(handle_id, keys)
       end
 
-      def double_click(_keys = [], **_opts)
+      def double_click(keys = [], **_opts)
         check_stale
-        browser.double_click(handle_id)
+        browser.double_click(handle_id, keys)
       end
 
       def hover(**_opts)
