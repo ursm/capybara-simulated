@@ -268,6 +268,7 @@ module Capybara
       # on the app snapshot for the rest of its lifetime.
       def install_app_snapshot_if_needed
         return if @app_snapshot_installed
+        return if ENV['CSIM_DISABLE_APP_SNAPSHOT'] == '1'
         return unless @ctx
         scripts = (ctx.eval('__csim_dumpExternalScripts()') rescue nil)
         return if scripts.nil? || scripts.empty?
