@@ -3582,6 +3582,20 @@
     if (n._tag === 'a' && n._attrs.href != null) {
       return { kind: 'navigate', url: n._attrs.href };
     }
+    // `<label>` activation: clicking a label clicks its labeled
+    // form control. Redmine's "New member" modal renders user
+    // checkboxes as `<label><input type=checkbox ...>Name</label>`;
+    // without this hop, `find('label', text: ...).click` runs the
+    // label's click chain but the checkbox stays unchecked and the
+    // POST body omits the user_ids — the form submits but adds no
+    // one. Per HTML spec the labeled control is the `for` target,
+    // or — if no `for` attr — the first labelable descendant.
+    if (n._tag === 'label') {
+      const labeled = labeledControlFor(n);
+      if (labeled && labeled !== n) {
+        return __csimClickResolve(labeled._id);
+      }
+    }
     if (isSubmitButton(n)) {
       const form = formForControl(n);
       if (!form) return null;
@@ -3592,6 +3606,34 @@
     }
     return null;
   };
+  // Resolve a `<label>` element to its labeled form control per HTML
+  // spec. Preference order: `for` attribute → first labelable
+  // descendant (input / textarea / select / button / output / meter
+  // / progress, excluding `input[type=hidden]`).
+  function labeledControlFor(label) {
+    const forId = label._attrs.for;
+    if (forId) {
+      const root = globalThis.document.documentElement;
+      if (root) {
+        const hit = findFirst(root, parseSelector('#' + forId));
+        if (hit) return hit;
+      }
+    }
+    const LABELABLE = new Set(['button', 'input', 'meter', 'output', 'progress', 'select', 'textarea']);
+    const stack = [label];
+    while (stack.length) {
+      const cur = stack.shift();
+      for (const c of cur._children) {
+        if (c.nodeType !== NODE_ELEMENT) continue;
+        if (LABELABLE.has(c._tag)) {
+          if (c._tag === 'input' && (c._attrs.type || '').toLowerCase() === 'hidden') continue;
+          return c;
+        }
+        stack.push(c);
+      }
+    }
+    return null;
+  }
   function isContenteditable(n) {
     let cur = n;
     while (cur && cur.nodeType === NODE_ELEMENT) {
