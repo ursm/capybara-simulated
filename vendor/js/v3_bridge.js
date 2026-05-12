@@ -5271,6 +5271,30 @@
       clearData: () => {}
     };
   }
+  // Finish a click that was started with `mouseDownOnly: true`: fire
+  // mouseup + click, then return the same action shape
+  // `__csimClickResolve` produces so Ruby can drive the navigate /
+  // submit follow-up.
+  globalThis.__csimClickFinish = function (h, base) {
+    const n = __handles.get(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return null;
+    dispatchEvent(n, new MouseEvent('mouseup', base));
+    const click = new MouseEvent('click', base);
+    dispatchEvent(n, click);
+    const pendingSubmit = __takePendingFormSubmit();
+    if (pendingSubmit) return { kind: 'submit', formHandle: pendingSubmit.formHandle, submitter: pendingSubmit.submitterHandle || 0 };
+    if (click.defaultPrevented) return null;
+    if (n._tag === 'a' && n._attrs.href != null) {
+      const href = String(n._attrs.href);
+      if (/^\s*javascript:/i.test(href)) return null;
+      if (n._attrs.download != null) {
+        return { kind: 'download', url: href, filename: String(n._attrs.download || '') };
+      }
+      return { kind: 'navigate', url: href };
+    }
+    return null;
+  };
+
   globalThis.__csimDropOnto = function (h, items) {
     const target = __handles.get(h);
     if (!target) return false;
@@ -5484,6 +5508,12 @@
                    altKey: !!mods.altKey, metaKey: !!mods.metaKey,
                    clientX: +mods.clientX || 0, clientY: +mods.clientY || 0 };
     dispatchEvent(n, new MouseEvent('mousedown', base));
+    if (mods.mouseDownOnly) {
+      // Caller (Ruby) handles the wall-clock delay between mousedown
+      // and mouseup; return the partial event init so the follow-up
+      // call can finish the chain with the same modifier state.
+      return { kind: 'partial', base };
+    }
     dispatchEvent(n, new MouseEvent('mouseup',   base));
     const click = new MouseEvent('click', base);
     dispatchEvent(n, click);

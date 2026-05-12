@@ -289,7 +289,19 @@ module Capybara
       def click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        action = @runtime.call('__csimClickResolve', handle, click_event_init(handle, keys, opts))
+        init = click_event_init(handle, keys, opts)
+        delay = opts[:delay].to_f
+        action =
+          if delay > 0
+            # Wall-sleep between mousedown and mouseup so click handlers
+            # reading `Date.now()` see the elapsed gap (selenium parity).
+            init['mouseDownOnly'] = true
+            partial = @runtime.call('__csimClickResolve', handle, init)
+            sleep delay
+            @runtime.call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
+          else
+            @runtime.call('__csimClickResolve', handle, init)
+          end
         return unless action.is_a?(Hash)
         case action['kind']
         when 'navigate'
@@ -430,7 +442,10 @@ module Capybara
       def right_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
+        init = {'bubbles' => true, 'cancelable' => true, 'button' => 2, 'which' => 3}.merge(click_event_init(handle, keys, opts))
+        @runtime.call('__csimDispatchEvent', handle, 'mousedown', init)
+        sleep opts[:delay].to_f if opts[:delay].to_f > 0
+        @runtime.call('__csimDispatchEvent', handle, 'mouseup',     init)
         @runtime.call('__csimDispatchEvent', handle, 'contextmenu', init)
       end
 
