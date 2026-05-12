@@ -5214,6 +5214,21 @@
     if (pendingSubmit) return { kind: 'submit', formHandle: pendingSubmit.formHandle, submitter: pendingSubmit.submitterHandle || 0 };
     if (click.defaultPrevented) return null;
 
+    // Clicking a <summary> toggles its parent <details>'s `open`
+    // attribute (the only built-in default action <summary> has).
+    // Capybara's `#visible? works when details is toggled` test
+    // hits this — without the toggle, opening / closing a
+    // collapsible block via click is a no-op.
+    if (n._tag === 'summary' && !click.defaultPrevented) {
+      let parent = n._parent;
+      while (parent && parent._tag !== 'details') parent = parent._parent;
+      if (parent && parent._tag === 'details') {
+        if (parent._attrs.open != null) delete parent._attrs.open;
+        else                            parent._attrs.open = '';
+        try { dispatchEvent(parent, new Event('toggle', { bubbles: false })); } catch (_) {}
+      }
+    }
+
     if (n._tag === 'a' && n._attrs.href != null) {
       const href = String(n._attrs.href);
       // `javascript:` URLs only ever ran the embedded script (already
