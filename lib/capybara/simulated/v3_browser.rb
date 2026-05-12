@@ -58,6 +58,12 @@ module Capybara
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until                = nil
         @ticking                      = false
+        # Navigation history for go_back / go_forward. `@history`
+        # holds Request entries; `@history_idx` is the current
+        # entry's index. Visits and link clicks append, then trim
+        # the redo tail; back/forward shift the index.
+        @history                      = []
+        @history_idx                  = -1
         @modal_handlers               = []
         @module_cache                 = {}
         # ESM loading is on by default — Stimulus boots end-to-end with
@@ -570,8 +576,31 @@ module Capybara
       def set_viewport(*)                 ; nil ; end
       def viewport_width                  ; 1024 ; end
       def viewport_height                 ; 768 ; end
-      def go_back                         ; nil ; end
-      def go_forward                      ; nil ; end
+      def go_back
+        return if @history_idx <= 0
+        @history_idx -= 1
+        replay_history_entry(@history[@history_idx])
+      end
+      def go_forward
+        return if @history_idx + 1 >= @history.size
+        @history_idx += 1
+        replay_history_entry(@history[@history_idx])
+      end
+      def record_history(entry)
+        # Discard any forward-history tail (a real browser drops the
+        # redo stack the moment you navigate after a `go_back`).
+        @history = @history[0..@history_idx] if @history_idx + 1 < @history.size
+        @history << entry
+        @history_idx = @history.size - 1
+      end
+      def replay_history_entry(entry)
+        return unless entry
+        if entry[:method] == :post
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true)
+        else
+          navigate(entry[:url], from_history: true)
+        end
+      end
       def active_element_handle
         h = @runtime.call('__csimActiveElement').to_i
         h.zero? ? nil : h
@@ -741,9 +770,10 @@ module Capybara
         end
       end
 
-      def navigate_post(url, body, content_type, depth: 0)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
+        record_history({method: :post, url: url, body: body, content_type: content_type}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -790,6 +820,9 @@ module Capybara
         @sticky_headers.clear
         @current_url     = nil
         @document_handle = 0
+        @history.clear
+        @history_idx     = -1
+        @last_request    = nil
         @runtime.reset_page
         reset_timer_state
         invalidate_find_cache
@@ -1001,9 +1034,10 @@ module Capybara
 
       # PoC navigate: fetch via the Rack app, hand the body to V8 for
       # parsing. Only follows 3xx redirects up to a small depth.
-      def navigate(url, depth: 0, referer: @current_url)
+      def navigate(url, depth: 0, referer: @current_url, from_history: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
+        record_history({method: :get, url: url}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
         env['HTTP_REFERER']  = referer         unless referer.nil? || referer.empty?
