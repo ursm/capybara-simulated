@@ -121,7 +121,10 @@ module Capybara
       def readonly?        = !!self['readonly']
       def obscured?(*)     = !visible?
       def synchronize(*)   = yield
-      def style(*_)        = {}
+      def style(names = [])
+        check_stale
+        browser.computed_style(handle_id, Array(names))
+      end
       def path             = ''
 
       def ==(other)

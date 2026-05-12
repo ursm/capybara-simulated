@@ -80,6 +80,7 @@ module Capybara
       end
 
       def current_url
+        tick_real_time
         @current_url || ''
       end
 
@@ -228,7 +229,10 @@ module Capybara
       # Capybara::Driver::Node surface ----------------------------------
       #
       # PoC: text == all_text == visible_text. Cascade-driven visibility
-      # filtering is deferred (V3_DESIGN.md milestone 5+).
+      # filtering is deferred (V3_DESIGN.md milestone 5+). V3Node calls
+      # `check_stale` before each of these, and `check_stale` advances
+      # the virtual clock — so a single tick covers both the staleness
+      # decision and the read against post-drain state.
       def all_text(handle)     = text(handle)
       def visible_text(handle) = @runtime.call('__csimVisibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
@@ -236,14 +240,25 @@ module Capybara
       def disabled?(handle)    = @runtime.call('__csimDisabled', handle)
       def option_selected?(h)  = !!attr(h, 'selected')
       def shadow_root_handle(_) = nil
-      def computed_style(_, names) = names.to_h {|n| [n, ''] }
+      def computed_style(handle, names)
+        result = @runtime.call('__csimComputedStyle', handle, names.map(&:to_s))
+        return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
+        result.transform_keys(&:to_s)
+      end
       def node_path(_)         = ''
 
       def lookup_node(handle)
         handle if @runtime.call('__csimAlive', handle)
       end
 
+      # Advance the virtual clock first so a `setTimeout`-driven DOM
+      # mutation that detaches `handle` between Capybara's polls is
+      # observed before the staleness check decides whether the
+      # node is still in the document. Without this, V3Node#check_stale
+      # would read the pre-drain state and let a stale handle's
+      # subsequent read return empty content instead of raising.
       def check_stale(handle, initial)
+        tick_real_time
         return if initial && @runtime.call('__csimAlive', handle)
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
@@ -449,10 +464,12 @@ module Capybara
       end
 
       def title
+        tick_real_time
         @runtime.call('__csimDocumentTitle').to_s
       end
 
       def html
+        tick_real_time
         @runtime.call('__csimDocumentHtml').to_s
       end
 
@@ -501,6 +518,7 @@ module Capybara
       def evaluate_async_script(_, _ = []); nil ; end
 
       def current_path
+        tick_real_time
         return '' if @current_url.nil? || @current_url.empty?
         URI.parse(@current_url).path
       rescue URI::InvalidURIError
@@ -538,16 +556,23 @@ module Capybara
         # already-fired timers.
         return if @ticking
         @ticking = true
-        now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        elapsed  = ((now - @last_tick_ts) * 1000).to_i
-        @last_tick_ts = now
-        step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
-        if step > 0
-          fired = @runtime.drain_timers(step).to_i
-          @find_cache_dirty = true if fired > 0
+        begin
+          now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          elapsed  = ((now - @last_tick_ts) * 1000).to_i
+          @last_tick_ts = now
+          step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
+          if step > 0
+            fired = @runtime.drain_timers(step).to_i
+            @find_cache_dirty = true if fired > 0
+          end
+        ensure
+          @ticking = false
         end
-      ensure
-        @ticking = false
+        # Drain navigation intents queued by JS-side handlers that fired
+        # during the drain (e.g. `setTimeout(() => location.pathname = X)`).
+        # Doing it outside the @ticking guard means the navigate's own
+        # rebuild_ctx is well-clear of the V8 call we just made.
+        consume_pending_location
       end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
@@ -617,6 +642,7 @@ module Capybara
           return
         end
         @current_url = url
+        @last_request = {method: :post, url: url, body: body, content_type: content_type}
         html         = read_rack_body(resp_body)
         # Same rebuild-on-full-load contract as `navigate`. POST
         # responses (form submissions that don't redirect, AJAX-less
@@ -780,8 +806,33 @@ module Capybara
         buf
       end
 
-      def location_assign(url) ; navigate(resolve_against_current(url.to_s)) ; end
-      def refresh              ; navigate(@current_url) if @current_url ; end
+      # `window.location.assign(url)` / `location.pathname = '/x'` / etc.
+      # routes through here from the JS bridge. Real browsers navigate
+      # synchronously, but doing so from inside the running V8 call
+      # would rebuild the Context mid-call (ScriptTerminatedError). Stash
+      # the target and drain after the call returns — same deferred-
+      # intent shape we use for `__csimPendingFormSubmit`.
+      def location_assign(url)
+        @pending_location = resolve_against_current(url.to_s)
+      end
+      def consume_pending_location
+        return unless (url = @pending_location)
+        @pending_location = nil
+        navigate(url)
+      end
+      # Replay the last navigation. After a form POST, real browsers
+      # re-send the POST (with the usual "Resubmit?" prompt); a
+      # GET-after-GET is just a re-GET. `@last_request` captures the
+      # method + payload so we can match that contract.
+      def refresh
+        req = @last_request
+        return unless req
+        if req[:method] == :post
+          navigate_post(req[:url], req[:body], req[:content_type])
+        else
+          navigate(req[:url])
+        end
+      end
       def history_state(url)   ; @current_url = url.to_s ; end
       def set_listened_type(*) ; end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
@@ -841,6 +892,7 @@ module Capybara
           return
         end
         @current_url = url
+        @last_request = {method: :get, url: url}
         html         = read_rack_body(body)
         # @module_cache and @importmap survive across navigates;
         # set_importmap flushes the cache only when the new page

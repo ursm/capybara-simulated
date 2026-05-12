@@ -3125,15 +3125,56 @@
   function makeLocation(url) {
     return parseUrlForLocation(url);
   }
+  // Assigning to a property on `window.location` (`location.href = X`,
+  // `location.pathname = X`, `location.hash = X`, …) navigates in real
+  // browsers — it's syntactic sugar over `location.assign(resolved)`.
+  // Without setters here the assignment silently no-ops, so any test
+  // that triggers a setTimeout-driven path change via assignment hangs
+  // until its `default_max_wait_time` expires.
   function parseUrlForLocation(url) {
     try {
       const u = __csim_parseUrl(url, null);
-      if (u && !u.error) return Object.assign({}, u, {
-        toString() { return this.href; },
-        assign:  (next) => __locationAssign(next),
-        replace: (next) => __locationAssign(next),
-        reload:  () => __locationReload()
-      });
+      if (u && !u.error) {
+        const loc = Object.assign({}, u, {
+          toString() { return this.href; },
+          assign:  (next) => __locationAssign(next),
+          replace: (next) => __locationAssign(next),
+          reload:  () => __locationReload()
+        });
+        const navTarget = (resolved) => __locationAssign(resolved);
+        Object.defineProperty(loc, 'href', {
+          configurable: true,
+          get() { return u.href; },
+          set(v) { navTarget(String(v)); }
+        });
+        // Rebuild the absolute URL from this location's parts with one
+        // part swapped — our `URL` doesn't update `href` when a part
+        // setter fires, so a `new URL(u.href)` + assign approach would
+        // navigate back to the original href instead of the new one.
+        const composeWith = (overrides) => {
+          const o = Object.assign({}, u, overrides);
+          const cred = o.username || o.password
+            ? (o.username || '') + (o.password ? ':' + o.password : '') + '@'
+            : '';
+          return (o.protocol || '') + '//' + cred + (o.host || '') +
+                 (o.pathname || '') + (o.search || '') + (o.hash || '');
+        };
+        const assignPart = (key, prefix) => {
+          Object.defineProperty(loc, key, {
+            configurable: true,
+            get() { return u[key]; },
+            set(v) {
+              const s = String(v == null ? '' : v);
+              const part = prefix && s.length > 0 && !s.startsWith(prefix) ? prefix + s : s;
+              navTarget(composeWith({ [key]: part }));
+            }
+          });
+        };
+        assignPart('pathname', '/');
+        assignPart('hash',     '#');
+        assignPart('search',   '?');
+        return loc;
+      }
     } catch (_) {}
     return { href: url || '', protocol: 'http:', host: '', hostname: '',
              port: '', pathname: '/', search: '', hash: '', origin: '',
@@ -3611,6 +3652,19 @@
   globalThis.getComputedStyle = function (el) {
     if (!el || el.nodeType !== NODE_ELEMENT) return makeStyleProxy({ _attrs: {} });
     return el._computedStyleProxy || (el._computedStyleProxy = __makeComputedStyleProxy(el));
+  };
+
+  // Read N computed-style properties for `handle` in one host fn call.
+  // Capybara's `assert_matches_style` / `Node#style` reads several
+  // properties per matcher invocation; batching avoids paying the V8
+  // round-trip per property.
+  globalThis.__csimComputedStyle = function (handle, names) {
+    const el = __handles.get(handle);
+    if (!el || el.nodeType !== NODE_ELEMENT) return {};
+    const proxy = getComputedStyle(el);
+    const out = {};
+    for (const n of names) out[n] = String(proxy[n] || '');
+    return out;
   };
 
   // Handle registry — Ruby keeps integer ids, looks up Element back
@@ -4806,7 +4860,17 @@
   // Lifetime / stale check. v2 pins a Nokogiri node; here the handle is
   // alive iff it's still in `__handles`. Detaches drop on the next
   // GC walk; for now we treat "in map" as "alive".
-  globalThis.__csimAlive = function (h) { return __handles.has(h); };
+  // "Alive" = the node behind this handle is still attached to the
+  // document tree. Handles outlive their nodes (the handle map keeps
+  // a strong ref so JS-side ops on detached fragments stay coherent),
+  // so "is in __handles" isn't the same as "still in the document."
+  // Capybara's stale-node detection (#reload / invalid_element_errors)
+  // depends on this: a node that's been removed from the DOM must
+  // report as stale on the next read.
+  globalThis.__csimAlive = function (h) {
+    const n = __handles.get(h);
+    return n != null && isConnected(n);
+  };
 
   // Form-field value reader. Mirrors what Capybara reads via
   // Node#value: input/textarea use `.value`, select returns its
