@@ -2458,7 +2458,20 @@
       // cascade rules that gate on them — and those rules generally
       // *reveal* content rather than hide it (so reporting false here
       // keeps the element visibility-stable until a real test cares).
-      case 'hover':         return false;
+      case 'hover': {
+        // CSS `:hover` applies to the hovered element AND every
+        // ancestor. We track the last-moused-over node on
+        // `document._hoverElement`; matches walk up the ancestor
+        // chain to decide whether `el` is on it. The hover state
+        // persists across polls (no auto-clear) because Selenium
+        // similarly keeps the pointer in place between user actions
+        // — until the next user action moves it.
+        const hov = globalThis.document && globalThis.document._hoverElement;
+        if (!hov) return false;
+        let cur = hov;
+        while (cur) { if (cur === el) return true; cur = cur._parent; }
+        return false;
+      }
       case 'focus':
       case 'focus-visible': return globalThis.document && globalThis.document._activeElement === el;
       case 'focus-within': {
@@ -3652,6 +3665,18 @@
     if (n._children) for (const c of n._children) registerNode(c);
   }
   function lookup(h) { return __handles.get(h) || null; }
+  // Ruby-callable hover dispatch. Updates `document._hoverElement` so
+  // `:hover` cascade matches resolve against this node, then fires
+  // mouseover + mouseenter — both side effects in one host call so
+  // Ruby doesn't need an interleaved eval that re-enters JS twice.
+  globalThis.__csimSetHover = function (h) {
+    const n = lookup(h);
+    if (!n) return false;
+    globalThis.document._hoverElement = n;
+    try { dispatchEvent(n, new MouseEvent('mouseover',  { bubbles: true,  cancelable: true })); } catch (_) {}
+    try { dispatchEvent(n, new MouseEvent('mouseenter', { bubbles: false, cancelable: false })); } catch (_) {}
+    return true;
+  };
   // Mutation hooks (called from Node.prototype.{appendChild, insertBefore,
   // replaceChild, removeChild} and `innerHTML` setter). Keeps the
   // handle registry in sync so Capybara's `find` results stay live
@@ -4915,6 +4940,15 @@
     // `:active` selector + sortable plugins drag-detect off mousedown.
     // Without these dispatches, clicking a Tribute `<li>` does not
     // call `selectItemAtIndex` and the autocomplete never inserts.
+    // Track the click target as the hover element so `:hover`
+    // cascade matches resolve correctly afterwards (Redmine's
+    // `#context-menu .folder` reveals its nested `<ul>` via
+    // `#context-menu li:hover ul { display: block }`). We don't
+    // dispatch a mouseover here — real browsers do, but redispatching
+    // mouseover at click time recursed into hover listeners that
+    // re-clicked / re-hovered (the gantt tooltip controller is the
+    // canonical case). Setting the slot is enough for the CSS path.
+    try { if (globalThis.document) globalThis.document._hoverElement = n; } catch (_) {}
     // Reset the form-submit intent slot before dispatch so the
     // click handler can populate it if it ends in `form.submit()`
     // (Rails-UJS data-method / data-confirm chain).

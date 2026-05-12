@@ -317,8 +317,16 @@ module Capybara
 
       def hover(handle)
         tick_real_time
-        @runtime.call('__csimDispatchEvent', handle, 'mouseover', {'bubbles' => true, 'cancelable' => true})
-        @runtime.call('__csimDispatchEvent', handle, 'mouseenter', {'bubbles' => false, 'cancelable' => false})
+        # Set `document._hoverElement` so `:hover` pseudo-class matches
+        # resolve against this element (Redmine's gantt tooltips +
+        # context-menu submenus rely on CSS `:hover`). The host fn
+        # call into `__csimSetHover` does the slot update on the JS
+        # side AND fires `mouseover` / `mouseenter` — keeping the
+        # state-set and dispatch on the same path avoids the
+        # double-eval recursion the inlined `globalThis.document.
+        # _hoverElement = ...` triggered (the eval string ran inside
+        # a fresh microtask that re-entered the hover listeners).
+        @runtime.call('__csimSetHover', handle)
       end
 
       def dispatch_event(handle, type, init = {})
