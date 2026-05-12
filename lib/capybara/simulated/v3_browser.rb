@@ -47,16 +47,21 @@ module Capybara
         @ticking                      = false
         @modal_handlers               = []
         @module_cache                 = {}
-        # ESM loading is correct on the wire — `<script type="module">`
-        # tags fetch, EsmRewriter rewrites, Stimulus boots. But on
-        # Redmine the same load order causes the legacy
-        # `$(document).ready` chain to register
-        # `addFormObserversForDoubleSubmit` twice, which then
-        # preventDefaults every form submission. `CSIM_V3_ESM=1` opts
-        # into the new path; default stays at "skip modules" so the
-        # Redmine 11/122 baseline is preserved while the regression
-        # is untangled.
-        @runtime.eval('globalThis.__csim_esm_enabled = ' + (ENV['CSIM_V3_ESM'] == '1').to_s)
+        # ESM loading is opt-in via `CSIM_V3_ESM=1` while the
+        # double-`addFormObserversForDoubleSubmit` regression on Redmine
+        # is untangled. We cache the boolean here so per-visit context
+        # rebuilds can re-apply it (the snapshot doesn't carry it).
+        @esm_enabled = ENV['CSIM_V3_ESM'] == '1'
+        apply_esm_flag
+      end
+
+      # Re-apply the `__csim_esm_enabled` global after a per-visit
+      # context rebuild — the warm snapshot doesn't carry it and the
+      # module-script branch in `runInlineScripts` reads it during
+      # `__csimLoadDocument`, so the flag has to land before the doc
+      # parse runs.
+      def apply_esm_flag
+        @runtime.eval("globalThis.__csim_esm_enabled = #{@esm_enabled.inspect}")
       end
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
@@ -493,6 +498,7 @@ module Capybara
         # semantics and bring up a fresh VM rather than papering over
         # the previous one's state.
         @runtime.rebuild_ctx
+        apply_esm_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
         @runtime.install_app_snapshot_if_needed
@@ -685,6 +691,7 @@ module Capybara
         # keeps the rebuild cost at a few ms; the cost dominator is
         # re-evaluating app bundles, which is what we want.
         @runtime.rebuild_ctx
+        apply_esm_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
         # `runInlineScripts`. The JS bridge pushes the importmap back
