@@ -2334,7 +2334,14 @@
       target.push(child);
     };
     let i = 0;
-    const re = /<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g;
+    // Tag regex: allow `>` inside quoted attribute values. Real HTML
+    // only ends a tag on an unquoted `>`; without honouring quotes,
+    // attributes like `data-action="click->stim#action"` (which
+    // Stimulus / Hotwire emit pervasively) end the tag prematurely
+    // and split the value into bogus garbage attributes. The repeated
+    // alternation handles bare chars, double-quoted strings, and
+    // single-quoted strings; everything else stops at `>`.
+    const re = /<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
     let m, last = 0;
     while ((m = re.exec(html)) !== null) {
       if (m.index > last) {
@@ -2538,6 +2545,13 @@
   // reads `navigator.userAgent` early. We pretend to be a modern
   // browser with a JS-capable runtime; tests that inspect specific
   // UA strings (mobile / Safari quirks) are out of scope.
+  // Clipboard buffer — Promise-shaped read/write so Stimulus
+  // `navigator.clipboard.writeText(...)` from `copyToClipboard` /
+  // `clipboard#copyPre` resolves cleanly. The buffer is in-process
+  // and survives across visits in the same Browser (real browsers
+  // share a system clipboard; we just need round-trip parity for the
+  // copy-then-paste flow tested by `copy_*_to_clipboard`).
+  let __clipboardText = '';
   globalThis.navigator = {
     userAgent: 'capybara-simulated/v3 (V8-resident DOM)',
     appName:   'Netscape',
@@ -2546,8 +2560,21 @@
     language:  'en-US',
     languages: ['en-US', 'en'],
     onLine:    true,
-    cookieEnabled: true
+    cookieEnabled: true,
+    clipboard: {
+      writeText (text) {
+        __clipboardText = String(text == null ? '' : text);
+        return Promise.resolve();
+      },
+      readText () { return Promise.resolve(__clipboardText); },
+      // Generic write/read with ClipboardItem entries (rare in app
+      // code; provide a stub so feature-detection doesn't trip).
+      write () { return Promise.resolve(); },
+      read  () { return Promise.resolve([]); }
+    }
   };
+  globalThis.__csimClipboardGet = function () { return __clipboardText; };
+  globalThis.__csimClipboardSet = function (text) { __clipboardText = String(text == null ? '' : text); };
   // History stub — Turbo Drive + many SPA libs read `history.length`
   // and call `history.pushState` / `replaceState`. We thread through
   // existing `__setCurrentUrl` for state changes.
@@ -4419,6 +4446,43 @@
         const mods    = __modifierFlags(parts.slice(0, lastKeyIdx >= 0 ? lastKeyIdx : parts.length));
         const keyName = lastKeyIdx >= 0 ? parts[lastKeyIdx] : '';
         pressKey(__resolveKey(keyName), mods);
+        // Clipboard paste: Ctrl+V / Cmd+V should fire a `paste` event
+        // with the system clipboard's text content. Real browsers do
+        // this as the default action of the keydown; Redmine's
+        // `copy_*_to_clipboard` tests use it to round-trip the
+        // value from a Stimulus `clipboard#copyText` call.
+        const lowerKey = String(keyName).toLowerCase();
+        if (typeable && (mods.ctrlKey || mods.metaKey) && lowerKey === 'v') {
+          const pasted = __clipboardText;
+          if (pasted) {
+            const ev = new Event('paste', { bubbles: true, cancelable: true });
+            ev.clipboardData = {
+              types: ['text/plain'],
+              getData (kind) {
+                return kind === 'text' || kind === 'text/plain' ? pasted : '';
+              },
+              setData () {}
+            };
+            dispatchEvent(n, ev);
+            if (!ev.defaultPrevented) {
+              // Insert at current caret position, replacing any
+              // selection range — same as a real browser paste.
+              const cur = n._attrs.value != null ? n._attrs.value : '';
+              const s = n._selectionStart != null ? n._selectionStart : cur.length;
+              const e = n._selectionEnd   != null ? n._selectionEnd   : s;
+              const next = cur.slice(0, s) + pasted + cur.slice(e);
+              n._attrs.value = next;
+              if (n._tag === 'textarea') {
+                n._children = [Object.assign(new Text(next), { _parent: n })];
+              }
+              n._selectionStart = n._selectionEnd = s + pasted.length;
+              dispatchEvent(n, new InputEvent('input', {
+                bubbles: true, cancelable: true,
+                data: pasted, inputType: 'insertFromPaste'
+              }));
+            }
+          }
+        }
       }
     }
     if (typeable && n._attrs.value !== startValue) {
