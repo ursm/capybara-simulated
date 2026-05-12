@@ -1259,148 +1259,66 @@
     return false;
   }
   // Clone the content covered by `range` into a DocumentFragment.
-  // The DOM spec splits partial text nodes at the offsets and walks
-  // the boundary chain; for the partial-quote tests we just need the
-  // single-Text-node case (most common) and a basic multi-element
-  // walk between start and end at the same parent.
-  // Range.cloneContents — spec-compliant. Ported from v2's
-  // `clone_range_into` in browser.rb (which walks Nokogiri). The
-  // algorithm:
-  //   1. If start and end share a container — slice or take children.
-  //   2. Otherwise, find the common ancestor. The ancestor-child path
-  //      from the ancestor toward `start` (call it `start_child`),
-  //      and toward `end` (`end_child`), partition the cut:
-  //      - If both boundaries below the same ancestor-child, recurse
-  //        on that subtree.
-  //      - Else: clone `start_child` from `(start_container,
-  //        start_offset)` to its end, full-clone the interior
-  //        siblings between `start_child` and `end_child`, then clone
-  //        `end_child` from its start to `(end_container, end_offset)`.
-  //   3. Text-node containers slice by character offset; Element
-  //      containers slice by child index.
+  // Spec-compliant; ported from v2's `clone_range_into` (Nokogiri).
+  //
+  // The recursive shape: each call to __cloneSlice clones one subtree
+  // bounded by two optional cuts. A null cut means "no boundary on
+  // this side" (clone from the start, or to the end). If a cut's
+  // container is the subtree itself, slice by offset directly; if
+  // it's a descendant, recurse into the ancestor-child that contains
+  // it with a tighter cut. Text-node subtrees slice by character
+  // offset; Element subtrees slice by child index.
   function __rangeAncestorChild (ancestor, descendant) {
     let cur = descendant;
     while (cur && cur._parent && cur._parent !== ancestor) cur = cur._parent;
     return cur && cur._parent === ancestor ? cur : null;
   }
-  function __textSlice (textNode, lo, hi) {
-    const data = textNode.data || '';
-    const a = lo == null ? 0 : Math.max(0, Math.min(data.length, lo));
-    const b = hi == null ? data.length : Math.max(0, Math.min(data.length, hi));
-    return new Text(data.slice(a, b));
+  function __appendCloned (parent, child) {
+    child._parent = parent;
+    parent._children.push(child);
   }
-  function __cloneShell (node) {
-    // Element shallow clone — copies tag + attrs without children.
-    const c = node.cloneNode(false);
-    return c;
-  }
-  // Clone `subtree`, including only content from (boundary, offset)
-  // to the end of `subtree`.
-  function __cloneSubtreeToEnd (subtree, boundary, offset) {
-    if (subtree === boundary && subtree.nodeType === NODE_TEXT) {
-      return __textSlice(subtree, offset, null);
-    }
-    const shell = __cloneShell(subtree);
-    if (subtree === boundary) {
-      const kids = subtree._children || [];
-      for (let i = offset; i < kids.length; i++) {
-        const cc = kids[i].cloneNode(true);
-        cc._parent = shell;
-        shell._children.push(cc);
-      }
-      return shell;
-    }
-    const child = __rangeAncestorChild(subtree, boundary);
-    if (!child) return shell;
-    const idx = subtree._children.indexOf(child);
-    const inner = __cloneSubtreeToEnd(child, boundary, offset);
-    inner._parent = shell;
-    shell._children.push(inner);
-    if (idx >= 0) {
-      for (let i = idx + 1; i < subtree._children.length; i++) {
-        const cc = subtree._children[i].cloneNode(true);
-        cc._parent = shell;
-        shell._children.push(cc);
+  // Emit (into `target`) the slice of `subtree` between the cuts.
+  // `target` is usually a shell clone of `subtree`, but cloneRangeContents
+  // passes its top-level DocumentFragment for the common-ancestor walk.
+  function __emitSlice (target, subtree, startCut, endCut) {
+    const kids = subtree._children || [];
+    let startIdx = 0, startChild = null;
+    if (startCut) {
+      if (startCut.container === subtree) {
+        startIdx = startCut.offset;
+      } else {
+        startChild = __rangeAncestorChild(subtree, startCut.container);
+        if (startChild) startIdx = kids.indexOf(startChild) + 1;
       }
     }
-    return shell;
-  }
-  // Clone `subtree`, including only content from the start of
-  // `subtree` to (boundary, offset).
-  function __cloneSubtreeFromStart (subtree, boundary, offset) {
-    if (subtree === boundary && subtree.nodeType === NODE_TEXT) {
-      return __textSlice(subtree, 0, offset);
-    }
-    const shell = __cloneShell(subtree);
-    if (subtree === boundary) {
-      const kids = subtree._children || [];
-      for (let i = 0; i < Math.min(offset, kids.length); i++) {
-        const cc = kids[i].cloneNode(true);
-        cc._parent = shell;
-        shell._children.push(cc);
-      }
-      return shell;
-    }
-    const child = __rangeAncestorChild(subtree, boundary);
-    if (!child) return shell;
-    const idx = subtree._children.indexOf(child);
-    if (idx > 0) {
-      for (let i = 0; i < idx; i++) {
-        const cc = subtree._children[i].cloneNode(true);
-        cc._parent = shell;
-        shell._children.push(cc);
+    let endIdx = kids.length, endChild = null;
+    if (endCut) {
+      if (endCut.container === subtree) {
+        endIdx = endCut.offset;
+      } else {
+        endChild = __rangeAncestorChild(subtree, endCut.container);
+        if (endChild) endIdx = kids.indexOf(endChild);
       }
     }
-    const inner = __cloneSubtreeFromStart(child, boundary, offset);
-    inner._parent = shell;
-    shell._children.push(inner);
-    return shell;
-  }
-  // Both boundaries land inside the same subtree below the common
-  // ancestor — recurse pairwise.
-  function __cloneSubtreeBetween (subtree, sc, so, ec, eo) {
-    if (subtree === sc && subtree === ec) {
-      if (subtree.nodeType === NODE_TEXT) return __textSlice(subtree, so, eo);
-      const shell = __cloneShell(subtree);
-      const kids = subtree._children || [];
-      for (let i = so; i < Math.min(eo, kids.length); i++) {
-        const cc = kids[i].cloneNode(true);
-        cc._parent = shell;
-        shell._children.push(cc);
-      }
-      return shell;
+    if (startChild && startChild === endChild) {
+      __appendCloned(target, __cloneSlice(startChild, startCut, endCut));
+      return;
     }
-    const shell = __cloneShell(subtree);
-    const sChild = subtree === sc ? null : __rangeAncestorChild(subtree, sc);
-    const eChild = subtree === ec ? null : __rangeAncestorChild(subtree, ec);
-    if (sChild && eChild && sChild === eChild) {
-      const inner = __cloneSubtreeBetween(sChild, sc, so, ec, eo);
-      inner._parent = shell;
-      shell._children.push(inner);
-      return shell;
-    }
-    const children = subtree._children || [];
-    let startIdx;
-    if (sChild) {
-      const inner = __cloneSubtreeToEnd(sChild, sc, so);
-      inner._parent = shell;
-      shell._children.push(inner);
-      startIdx = (children.indexOf(sChild) + 1);
-    } else {
-      startIdx = so;
-    }
-    const endIdx = eChild ? children.indexOf(eChild) : eo;
+    if (startChild) __appendCloned(target, __cloneSlice(startChild, startCut, null));
     for (let i = startIdx; i < endIdx; i++) {
-      if (!children[i]) continue;
-      const cc = children[i].cloneNode(true);
-      cc._parent = shell;
-      shell._children.push(cc);
+      if (kids[i]) __appendCloned(target, kids[i].cloneNode(true));
     }
-    if (eChild) {
-      const inner = __cloneSubtreeFromStart(eChild, ec, eo);
-      inner._parent = shell;
-      shell._children.push(inner);
+    if (endChild) __appendCloned(target, __cloneSlice(endChild, null, endCut));
+  }
+  function __cloneSlice (subtree, startCut, endCut) {
+    if (subtree.nodeType === NODE_TEXT) {
+      const data = subtree.data || '';
+      const lo = startCut && startCut.container === subtree ? startCut.offset : 0;
+      const hi = endCut   && endCut.container === subtree   ? endCut.offset   : data.length;
+      return new Text(data.slice(lo, hi));
     }
+    const shell = subtree.cloneNode(false);
+    __emitSlice(shell, subtree, startCut, endCut);
     return shell;
   }
   function cloneRangeContents (range) {
@@ -1408,52 +1326,19 @@
     if (!range.startContainer || !range.endContainer) return frag;
     const sc = range.startContainer, so = range.startOffset;
     const ec = range.endContainer,   eo = range.endOffset;
-    // Same-container fast path.
     if (sc === ec) {
       if (sc.nodeType === NODE_TEXT) {
-        const t = __textSlice(sc, so, eo);
-        t._parent = frag;
-        frag._children.push(t);
+        __appendCloned(frag, new Text((sc.data || '').slice(so, eo)));
       } else if (sc._children) {
         for (let i = so; i < Math.min(eo, sc._children.length); i++) {
-          const cc = sc._children[i].cloneNode(true);
-          cc._parent = frag;
-          frag._children.push(cc);
+          __appendCloned(frag, sc._children[i].cloneNode(true));
         }
       }
       return frag;
     }
     const ancestor = range.commonAncestorContainer;
-    if (!ancestor) return frag;
-    const sChild = sc === ancestor ? null : __rangeAncestorChild(ancestor, sc);
-    const eChild = ec === ancestor ? null : __rangeAncestorChild(ancestor, ec);
-    if (sChild && eChild && sChild === eChild) {
-      const inner = __cloneSubtreeBetween(sChild, sc, so, ec, eo);
-      inner._parent = frag;
-      frag._children.push(inner);
-      return frag;
-    }
-    const children = ancestor._children || [];
-    let startIdx;
-    if (sChild) {
-      const cloned = __cloneSubtreeToEnd(sChild, sc, so);
-      cloned._parent = frag;
-      frag._children.push(cloned);
-      startIdx = children.indexOf(sChild) + 1;
-    } else {
-      startIdx = so;
-    }
-    const endIdx = eChild ? children.indexOf(eChild) : eo;
-    for (let i = startIdx; i < endIdx; i++) {
-      if (!children[i]) continue;
-      const cc = children[i].cloneNode(true);
-      cc._parent = frag;
-      frag._children.push(cc);
-    }
-    if (eChild) {
-      const cloned = __cloneSubtreeFromStart(eChild, ec, eo);
-      cloned._parent = frag;
-      frag._children.push(cloned);
+    if (ancestor) {
+      __emitSlice(frag, ancestor, {container: sc, offset: so}, {container: ec, offset: eo});
     }
     return frag;
   }
