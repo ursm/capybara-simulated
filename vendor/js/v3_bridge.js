@@ -522,9 +522,25 @@
         const t = this._attrs.type;
         return t != null ? t.toLowerCase() : 'text';
       }
+      // `<select>.type` is `'select-multiple'` when the multiple attr
+      // is set, otherwise `'select-one'`. jQuery's `.val()` for a
+      // select branches on this string; without the override it read
+      // `''`, which doesn't equal `'select-one'`, so jQuery walked
+      // every option as if multi-select and tripped over `null.value`.
+      if (this._tag === 'select') {
+        return this._attrs.multiple != null ? 'select-multiple' : 'select-one';
+      }
       return this._attrs.type != null ? this._attrs.type : '';
     }
     set type(v) { this.setAttribute('type', String(v == null ? '' : v)); }
+    // `<select>.options` — live HTMLOptionsCollection of every
+    // `<option>` descendant (jQuery's `.val()` getter reads this with
+    // an indexed lookup based on `selectedIndex`; without the property
+    // the read returns undefined → `undefined.length` TypeError).
+    get options() {
+      if (this._tag !== 'select') return undefined;
+      return this.querySelectorAll('option');
+    }
     get title() { return this._attrs.title != null ? this._attrs.title : ''; }
     set title(v){ this.setAttribute('title', String(v == null ? '' : v)); }
 
@@ -552,8 +568,70 @@
     // mirroring; here we expose the same pair-of-attr-and-IDL shape
     // so JS like `input.value = 'x'` / `input.checked = true` works
     // and reads back via `__csimValue` / serialised attrs alike.
-    get value()    { return this._attrs.value != null ? this._attrs.value : ''; }
-    set value(v)   { this._attrs.value = String(v == null ? '' : v); }
+    get value() {
+      // `<select>.value` is the value of the first selected option, or
+      // (per HTML spec) the value of the first non-disabled option as
+      // the default. Library handlers (Redmine's `updateIssueFrom`
+      // posts `$('#issue-form').serialize()` which reads the IDL
+      // value, jQuery's `.val()` falls through to this getter for
+      // selects) all expect this resolution rather than `_attrs.value`.
+      if (this._tag === 'select') {
+        const opts = this.querySelectorAll('option');
+        if (this._attrs.multiple != null) {
+          const out = [];
+          for (const o of opts) if (o._attrs.selected != null) {
+            out.push(o._attrs.value != null ? o._attrs.value : o.textContent);
+          }
+          return out;
+        }
+        let implicit = null;
+        for (const o of opts) {
+          if (o._attrs.disabled != null) continue;
+          if (o._attrs.selected != null) return o._attrs.value != null ? o._attrs.value : o.textContent;
+          if (implicit == null) implicit = o._attrs.value != null ? o._attrs.value : o.textContent;
+        }
+        return implicit == null ? '' : implicit;
+      }
+      return this._attrs.value != null ? this._attrs.value : '';
+    }
+    set value(v)   {
+      if (this._tag === 'select') {
+        const target = String(v == null ? '' : v);
+        const opts = this.querySelectorAll('option');
+        for (const o of opts) delete o._attrs.selected;
+        for (const o of opts) {
+          const ov = o._attrs.value != null ? o._attrs.value : o.textContent;
+          if (ov === target) { o._attrs.selected = ''; break; }
+        }
+        return;
+      }
+      this._attrs.value = String(v == null ? '' : v);
+    }
+    // `<option>.selected` IDL — boolean reflecting the `selected`
+    // content attribute. jQuery's `.val()` over a `<select>` walks the
+    // options checking each `.selected`; Redmine's onchange handlers
+    // probe `option[selected]` after manual `select` calls. Without
+    // the IDL getter the read returns `undefined` and the resolved
+    // value comes back empty.
+    get selected() {
+      if (this._tag !== 'option') return false;
+      return this._attrs.selected != null;
+    }
+    set selected(v) {
+      if (this._tag !== 'option') return;
+      if (v) this._attrs.selected = '';
+      else delete this._attrs.selected;
+    }
+    // `<select>.selectedIndex` — index of the first selected option,
+    // or 0 (the default) when no option is explicitly selected.
+    get selectedIndex() {
+      if (this._tag !== 'select') return -1;
+      const opts = this.querySelectorAll('option');
+      for (let i = 0; i < opts.length; i++) {
+        if (opts[i]._attrs.selected != null) return i;
+      }
+      return opts.length > 0 ? 0 : -1;
+    }
     // <a> / <area> / <link>.href: IDL attribute returns the *resolved*
     // URL against the document base (per HTML spec). Rails-UJS reads
     // `element.href` to get the AJAX target; without this getter it
@@ -3468,10 +3546,15 @@
       // value drops one leading newline that immediately follows the
       // open tag (the spec calls this "first newline removal"). After
       // a `set`, `_attrs.value` carries the user's intent verbatim,
-      // so prefer that.
+      // so prefer that. The "one newline" is a single line terminator
+      // — `\r\n` / `\r` / `\n` — not just `\n`, so we need to strip
+      // CR + LF as a pair when Redmine sends a textarea body with CRLF
+      // line endings (the default for forms responding via AJAX).
       if (n._attrs.value != null) return n._attrs.value;
       const txt = n.textContent;
-      return txt.length && txt.charCodeAt(0) === 10 ? txt.slice(1) : txt;
+      if (txt.length >= 2 && txt.charCodeAt(0) === 13 && txt.charCodeAt(1) === 10) return txt.slice(2);
+      if (txt.length >= 1 && (txt.charCodeAt(0) === 13 || txt.charCodeAt(0) === 10)) return txt.slice(1);
+      return txt;
     }
     if (tag === 'select') {
       const opts = n.querySelectorAll('option');
@@ -3961,12 +4044,30 @@
     while (sel && sel._tag !== 'select') sel = sel._parent;
     if (!sel) { n._attrs.selected = ''; return true; }
     selectOptionExclusive(sel, n);
+    // Real browsers (and selenium's `.select_by(...)`) fire `input`
+    // and `change` on the parent `<select>` when the user picks a
+    // different option. Redmine's `<select onchange=
+    // "updateIssueFrom(...)">` relies on `change` to refire the form
+    // AJAX; without these dispatches the form stays stale and tests
+    // that hinge on a tracker/project switch (form_update / activity
+    // refresh / bulk-edit project move) all fail at the next assertion.
+    try { dispatchEvent(sel, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
+    try { dispatchEvent(sel, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
     return true;
   };
   globalThis.__csimUnselectOption = function (h) {
     const n = lookup(h);
     if (!n || n._tag !== 'option') return false;
     delete n._attrs.selected;
+    // Mirror `__csimSelectOption`: when the user toggles an option
+    // off in a multi-select, fire input + change on the owning
+    // `<select>` so onchange handlers see the new state.
+    let sel = n._parent;
+    while (sel && sel._tag !== 'select') sel = sel._parent;
+    if (sel) {
+      try { dispatchEvent(sel, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
+      try { dispatchEvent(sel, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
+    }
     return true;
   };
 
@@ -4016,7 +4117,15 @@
         fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
       } else if (tag === 'textarea') {
         // HTML form-submission spec normalizes textarea LF to CRLF.
-        const raw = f._attrs.value != null ? f._attrs.value : f.textContent;
+        // Strip the same single leading line terminator that
+        // `__csimValue` strips so the serialized payload matches what
+        // the textarea IDL reports (no phantom `\r\n` prefix from the
+        // post-parse `<textarea>\nbody</textarea>` whitespace).
+        let raw = f._attrs.value != null ? f._attrs.value : f.textContent;
+        if (f._attrs.value == null && typeof raw === 'string' && raw.length) {
+          if (raw.length >= 2 && raw.charCodeAt(0) === 13 && raw.charCodeAt(1) === 10) raw = raw.slice(2);
+          else if (raw.charCodeAt(0) === 13 || raw.charCodeAt(0) === 10) raw = raw.slice(1);
+        }
         fields.push([name, String(raw).replace(/\r\n|\r|\n/g, '\r\n')]);
       } else if (tag === 'select') {
         const multi = f._attrs.multiple != null;
