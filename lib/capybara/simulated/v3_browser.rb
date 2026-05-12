@@ -290,6 +290,7 @@ module Capybara
         else
           @runtime.call('__csimSetValue', handle, coerced)
         end
+        consume_pending_form_submit
       end
 
       def coerce_set_value(v)
@@ -348,16 +349,31 @@ module Capybara
           end
         }.compact
         @runtime.call('__csimSendKeys', handle, atoms)
+        consume_pending_form_submit
       end
 
       def select_option(handle)
         tick_real_time
         @runtime.call('__csimSelectOption', handle)
+        consume_pending_form_submit
       end
 
       def unselect_option(handle)
         tick_real_time
         @runtime.call('__csimUnselectOption', handle)
+        consume_pending_form_submit
+      end
+
+      # Read the form-submit pending intent set by JS-side
+      # `form.submit()` / `form.requestSubmit()`. Called by user-action
+      # entry points (click is the primary, but a `<select onchange="$
+      # ('#form').submit()">` pattern reaches here through
+      # select_option). Without this hop the intent sits on the slot
+      # forever and the form never actually navigates / POSTs.
+      def consume_pending_form_submit
+        pending = @runtime.eval('(function(){const p = globalThis.__csimPendingFormSubmit; globalThis.__csimPendingFormSubmit = null; return p ? {formHandle: p.form && p.form._id, submitterHandle: p.submitter && p.submitter._id} : null})()')
+        return unless pending.is_a?(Hash) && pending['formHandle']
+        submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
       end
 
       # `Node#submit(*)` (Capybara DSL) hits here. Find the enclosing
