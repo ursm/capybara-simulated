@@ -170,6 +170,33 @@
     get lastChild()     { return this._children[this._children.length - 1] || null; }
     get childNodes()    { return this._children.slice(); }
     hasChildNodes()     { return this._children.length > 0; }
+    // `form.submit()` — programmatic form submission. Per HTML spec
+    // this does NOT fire a `submit` event (selenium-mode submit-via-
+    // button fires submit; programmatic skips it; memory
+    // `feedback_form_submit_spec_compliance`). We can't return out
+    // through the synchronous JS call stack here, so we stash the
+    // intent on a global slot that the outer click-resolver picks up
+    // (Rails-UJS data-method/data-confirm chain ends in form.submit
+    // inside the click handler; the Ruby side reads the intent after
+    // dispatch and routes through the normal POST/GET form-submit
+    // path). Direct callers (Capybara `Node#submit`) hit the host
+    // fn instead.
+    submit() {
+      if (this._tag !== 'form') return;
+      globalThis.__csimPendingFormSubmit = { form: this, submitter: null };
+    }
+    requestSubmit(submitter) {
+      // `form.requestSubmit()` (HTML spec): like submit() but DOES
+      // fire 'submit' event and goes through the form-submit
+      // algorithm. We can't fully run that algorithm pre-navigation,
+      // so we dispatch submit + record the intent + let the
+      // submitter contribute its value.
+      if (this._tag !== 'form') return;
+      const ev = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter || null });
+      dispatchEvent(this, ev);
+      if (ev.defaultPrevented) return;
+      globalThis.__csimPendingFormSubmit = { form: this, submitter: submitter || null };
+    }
     // `el.click()` — programmatic synthetic click. jstoolbar dispatches
     // its keyboard-shortcut handlers via
     // `this.toolbar.querySelector('.jstb_strong').click()`, jQuery
@@ -177,9 +204,30 @@
     // buttons, and Rails-UJS uses it to retrigger confirmed actions.
     // Per HTML spec the synthetic click is the same shape as a real
     // primary-button mouse click; we fire `click` directly (skipping
-    // mousedown / mouseup because those are pointer-only).
+    // mousedown / mouseup because those are pointer-only). When the
+    // synthetic click lands on a submit-shaped input/button inside a
+    // form, we also fire the form's submit event and record the
+    // submit intent so the outer click resolver can route the
+    // navigation through Ruby's form-submit path — Rails-UJS's
+    // data-method handler builds a hidden form, then calls
+    // `form.querySelector('[type="submit"]').click()` to trigger
+    // navigation, so without this step the form sits attached but
+    // never submits.
     click() {
-      try { dispatchEvent(this, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 })); } catch (_) {}
+      try {
+        const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
+        dispatchEvent(this, ev);
+        if (!ev.defaultPrevented && isSubmitButton(this)) {
+          const form = formForControl(this);
+          if (form) {
+            const submitEv = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: this });
+            dispatchEvent(form, submitEv);
+            if (!submitEv.defaultPrevented) {
+              globalThis.__csimPendingFormSubmit = { form, submitter: this };
+            }
+          }
+        }
+      } catch (_) {}
     }
     // `Element.remove()` / `ChildNode.remove()` — detach this node from
     // its parent. Standard since DOM4; the table-paste Stimulus
@@ -701,6 +749,38 @@
       } catch (_) { return v; }
     }
     set href(v) { this._attrs.href = String(v == null ? '' : v); }
+    // HTMLFormElement IDL — `method` / `action` / `enctype` /
+    // `target` are reflections of the corresponding attributes.
+    // Rails-UJS's `handleMethod` builds a synthetic form via
+    // `form.method = 'post'` / `form.action = href`; without
+    // these setters those land as plain JS properties (not
+    // attributes), and our form serialiser reads the attrs as
+    // null → default GET → submits with the wrong method and a
+    // query-string instead of a POST body.
+    get method() {
+      if (this._tag !== 'form') return this._attrs.method;
+      const m = (this._attrs.method || 'get').toLowerCase();
+      return m === 'dialog' ? 'dialog' : (m === 'post' ? 'post' : 'get');
+    }
+    set method(v) {
+      if (this._tag === 'form') this.setAttribute('method', String(v == null ? '' : v));
+      else                       this._attrs.method = String(v == null ? '' : v);
+    }
+    get action() {
+      if (this._tag !== 'form') return this._attrs.action;
+      const a = this._attrs.action;
+      if (a == null) return (globalThis.location && globalThis.location.href) || '';
+      try {
+        const base = (globalThis.location && globalThis.location.href) || null;
+        const u = __csim_parseUrl(a, base);
+        return u && !u.error ? u.href : a;
+      } catch (_) { return a; }
+    }
+    set action(v)  { this.setAttribute('action', String(v == null ? '' : v)); }
+    get enctype()  { return this._attrs.enctype != null ? this._attrs.enctype : 'application/x-www-form-urlencoded'; }
+    set enctype(v) { this.setAttribute('enctype', String(v == null ? '' : v)); }
+    get target()   { return this._attrs.target != null ? this._attrs.target : ''; }
+    set target(v)  { this.setAttribute('target', String(v == null ? '' : v)); }
     // HTMLScriptElement / HTMLTitleElement / etc. expose `.text` as
     // an alias for `textContent`. stimulus-rails' `parseImportmapJson`
     // reads `script.text` to get the JSON; without this alias it
@@ -2762,20 +2842,20 @@
       for (const k of Object.keys(init)) this._entries.push([k, String(init[k])]);
     }
   };
-  globalThis.URLSearchParams.prototype = {
-    append (k, v) { this._entries.push([String(k), String(v)]); },
-    delete (k) { this._entries = this._entries.filter(e => e[0] !== String(k)); },
-    get (k) { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; },
-    getAll (k) { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); },
-    has (k) { return this._entries.some(e => e[0] === String(k)); },
-    set (k, v) { this.delete(k); this.append(k, v); },
-    entries () { return this._entries[Symbol.iterator] ? this._entries[Symbol.iterator]() : this._entries.values(); },
-    keys ()   { return this._entries.map(e => e[0])[Symbol.iterator](); },
-    values () { return this._entries.map(e => e[1])[Symbol.iterator](); },
-    forEach (fn) { for (const e of this._entries) fn(e[1], e[0], this); },
-    toString () { return this._entries.map(e => encodeURIComponent(e[0]) + '=' + encodeURIComponent(e[1])).join('&'); }
-  };
-  globalThis.URLSearchParams.prototype[Symbol.iterator] = function () { return this.entries(); };
+  Object.defineProperties(globalThis.URLSearchParams.prototype, {
+    append:   { value: function (k, v) { this._entries.push([String(k), String(v)]); }, writable: true, configurable: true },
+    delete:   { value: function (k) { this._entries = this._entries.filter(e => e[0] !== String(k)); }, writable: true, configurable: true },
+    get:      { value: function (k) { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; }, writable: true, configurable: true },
+    getAll:   { value: function (k) { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); }, writable: true, configurable: true },
+    has:      { value: function (k) { return this._entries.some(e => e[0] === String(k)); }, writable: true, configurable: true },
+    set:      { value: function (k, v) { this.delete(k); this.append(k, v); }, writable: true, configurable: true },
+    entries:  { value: function () { return this._entries[Symbol.iterator] ? this._entries[Symbol.iterator]() : this._entries.values(); }, writable: true, configurable: true },
+    keys:     { value: function () { return this._entries.map(e => e[0])[Symbol.iterator](); }, writable: true, configurable: true },
+    values:   { value: function () { return this._entries.map(e => e[1])[Symbol.iterator](); }, writable: true, configurable: true },
+    forEach:  { value: function (fn) { for (const e of this._entries) fn(e[1], e[0], this); }, writable: true, configurable: true },
+    toString: { value: function () { return this._entries.map(e => encodeURIComponent(e[0]) + '=' + encodeURIComponent(e[1])).join('&'); }, writable: true, configurable: true },
+    [Symbol.iterator]: { value: function () { return this.entries(); }, writable: true, configurable: true }
+  });
 
   function __normaliseHeaderName (k) { return String(k).toLowerCase(); }
   globalThis.Headers = function Headers (init) {
@@ -2790,39 +2870,54 @@
       }
     }
   };
-  globalThis.Headers.prototype = {
-    append (k, v) {
+  Object.defineProperties(globalThis.Headers.prototype, {
+    append:  { value: function (k, v) {
       const key = __normaliseHeaderName(k);
       const prev = this._map.get(key);
       this._map.set(key, prev == null ? String(v) : prev + ', ' + String(v));
-    },
-    delete (k) { this._map.delete(__normaliseHeaderName(k)); },
-    get (k)    { const v = this._map.get(__normaliseHeaderName(k)); return v == null ? null : v; },
-    has (k)    { return this._map.has(__normaliseHeaderName(k)); },
-    set (k, v) { this._map.set(__normaliseHeaderName(k), String(v)); },
-    forEach (fn) { this._map.forEach((v, k) => fn(v, k, this)); },
-    entries () { return this._map.entries(); },
-    keys ()    { return this._map.keys(); },
-    values ()  { return this._map.values(); }
-  };
-  globalThis.Headers.prototype[Symbol.iterator] = function () { return this.entries(); };
+    }, writable: true, configurable: true },
+    delete:  { value: function (k) { this._map.delete(__normaliseHeaderName(k)); }, writable: true, configurable: true },
+    get:     { value: function (k) { const v = this._map.get(__normaliseHeaderName(k)); return v == null ? null : v; }, writable: true, configurable: true },
+    has:     { value: function (k) { return this._map.has(__normaliseHeaderName(k)); }, writable: true, configurable: true },
+    set:     { value: function (k, v) { this._map.set(__normaliseHeaderName(k), String(v)); }, writable: true, configurable: true },
+    forEach: { value: function (fn) { this._map.forEach((v, k) => fn(v, k, this)); }, writable: true, configurable: true },
+    entries: { value: function () { return this._map.entries(); }, writable: true, configurable: true },
+    keys:    { value: function () { return this._map.keys(); }, writable: true, configurable: true },
+    values:  { value: function () { return this._map.values(); }, writable: true, configurable: true },
+    [Symbol.iterator]: { value: function () { return this.entries(); }, writable: true, configurable: true }
+  });
 
-  globalThis.FormData = function FormData () {
+  globalThis.FormData = function FormData (form) {
     this._entries = [];
+    // `new FormData(form)` populates from the form's submittable
+    // controls. Rails-UJS's data-remote multipart path constructs
+    // FormData(form) and immediately calls `xhr.send(fd)`; without
+    // this branch the FormData is empty and the server reads zero
+    // params from what looks like an empty form submit.
+    if (form && form._tag === 'form') {
+      const spec = globalThis.__csimFormSerialize(form._id, 0);
+      if (spec && Array.isArray(spec.fields)) {
+        for (const pair of spec.fields) this._entries.push([String(pair[0]), String(pair[1])]);
+      }
+    }
   };
-  globalThis.FormData.prototype = {
-    append (k, v) { this._entries.push([String(k), v]); },
-    delete (k)    { this._entries = this._entries.filter(e => e[0] !== String(k)); },
-    get (k)       { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; },
-    getAll (k)    { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); },
-    has (k)       { return this._entries.some(e => e[0] === String(k)); },
-    set (k, v)    { this.delete(k); this.append(k, v); },
-    forEach (fn)  { for (const e of this._entries) fn(e[1], e[0], this); },
-    entries ()    { return this._entries[Symbol.iterator](); },
-    keys ()       { return this._entries.map(e => e[0])[Symbol.iterator](); },
-    values ()     { return this._entries.map(e => e[1])[Symbol.iterator](); }
-  };
-  globalThis.FormData.prototype[Symbol.iterator] = function () { return this.entries(); };
+  // Define methods on FormData.prototype so `instance.constructor`
+  // stays pointing at FormData and `instance instanceof FormData`
+  // remains true (replacing the prototype object with a literal
+  // wiped the constructor link).
+  Object.defineProperties(globalThis.FormData.prototype, {
+    append:  { value: function (k, v) { this._entries.push([String(k), v]); }, writable: true, configurable: true },
+    delete:  { value: function (k)    { this._entries = this._entries.filter(e => e[0] !== String(k)); }, writable: true, configurable: true },
+    get:     { value: function (k)    { for (const e of this._entries) if (e[0] === String(k)) return e[1]; return null; }, writable: true, configurable: true },
+    getAll:  { value: function (k)    { return this._entries.filter(e => e[0] === String(k)).map(e => e[1]); }, writable: true, configurable: true },
+    has:     { value: function (k)    { return this._entries.some(e => e[0] === String(k)); }, writable: true, configurable: true },
+    set:     { value: function (k, v) { this.delete(k); this.append(k, v); }, writable: true, configurable: true },
+    forEach: { value: function (fn)   { for (const e of this._entries) fn(e[1], e[0], this); }, writable: true, configurable: true },
+    entries: { value: function ()     { return this._entries[Symbol.iterator](); }, writable: true, configurable: true },
+    keys:    { value: function ()     { return this._entries.map(e => e[0])[Symbol.iterator](); }, writable: true, configurable: true },
+    values:  { value: function ()     { return this._entries.map(e => e[1])[Symbol.iterator](); }, writable: true, configurable: true },
+    [Symbol.iterator]: { value: function () { return this.entries(); }, writable: true, configurable: true }
+  });
 
   globalThis.AbortController = function AbortController () {
     this.signal = { aborted: false, addEventListener () {}, removeEventListener () {}, dispatchEvent () {} };
@@ -4195,12 +4290,24 @@
     // `:active` selector + sortable plugins drag-detect off mousedown.
     // Without these dispatches, clicking a Tribute `<li>` does not
     // call `selectItemAtIndex` and the autocomplete never inserts.
+    // Reset the form-submit intent slot before dispatch so the
+    // click handler can populate it if it ends in `form.submit()`
+    // (Rails-UJS data-method / data-confirm chain).
+    globalThis.__csimPendingFormSubmit = null;
     const mdown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, which: 1 });
     dispatchEvent(n, mdown);
     const mup   = new MouseEvent('mouseup',   { bubbles: true, cancelable: true, button: 0, which: 1 });
     dispatchEvent(n, mup);
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
     dispatchEvent(n, click);
+    // A click handler that ended in `form.submit()` (Rails-UJS
+    // data-method link → builds synthetic form → submit) takes
+    // precedence: the page intent is to submit, not navigate.
+    if (globalThis.__csimPendingFormSubmit) {
+      const p = globalThis.__csimPendingFormSubmit;
+      globalThis.__csimPendingFormSubmit = null;
+      return { kind: 'submit', formHandle: p.form._id, submitter: p.submitter ? p.submitter._id : 0 };
+    }
     if (click.defaultPrevented) return null;
 
     if (n._tag === 'a' && n._attrs.href != null) {
@@ -4914,7 +5021,33 @@
       if (self._aborted) return;
       let resp;
       try {
-        const bodyStr = body == null ? '' : (typeof body === 'string' ? body : String(body));
+        // FormData / URLSearchParams / Headers all reach here when
+        // Rails-UJS submits a `data-remote="true"` form (it builds a
+        // FormData from the form fields and calls `xhr.send(fd)`).
+        // The default `String(fd)` returns `"[object Object]"` which
+        // the Rails app treats as garbage. Serialise to
+        // urlencoded — the most common no-file path — and let the
+        // multipart layer handle the file case once attachments land.
+        let bodyStr;
+        if (body == null) {
+          bodyStr = '';
+        } else if (typeof body === 'string') {
+          bodyStr = body;
+        } else if (body instanceof globalThis.FormData) {
+          const parts = [];
+          body.forEach((v, k) => parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v))));
+          bodyStr = parts.join('&');
+          if (!self._headers['Content-Type'] && !self._headers['content-type']) {
+            self._headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+          }
+        } else if (body instanceof globalThis.URLSearchParams) {
+          bodyStr = body.toString();
+          if (!self._headers['Content-Type'] && !self._headers['content-type']) {
+            self._headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
+          }
+        } else {
+          bodyStr = String(body);
+        }
         resp = __rackFetch(self._method, self._url, bodyStr, self._headers, 'follow');
       } catch (_) { resp = null; }
       if (!resp) {
