@@ -4813,7 +4813,15 @@
   // assertions.
   globalThis.__csimVisibleText = function (h) {
     const n = lookup(h);
-    return n ? collectVisibleText(n) : '';
+    if (!n) return '';
+    // If any ancestor is hidden, the whole subtree is invisible —
+    // Capybara's `text` on a node found with `visible: false` whose
+    // parent has `display: none` must return ''. collectVisibleText
+    // only consults the descended-into node, so walk parents first.
+    for (let cur = n._parent; cur; cur = cur._parent) {
+      if (cur.nodeType === NODE_ELEMENT && (INVISIBLE_TAGS.has(cur._tag) || selfHidden(cur))) return '';
+    }
+    return collectVisibleText(n);
   };
   function collectVisibleText(node) {
     if (node.nodeType === NODE_TEXT) return node.data;
@@ -4888,6 +4896,11 @@
   // Capybara's stale-node detection (#reload / invalid_element_errors)
   // depends on this: a node that's been removed from the DOM must
   // report as stale on the next read.
+  globalThis.__csimActiveElement = function () {
+    const el = globalThis.document && globalThis.document._activeElement;
+    return el && el._id != null ? el._id : 0;
+  };
+
   globalThis.__csimAlive = function (h) {
     const n = __handles.get(h);
     return n != null && isConnected(n);
@@ -5489,8 +5502,38 @@
     if (tag === 'input' || tag === 'textarea' || isContenteditable(n)) {
       try { dispatchEvent(n, new KeyboardEvent('keyup', { bubbles: true, cancelable: true })); } catch (_) {}
     }
+    // Capybara's `set("value\n")` on a text input means "type the
+    // value, then press Enter". HTML's implicit form submission says:
+    // when Enter is pressed in a form's sole text-like control, the
+    // form submits. Detect the trailing newline, strip it from the
+    // stored value, and queue a form-submit intent for Ruby to drain
+    // (same channel as Rails-UJS data-method chains).
+    if (tag === 'input' && typeof value === 'string' && value.endsWith('\n')) {
+      const stripped = String(n._attrs.value || '').replace(/\n$/, '');
+      n._attrs.value = stripped;
+      const form = formForControl(n);
+      if (form && __formImplicitSubmit(form, n)) {
+        // Match the shape `__takePendingFormSubmit` reads: an object
+        // with the raw form/submitter Element refs, not handle ids.
+        globalThis.__csimPendingFormSubmit = { form, submitter: null };
+      }
+    }
     return true;
   };
+  // HTML "implicit submission" eligibility: the form must have exactly
+  // one text-shaped input control. Multiple text inputs disqualify
+  // (browsers fall back to needing a submit button) — Capybara's
+  // `should not submit single text input forms if ended with \n and
+  // has multiple values` test pins that branch.
+  function __formImplicitSubmit (form, control) {
+    let count = 0;
+    for (const el of form.querySelectorAll('input')) {
+      const t = (el._attrs.type || 'text').toLowerCase();
+      if (['text', 'email', 'password', 'tel', 'url', 'search', 'number'].includes(t)) count++;
+      if (count > 1) return false;
+    }
+    return count === 1 && (control._attrs.type || 'text').toLowerCase() !== 'submit';
+  }
   function selectOptionExclusive(select, opt) {
     const multi = select._attrs.multiple != null;
     const opts = select.querySelectorAll('option');

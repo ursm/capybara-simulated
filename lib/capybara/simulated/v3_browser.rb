@@ -530,8 +530,15 @@ module Capybara
         @runtime.call('__csimDocumentHtml').to_s
       end
 
-      def status_code      = 200
-      def response_headers = {}
+      def status_code      = (@last_response_status || 200)
+      # Rack 3 lowercases header names (`content-type`), but Capybara
+      # tests expect the canonical mixed-case (`Content-Type`).
+      # Title-case each segment so either lookup style works.
+      def response_headers
+        (@last_response_headers || {}).each_with_object({}) {|(k, v), h|
+          h[k.to_s.split('-').map(&:capitalize).join('-')] = v
+        }
+      end
 
       # Driver surface bits that v2 Browser exposes; stubbed for v3 PoC.
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
@@ -540,7 +547,10 @@ module Capybara
       def viewport_height                 ; 768 ; end
       def go_back                         ; nil ; end
       def go_forward                      ; nil ; end
-      def active_element_handle           ; nil ; end
+      def active_element_handle
+        h = @runtime.call('__csimActiveElement').to_i
+        h.zero? ? nil : h
+      end
       def session_send_keys(_)            ; nil ; end
       def with_modal(_)                   ; yield ; end
       def start_trace(_)                  ; nil ; end
@@ -703,7 +713,9 @@ module Capybara
         end
         @current_url = url
         @last_request = {method: :post, url: url, body: body, content_type: content_type}
-        html         = read_rack_body(resp_body)
+        @last_response_status  = status
+        @last_response_headers = headers.to_h
+        html                   = read_rack_body(resp_body)
         # Same rebuild-on-full-load contract as `navigate`. POST
         # responses (form submissions that don't redirect, AJAX-less
         # data-remote replies) replace the page; we follow real-browser
@@ -953,7 +965,9 @@ module Capybara
         end
         @current_url = url
         @last_request = {method: :get, url: url}
-        html         = read_rack_body(body)
+        @last_response_status  = status
+        @last_response_headers = headers.to_h
+        html                   = read_rack_body(body)
         # @module_cache and @importmap survive across navigates;
         # set_importmap flushes the cache only when the new page
         # ships a different importmap (handles cross-app navigation).
