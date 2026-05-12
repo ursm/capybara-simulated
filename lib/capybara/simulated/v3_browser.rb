@@ -47,11 +47,14 @@ module Capybara
         @ticking                      = false
         @modal_handlers               = []
         @module_cache                 = {}
-        # ESM loading is opt-in via `CSIM_V3_ESM=1` while the
-        # double-`addFormObserversForDoubleSubmit` regression on Redmine
-        # is untangled. We cache the boolean here so per-visit context
-        # rebuilds can re-apply it (the snapshot doesn't carry it).
-        @esm_enabled = ENV['CSIM_V3_ESM'] == '1'
+        # ESM loading is on by default — Stimulus boots end-to-end with
+        # the EventListener-object branch in `addEventListener`, and
+        # `CSIM_V3_ESM=1`'s previous gating on a
+        # `addFormObserversForDoubleSubmit` double-register no longer
+        # reproduces (the snapshot path runs each library body once, so
+        # the legacy ready chain only registers once). Set
+        # `CSIM_V3_ESM=0` to opt out for diagnostic comparison.
+        @esm_enabled = ENV['CSIM_V3_ESM'] != '0'
         apply_esm_flag
       end
 

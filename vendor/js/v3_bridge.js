@@ -37,19 +37,40 @@
       this.nodeType   = NODE_ELEMENT;
     }
     addEventListener(type, handler, options) {
-      if (typeof handler !== 'function') return;
+      // DOM spec: handler may be either a function OR an EventListener
+      // object with a `handleEvent` method. Stimulus's central
+      // dispatcher passes the latter (one `EventListener` instance per
+      // (element, eventName) pair, with bindings looked up inside
+      // `handleEvent`) — without this branch the listener silently
+      // never registers and every Stimulus `data-action` is a no-op.
+      let fn = null;
+      if (typeof handler === 'function') fn = handler;
+      else if (handler && typeof handler.handleEvent === 'function') {
+        fn = handler.handleEvent.bind(handler);
+        fn._csimEventListenerObject = handler;
+      } else return;
       const capture = !!(options && (options === true || options.capture));
       this._listeners = this._listeners || Object.create(null);
       const list = this._listeners[type] || (this._listeners[type] = []);
-      // Per spec, identical {type, handler, capture} is deduped.
-      if (list.some(l => l.handler === handler && l.capture === capture)) return;
-      list.push({ handler, capture });
+      // Per spec, identical {type, handler, capture} is deduped. The
+      // identity for handler-object form is the original object, so
+      // re-registering the same EventListener instance is a no-op.
+      if (list.some(l => (l.handler === fn ||
+                          (handler && l.handler._csimEventListenerObject === handler)) &&
+                         l.capture === capture)) return;
+      list.push({ handler: fn, capture });
     }
     removeEventListener(type, handler, options) {
       if (!this._listeners || !this._listeners[type]) return;
       const capture = !!(options && (options === true || options.capture));
-      this._listeners[type] = this._listeners[type].filter(l =>
-        !(l.handler === handler && l.capture === capture));
+      this._listeners[type] = this._listeners[type].filter(l => {
+        if (l.capture !== capture) return true;
+        if (typeof handler === 'function') return l.handler !== handler;
+        if (handler && typeof handler.handleEvent === 'function') {
+          return l.handler._csimEventListenerObject !== handler;
+        }
+        return true;
+      });
     }
     dispatchEvent(event) {
       return dispatchEvent(this, event);
@@ -682,6 +703,51 @@
       this._selectionStart     = start | 0;
       this._selectionEnd       = end   | 0;
       this._selectionDirection = direction != null ? String(direction) : 'none';
+    }
+    // `setRangeText(replacement, start, end, selectMode)` — HTMLSpec.
+    // Replaces the text between `start` and `end` with `replacement`
+    // and updates the caret per the `selectMode` argument
+    // ('select' / 'start' / 'end' / 'preserve'; default 'preserve').
+    // Redmine's list-autofill controller calls this with `'start'` to
+    // remove a list marker when the user presses Enter on an empty
+    // item; without the method the call throws and the marker stays.
+    setRangeText(replacement, start, end, selectMode) {
+      if (this._tag !== 'input' && this._tag !== 'textarea') return;
+      const cur = this._attrs.value != null ? this._attrs.value : '';
+      const len = cur.length;
+      if (replacement == null) replacement = '';
+      replacement = String(replacement);
+      let s = start == null ? (this._selectionStart || 0) : (start | 0);
+      let e = end   == null ? (this._selectionEnd   || s) : (end   | 0);
+      if (s < 0) s = 0; if (e > len) e = len; if (s > e) s = e;
+      const before = cur.slice(0, s);
+      const after  = cur.slice(e);
+      const next = before + replacement + after;
+      this._attrs.value = next;
+      if (this._tag === 'textarea') {
+        this._children = [Object.assign(new Text(next), { _parent: this })];
+      }
+      const mode = selectMode == null ? 'preserve' : String(selectMode);
+      const replEnd = s + replacement.length;
+      if (mode === 'select') {
+        this._selectionStart = s;
+        this._selectionEnd   = replEnd;
+      } else if (mode === 'start') {
+        this._selectionStart = s;
+        this._selectionEnd   = s;
+      } else if (mode === 'end') {
+        this._selectionStart = replEnd;
+        this._selectionEnd   = replEnd;
+      } else {
+        // 'preserve': adjust positions to account for the length delta.
+        const delta = replacement.length - (e - s);
+        let ss = this._selectionStart != null ? this._selectionStart : len;
+        let se = this._selectionEnd   != null ? this._selectionEnd   : len;
+        if (ss > e) ss += delta; else if (ss > s) ss = replEnd;
+        if (se > e) se += delta; else if (se > s) se = replEnd;
+        this._selectionStart = ss;
+        this._selectionEnd   = se;
+      }
     }
     select() {
       this._selectionStart = 0;
@@ -3809,17 +3875,17 @@
   // end if the value moved (selenium parity: change fires after
   // the whole `send_keys` batch, not per character).
   const __KEY_NAME_MAP = {
-    enter:      { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n' },
-    return:     { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n' },
-    tab:        { key: 'Tab',       code: 'Tab',       keyCode:  9, char: '\t' },
-    space:      { key: ' ',         code: 'Space',     keyCode: 32, char: ' '  },
-    backspace:  { key: 'Backspace', code: 'Backspace', keyCode:  8, char: null },
-    delete:     { key: 'Delete',    code: 'Delete',    keyCode: 46, char: null },
-    escape:     { key: 'Escape',    code: 'Escape',    keyCode: 27, char: null },
-    up:         { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38, char: null },
-    down:       { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40, char: null },
-    left:       { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37, char: null },
-    right:      { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, char: null }
+    enter:      { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n', inputType: 'insertLineBreak' },
+    return:     { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n', inputType: 'insertLineBreak' },
+    tab:        { key: 'Tab',       code: 'Tab',       keyCode:  9, char: '\t', inputType: 'insertText'      },
+    space:      { key: ' ',         code: 'Space',     keyCode: 32, char: ' ',  inputType: 'insertText'      },
+    backspace:  { key: 'Backspace', code: 'Backspace', keyCode:  8, char: null, inputType: 'deleteContentBackward', backspace: true },
+    delete:     { key: 'Delete',    code: 'Delete',    keyCode: 46, char: null, inputType: 'deleteContentForward'  },
+    escape:     { key: 'Escape',    code: 'Escape',    keyCode: 27, char: null, inputType: null },
+    up:         { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38, char: null, inputType: null },
+    down:       { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40, char: null, inputType: null },
+    left:       { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37, char: null, inputType: null },
+    right:      { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, char: null, inputType: null }
   };
   const __MODIFIER_NAMES = new Set([
     'control', 'ctrl', 'command', 'cmd', 'meta', 'shift', 'alt', 'option'
@@ -3838,9 +3904,10 @@
       return { key: spec,
                code: spec.length === 1 ? 'Key' + spec.toUpperCase() : '',
                keyCode: spec.length === 1 ? spec.toUpperCase().charCodeAt(0) : 0,
-               char: spec };
+               char: spec,
+               inputType: 'insertText' };
     }
-    return { key: String(spec), code: '', keyCode: 0, char: null };
+    return { key: String(spec), code: '', keyCode: 0, char: null, inputType: null };
   }
   function __modifierFlags(names) {
     const out = { ctrlKey: false, metaKey: false, shiftKey: false, altKey: false };
@@ -3877,10 +3944,47 @@
       const init = Object.assign({}, initBase, { key: info.key, code: info.code, keyCode: info.keyCode, which: info.keyCode });
       const kd = new KeyboardEvent('keydown', init);
       dispatchEvent(n, kd);
-      const blocked = kd.defaultPrevented;
-      if (!blocked && typeable && info.char != null && (!modifiers || (!modifiers.ctrlKey && !modifiers.metaKey && !modifiers.altKey))) {
-        __appendValue(n, info.char);
-        dispatchEvent(n, new InputEvent('input', { bubbles: true, cancelable: true, data: info.char }));
+      let blocked = kd.defaultPrevented;
+      const wouldType =
+        typeable && !blocked &&
+        (info.char != null || info.inputType === 'deleteContentBackward' || info.inputType === 'deleteContentForward') &&
+        (!modifiers || (!modifiers.ctrlKey && !modifiers.metaKey && !modifiers.altKey));
+      if (wouldType && info.inputType) {
+        // `beforeinput` fires before the value mutates, with the
+        // semantic `inputType` set ('insertText' / 'insertLineBreak'
+        // / 'deleteContentBackward' / etc.). Stimulus actions like
+        // `data-action="beforeinput->list-autofill#handleBeforeInput"`
+        // gate on `event.inputType` and call preventDefault to take
+        // over (e.g. list-autofill replaces the default Enter with
+        // a marker-prefixed newline). Honour the cancellation.
+        const bi = new InputEvent('beforeinput', {
+          bubbles: true, cancelable: true,
+          data: info.char != null ? info.char : null,
+          inputType: info.inputType
+        });
+        dispatchEvent(n, bi);
+        if (bi.defaultPrevented) blocked = true;
+      }
+      if (!blocked && wouldType) {
+        if (info.char != null) {
+          __appendValue(n, info.char);
+        } else if (info.inputType === 'deleteContentBackward') {
+          // Backspace: drop the char before the caret.
+          const cur = n._attrs.value != null ? n._attrs.value : '';
+          const pos = n._selectionStart != null ? n._selectionStart : cur.length;
+          if (pos > 0) {
+            const next = cur.slice(0, pos - 1) + cur.slice(pos);
+            n._attrs.value = next;
+            if (n._tag === 'textarea') n._children = [Object.assign(new Text(next), { _parent: n })];
+            n._selectionStart = pos - 1;
+            n._selectionEnd   = pos - 1;
+          }
+        }
+        dispatchEvent(n, new InputEvent('input', {
+          bubbles: true, cancelable: true,
+          data: info.char != null ? info.char : null,
+          inputType: info.inputType
+        }));
       }
       dispatchEvent(n, new KeyboardEvent('keyup', init));
     };
