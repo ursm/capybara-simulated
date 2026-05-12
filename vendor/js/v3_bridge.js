@@ -595,7 +595,15 @@
     constructor() {
       super();
       this.nodeType   = NODE_DOC;
-      this.readyState = 'complete';
+      // Start in 'loading' so library IIFEs (jQuery 3.x sniffs
+      // `document.readyState === 'complete'` and self-schedules
+      // `jQuery.ready` via setTimeout) register a DOMContentLoaded
+      // listener instead of side-effecting onto the virtual clock.
+      // Each per-visit `__csimLoadDocument` flips us to 'complete'
+      // *after* the new body is in place, then dispatches
+      // DOMContentLoaded so the queued ready cbs fire against the
+      // fresh body.
+      this.readyState = 'loading';
       this.documentElement = null;
     }
     // jQuery's `mc(node)` helper resolves a node back to its window
@@ -2178,81 +2186,36 @@
   // `<script src>` / `defer` / `async` ordering lifts in once
   // resource fetching ports to v3.
   globalThis.__csimLoadDocument = function (html) {
-    __handles.clear();
+    // Each Capybara visit lands here on a freshly-checked-out Context
+    // from the snapshot pool. The Context is either:
+    //   - "base snapshot" — just bridge + wgxpath, no app bundles run.
+    //     `__externalScriptsRun` empty, document has no body. Library
+    //     scripts in the page's `<head>` get evaluated here for the
+    //     first time.
+    //   - "app-warm snapshot" — bridge + wgxpath + app library bundles
+    //     pre-evaluated, with their `$(document).on(...)` delegates
+    //     attached to `document` and `__externalScriptsRun` already
+    //     containing the library URLs. `readyState` is still 'loading'
+    //     because the warmup epilogue parks DOMContentLoaded.
+    // In the app-warm case the library delegates must keep pointing at
+    // the SAME `document` instance the snapshot baked them against, so
+    // we reuse `globalThis.document` here and only swap in fresh
+    // children. In the base case we just append onto the empty doc.
+    __initialScriptsDone = false;
     __hideRules = [];
     __hideRuleIdx = null;
-    // Gate dynamic-script execution off for the duration of this
-    // page-build call. fireCEConnect (which fires during child-move
-    // below) would otherwise try to re-eval inline `<script>` bodies
-    // that runInlineScripts is about to walk explicitly — leading to
-    // double execution. Flipped back on at the end so post-load AJAX
-    // responses (Rails-UJS dataType:'script') still trigger script
-    // eval when their <script> is appended dynamically.
-    __initialScriptsDone = false;
-    // Drop pending timers from the prior page — otherwise stale
-    // setTimeouts captured against the previous jQuery closure
-    // fire under the new page's context. We saw this surface as
-    // Redmine's `addFormObserversForDoubleSubmit` running 3× (once
-    // for the new page's ready resolution + leftovers from prior
-    // visits' chained-Deferred .then setTimeouts).
-    __resetTimers();
-    // Per-visit reset to approximate full-page-load semantics.
-    // Real browsers replace document + window on every navigation;
-    // libraries' `$(document).on(...)` delegates and per-page init
-    // (`contextMenuInit` creating `#context-menu`, Stimulus reattaching
-    // controllers, …) re-run on each visit. v3 keeps the Context
-    // alive for warmup, but emulates the "fresh page" effect by:
-    //   - dropping document listeners (so old delegates don't pile up
-    //     when scripts re-register against the new body)
-    //   - clearing the external-script cache (so app bundles re-evaluate
-    //     and re-call `$(document).on(...)` / `$(document).ready(...)`)
-    //   - clearing rails-ujs's auto-start guard (`window._rails_loaded`)
-    //     so its IIFE re-binds delegates instead of throwing on the
-    //     "already loaded" check.
-    // The `_rails_loaded` clear is library-named but mirrors what real
-    // browsers do on navigation: the prior window is gone, so the flag
-    // is too. We carve it out here because rails-ujs is the only
-    // popular guard that refuses to re-register; well-behaved libs
-    // (jQuery, Stimulus core) re-bind unconditionally.
-    if (globalThis.document) globalThis.document._listeners = null;
-    __externalScriptsRun.clear();
-    delete globalThis._rails_loaded;
-    // Reuse the existing Document instance and swap in a freshly
-    // parsed documentElement. Keeping the document's object identity
-    // stable across visits is critical for library init guards: e.g.
-    // rails-ujs sets `window._rails_loaded = true` after its first
-    // `delegate(document, ...)` call. The flag survives navigation
-    // (window/global state persists in v3's architecture), so the
-    // second visit's script re-run hits the guard and skips
-    // `start()`. If `document` were also replaced, those click
-    // delegates would point at the *previous* document and never see
-    // the new page's events. By keeping `document` stable, the
-    // delegates the library installed once stay live for every page.
     const freshDoc = parseDocument(String(html == null ? '' : html));
-    if (globalThis.document) {
-      const d = globalThis.document;
-      // Detach old children (head/body/documentElement) and unregister.
-      for (const c of d._children.slice()) {
-        d.removeChild(c);
-      }
-      // Point `d.documentElement` at the new <html> BEFORE moving any
-      // children — appendChild fires fireCEConnect → maybeRunScript →
-      // (potentially) `customElements.define`, which needs to walk
-      // `doc.documentElement` to upgrade existing elements. Without
-      // documentElement set first, the upgrade query bails and pre-
-      // registered custom elements never get their connectedCallback.
-      d.documentElement = freshDoc.documentElement;
-      d.readyState = 'complete';
-      // Move freshDoc's children over.
-      const newKids = freshDoc._children.slice();
-      for (const c of newKids) {
-        c._parent = null;
-        d.appendChild(c);
-      }
-    } else {
-      globalThis.document = freshDoc;
-      registerNode(globalThis.document);
+    const d = globalThis.document;
+    // Detach any prior body content (only relevant if we ever re-enter
+    // this function on the same Context — currently visit() rebuilds
+    // the Context, so this loop is a no-op).
+    for (const c of d._children.slice()) d.removeChild(c);
+    d.documentElement = freshDoc.documentElement;
+    for (const c of freshDoc._children.slice()) {
+      c._parent = null;
+      d.appendChild(c);
     }
+    d.readyState = 'complete';
     // Cascade-derived hide rules need to land *before* scripts run —
     // a script that tests visibility (`offsetWidth`-style probes) or
     // queries Capybara-visible elements would otherwise see the
@@ -3936,6 +3899,35 @@
     __timers.clear();
     __virtualNow = 0;
     if (had) __setTimersActive(false);
+  };
+
+  // Called as the last line of the app-warm snapshot build script.
+  // The snapshot freezes a Context in "library bundles evaluated but
+  // no page loaded yet" state, so the per-visit side effects that
+  // accumulated during warmup eval (queued timers / microtasks,
+  // pending MutationObserver records, scratch handles for warmup-only
+  // nodes, virtual clock advance) all need to roll back to a clean
+  // baseline. What we *keep*: library globals (jQuery, Rails, …),
+  // `document._listeners` (`$(document).on(...)` delegates),
+  // `__externalScriptsRun` (so per-visit script lists skip already-
+  // baked URLs), `__customElementRegistry`, `__hideRules`.
+  globalThis.__csimEnterSnapshotState = function () {
+    __resetTimers();
+    __nextTimerId      = 1;
+    __pendingRecords.length = 0;
+    // `document.readyState` stays 'loading' so the first per-visit
+    // `__csimLoadDocument` can flip it to 'complete' and dispatch
+    // DOMContentLoaded — that's the trigger jQuery-style ready cbs
+    // were parked behind during warmup.
+    if (globalThis.document) {
+      globalThis.document.readyState = 'loading';
+      for (const c of globalThis.document._children.slice()) {
+        globalThis.document.removeChild(c);
+      }
+      globalThis.document.documentElement = null;
+    }
+    __handles.clear();
+    if (globalThis.document) registerNode(globalThis.document);
   };
 
   // Vestigial: the Ruby side now rebuilds the Context from the warm
