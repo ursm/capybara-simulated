@@ -47,6 +47,22 @@ DESCRIPTION_SKIPS_V3 = [
 
 RSpec.configure do |config|
   config.filter_run_excluding requires: Capybara::SpecHelper.method(:filter).to_proc
+  config.shared_context_metadata_behavior = :apply_to_host_groups
+
+  # Mirror v2's reset: Capybara's shared specs flip globals
+  # (`ignore_hidden_elements`, `default_selector`, …) inline without
+  # restoring them, so an earlier test's mutation bleeds into the
+  # next one. `Capybara::SpecHelper.reset!` puts everything back to
+  # defaults; without it we see false positives like text-visibility
+  # tests failing because a prior spec turned `ignore_hidden_elements`
+  # off and never turned it back on.
+  config.around(:each, :capybara_skip) do |example|
+    Capybara::SpecHelper.reset!
+    example.run
+  ensure
+    Capybara.app = nil
+    Capybara.default_selector = :css
+  end
 
   config.before(:each) do |example|
     skip 'needs elementFromPoint / real layout engine — out of scope' \
