@@ -860,8 +860,56 @@
     // the validation algorithm, so `valid` is always true and the
     // message is empty. Frameworks (Stimulus form controllers,
     // Capybara's `:valid` filter) probe these without crashing.
-    get validity()          { return { valid: true, valueMissing: false, typeMismatch: false, patternMismatch: false, tooLong: false, tooShort: false, rangeUnderflow: false, rangeOverflow: false, stepMismatch: false, badInput: false, customError: false }; }
-    get validationMessage() { return this._validationMessage || ''; }
+    get validity() {
+      // Compute the subset of HTML5 validity flags Capybara's specs
+      // gate on: `valueMissing` (required + empty), `patternMismatch`
+      // (pattern attr + value doesn't match), `typeMismatch`
+      // (email / url with bad value), and `customError` (setCustomValidity).
+      const tag  = this._tag;
+      const type = (this._attrs.type || 'text').toLowerCase();
+      const val  = this._attrs.value != null ? String(this._attrs.value) : '';
+      const checkable = type === 'checkbox' || type === 'radio';
+      const empty = checkable ? this._attrs.checked == null : val === '';
+      const v = {
+        valueMissing: false, typeMismatch: false, patternMismatch: false,
+        tooLong: false, tooShort: false, rangeUnderflow: false,
+        rangeOverflow: false, stepMismatch: false, badInput: false,
+        customError: !!this._validationMessage,
+        valid: true
+      };
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        if (this._attrs.required != null && empty) v.valueMissing = true;
+        if (!empty && this._attrs.pattern != null && tag === 'input') {
+          try { v.patternMismatch = !(new RegExp('^(?:' + this._attrs.pattern + ')$').test(val)); }
+          catch (_) {}
+        }
+        if (!empty && tag === 'input') {
+          if (type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) v.typeMismatch = true;
+          if (type === 'url'   && !/^[a-z]+:\/\//i.test(val))               v.typeMismatch = true;
+        }
+        // tooShort / tooLong fire only after a user edit; for our
+        // purposes the test pre-fills via `fill_in` which counts as
+        // dirty, so we always check.
+        if (!empty && tag === 'input') {
+          const min = parseInt(this._attrs.minlength || '', 10);
+          const max = parseInt(this._attrs.maxlength || '', 10);
+          if (!isNaN(min) && val.length < min) v.tooShort = true;
+          if (!isNaN(max) && val.length > max) v.tooLong  = true;
+        }
+        if (v.valueMissing || v.patternMismatch || v.typeMismatch ||
+            v.tooShort || v.tooLong || v.customError) v.valid = false;
+      }
+      return v;
+    }
+    get validationMessage() {
+      if (this._validationMessage) return this._validationMessage;
+      const v = this.validity;
+      if (v.valid) return '';
+      if (v.valueMissing)    return 'Please fill out this field.';
+      if (v.typeMismatch)    return 'Please match the requested format.';
+      if (v.patternMismatch) return 'Please match the requested format.';
+      return '';
+    }
     get willValidate()      { return false; }
     checkValidity()         { return true; }
     reportValidity()        { return true; }
@@ -4255,7 +4303,25 @@
     if (n instanceof ShadowRoot) return 'ShadowRoot';
     return '';
   };
-  globalThis.__csimAttr      = function (h, name) { const n = lookup(h); return n && n.getAttribute ? n.getAttribute(name) : null; };
+  globalThis.__csimAttr      = function (h, name) {
+    const n = lookup(h);
+    if (!n) return null;
+    // Capybara's `node[name]` reads either a content attribute or an
+    // IDL property. Route a few well-known IDL names off the
+    // getAttribute path so `node[:validationMessage]` /
+    // `node[:innerHTML]` etc. return what user JS sees.
+    switch (String(name)) {
+      case 'validationMessage': return n.validationMessage || '';
+      case 'validity':          return n.validity || null;
+      case 'innerHTML':         return typeof n.innerHTML === 'string' ? n.innerHTML : null;
+      case 'outerHTML':         return typeof n.outerHTML === 'string' ? n.outerHTML : null;
+      case 'textContent':       return typeof n.textContent === 'string' ? n.textContent : null;
+      case 'checked':           return !!n.checked;
+      case 'disabled':          return !!n.disabled;
+      case 'value':             return n.value != null ? n.value : '';
+    }
+    return n.getAttribute ? n.getAttribute(name) : null;
+  };
   globalThis.__csimHasAttr   = function (h, name) { const n = lookup(h); return !!(n && n.hasAttribute && n.hasAttribute(name)); };
   // Visibility walk mirroring v2's `self_hidden?` + ancestor chain:
   // INVISIBLE_TAGS (head/script/style/template/noscript/title),
@@ -4905,6 +4971,9 @@
   // box into an absolute "viewport" position. We don't run a layout
   // engine; this is just "if a test declares position via px values,
   // honour those values" — enough for the click-offset specs.
+  globalThis.__csimTimersDebug = function () {
+    return { size: __timers.size, virtualNow: __virtualNow };
+  };
   globalThis.__csimElementRect = function (h) {
     const el = __handles.get(h);
     if (!el || el.nodeType !== NODE_ELEMENT) return { x: 0, y: 0, width: 0, height: 0 };
