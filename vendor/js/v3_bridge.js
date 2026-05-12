@@ -5808,14 +5808,24 @@
     // (descendant of the form) *or* an explicit `form="<form-id>"`
     // attribute pointing at the form. Skip descendant controls whose
     // `form` attr points elsewhere — they belong to another form.
-    const inputs = [];
-    for (const f of form.querySelectorAll('input,textarea,select,button')) {
-      if (f._attrs.form == null || f._attrs.form === form._attrs.id) inputs.push(f);
-    }
+    // Collect controls in DOCUMENT ORDER. Walk the whole document
+    // once, keep any control whose form-association lands on this
+    // form — either via DOM ancestry (and no overriding `form` attr)
+    // or an explicit `form="<id>"` pointing at us. This is the order
+    // browsers serialise in, and Capybara's spec checks for it
+    // (`should send button in document order`).
     const formId = form._attrs.id;
-    if (formId) {
-      for (const f of globalThis.document.documentElement.querySelectorAll('input,textarea,select,button')) {
-        if (f._attrs.form === formId && !inputs.includes(f)) inputs.push(f);
+    const isDescendant = (el) => {
+      for (let cur = el._parent; cur; cur = cur._parent) if (cur === form) return true;
+      return false;
+    };
+    const inputs = [];
+    for (const f of globalThis.document.documentElement.querySelectorAll('input,textarea,select,button')) {
+      const explicit = f._attrs.form;
+      if (explicit != null) {
+        if (formId && explicit === formId) inputs.push(f);
+      } else if (isDescendant(f)) {
+        inputs.push(f);
       }
     }
     for (const f of inputs) {
