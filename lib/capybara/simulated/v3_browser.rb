@@ -42,6 +42,13 @@ module Capybara
         @sticky_headers               = {}
         @timers_active                = false
         @intersection_observer_active = false
+        # Bumped on each context rebuild. V3Node captures this at
+        # construction and `check_stale` rejects any handle whose
+        # captured generation no longer matches — handle IDs are
+        # per-Context integer sequences, so a handle from a pre-refresh
+        # context could otherwise collide with a fresh node in the
+        # new context and silently dodge staleness detection.
+        @context_gen                  = 0
         @find_cache_dirty             = true
         @find_cache_kind              = nil
         @find_cache_arg               = nil
@@ -116,8 +123,15 @@ module Capybara
             # `Capybara::Ambiguous` whenever a within() block expected one
             # element (e.g. Redmine's ReactionsSystemTest scoped to a span).
             prefix = context_handle ? './/' : '//'
-            xpath = Nokogiri::CSS.xpath_for(s, prefix: prefix).first
-            return find_xpath(xpath, context_handle) if xpath
+            xpaths = Nokogiri::CSS.xpath_for(s, prefix: prefix)
+            unless xpaths.empty?
+              # `Nokogiri::CSS.xpath_for("h1, p")` returns one xpath per
+              # selector group. Union them with ` | ` so the wgxpath
+              # pass returns matches across all groups in document order
+              # instead of just the first group.
+              combined = xpaths.length == 1 ? xpaths.first : xpaths.join(' | ')
+              return find_xpath(combined, context_handle)
+            end
           rescue Nokogiri::CSS::SyntaxError, StandardError
             # Fall back to the JS-side parser. Worth trying because
             # `xpath_for` can choke on Capybara-emitted pseudo selectors
@@ -257,9 +271,9 @@ module Capybara
       # node is still in the document. Without this, V3Node#check_stale
       # would read the pre-drain state and let a stale handle's
       # subsequent read return empty content instead of raising.
-      def check_stale(handle, initial)
+      def check_stale(handle, initial, gen = nil)
         tick_real_time
-        return if initial && @runtime.call('__csimAlive', handle)
+        return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
@@ -610,7 +624,10 @@ module Capybara
         @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @timers_active = false
         @polling_until = nil
+        @context_gen  += 1
       end
+
+      attr_reader :context_gen
 
       # Pulls the serialised form-state out of JS, encodes it, and
       # drives the Rack app via `navigate` (for GET) or a POST. Mirrors

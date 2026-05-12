@@ -20,6 +20,7 @@ module Capybara
         super(driver, self)
         @handle_id    = handle
         @initial_node = driver.browser.lookup_node(handle)
+        @context_gen  = driver.browser.context_gen
       end
 
       attr_reader :handle_id
@@ -134,7 +135,7 @@ module Capybara
       private
 
       def browser     = driver.browser
-      def check_stale = browser.check_stale(handle_id, @initial_node)
+      def check_stale = browser.check_stale(handle_id, @initial_node, @context_gen)
     end
   end
 end
