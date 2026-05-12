@@ -52,19 +52,19 @@ module Capybara
         browser.attr(handle_id, name.to_s)
       end
 
-      def click(keys = [], **_opts)
+      def click(keys = [], **opts)
         check_stale
-        browser.click(handle_id, keys)
+        browser.click(handle_id, keys, **opts)
       end
 
-      def right_click(keys = [], **_opts)
+      def right_click(keys = [], **opts)
         check_stale
-        browser.right_click(handle_id, keys)
+        browser.right_click(handle_id, keys, **opts)
       end
 
-      def double_click(keys = [], **_opts)
+      def double_click(keys = [], **opts)
         check_stale
-        browser.double_click(handle_id, keys)
+        browser.double_click(handle_id, keys, **opts)
       end
 
       def hover(**_opts)
@@ -115,7 +115,11 @@ module Capybara
         browser.find_css(query, handle_id).map {|id| self.class.new(driver, id) }
       end
 
-      def shadow_root      ; nil ; end
+      def shadow_root
+        check_stale
+        h = browser.shadow_root_handle(handle_id)
+        h && self.class.new(driver, h)
+      end
       def disabled?        = browser.disabled?(handle_id)
       def selected?        = browser.option_selected?(handle_id)
       def checked?         = !!self['checked']

@@ -257,7 +257,10 @@ module Capybara
       def value(handle)        = @runtime.call('__csimValue', handle)
       def disabled?(handle)    = @runtime.call('__csimDisabled', handle)
       def option_selected?(h)  = !!attr(h, 'selected')
-      def shadow_root_handle(_) = nil
+      def shadow_root_handle(handle)
+        h = @runtime.call('__csimShadowRoot', handle).to_i
+        h.zero? ? nil : h
+      end
       def computed_style(handle, names)
         result = @runtime.call('__csimComputedStyle', handle, names.map(&:to_s))
         return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
@@ -282,10 +285,10 @@ module Capybara
       # form submission through the Rack app. Checkbox / radio toggle
       # inline on the JS side (no Ruby trip). Everything else is a
       # no-op until milestone 4 lands event dispatch.
-      def click(handle, keys = [], **_opts)
+      def click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        action = @runtime.call('__csimClickResolve', handle, modifier_flags(keys))
+        action = @runtime.call('__csimClickResolve', handle, click_event_init(keys, opts))
         return unless action.is_a?(Hash)
         case action['kind']
         when 'navigate'
@@ -404,16 +407,18 @@ module Capybara
         (@file_picks && @file_picks[handle]) || []
       end
 
-      def right_click(handle, keys = [], **_opts)
+      def right_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', {'bubbles' => true, 'cancelable' => true}.merge(modifier_flags(keys)))
+        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(keys, opts))
+        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', init)
       end
 
-      def double_click(handle, keys = [], **_opts)
+      def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true}.merge(modifier_flags(keys)))
+        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(keys, opts))
+        @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
       end
 
       MODIFIER_KEYS = {
@@ -431,6 +436,18 @@ module Capybara
           field = MODIFIER_KEYS[k.is_a?(Symbol) ? k : k.to_sym]
           h[field] = true if field
         }
+      end
+
+      # Capybara passes `:x` / `:y` for click-with-offset. We don't run
+      # a layout engine; just propagate the offset as `clientX/clientY`
+      # so handlers reading the event get back what the test passed
+      # (Capybara's `should allow to adjust the click offset` tests
+      # match `within(1).of(5)` against base-zero rects).
+      def click_event_init(keys, opts)
+        out = modifier_flags(keys)
+        out['clientX'] = opts[:x].to_f if opts[:x]
+        out['clientY'] = opts[:y].to_f if opts[:y]
+        out
       end
 
       def hover(handle)
@@ -751,15 +768,64 @@ module Capybara
         method  = spec['method'].to_s.upcase
         method  = 'GET' if method.empty?
         fields  = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
-        body    = URI.encode_www_form(fields)
+        file_inputs = spec['fileInputs'] || []
+        enctype = spec['enctype'].to_s
+        multipart = enctype.start_with?('multipart/form-data')
+        content_type = nil
+        body =
+          if multipart
+            built = build_multipart_body(fields, file_inputs)
+            content_type = built[:content_type]
+            built[:body]
+          else
+            # Non-multipart: file inputs contribute the filename only.
+            file_inputs.each do |fi|
+              picks = @file_picks && @file_picks[fi['handle'].to_i] || []
+              fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
+            end
+            URI.encode_www_form(fields)
+          end
         action_url = action.empty? ? (@current_url || DEFAULT_HOST) : resolve_against_current(action)
         if method == 'GET'
           uri = URI.parse(action_url)
           uri.query = body unless body.empty?
           navigate(uri.to_s)
         else
-          navigate_post(action_url, body, spec['enctype'].to_s)
+          navigate_post(action_url, body, content_type || enctype)
         end
+      end
+
+      def build_multipart_body(fields, file_inputs)
+        boundary = "csim-#{SecureRandom.hex(8)}"
+        body     = String.new.force_encoding(Encoding::ASCII_8BIT)
+        fields.each do |name, value|
+          append_multipart_part(body, boundary, name, value.to_s)
+        end
+        file_inputs.each do |fi|
+          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
+          if picks.empty?
+            append_multipart_part(body, boundary, fi['name'].to_s, '', filename: '')
+          else
+            picks.each do |path|
+              append_multipart_part(body, boundary, fi['name'].to_s, File.binread(path),
+                                    filename:     File.basename(path),
+                                    content_type: Rack::Mime.mime_type(File.extname(path)))
+            end
+          end
+        end
+        body << "--#{boundary}--\r\n"
+        {content_type: "multipart/form-data; boundary=#{boundary}", body: body}
+      end
+
+      def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
+        body << "--#{boundary}\r\n"
+        disposition = %[form-data; name="#{name}"]
+        disposition += %[; filename="#{filename}"] if filename
+        body << "Content-Disposition: #{disposition}\r\n"
+        body << "Content-Type: #{content_type}\r\n" if content_type
+        body << "\r\n"
+        body << content.to_s.b
+        body << "\r\n"
       end
 
       def navigate_post(url, body, content_type, depth: 0, from_history: false)
@@ -812,6 +878,7 @@ module Capybara
         @document_handle = 0
         @history.clear
         @history_idx     = -1
+        @file_picks      = {} if @file_picks
         @runtime.reset_page
         reset_timer_state
         invalidate_find_cache

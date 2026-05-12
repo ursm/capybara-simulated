@@ -962,6 +962,17 @@
       }
     }
     get outerHTML() { return serializeElement(this); }
+    attachShadow(init) {
+      if (this._shadowRoot) return this._shadowRoot;
+      const mode = init && init.mode === 'closed' ? 'closed' : 'open';
+      const sr = new ShadowRoot(this, mode);
+      this._shadowRoot = sr;
+      registerSubtree(sr);
+      return sr;
+    }
+    get shadowRoot() {
+      return this._shadowRoot && this._shadowRoot.mode === 'open' ? this._shadowRoot : null;
+    }
   }
 
   // DocumentFragment: a Node-shaped subtree root that's *not* in the
@@ -981,8 +992,53 @@
     }
     get nodeName()     { return '#document-fragment'; }
     get ownerDocument(){ return globalThis.document; }
+    get innerHTML()    { return serializeChildren(this); }
+    set innerHTML(html) {
+      for (const c of this._children) unregisterSubtree(c);
+      this._children = [];
+      for (const c of parseFragment(String(html == null ? '' : html))) {
+        c._parent = this;
+        this._children.push(c);
+        registerSubtree(c);
+      }
+    }
+    querySelector(sel)    { return findFirst(this, parseSelector(__normaliseScopedSelector(sel))); }
+    querySelectorAll(sel) { return findAll(this, parseSelector(__normaliseScopedSelector(sel))); }
+    getElementById(id)    { return findFirst(this, parseSelector('#' + String(id))); }
+    // wgxpath's descendant axis traversal probes
+    // `getElementsByTagName('*')` on the context node. Inherit
+    // Element's behaviour so a ShadowRoot context resolves
+    // `.//*[@id=…]` against its own subtree.
+    getElementsByTagName(tag) {
+      const t = String(tag).toLowerCase();
+      const all = t === '*' ? this.querySelectorAll('*') : this.querySelectorAll(t);
+      return __htmlCollection(all.filter(n => n !== this));
+    }
+    getElementsByClassName(cls) {
+      const sel = String(cls).split(/\s+/).filter(Boolean).map(c => '.' + c).join('');
+      return __htmlCollection(this.querySelectorAll(sel).filter(n => n !== this));
+    }
   }
   globalThis.DocumentFragment = DocumentFragment;
+
+  // ShadowRoot: a DocumentFragment that lives as a sibling tree off
+  // a host Element. Same query API (`querySelector` / `getElementById`)
+  // as Element; queries from outside the shadow tree don't descend in.
+  class ShadowRoot extends DocumentFragment {
+    constructor(host, mode) {
+      super();
+      this.host = host;
+      this.mode = mode || 'open';
+      // Shadow-tree descendants need an upward path so `isConnected`
+      // and ancestor walks land back in the document. Use the host
+      // as the "parent" of the shadow root itself; descendants
+      // inside the shadow root have their _parent pointing inside
+      // the shadow tree as usual.
+      this._parent = host;
+    }
+    get nodeName() { return '#shadow-root'; }
+  }
+  globalThis.ShadowRoot = ShadowRoot;
 
   class Document extends Node {
     constructor() {
@@ -4190,7 +4246,13 @@
   // Capybara DSL operation (`node.text`, `node.tag_name`, …), not
   // per-internal-DOM-op.
   globalThis.__csimText      = function (h) { const n = lookup(h); return n ? n.textContent : ''; };
-  globalThis.__csimTag       = function (h) { const n = lookup(h); return n && n._tag ? n._tag : ''; };
+  globalThis.__csimTag       = function (h) {
+    const n = lookup(h);
+    if (!n) return '';
+    if (n._tag) return n._tag;
+    if (n instanceof ShadowRoot) return 'ShadowRoot';
+    return '';
+  };
   globalThis.__csimAttr      = function (h, name) { const n = lookup(h); return n && n.getAttribute ? n.getAttribute(name) : null; };
   globalThis.__csimHasAttr   = function (h, name) { const n = lookup(h); return !!(n && n.hasAttribute && n.hasAttribute(name)); };
   // Visibility walk mirroring v2's `self_hidden?` + ancestor chain:
@@ -4860,7 +4922,7 @@
   ]);
   function collectVisibleText(node) {
     if (node.nodeType === NODE_TEXT) return String(node.data || '').replace(INLINE_WS_RE, ' ');
-    if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC) return '';
+    if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC && node.nodeType !== NODE_FRAGMENT) return '';
     if (node.nodeType === NODE_ELEMENT) {
       if (INVISIBLE_TAGS.has(node._tag)) return '';
       if (node._tag === 'input' && (node._attrs.type || '').toLowerCase() === 'hidden') return '';
@@ -5011,6 +5073,12 @@
     while (cur && cur._tag !== 'select') cur = cur._parent;
     if (!cur || cur._tag !== 'select') return { hasSelect: false, multiple: false };
     return { hasSelect: true, multiple: cur._attrs.multiple != null };
+  };
+
+  globalThis.__csimShadowRoot = function (h) {
+    const el = __handles.get(h);
+    const sr = el && el._shadowRoot;
+    return sr && sr.mode === 'open' && sr._id != null ? sr._id : 0;
   };
 
   globalThis.__csimActiveElement = function () {
@@ -5205,7 +5273,8 @@
     globalThis.__csimPendingFormSubmit = null;
     const base = { bubbles: true, cancelable: true, button: 0, which: 1,
                    shiftKey: !!mods.shiftKey, ctrlKey: !!mods.ctrlKey,
-                   altKey: !!mods.altKey, metaKey: !!mods.metaKey };
+                   altKey: !!mods.altKey, metaKey: !!mods.metaKey,
+                   clientX: +mods.clientX || 0, clientY: +mods.clientY || 0 };
     dispatchEvent(n, new MouseEvent('mousedown', base));
     dispatchEvent(n, new MouseEvent('mouseup',   base));
     const click = new MouseEvent('click', base);
@@ -5818,6 +5887,7 @@
     if (!form || form._tag !== 'form') return null;
     const submitter = submitterHandle ? lookup(submitterHandle) : null;
     const fields = [];
+    const fileInputs = [];
     // HTML's `form` IDL: controls participate via either DOM ancestry
     // Walk the whole document once and keep controls whose form
     // association lands on this form (explicit `form=<id>` wins,
@@ -5854,7 +5924,10 @@
           fields.push([name, f._attrs.value != null ? f._attrs.value : 'on']);
           continue;
         }
-        if (type === 'file') continue; // PoC: skip until multipart support
+        if (type === 'file') {
+          fileInputs.push({ name, handle: f._id });
+          continue;
+        }
         fields.push([name, f._attrs.value != null ? f._attrs.value : '']);
       } else if (tag === 'textarea') {
         // HTML form-submission spec normalizes textarea LF to CRLF.
@@ -5903,7 +5976,8 @@
       action:  subAction  != null ? subAction  : (form._attrs.action  != null ? form._attrs.action  : ''),
       method:  (subMethod  || form._attrs.method  || 'get').toLowerCase(),
       enctype: (subEnctype || form._attrs.enctype || 'application/x-www-form-urlencoded').toLowerCase(),
-      fields: fields
+      fields: fields,
+      fileInputs: fileInputs
     };
   };
 
