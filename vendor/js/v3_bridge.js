@@ -2412,6 +2412,13 @@
     head._parent = root; root._children.push(head);
     body._parent = root; root._children.push(body);
     const stripped = stripHtmlWrapper(html);
+    // Preserve attributes on the html / body / head opening tags so
+    // page-level classes (Redmine's `body class="controller-timelog
+    // action-report"` is what hides the unused `<fieldset#options>`
+    // via a body-class-scoped rule) survive the parse round-trip.
+    if (stripped.htmlAttrs) applyAttributes(root, stripped.htmlAttrs);
+    if (stripped.headAttrs) applyAttributes(head, stripped.headAttrs);
+    if (stripped.bodyAttrs) applyAttributes(body, stripped.bodyAttrs);
     const nodes = parseFragment(stripped.body);
     for (const n of nodes) { n._parent = body; body._children.push(n); }
     if (stripped.head) {
@@ -2424,11 +2431,18 @@
   function stripHtmlWrapper(html) {
     // Crude: pull out <head>…</head> and <body>…</body> blocks; if
     // neither is present treat the whole thing as body content.
-    const head = (/<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(html) || [, ''])[1];
-    const body = (/<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html) || [, ''])[1];
-    if (body) return { head: head, body: body };
+    const htmlMatch = /<html\b([^>]*)>/i.exec(html);
+    const headMatch = /<head\b([^>]*)>([\s\S]*?)<\/head>/i.exec(html);
+    const bodyMatch = /<body\b([^>]*)>([\s\S]*?)<\/body>/i.exec(html);
+    const head    = headMatch ? headMatch[2] : '';
+    const body    = bodyMatch ? bodyMatch[2] : '';
+    const htmlAttrs = htmlMatch ? htmlMatch[1] : '';
+    const headAttrs = headMatch ? headMatch[1] : '';
+    const bodyAttrs = bodyMatch ? bodyMatch[1] : '';
+    if (bodyMatch) return { head, body, htmlAttrs, headAttrs, bodyAttrs };
     // No wrapper: the whole input is body content. Strip <!doctype>.
-    return { head: head, body: html.replace(/<!doctype[^>]*>/i, '').replace(/<\/?html\b[^>]*>/gi, '') };
+    return { head, htmlAttrs, headAttrs, bodyAttrs,
+             body: html.replace(/<!doctype[^>]*>/i, '').replace(/<\/?html\b[^>]*>/gi, '') };
   }
 
   function parseFragment(html) {
@@ -3462,6 +3476,23 @@
       if (liveBody && freshBody) for (const c of freshBody._children.slice()) {
         c._parent = null;
         liveBody.appendChild(c);
+      }
+      // Copy attributes from the parsed body / head / html onto the
+      // live skeleton elements. Redmine scopes its
+      // `display: none` rule for unused fieldsets on
+      // `body.controller-X.action-Y`; without the body class copy the
+      // cascade selector misses and the fieldset stays visible.
+      if (liveHtml && freshHtml) {
+        for (const k of Object.keys(liveHtml._attrs)) delete liveHtml._attrs[k];
+        Object.assign(liveHtml._attrs, freshHtml._attrs);
+      }
+      if (liveHead && freshHead) {
+        for (const k of Object.keys(liveHead._attrs)) delete liveHead._attrs[k];
+        Object.assign(liveHead._attrs, freshHead._attrs);
+      }
+      if (liveBody && freshBody) {
+        for (const k of Object.keys(liveBody._attrs)) delete liveBody._attrs[k];
+        Object.assign(liveBody._attrs, freshBody._attrs);
       }
     }
     d.readyState = 'complete';
