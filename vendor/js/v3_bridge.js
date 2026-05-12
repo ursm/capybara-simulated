@@ -2196,6 +2196,27 @@
     // for the new page's ready resolution + leftovers from prior
     // visits' chained-Deferred .then setTimeouts).
     __resetTimers();
+    // Per-visit reset to approximate full-page-load semantics.
+    // Real browsers replace document + window on every navigation;
+    // libraries' `$(document).on(...)` delegates and per-page init
+    // (`contextMenuInit` creating `#context-menu`, Stimulus reattaching
+    // controllers, …) re-run on each visit. v3 keeps the Context
+    // alive for warmup, but emulates the "fresh page" effect by:
+    //   - dropping document listeners (so old delegates don't pile up
+    //     when scripts re-register against the new body)
+    //   - clearing the external-script cache (so app bundles re-evaluate
+    //     and re-call `$(document).on(...)` / `$(document).ready(...)`)
+    //   - clearing rails-ujs's auto-start guard (`window._rails_loaded`)
+    //     so its IIFE re-binds delegates instead of throwing on the
+    //     "already loaded" check.
+    // The `_rails_loaded` clear is library-named but mirrors what real
+    // browsers do on navigation: the prior window is gone, so the flag
+    // is too. We carve it out here because rails-ujs is the only
+    // popular guard that refuses to re-register; well-behaved libs
+    // (jQuery, Stimulus core) re-bind unconditionally.
+    if (globalThis.document) globalThis.document._listeners = null;
+    __externalScriptsRun.clear();
+    delete globalThis._rails_loaded;
     // Reuse the existing Document instance and swap in a freshly
     // parsed documentElement. Keeping the document's object identity
     // stable across visits is critical for library init guards: e.g.
@@ -3917,14 +3938,10 @@
     if (had) __setTimersActive(false);
   };
 
+  // Vestigial: the Ruby side now rebuilds the Context from the warm
+  // snapshot on every visit (and on inter-test reset), so this JS-
+  // side reset is unreachable. Kept as a no-op for any latent caller.
   globalThis.__resetPage = function () {
-    // Inter-test reset. Wipe document children (the per-page DOM) AND
-    // its installed listeners (jQuery / Rails-UJS delegates attached
-    // via `$(document).on(...)`); each test starts with a clean slate.
-    // We do keep the Document instance — only its content state
-    // resets. Intra-test `visit()` calls go through __csimLoadDocument,
-    // which preserves listeners so library init guards keep working
-    // across page transitions inside a single test.
     if (globalThis.document) {
       for (const c of globalThis.document._children.slice()) {
         globalThis.document.removeChild(c);
@@ -3937,12 +3954,7 @@
     __handles.clear();
     registerNode(globalThis.document);
     __resetTimers();
-    // External scripts that initialise per-document state (jQuery
-    // delegates, Rails-UJS auto-start, etc.) need to re-run on the
-    // next test's first visit. Inter-test reset is the right boundary.
     __externalScriptsRun.clear();
-    // Rails-UJS's auto-start guard. Cleared here so the second test
-    // in a class re-installs delegates on the fresh document.
     delete globalThis._rails_loaded;
   };
 

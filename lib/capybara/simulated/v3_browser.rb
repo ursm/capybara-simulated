@@ -488,8 +488,14 @@ module Capybara
         end
         @current_url = url
         html         = read_rack_body(resp_body)
-        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        # Same rebuild-on-full-load contract as `navigate`. POST
+        # responses (form submissions that don't redirect, AJAX-less
+        # data-remote replies) replace the page; we follow real-browser
+        # semantics and bring up a fresh VM rather than papering over
+        # the previous one's state.
+        @runtime.rebuild_ctx
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
+        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
 
       def reset!
@@ -671,6 +677,14 @@ module Capybara
         html         = read_rack_body(body)
         @module_cache = {}
         @importmap    = {'imports' => {}, 'scopes' => {}}
+        # Full-reload navigation rebuilds the JS Context from the warm
+        # snapshot. Mirrors v2's pool-checkout model: per-visit fresh VM
+        # avoids the partial-reset drift (jQuery `.ready`, rails-ujs
+        # `_rails_loaded`, accumulated `$(document).on(...)` delegates)
+        # that bit us when state leaked between visits. Snapshot warmup
+        # keeps the rebuild cost at a few ms; the cost dominator is
+        # re-evaluating app bundles, which is what we want.
+        @runtime.rebuild_ctx
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
         # `runInlineScripts`. The JS bridge pushes the importmap back
