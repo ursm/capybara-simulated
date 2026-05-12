@@ -556,10 +556,15 @@ module Capybara
       # at its pre-rebuild value, the next `tick_real_time` would
       # treat the entire app-boot interval as elapsed wall time and
       # drain up to 5 s of virtual clock in one step — firing wait-
-      # duration timers prematurely. Resetting `@last_tick_ts` keeps
-      # the first post-rebuild tick honest.
+      # duration timers prematurely. Also clear `@timers_active` and
+      # the `@polling_until` grace window so the previous page's
+      # pending-timer state doesn't leak into the next test, leaving
+      # `Driver#wait?` true and dragging every failing matcher
+      # through the full `default_max_wait_time` retry loop.
       def reset_timer_state
-        @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @timers_active = false
+        @polling_until = nil
       end
 
       # Pulls the serialised form-state out of JS, encodes it, and
