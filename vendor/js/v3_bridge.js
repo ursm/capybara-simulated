@@ -1182,11 +1182,28 @@
     // wgxpath optimizes `descendant::name` and `descendant::*` against
     // Document-rooted queries via getElementsByTagName. Without these
     // shims the descendant axis returns empty from a Document context.
+    // Per DOM spec these include self when called on Document (the
+    // documentElement IS a descendant of Document), so `//html`
+    // matching documentElement is a hard requirement Capybara relies
+    // on for `find(:css, 'html')` and `match_selector('html')`.
     getElementsByTagName(tag) {
-      return this.documentElement ? this.documentElement.getElementsByTagName(tag) : [];
+      const root = this.documentElement;
+      if (!root) return [];
+      const want = String(tag).toLowerCase();
+      const out  = want === '*' || root._tag === want ? [root] : [];
+      const tail = root.getElementsByTagName(tag);
+      for (let i = 0; i < tail.length; i++) out.push(tail[i]);
+      return out;
     }
     getElementsByClassName(cls) {
-      return this.documentElement ? this.documentElement.getElementsByClassName(cls) : [];
+      const root = this.documentElement;
+      if (!root) return [];
+      const classes = String(cls).split(/\s+/).filter(Boolean);
+      const has = (el) => classes.every(c => (el.classList && el.classList.contains(c)));
+      const out  = has(root) ? [root] : [];
+      const tail = root.getElementsByClassName(cls);
+      for (let i = 0; i < tail.length; i++) out.push(tail[i]);
+      return out;
     }
     getElementsByName(name) {
       return this.documentElement ? this.documentElement.getElementsByName(name) : [];
@@ -2245,12 +2262,14 @@
   }
 
   function parseAttrToken(s) {
-    const m = /^\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*(?:[isIS])?\s*$/.exec(s);
+    const m = /^\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*([isIS])?\s*$/.exec(s);
     if (!m) throw new SyntaxError('csim v3: bad attr selector: ' + s);
+    const flag = m[6];
     return {
       name: m[1].toLowerCase(),
       op: m[2] || null,
-      value: m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[5] || ''))
+      value: m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[5] || '')),
+      ci: flag === 'i' || flag === 'I'
     };
   }
 
@@ -2383,16 +2402,21 @@
   }
 
   function matchAttr(el, a) {
-    const v = el._attrs[a.name];
+    let v = el._attrs[a.name];
     if (a.op == null) return v != null;
     if (v == null) return false;
+    let needle = a.value;
+    if (a.ci) {
+      v = v.toLowerCase();
+      needle = needle.toLowerCase();
+    }
     switch (a.op) {
-      case '=':  return v === a.value;
-      case '~=': return v.split(/\s+/).includes(a.value);
-      case '^=': return a.value !== '' && v.startsWith(a.value);
-      case '$=': return a.value !== '' && v.endsWith(a.value);
-      case '*=': return a.value !== '' && v.indexOf(a.value) >= 0;
-      case '|=': return v === a.value || v.startsWith(a.value + '-');
+      case '=':  return v === needle;
+      case '~=': return v.split(/\s+/).includes(needle);
+      case '^=': return needle !== '' && v.startsWith(needle);
+      case '$=': return needle !== '' && v.endsWith(needle);
+      case '*=': return needle !== '' && v.indexOf(needle) >= 0;
+      case '|=': return v === needle || v.startsWith(needle + '-');
     }
     return false;
   }
@@ -4231,6 +4255,13 @@
   globalThis.__csimEvalScript = function (code, args) {
     return marshalReturn(compileScript(code).apply(null, rehydrateArgs(args || [])));
   };
+  // Run the script, drop the return. Lets execute_script tolerate
+  // scripts whose result is a chainable jQuery object or other
+  // structure mini_racer's value filter would walk recursively
+  // (StackOverflowError when prevObject self-references chain).
+  globalThis.__csimExecScript = function (code, args) {
+    compileScript(code).apply(null, rehydrateArgs(args || []));
+  };
   function rehydrateArgs(args) {
     if (Array.isArray(args)) return args.map(rehydrateArgs);
     if (args && typeof args === 'object') {
@@ -4585,9 +4616,10 @@
               value = value.replace(/!important\s*$/i, '').trim();
             }
             // Retain only the properties the cascade resolvers care
-            // about — display / visibility (hide rules) and
-            // top / left / width / height (layout for click-offset).
-            if (prop === 'display' || prop === 'visibility') {
+            // about — display / visibility (hide rules),
+            // top / left / width / height (layout for click-offset),
+            // text-transform (visible-text uppercase/lowercase).
+            if (prop === 'display' || prop === 'visibility' || prop === 'text-transform') {
               decls.push({ prop, value: value.toLowerCase(), important });
             } else if (prop === 'top' || prop === 'left' || prop === 'width' || prop === 'height') {
               decls.push({ prop, value: value.trim(), important });
@@ -5092,7 +5124,16 @@
     for (let cur = n._parent; cur; cur = cur._parent) {
       if (cur.nodeType === NODE_ELEMENT && (INVISIBLE_TAGS.has(cur._tag) || selfHidden(cur))) return '';
     }
-    return collectVisibleText(n);
+    // Pick up an inherited text-transform from ancestors above the
+    // starting node so e.g. `<body style="text-transform:uppercase">`
+    // applies to a descendant's visible_text.
+    let startTransform = 'none';
+    for (let cur = n._parent; cur; cur = cur._parent) {
+      if (cur.nodeType !== NODE_ELEMENT) continue;
+      const v = cascadedTextTransform(cur);
+      if (v && v !== 'inherit') { startTransform = v; break; }
+    }
+    return collectVisibleText(n, startTransform);
   };
   // Per innerText: collapse inline-whitespace runs (tab/newline/VT)
   // to a single space in each text node.
@@ -5104,26 +5145,78 @@
     'h6','header','hr','li','main','nav','ol','p','pre','section',
     'table','tbody','td','tfoot','th','thead','tr','ul'
   ]);
-  function collectVisibleText(node) {
-    if (node.nodeType === NODE_TEXT) return String(node.data || '').replace(INLINE_WS_RE, ' ');
+  // text-transform inherits per CSS — resolve once per element by
+  // walking inline style → cascade → parent. Capybara's case-insensitive
+  // assertion message ("found 1 time using a case insensitive search")
+  // hinges on visible_text being `TEXT HERE` for `text-transform:uppercase`,
+  // not the underlying `text here`.
+  function parseInlineTextTransform (el) {
+    const s = el._attrs && el._attrs.style;
+    if (!s) return null;
+    const m = /(?:^|;)\s*text-transform\s*:\s*([^;!]+?)\s*(?:!important)?\s*(?:;|$)/i.exec(String(s));
+    return m ? m[1].toLowerCase() : null;
+  }
+  function cascadedTextTransform (el) {
+    const inline = parseInlineTextTransform(el);
+    let best = inline ? { value: inline, spec: [1,0,0,0], important: /!important/i.test(el._attrs.style || ''), source: Infinity } : null;
+    for (const r of __layoutRules) {
+      const cap = r.captured['text-transform'];
+      if (!cap) continue;
+      let m;
+      try { m = matchOne(el, r.group); } catch (_) { continue; }
+      if (!m) continue;
+      if (!best ||
+          (cap.important && !best.important) ||
+          (cap.important === best.important &&
+           (specCompare(r.spec, best.spec) > 0 ||
+            (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
+        best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
+      }
+    }
+    return best ? best.value : null;
+  }
+  function resolveTextTransform (el) {
+    for (let cur = el; cur && cur.nodeType === NODE_ELEMENT; cur = cur._parent) {
+      const v = cascadedTextTransform(cur);
+      if (v && v !== 'inherit') return v;
+    }
+    return 'none';
+  }
+  function applyTextTransform (text, mode) {
+    if (!text || mode === 'none' || mode === 'initial' || mode === 'unset' || !mode) return text;
+    if (mode === 'uppercase') return text.toUpperCase();
+    if (mode === 'lowercase') return text.toLowerCase();
+    if (mode === 'capitalize') {
+      return text.replace(/(^|\s)(\S)/g, (_, ws, ch) => ws + ch.toUpperCase());
+    }
+    return text;
+  }
+  function collectVisibleText(node, transform) {
+    if (node.nodeType === NODE_TEXT) {
+      const raw = String(node.data || '').replace(INLINE_WS_RE, ' ');
+      return applyTextTransform(raw, transform || 'none');
+    }
     if (node.nodeType !== NODE_ELEMENT && node.nodeType !== NODE_DOC && node.nodeType !== NODE_FRAGMENT) return '';
     if (node.nodeType === NODE_ELEMENT) {
       if (INVISIBLE_TAGS.has(node._tag)) return '';
       if (node._tag === 'input' && (node._attrs.type || '').toLowerCase() === 'hidden') return '';
       if (selfHidden(node)) return '';
       if (node._tag === 'br') return '\n';
+      const ownTransform = cascadedTextTransform(node);
+      const effTransform = (ownTransform && ownTransform !== 'inherit') ? ownTransform : (transform || 'none');
       if (node._tag === 'details' && node._attrs.open == null) {
         // Closed details: only emit text inside <summary>.
         let s = '';
         for (const c of node._children) {
-          if (c.nodeType === NODE_ELEMENT && c._tag === 'summary') s += collectVisibleText(c);
+          if (c.nodeType === NODE_ELEMENT && c._tag === 'summary') s += collectVisibleText(c, effTransform);
         }
         return s;
       }
+      transform = effTransform;
     }
     let out = '';
     for (const c of node._children) {
-      const part = collectVisibleText(c);
+      const part = collectVisibleText(c, transform);
       if (!part) continue;
       const isBlock = c.nodeType === NODE_ELEMENT && BLOCK_TAGS.has(c._tag);
       if (isBlock && out && !out.endsWith('\n')) out += '\n';

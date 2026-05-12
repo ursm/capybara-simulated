@@ -713,6 +713,16 @@ module Capybara
         @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
       end
 
+      # Fire-and-forget variant: runs the script but never returns
+      # its value to Ruby. Lets execute_script handle scripts whose
+      # return is a complex JS object (jQuery chainable, DOM tree,
+      # …) that mini_racer's value filter would recurse into.
+      def execute_script(code, args = [])
+        tick_real_time
+        invalidate_find_cache
+        @runtime.call('__csimExecScript', code.to_s, marshal_args(args || []))
+      end
+
       # Capybara passes Node instances directly as script args
       # (`session.evaluate_script('arguments[0].click()', some_node)`).
       # mini_racer can't marshal a Ruby Node, so wrap as a sentinel

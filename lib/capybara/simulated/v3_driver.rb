@@ -67,9 +67,13 @@ module Capybara
       end
 
       # Capybara's `execute_script` contract is "run it, discard the
-      # return". Same wire path; we just throw the result away.
+      # return". Route through a no-return JS path so a script that
+      # returns a non-marshallable value (jQuery `$('…').text('…')`
+      # returns a chainable jQuery object that mini_racer's value
+      # filter recurses into until it stack-overflows) doesn't blow
+      # up on the way back.
       def execute_script(script, *args)
-        browser.evaluate_script(script, args)
+        browser.execute_script(script, args)
         nil
       end
 
