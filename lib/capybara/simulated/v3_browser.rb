@@ -42,6 +42,11 @@ module Capybara
         @sticky_headers               = {}
         @timers_active                = false
         @intersection_observer_active = false
+        @find_cache_dirty             = true
+        @find_cache_kind              = nil
+        @find_cache_arg               = nil
+        @find_cache_ctx               = nil
+        @find_cache_value             = nil
         @document_handle              = 0
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until                = nil
@@ -119,13 +124,18 @@ module Capybara
             # JS path either supports or ignores predictably.
           end
         end
-        @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
+        cached_find(:css, s, context_handle) do
+          @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
+        end
       end
 
       def find_first_css(css, context_handle = nil)
         tick_real_time
-        h = @runtime.call('__csimQueryOne', context_handle || @document_handle, css.to_s).to_i
-        h.zero? ? nil : h
+        s = css.to_s
+        cached_find(:css_first, s, context_handle) do
+          h = @runtime.call('__csimQueryOne', context_handle || @document_handle, s).to_i
+          h.zero? ? nil : h
+        end
       end
 
       def xpath_shaped?(s)
@@ -152,11 +162,45 @@ module Capybara
       XPATH_BACKEND = ENV['CSIM_V3_XPATH'] == 'nokogiri' ? :nokogiri : :wgxpath
       def find_xpath(xpath, context_handle = nil)
         tick_real_time
-        if XPATH_BACKEND == :nokogiri
-          find_xpath_via_nokogiri(xpath, context_handle)
-        else
-          @runtime.call('__csimEvaluateXPath', xpath.to_s, context_handle || 0).to_a
+        xpath_str = xpath.to_s
+        cached_find(:xpath, xpath_str, context_handle) do
+          if XPATH_BACKEND == :nokogiri
+            find_xpath_via_nokogiri(xpath, context_handle)
+          else
+            @runtime.call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
+          end
         end
+      end
+
+      # Single-slot cache for the most recent find_xpath / find_css /
+      # find_first_css result. Capybara's `synchronize` retry loop
+      # re-issues the same find on every poll while waiting for an
+      # element to appear or disappear; if no DOM-mutating event has
+      # happened since the last call (no timer fired, no click / set /
+      # navigate), the result is guaranteed identical and we can skip
+      # the V8 round-trip + wgxpath traversal.
+      def cached_find(kind, arg, ctx)
+        if !@find_cache_dirty &&
+           @find_cache_kind == kind &&
+           @find_cache_ctx  == ctx &&
+           @find_cache_arg  == arg
+          return @find_cache_value
+        end
+        result = yield
+        @find_cache_kind  = kind
+        @find_cache_arg   = arg
+        @find_cache_ctx   = ctx
+        @find_cache_value = result
+        @find_cache_dirty = false
+        result
+      end
+
+      # Any operation that may have mutated the DOM (click, set,
+      # send_keys, navigate, hover, …) must call this so the next find
+      # falls through to a fresh V8 query. Timer drains that fire any
+      # callbacks also dirty (see `tick_real_time`).
+      def invalidate_find_cache
+        @find_cache_dirty = true
       end
 
       # Kept as a fallback / debug aid. Same semantics as the wgxpath
@@ -210,6 +254,7 @@ module Capybara
       # no-op until milestone 4 lands event dispatch.
       def click(handle, _keys = [], **_opts)
         tick_real_time
+        invalidate_find_cache
         action = @runtime.call('__csimClickResolve', handle)
         return unless action.is_a?(Hash)
         case action['kind']
@@ -247,6 +292,7 @@ module Capybara
 
       def set_value_with_events(handle, value)
         tick_real_time
+        invalidate_find_cache
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # mini_racer rejects non-primitive types. Coerce to a path-list
         # form V8 can hold. File-input handling stops here for v3 — the
@@ -308,16 +354,19 @@ module Capybara
 
       def right_click(handle, *_)
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimDispatchEvent', handle, 'contextmenu', {'bubbles' => true, 'cancelable' => true})
       end
 
       def double_click(handle, *_)
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true})
       end
 
       def hover(handle)
         tick_real_time
+        invalidate_find_cache
         # Set `document._hoverElement` so `:hover` pseudo-class matches
         # resolve against this element (Redmine's gantt tooltips +
         # context-menu submenus rely on CSS `:hover`). The host fn
@@ -332,6 +381,7 @@ module Capybara
 
       def dispatch_event(handle, type, init = {})
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimDispatchEvent', handle, type.to_s, init)
       end
 
@@ -348,6 +398,7 @@ module Capybara
       # is the key being pressed (String char or Symbol special).
       def send_keys(handle, keys)
         tick_real_time
+        invalidate_find_cache
         atoms = keys.map {|k|
           case k
           when String then {'kind' => 'text', 'value' => k}
@@ -363,12 +414,14 @@ module Capybara
 
       def select_option(handle)
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimSelectOption', handle)
         consume_pending_form_submit
       end
 
       def unselect_option(handle)
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimUnselectOption', handle)
         consume_pending_form_submit
       end
@@ -389,6 +442,7 @@ module Capybara
       # form, serialise, post.
       def submit_form(handle)
         tick_real_time
+        invalidate_find_cache
         form_handle = @runtime.call('__csimAncestorForm', handle).to_i
         return if form_handle.zero?
         submit_form_handle(form_handle, nil)
@@ -426,6 +480,7 @@ module Capybara
         # *before* the page's own setup code that the test expects
         # to be active.
         tick_real_time
+        invalidate_find_cache
         @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
       end
 
@@ -487,7 +542,10 @@ module Capybara
         elapsed  = ((now - @last_tick_ts) * 1000).to_i
         @last_tick_ts = now
         step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
-        @runtime.drain_timers(step) if step > 0
+        if step > 0
+          fired = @runtime.drain_timers(step).to_i
+          @find_cache_dirty = true if fired > 0
+        end
       ensure
         @ticking = false
       end
@@ -509,6 +567,7 @@ module Capybara
       # the slice of <form> semantics rack-test supports — multipart
       # uploads lift in with milestone 4+ once <input type=file> matters.
       def submit_form_handle(form_handle, submitter_handle)
+        invalidate_find_cache
         spec = @runtime.call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
         action  = spec['action'].to_s
@@ -528,6 +587,7 @@ module Capybara
 
       def navigate_post(url, body, content_type, depth: 0)
         raise 'too many redirects' if depth > 10
+        invalidate_find_cache
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -573,6 +633,7 @@ module Capybara
         @document_handle = 0
         @runtime.reset_page
         reset_timer_state
+        invalidate_find_cache
       end
 
       # ── Host-fn callbacks invoked by v3_bridge.js ───────────────
@@ -758,6 +819,7 @@ module Capybara
       # parsing. Only follows 3xx redirects up to a small depth.
       def navigate(url, depth: 0)
         raise 'too many redirects' if depth > 10
+        invalidate_find_cache
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
         env['HTTP_REFERER']  = @current_url    unless @current_url.nil? || @current_url.empty?

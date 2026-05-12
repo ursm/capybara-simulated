@@ -5754,11 +5754,16 @@
     return false;
   };
 
+  // Returns the number of timers fired during this drain. Ruby uses
+  // the count to invalidate the find-result cache: any fired timer
+  // could have mutated the DOM, so cached find results from before
+  // the drain are no longer safe to reuse.
   globalThis.__drainTimers = function (maxMs, maxIter) {
     if (typeof maxMs   !== 'number') maxMs   = 2000;
     if (typeof maxIter !== 'number') maxIter = 10000;
     const limit = __virtualNow + maxMs;
     let iter = 0;
+    let fired = 0;
     while (iter++ < maxIter && __timers.size > 0) {
       let nextId = null, nextDue = Infinity;
       for (const [id, t] of __timers) {
@@ -5774,11 +5779,13 @@
         try { console.error('[csim v3] timer threw:', e && e.message); } catch (_) {}
       }
       if (__observers.size && __pendingRecords.length) deliverMutations();
+      fired++;
     }
     // Pin clock at limit even when nothing fired, so a follow-up
     // drain reflects cumulative elapsed time.
     if (__virtualNow < limit) __virtualNow = limit;
     if (__timers.size === 0) __setTimersActive(false);
+    return fired;
   };
 
   globalThis.__resetTimers = function () {
