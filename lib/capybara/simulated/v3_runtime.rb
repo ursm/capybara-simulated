@@ -6,6 +6,9 @@
 
 require 'mini_racer'
 require 'base64'
+require 'digest'
+require 'fileutils'
+require 'json'
 require 'securerandom'
 require 'set'
 
@@ -67,6 +70,18 @@ module Capybara
       @@snapshot      = nil
       @@live_lock     = Mutex.new
       @@live          = []
+      # Class-level app-warm snapshot cache: many Browsers in the same
+      # RubyVM that share an app boot to the same library set, so we
+      # only need to build / load one snapshot per content hash.
+      @@app_snap_lock  = Mutex.new
+      @@app_snap_cache = {}
+
+      # `tmp/csim/` keeps `snapshot-<hash>.bin` files between test runs.
+      # Honors `CSIM_CACHE_DIR` for environments where the gem isn't
+      # running out of the project's tmp dir.
+      def self.cache_dir
+        ENV['CSIM_CACHE_DIR'] || File.join(Dir.pwd, 'tmp', 'csim')
+      end
 
       at_exit do
         @@live_lock.synchronize {
@@ -153,6 +168,14 @@ module Capybara
         @pool        = Queue.new
         @pool_lock   = Mutex.new
         @refill_busy = false
+        # Each Browser starts on the base snapshot (bridge + wgxpath
+        # only). After the first visit completes, `install_app_snapshot`
+        # promotes us to an app-warm snapshot built from the library
+        # scripts the page loaded. From that point on the pool refills
+        # from the app snapshot so subsequent visits skip library
+        # re-evaluation.
+        @snapshot = self.class.snapshot
+        @app_snapshot_installed = false
         refill_pool_async
       end
 
@@ -232,9 +255,118 @@ module Capybara
       end
 
       def build_ctx
-        c = MiniRacer::Context.new(snapshot: self.class.snapshot)
+        c = MiniRacer::Context.new(snapshot: @snapshot || self.class.snapshot)
         attach_host_fns(c)
         c
+      end
+
+      # Called by V3Browser after each `__csimLoadDocument`. The first
+      # successful call dumps the external script bodies that were
+      # evaluated during the visit, builds (or loads from disk) the
+      # app-warm snapshot, and points subsequent pool refills at it.
+      # No-op on subsequent calls — once promoted, the runtime stays
+      # on the app snapshot for the rest of its lifetime.
+      def install_app_snapshot_if_needed
+        return if @app_snapshot_installed
+        return unless @ctx
+        scripts = (ctx.eval('__csim_dumpExternalScripts()') rescue nil)
+        return if scripts.nil? || scripts.empty?
+        snap = self.class.app_snapshot_for(scripts)
+        return unless snap
+        @snapshot = snap
+        @app_snapshot_installed = true
+        drain_pool!
+        refill_pool_async
+      end
+
+      def drain_pool!
+        while (c = (@pool.pop(true) rescue nil))
+          @@live_lock.synchronize { @@live.delete(c) }
+          Thread.new { begin
+            c.stop rescue nil
+            c.dispose
+          rescue StandardError
+          end }
+        end
+      end
+
+      def self.app_snapshot_for(scripts)
+        hash = app_snapshot_key(scripts)
+        @@app_snap_lock.synchronize {
+          @@app_snap_cache[hash] ||= load_or_build_app_snapshot(hash, scripts)
+        }
+      end
+
+      # Hash is keyed on the inputs that affect the resulting V8
+      # startup blob: source bodies of bridge / wgxpath / each library,
+      # plus library version strings (libv8 is the big one — its
+      # internal V8 build version determines blob compatibility, and
+      # loading a snapshot from a mismatched build CHECK-fails inside
+      # V8).
+      def self.app_snapshot_key(scripts)
+        parts = [
+          'capybara-simulated:v3:app-snap:v1',
+          (Capybara::Simulated::VERSION rescue 'unknown'),
+          (MiniRacer::VERSION rescue 'unknown'),
+          (defined?(Libv8::Node::VERSION) ? Libv8::Node::VERSION : ''),
+          File.read(BRIDGE_JS),
+          File.read(WGXPATH_JS)
+        ]
+        scripts.sort_by {|s| s['url'].to_s }.each {|s|
+          parts << s['url']
+          parts << s['body']
+        }
+        Digest::SHA256.hexdigest(parts.join("\0"))
+      end
+
+      def self.load_or_build_app_snapshot(hash, scripts)
+        path = File.join(cache_dir, "snapshot-#{hash}.bin")
+        if File.exist?(path)
+          begin
+            return MiniRacer::Snapshot.load(File.binread(path))
+          rescue StandardError => e
+            warn "[capybara-simulated v3] app snapshot load failed (#{e.class}: #{e.message[0, 120]}); rebuilding"
+          end
+        end
+        snap = build_app_snapshot(scripts)
+        begin
+          FileUtils.mkdir_p(File.dirname(path))
+          tmp = "#{path}.#{Process.pid}.tmp"
+          File.binwrite(tmp, snap.dump)
+          File.rename(tmp, path)
+        rescue StandardError => e
+          warn "[capybara-simulated v3] app snapshot write failed: #{e.class}: #{e.message[0, 120]}"
+        end
+        snap
+      end
+
+      def self.build_app_snapshot(scripts)
+        # Build the snapshot source: same prologue as the base snapshot,
+        # then evaluate each captured library body inside its own IIFE
+        # (so a thrown error doesn't abort the whole warmup), and
+        # register the URL in `__externalScriptsRun` so the per-visit
+        # __csimLoadDocument pass skips re-evaluating it. Epilogue calls
+        # `__csimEnterSnapshotState()` to roll per-visit state back to
+        # baseline (clear timers, virtual clock, MO records, handles)
+        # while leaving library globals + delegates intact.
+        src = +SNAPSHOT_HOST_STUBS.dup
+        src << File.read(BRIDGE_JS)
+        src << File.read(WGXPATH_JS) << ";\n"
+        src << "wgxpath.install(globalThis);\n"
+        scripts.each {|s|
+          url  = s['url'].to_s
+          body = s['body'].to_s
+          src << ";(function(){\n"
+          src << "try {\n"
+          src << body
+          src << "\n} catch (e) { try { console.error('[csim warmup script]', #{url.to_json}, ':', e && e.message); } catch (_) {} }\n"
+          src << "__csim_markScriptLoaded(#{url.to_json});\n"
+          src << "})();\n"
+        }
+        src << "__csimEnterSnapshotState();\n"
+        snap = MiniRacer::Snapshot.new(src)
+        snap.warmup!(SNAPSHOT_WARMUP) rescue nil
+        snap
       end
 
       def refill_pool_async

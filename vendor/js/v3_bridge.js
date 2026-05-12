@@ -604,7 +604,21 @@
       // DOMContentLoaded so the queued ready cbs fire against the
       // fresh body.
       this.readyState = 'loading';
-      this.documentElement = null;
+      // Pre-populate an empty html/head/body skeleton. jQuery 3.x's
+      // feature-detection code captures `documentElement` at IIFE
+      // evaluation time and dereferences it later (e.g.
+      // `T.createElement('fieldset')` inside a `$` support probe).
+      // Without a valid skeleton in the snapshot, the captured `T`
+      // is null/undefined and the IIFE throws before `window.jQuery`
+      // gets assigned. The per-visit `__csimLoadDocument` swaps
+      // this skeleton out for the parsed-from-HTML tree.
+      const html = new Element('html');
+      const head = new Element('head');
+      const body = new Element('body');
+      html._parent = this;     this._children.push(html);
+      head._parent = html;     html._children.push(head);
+      body._parent = html;     html._children.push(body);
+      this.documentElement = html;
     }
     // jQuery's `mc(node)` helper resolves a node back to its window
     // via `doc.defaultView || doc.parentWindow`; without these the
@@ -2159,6 +2173,12 @@
   // via `__csimGet*(handle)` accessors. Wired in `parseDocument`
   // and pushed during create / append paths once those exist.
   const __handles = new Map();
+  // Document + its html/head/body skeleton need to be in `__handles`
+  // so wgxpath / find_xpath / `__csimVisible` lookups can resolve
+  // skeleton nodes by id. We register the live document here at
+  // bridge init; per-visit appendChild calls add the grafted body
+  // descendants via `registerSubtree` automatically.
+  registerNode(globalThis.document);
   function registerNode(n) {
     __handles.set(n._id, n);
     if (n._children) for (const c of n._children) registerNode(c);
@@ -2206,14 +2226,30 @@
     __hideRuleIdx = null;
     const freshDoc = parseDocument(String(html == null ? '' : html));
     const d = globalThis.document;
-    // Detach any prior body content (only relevant if we ever re-enter
-    // this function on the same Context — currently visit() rebuilds
-    // the Context, so this loop is a no-op).
-    for (const c of d._children.slice()) d.removeChild(c);
-    d.documentElement = freshDoc.documentElement;
-    for (const c of freshDoc._children.slice()) {
-      c._parent = null;
-      d.appendChild(c);
+    // Preserve document / documentElement / head / body identity across
+    // per-visit content swaps. Library IIFEs (jQuery 3.x in particular)
+    // capture `document.documentElement` at evaluation time and reuse
+    // it for `createElement` / `appendChild` probes; replacing the
+    // documentElement strands those references on a detached node.
+    // So instead: walk the parsed tree's <head> and <body> children
+    // and graft them onto the live skeleton.
+    const freshHtml = freshDoc.documentElement;
+    const liveHtml  = d.documentElement;
+    if (freshHtml && liveHtml) {
+      const freshHead = freshHtml._children.find(c => c._tag === 'head');
+      const freshBody = freshHtml._children.find(c => c._tag === 'body');
+      const liveHead  = liveHtml._children.find(c => c._tag === 'head');
+      const liveBody  = liveHtml._children.find(c => c._tag === 'body');
+      if (liveHead) for (const c of liveHead._children.slice()) liveHead.removeChild(c);
+      if (liveBody) for (const c of liveBody._children.slice()) liveBody.removeChild(c);
+      if (liveHead && freshHead) for (const c of freshHead._children.slice()) {
+        c._parent = null;
+        liveHead.appendChild(c);
+      }
+      if (liveBody && freshBody) for (const c of freshBody._children.slice()) {
+        c._parent = null;
+        liveBody.appendChild(c);
+      }
     }
     d.readyState = 'complete';
     // Cascade-derived hide rules need to land *before* scripts run —
@@ -2240,7 +2276,11 @@
   // don't re-run cached scripts on bf-cache / SPA navigation, and we
   // keep `document` stable across visits, so the resulting semantics
   // match.
-  const __externalScriptsRun = new Set();
+  // url → body. Doubles as the "already evaluated" set (.has() check
+  // semantics) and the registry the Ruby side reads to build the
+  // app-warm snapshot. Map (not Set) so we can hand back the bodies
+  // verbatim instead of re-fetching them.
+  const __externalScriptsRun = new Map();
   function runInlineScripts(doc) {
     if (!doc || !doc.documentElement) return;
     // Importmaps land first so `<script type="module">` can resolve
@@ -2270,7 +2310,7 @@
         const resp = __rackFetch('GET', s._attrs.src, '', null, 'follow');
         if (!resp || resp.status >= 400) continue;
         body = resp.body || '';
-        __externalScriptsRun.add(s._attrs.src);
+        __externalScriptsRun.set(s._attrs.src, body);
       } else {
         body = scriptText(s);
       }
@@ -3901,6 +3941,23 @@
     if (had) __setTimersActive(false);
   };
 
+  // Ruby side calls this after the first visit completes to harvest
+  // the list of external `<script src>` URLs that were evaluated +
+  // their bodies. Feeds the app-warm snapshot build.
+  globalThis.__csim_dumpExternalScripts = function () {
+    const out = [];
+    for (const [url, body] of __externalScriptsRun) out.push({ url, body });
+    return out;
+  };
+
+  // Used by the warmup snapshot build script to mark a URL as already
+  // evaluated — `__externalScriptsRun` is IIFE-scoped, so per-visit
+  // pages that try to load the same `<script src>` need to consult
+  // through this hook instead of touching the variable directly.
+  globalThis.__csim_markScriptLoaded = function (url) {
+    __externalScriptsRun.set(String(url), '');
+  };
+
   // Called as the last line of the app-warm snapshot build script.
   // The snapshot freezes a Context in "library bundles evaluated but
   // no page loaded yet" state, so the per-visit side effects that
@@ -3915,16 +3972,23 @@
     __resetTimers();
     __nextTimerId      = 1;
     __pendingRecords.length = 0;
-    // `document.readyState` stays 'loading' so the first per-visit
-    // `__csimLoadDocument` can flip it to 'complete' and dispatch
-    // DOMContentLoaded — that's the trigger jQuery-style ready cbs
-    // were parked behind during warmup.
     if (globalThis.document) {
+      // Keep `document.readyState = 'loading'` so the first per-visit
+      // `__csimLoadDocument` can flip to 'complete' and dispatch
+      // DOMContentLoaded — that's the trigger jQuery-style ready cbs
+      // were parked behind during warmup.
       globalThis.document.readyState = 'loading';
-      for (const c of globalThis.document._children.slice()) {
-        globalThis.document.removeChild(c);
+      // Strip body content but leave the html / head / body skeleton
+      // intact. Library IIFEs captured `documentElement` references
+      // that must remain valid in any Context spawned from this
+      // snapshot.
+      const html = globalThis.document.documentElement;
+      if (html) {
+        const head = html._children.find(c => c._tag === 'head');
+        const body = html._children.find(c => c._tag === 'body');
+        if (head) for (const c of head._children.slice()) head.removeChild(c);
+        if (body) for (const c of body._children.slice()) body.removeChild(c);
       }
-      globalThis.document.documentElement = null;
     }
     __handles.clear();
     if (globalThis.document) registerNode(globalThis.document);

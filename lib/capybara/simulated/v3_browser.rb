@@ -496,6 +496,7 @@ module Capybara
         @runtime.rebuild_ctx
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        @runtime.install_app_snapshot_if_needed
       end
 
       def reset!
@@ -691,6 +692,11 @@ module Capybara
         # to Ruby via `__csim_pushImportmap` before any module loads,
         # so `load_module` sees the fully-merged map.
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        # First-visit only: harvest external script bodies that just
+        # got evaluated and promote the runtime onto an app-warm
+        # snapshot. Subsequent visits skip library re-eval; the
+        # snapshot already has them.
+        @runtime.install_app_snapshot_if_needed
       end
 
       def merge_set_cookie(headers)
