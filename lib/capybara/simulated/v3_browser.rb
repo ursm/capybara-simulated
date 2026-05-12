@@ -302,29 +302,28 @@ module Capybara
 
       # Capybara's `send_keys` accepts Strings and Symbols (special
       # keys: `:enter`, `:tab`, `:backspace`, …) and Array combos
-      # (modifier + key). PoC: append printable keys to the input's
-      # value and fire input/change. Special keys + modifier combos
-      # land later — for now, special keys without a known glyph are
-      # dropped.
+      # (modifier + key). We hand each item to JS as a tagged atom so
+      # the bridge can fire proper KeyboardEvents with `key` / `code`
+      # / `ctrlKey` / `metaKey` / `shiftKey` filled in — required by
+      # libraries that gate behaviour on the modifier flags (Redmine's
+      # jstoolbar reads `event.ctrlKey || event.metaKey` for Ctrl+B /
+      # Cmd+B; quote-reply Stimulus controllers read `event.key`).
+      # An Array combo is the canonical "modifier + key" pattern:
+      # everything but the last entry is a modifier; the last entry
+      # is the key being pressed (String char or Symbol special).
       def send_keys(handle, keys)
         tick_real_time
-        text = keys.flat_map {|k|
+        atoms = keys.map {|k|
           case k
-          when String then [k]
-          when Symbol then [SEND_KEYS_GLYPHS[k]].compact
-          when Array  then k.map {|x| x.is_a?(String) ? x : SEND_KEYS_GLYPHS[x] }.compact
-          else []
+          when String then {'kind' => 'text', 'value' => k}
+          when Symbol then {'kind' => 'key',  'name'  => k.to_s}
+          when Array
+            parts = k.map {|x| x.is_a?(Symbol) ? x.to_s : x.to_s }
+            {'kind' => 'combo', 'parts' => parts}
           end
-        }.join
-        @runtime.call('__csimSendKeys', handle, text)
+        }.compact
+        @runtime.call('__csimSendKeys', handle, atoms)
       end
-
-      SEND_KEYS_GLYPHS = {
-        space: ' ',
-        tab:   "\t",
-        enter: "\n",
-        return: "\n"
-      }.freeze
 
       def select_option(handle)
         tick_real_time

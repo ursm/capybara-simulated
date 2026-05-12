@@ -149,6 +149,17 @@
     get lastChild()     { return this._children[this._children.length - 1] || null; }
     get childNodes()    { return this._children.slice(); }
     hasChildNodes()     { return this._children.length > 0; }
+    // `el.click()` — programmatic synthetic click. jstoolbar dispatches
+    // its keyboard-shortcut handlers via
+    // `this.toolbar.querySelector('.jstb_strong').click()`, jQuery
+    // form submission triggers `form[0].click()` on hidden submit
+    // buttons, and Rails-UJS uses it to retrigger confirmed actions.
+    // Per HTML spec the synthetic click is the same shape as a real
+    // primary-button mouse click; we fire `click` directly (skipping
+    // mousedown / mouseup because those are pointer-only).
+    click() {
+      try { dispatchEvent(this, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 })); } catch (_) {}
+    }
     get children()      { return this._children.filter(c => c.nodeType === NODE_ELEMENT); }
     get nextSibling() {
       if (!this._parent) return null;
@@ -1093,8 +1104,42 @@
       this.relatedTarget = init.relatedTarget || null;
     }
   };
-  globalThis.KeyboardEvent   = class extends Event {};
-  globalThis.InputEvent      = class extends Event {};
+  globalThis.KeyboardEvent   = class extends Event {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      // KeyboardEvent fields per the UI Events spec — listeners gate
+      // on `key` (string like 'Enter' / 'a'), `code` (physical key),
+      // `keyCode` (legacy), `ctrlKey` / `metaKey` / `shiftKey` /
+      // `altKey`. Redmine's jstoolbar reads `event.key.toLowerCase()`
+      // and `event.ctrlKey || event.metaKey`; the document-level
+      // toogleEditPreview shortcut reads the same combination.
+      this.key      = init.key      != null ? String(init.key)  : '';
+      this.code     = init.code     != null ? String(init.code) : '';
+      this.keyCode  = init.keyCode  != null ? init.keyCode  : 0;
+      this.which    = init.which    != null ? init.which    : this.keyCode;
+      this.charCode = init.charCode != null ? init.charCode : 0;
+      this.location = init.location != null ? init.location : 0;
+      this.repeat   = !!init.repeat;
+      this.isComposing = !!init.isComposing;
+      this.ctrlKey  = !!init.ctrlKey;
+      this.metaKey  = !!init.metaKey;
+      this.shiftKey = !!init.shiftKey;
+      this.altKey   = !!init.altKey;
+    }
+  };
+  globalThis.InputEvent      = class extends Event {
+    constructor(type, init) {
+      super(type, init);
+      init = init || {};
+      // InputEvent fields — `data` is the typed text, `inputType`
+      // distinguishes 'insertText' / 'deleteContentBackward' / etc.
+      // Stimulus-driven `beforeinput` handlers branch on inputType.
+      this.data      = init.data      != null ? String(init.data) : null;
+      this.inputType = init.inputType != null ? String(init.inputType) : '';
+      this.isComposing = !!init.isComposing;
+    }
+  };
   globalThis.SubmitEvent     = class extends Event {
     constructor(type, init) { super(type, init); this.submitter = init && init.submitter || null; }
   };
@@ -3624,26 +3669,123 @@
   // `select`) all eventually call Node#set / select_option /
   // unselect_option. Each is one Context#call into here.
 
-  // send_keys: append text to a focusable control and fire `input`+
-  // `change`. Mirrors what selenium does at this level — keydown/
-  // keypress/keyup chain comes later when test pages depend on it.
-  globalThis.__csimSendKeys = function (h, text) {
+  // send_keys: replay a sequence of typed keystrokes against a
+  // focusable control (or, for non-typeable targets, a plain
+  // keydown / keyup chain at the body). Each atom from the Ruby
+  // side is one of:
+  //   { kind: 'text',  value: 'abc' }   — printable text
+  //   { kind: 'key',   name: 'enter' }  — special key (no modifier)
+  //   { kind: 'combo', parts: [...] }   — modifier(s) + final key
+  //
+  // We fire a real `keydown` (cancelable) for each effective key
+  // press, then — if it wasn't `preventDefault`-ed — apply the
+  // typed effect to the input value and fire `input`. `keyup`
+  // closes each press. A single `change` event coalesces at the
+  // end if the value moved (selenium parity: change fires after
+  // the whole `send_keys` batch, not per character).
+  const __KEY_NAME_MAP = {
+    enter:      { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n' },
+    return:     { key: 'Enter',     code: 'Enter',     keyCode: 13, char: '\n' },
+    tab:        { key: 'Tab',       code: 'Tab',       keyCode:  9, char: '\t' },
+    space:      { key: ' ',         code: 'Space',     keyCode: 32, char: ' '  },
+    backspace:  { key: 'Backspace', code: 'Backspace', keyCode:  8, char: null },
+    delete:     { key: 'Delete',    code: 'Delete',    keyCode: 46, char: null },
+    escape:     { key: 'Escape',    code: 'Escape',    keyCode: 27, char: null },
+    up:         { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38, char: null },
+    down:       { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40, char: null },
+    left:       { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37, char: null },
+    right:      { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, char: null }
+  };
+  const __MODIFIER_NAMES = new Set([
+    'control', 'ctrl', 'command', 'cmd', 'meta', 'shift', 'alt', 'option'
+  ]);
+  function __resolveKey(spec) {
+    // Try the named-key table first so callers can pass 'enter' /
+    // 'tab' / 'escape' interchangeably as strings or symbols — the
+    // Ruby side stringifies symbols at the JSON boundary, so an
+    // atom for `:enter` arrives here as the string 'enter' and
+    // would otherwise fall into the printable-char branch and get
+    // typed verbatim.
+    const known = __KEY_NAME_MAP[String(spec).toLowerCase()];
+    if (known) return Object.assign({}, known);
+    // Printable: typically a single char from a text atom.
+    if (typeof spec === 'string' && spec.length >= 1) {
+      return { key: spec,
+               code: spec.length === 1 ? 'Key' + spec.toUpperCase() : '',
+               keyCode: spec.length === 1 ? spec.toUpperCase().charCodeAt(0) : 0,
+               char: spec };
+    }
+    return { key: String(spec), code: '', keyCode: 0, char: null };
+  }
+  function __modifierFlags(names) {
+    const out = { ctrlKey: false, metaKey: false, shiftKey: false, altKey: false };
+    for (const raw of names) {
+      const n = String(raw).toLowerCase();
+      if (n === 'control' || n === 'ctrl')                out.ctrlKey  = true;
+      else if (n === 'command' || n === 'cmd' || n === 'meta') out.metaKey = true;
+      else if (n === 'shift')                             out.shiftKey = true;
+      else if (n === 'alt' || n === 'option')             out.altKey   = true;
+    }
+    return out;
+  }
+  function __appendValue(n, ch) {
+    if (ch == null) return;
+    const cur = n._attrs.value != null ? n._attrs.value : '';
+    const next = cur + ch;
+    const maxlen = parseInt(n._attrs.maxlength || '', 10);
+    n._attrs.value = (maxlen > 0 && next.length > maxlen) ? next.slice(0, maxlen) : next;
+    if (n._tag === 'textarea') {
+      n._children = [Object.assign(new Text(n._attrs.value), { _parent: n })];
+    }
+    n._selectionStart = n._attrs.value.length;
+    n._selectionEnd   = n._attrs.value.length;
+  }
+  globalThis.__csimSendKeys = function (h, atoms) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
-    if (n._tag === 'input' || n._tag === 'textarea') {
-      if (n._attrs.readonly != null || n._attrs.disabled != null) return false;
-      const cur = n._attrs.value != null ? n._attrs.value : '';
-      const newVal = cur + String(text);
-      const maxlen = parseInt(n._attrs.maxlength || '', 10);
-      n._attrs.value = (maxlen > 0 && newVal.length > maxlen) ? newVal.slice(0, maxlen) : newVal;
-      if (n._tag === 'textarea') {
-        n._children = [Object.assign(new Text(n._attrs.value), { _parent: n })];
+    const typeable = (n._tag === 'input' || n._tag === 'textarea') &&
+                     !(n._attrs.readonly != null || n._attrs.disabled != null);
+    if (typeable) { try { n.focus(); } catch (_) {} }
+    const startValue = typeable ? (n._attrs.value || '') : null;
+    const pressKey = (info, modifiers) => {
+      const initBase = Object.assign({ bubbles: true, cancelable: true }, modifiers || {});
+      const init = Object.assign({}, initBase, { key: info.key, code: info.code, keyCode: info.keyCode, which: info.keyCode });
+      const kd = new KeyboardEvent('keydown', init);
+      dispatchEvent(n, kd);
+      const blocked = kd.defaultPrevented;
+      if (!blocked && typeable && info.char != null && (!modifiers || (!modifiers.ctrlKey && !modifiers.metaKey && !modifiers.altKey))) {
+        __appendValue(n, info.char);
+        dispatchEvent(n, new InputEvent('input', { bubbles: true, cancelable: true, data: info.char }));
       }
-      dispatchEvent(n, new InputEvent('input',  { bubbles: true, cancelable: true }));
-      dispatchEvent(n, new Event('change', { bubbles: true, cancelable: false }));
-      return true;
+      dispatchEvent(n, new KeyboardEvent('keyup', init));
+    };
+    const atomList = Array.isArray(atoms) ? atoms : [];
+    for (const a of atomList) {
+      if (!a || typeof a !== 'object') continue;
+      if (a.kind === 'text') {
+        const s = String(a.value || '');
+        for (const ch of s) pressKey(__resolveKey(ch), null);
+      } else if (a.kind === 'key') {
+        pressKey(__resolveKey(a.name), null);
+      } else if (a.kind === 'combo') {
+        const parts = Array.isArray(a.parts) ? a.parts : [];
+        // Modifiers are everything but the final atom; the final
+        // atom is the key being pressed *while* the modifiers are
+        // held. Some callers only pass modifiers (selecting all
+        // text via Ctrl+A is the canonical "modifier + letter").
+        let lastKeyIdx = -1;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          if (!__MODIFIER_NAMES.has(String(parts[i]).toLowerCase())) { lastKeyIdx = i; break; }
+        }
+        const mods    = __modifierFlags(parts.slice(0, lastKeyIdx >= 0 ? lastKeyIdx : parts.length));
+        const keyName = lastKeyIdx >= 0 ? parts[lastKeyIdx] : '';
+        pressKey(__resolveKey(keyName), mods);
+      }
     }
-    return false;
+    if (typeable && n._attrs.value !== startValue) {
+      dispatchEvent(n, new Event('change', { bubbles: true, cancelable: false }));
+    }
+    return true;
   };
 
   globalThis.__csimAncestorForm = function (h) {
