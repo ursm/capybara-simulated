@@ -86,7 +86,11 @@ module Capybara
         browser.dispatch_event(handle_id, event.to_s)
         true
       end
-      def drop(*_)               ; true ; end
+      def drop(*args)
+        check_stale
+        browser.drop(handle_id, args)
+        true
+      end
       def set(value, **_)
         check_stale
         browser.set_value_with_events(handle_id, value)

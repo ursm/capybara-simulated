@@ -5244,6 +5244,39 @@
     return { hasSelect: true, multiple: cur._attrs.multiple != null };
   };
 
+  function __csimMakeDataTransfer(items) {
+    const dtItems = items.map(it => {
+      if (it.kind === 'file') {
+        const file = { name: it.name, type: '', size: 0 };
+        return { kind: 'file', type: 'application/octet-stream', getAsFile: () => file };
+      }
+      return {
+        kind: 'string', type: it.type,
+        getAsString: (cb) => { try { cb(it.value); } catch (_) {} }
+      };
+    });
+    const files = items.filter(it => it.kind === 'file').map(it => ({ name: it.name, type: '', size: 0 }));
+    const types = items.map(it => it.kind === 'file' ? 'Files' : it.type);
+    return {
+      items: dtItems, files, types,
+      effectAllowed: 'all', dropEffect: 'none',
+      getData: (t) => { const i = items.find(x => x.type === t); return i ? i.value : ''; },
+      setData: () => {},
+      clearData: () => {}
+    };
+  }
+  globalThis.__csimDropOnto = function (h, items) {
+    const target = __handles.get(h);
+    if (!target) return false;
+    const dt = __csimMakeDataTransfer(items || []);
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      const ev = new Event(type, { bubbles: true, cancelable: true });
+      ev.dataTransfer = dt;
+      dispatchEvent(target, ev);
+    }
+    return true;
+  };
+
   globalThis.__csimShadowRoot = function (h) {
     const el = __handles.get(h);
     const sr = el && el._shadowRoot;

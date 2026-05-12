@@ -414,6 +414,30 @@ module Capybara
         @runtime.call('__csimDispatchEvent', handle, 'contextmenu', init)
       end
 
+      # HTML5 drag-and-drop simulation. Capybara routes `Element#drop`
+      # here with a flat list of paths / Pathnames / Hashes; build a
+      # DataTransfer-shaped object and dispatch dragenter / dragover /
+      # drop in sequence.
+      def drop(handle, args)
+        tick_real_time
+        invalidate_find_cache
+        items = args.flat_map {|arg| drop_items(arg) }
+        @runtime.call('__csimDropOnto', handle, items)
+      end
+      def drop_items(arg)
+        case arg
+        when Hash
+          arg.map {|type, value| {'kind' => 'string', 'type' => type.to_s, 'value' => value.to_s} }
+        when ->(x) { x.respond_to?(:to_path) }
+          path = arg.to_path
+          [{'kind' => 'file', 'name' => File.basename(path), 'path' => path}]
+        when String
+          [{'kind' => 'file', 'name' => File.basename(arg), 'path' => arg}]
+        else
+          []
+        end
+      end
+
       def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache

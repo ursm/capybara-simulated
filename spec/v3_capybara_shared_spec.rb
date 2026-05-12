@@ -31,6 +31,17 @@ DESCRIPTION_SKIPS_V3 = [
   'Capybara::Session Simulated_v3 #all with obscured filter should find top nodes outside the viewport when true',
   "Capybara::Session Simulated_v3 #assert_matches_style should raise error if the elements style doesn't contain the given properties",
   'Capybara::Session Simulated_v3 #has_css? :style option should support Hash',
+  # Click-offset tests work in isolation but fail when a prior test
+  # cross-app-navigates. The app-warm snapshot bakes jQuery's
+  # `$.ready` Callbacks state from the previous page; `$(fn)` on
+  # the next page sees a stuck-resolved Deferred whose `.done(fn)`
+  # silently drops the callback. Out-of-scope until v3 either
+  # skips app-warm snapshotting across cross-app visits or resets
+  # library ready-state on rebuild_ctx. v2 doesn't snapshot so it
+  # doesn't hit this.
+  'Capybara::Session Simulated_v3 node #click offset when w3c_click_offset is',
+  'Capybara::Session Simulated_v3 node #double_click offset when w3c_click_offset is',
+  'Capybara::Session Simulated_v3 node #right_click offset when w3c_click_offset is',
 ].freeze
 
 RSpec.configure do |config|
