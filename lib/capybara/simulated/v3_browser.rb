@@ -1063,6 +1063,10 @@ module Capybara
         merge_set_cookie(headers)
         if (300..399).include?(status) && headers['location']
           next_url = resolve_against_current(headers['location'])
+          # Per RFC 7231: if the original request URL had a fragment
+          # and the redirect target doesn't specify one, preserve
+          # the original fragment in the final URL.
+          next_url = carry_fragment(url, next_url)
           body.close if body.respond_to?(:close)
           return navigate(next_url, depth: depth + 1)
         end
@@ -1172,6 +1176,16 @@ module Capybara
 
       def base_href
         @runtime.call('__csimBaseHref').to_s
+      end
+
+      def carry_fragment(from_url, to_url)
+        from = URI.parse(from_url.to_s)
+        to   = URI.parse(to_url.to_s)
+        return to_url if to.fragment || from.fragment.nil? || from.fragment.empty?
+        to.fragment = from.fragment
+        to.to_s
+      rescue URI::InvalidURIError
+        to_url
       end
     end
   end

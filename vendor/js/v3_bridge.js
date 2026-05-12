@@ -5193,15 +5193,20 @@
     if (click.defaultPrevented) return null;
 
     if (n._tag === 'a' && n._attrs.href != null) {
+      const href = String(n._attrs.href);
+      // `javascript:` URLs only ever ran the embedded script (already
+      // handled by the click dispatch above, which fires the JS).
+      // The default action is a no-op.
+      if (/^\s*javascript:/i.test(href)) return null;
       // `<a download>` (any value) signals that the linked resource
       // should be saved rather than rendered. Real browsers honour
       // this regardless of the response's Content-Disposition, so we
       // tell Ruby to take the download path even if the server only
       // sets a Content-Type.
       if (n._attrs.download != null) {
-        return { kind: 'download', url: n._attrs.href, filename: String(n._attrs.download || '') };
+        return { kind: 'download', url: href, filename: String(n._attrs.download || '') };
       }
-      return { kind: 'navigate', url: n._attrs.href };
+      return { kind: 'navigate', url: href };
     }
     // `<label>` activation: clicking a label clicks its labeled
     // form control. Redmine's "New member" modal renders user
@@ -5591,9 +5596,16 @@
     const tag = n._tag;
     // readonly / disabled inputs reject programmatic value changes —
     // mirrors what real browsers + selenium do.
-    if ((tag === 'input' || tag === 'textarea') &&
-        (n._attrs.readonly != null || n._attrs.disabled != null)) {
-      return false;
+    // `readonly` only applies to text-shaped controls per HTML;
+    // checkboxes / radios / file inputs ignore it. `disabled` rejects
+    // every control type.
+    if (tag === 'input' || tag === 'textarea') {
+      if (n._attrs.disabled != null) return false;
+      if (n._attrs.readonly != null) {
+        const t = (n._attrs.type || 'text').toLowerCase();
+        const READONLY_RESPECTING = new Set(['text', 'email', 'password', 'tel', 'url', 'search', 'number', 'date', 'datetime-local', 'time', 'week', 'month']);
+        if (READONLY_RESPECTING.has(t) || tag === 'textarea') return false;
+      }
     }
     // Selenium implicitly focuses the field before typing into it
     // (`feedback_send_keys_focus` memory). Without that, delegated
