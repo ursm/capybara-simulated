@@ -23,7 +23,7 @@ module Capybara
         @context_gen  = driver.browser.context_gen
       end
 
-      attr_reader :handle_id
+      attr_reader :handle_id, :context_gen
 
       def all_text
         check_stale
@@ -139,8 +139,16 @@ module Capybara
         browser.node_path(handle_id)
       end
 
+      # Both handle_id and context_gen are part of identity: after a
+      # cross-page reload the new element can land on the same handle
+      # id (JS-side counter resets per ctx) but a different generation.
+      # Capybara's synchronize uses `old_base == @base` to decide
+      # whether reload made progress, so id-only equality would mark
+      # a successful reload as a no-op and raise the original error.
       def ==(other)
-        other.is_a?(V3Node) && other.handle_id == @handle_id
+        other.is_a?(V3Node) &&
+          other.handle_id == @handle_id &&
+          other.context_gen == @context_gen
       end
 
       private
