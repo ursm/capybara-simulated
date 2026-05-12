@@ -5339,14 +5339,21 @@
   function __appendValue(n, ch) {
     if (ch == null) return;
     const cur = n._attrs.value != null ? n._attrs.value : '';
-    const next = cur + ch;
-    const maxlen = parseInt(n._attrs.maxlength || '', 10);
-    n._attrs.value = (maxlen > 0 && next.length > maxlen) ? next.slice(0, maxlen) : next;
+    // Insert at the current selection (which may have been moved by
+    // an ArrowLeft / ArrowRight earlier in the same send_keys atom
+    // stream). If selection bounds are missing, fall back to "append
+    // at end" — i.e. caret-at-end after the last write.
+    const s = n._selectionStart != null ? n._selectionStart : cur.length;
+    const e = n._selectionEnd   != null ? n._selectionEnd   : s;
+    const composed = cur.slice(0, s) + ch + cur.slice(e);
+    const maxlen   = parseInt(n._attrs.maxlength || '', 10);
+    n._attrs.value = (maxlen > 0 && composed.length > maxlen) ? composed.slice(0, maxlen) : composed;
     if (n._tag === 'textarea') {
       n._children = [Object.assign(new Text(n._attrs.value), { _parent: n })];
     }
-    n._selectionStart = n._attrs.value.length;
-    n._selectionEnd   = n._attrs.value.length;
+    const caret = Math.min(n._attrs.value.length, s + ch.length);
+    n._selectionStart = caret;
+    n._selectionEnd   = caret;
   }
   globalThis.__csimSendKeys = function (h, atoms) {
     const n = lookup(h);
@@ -5381,6 +5388,24 @@
         dispatchEvent(n, bi);
         if (bi.defaultPrevented) blocked = true;
       }
+      // Arrow keys: real keyboards move the caret as the default
+       // action. We don't fire input/beforeinput for these (caret
+       // moves don't dispatch input), but we update the selection
+       // so a subsequent character lands at the new position —
+       // Capybara's `send_keys('abc', :left, 'x')` expects 'abxc'.
+       if (typeable && !blocked && info.key === 'ArrowLeft') {
+         const cur = n._attrs.value != null ? n._attrs.value : '';
+         const pos = n._selectionStart != null ? n._selectionStart : cur.length;
+         const next = Math.max(0, pos - 1);
+         n._selectionStart = next;
+         n._selectionEnd   = next;
+       } else if (typeable && !blocked && info.key === 'ArrowRight') {
+         const cur = n._attrs.value != null ? n._attrs.value : '';
+         const pos = n._selectionEnd != null ? n._selectionEnd : cur.length;
+         const next = Math.min(cur.length, pos + 1);
+         n._selectionStart = next;
+         n._selectionEnd   = next;
+       }
       if (!blocked && wouldType) {
         if (info.char != null) {
           __appendValue(n, info.char);
@@ -5424,7 +5449,23 @@
         }
         const mods    = __modifierFlags(parts.slice(0, lastKeyIdx >= 0 ? lastKeyIdx : parts.length));
         const keyName = lastKeyIdx >= 0 ? parts[lastKeyIdx] : '';
-        pressKey(__resolveKey(keyName), mods);
+        // `[:shift, 'side']` means "hold shift, type each character" —
+        // unfold the string into per-character presses with the
+        // modifier flags applied. Real keyboards send one keydown per
+        // physical key; without unfolding, the whole 'side' string
+        // typed as one keydown plus `info.char='side'` would either
+        // miss the shift-uppercase mapping or land in the value as
+        // the literal modifier name (the previous behaviour).
+        if (typeof keyName === 'string' && keyName.length > 1) {
+          for (const ch of keyName) {
+            const cooked = mods.shiftKey ? ch.toUpperCase() : ch;
+            pressKey(__resolveKey(cooked), mods);
+          }
+        } else {
+          const single = String(keyName);
+          const cooked = mods.shiftKey && single.length === 1 ? single.toUpperCase() : single;
+          pressKey(__resolveKey(cooked), mods);
+        }
         // Clipboard paste: Ctrl+V / Cmd+V should fire a `paste` event
         // with the system clipboard's text content. Real browsers do
         // this as the default action of the keydown; Redmine's

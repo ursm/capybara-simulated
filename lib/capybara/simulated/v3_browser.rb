@@ -468,13 +468,29 @@ module Capybara
       # An Array combo is the canonical "modifier + key" pattern:
       # everything but the last entry is a modifier; the last entry
       # is the key being pressed (String char or Symbol special).
+      MODIFIER_KEY_NAMES = %i[shift control ctrl alt option meta command].to_set.freeze
       def send_keys(handle, keys)
         tick_real_time
         invalidate_find_cache
-        atoms = keys.map {|k|
+        # Selenium's contract: a bare modifier symbol (`:shift`) at the
+        # top level "holds" the modifier from that point on. `:null`
+        # releases all modifiers. We rewrite the atom stream so each
+        # following character / key carries the accumulated modifiers.
+        held = []
+        atoms = keys.flat_map {|k|
           case k
-          when String then {'kind' => 'text', 'value' => k}
-          when Symbol then {'kind' => 'key',  'name'  => k.to_s}
+          when Symbol
+            if k == :null
+              held = []; nil
+            elsif MODIFIER_KEY_NAMES.include?(k)
+              held = (held + [k.to_s]).uniq; nil
+            else
+              held.empty? ? {'kind' => 'key',  'name'  => k.to_s}
+                          : {'kind' => 'combo', 'parts' => held + [k.to_s]}
+            end
+          when String
+            held.empty? ? {'kind' => 'text', 'value' => k}
+                        : {'kind' => 'combo', 'parts' => held + [k]}
           when Array
             parts = k.map {|x| x.is_a?(Symbol) ? x.to_s : x.to_s }
             {'kind' => 'combo', 'parts' => parts}
