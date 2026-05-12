@@ -181,6 +181,38 @@
     click() {
       try { dispatchEvent(this, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 })); } catch (_) {}
     }
+    // `Element.remove()` / `ChildNode.remove()` — detach this node from
+    // its parent. Standard since DOM4; the table-paste Stimulus
+    // controller walks pasted HTML and strips `<style>` / wrapping
+    // nodes via `e.remove()` before formatting.
+    remove() {
+      if (this._parent) this._parent.removeChild(this);
+    }
+    // `ChildNode.before(...nodes)` / `after(...nodes)` / `replaceWith
+    // (...nodes)` — convenience neighbours of `remove`. Pass strings or
+    // nodes; strings become Text nodes. Stimulus / jQuery 3.x lean on
+    // these for shorter swap-this-with-that idioms.
+    before (...nodes) { if (this._parent) for (const n of nodes) this._parent.insertBefore(toNode(n), this); }
+    after  (...nodes) {
+      if (!this._parent) return;
+      const sibs = this._parent._children;
+      const idx  = sibs.indexOf(this);
+      const ref  = idx + 1 < sibs.length ? sibs[idx + 1] : null;
+      for (const n of nodes) this._parent.insertBefore(toNode(n), ref);
+    }
+    replaceWith (...nodes) {
+      if (!this._parent) return;
+      const p = this._parent;
+      for (const n of nodes) p.insertBefore(toNode(n), this);
+      p.removeChild(this);
+    }
+    // `ParentNode.prepend(...nodes)` / `append(...nodes)` — the
+    // sibling of `appendChild` that accepts strings + variadic args.
+    prepend (...nodes) {
+      const first = this._children[0] || null;
+      for (const n of nodes) this.insertBefore(toNode(n), first);
+    }
+    append (...nodes) { for (const n of nodes) this.appendChild(toNode(n)); }
     get children()      { return this._children.filter(c => c.nodeType === NODE_ELEMENT); }
     get nextSibling() {
       if (!this._parent) return null;
@@ -2396,6 +2428,12 @@
 
   function makeText(s) {
     return new Text(decodeEntities(s));
+  }
+  // Used by `ChildNode.before/after/replaceWith` + `ParentNode.append
+  // /prepend` to accept strings (auto-wrap as Text) alongside nodes.
+  function toNode(v) {
+    if (v && (v.nodeType === NODE_ELEMENT || v.nodeType === NODE_TEXT || v.nodeType === NODE_FRAGMENT || v.nodeType === NODE_DOC)) return v;
+    return new Text(v == null ? '' : String(v));
   }
   function decodeEntities(s) {
     return s.replace(/&(amp|lt|gt|quot|apos|nbsp|#\d+|#x[0-9a-fA-F]+);/g, (_, e) => {
