@@ -848,12 +848,8 @@
     set text(v)    { this.textContent = v; }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
-    // HTML IDL boolean-attribute reflections. Setting via property
-    // mirrors to the underlying content attribute — without this,
-    // `input.disabled = true` (the canonical way to disable a control
-    // from script) would be a no-op as far as `:disabled` /
-    // `getAttribute('disabled')` see, and Capybara's `assert_matches_selector(:css, 'input:disabled')`
-    // never settles.
+    // Boolean IDL reflections — `el.disabled = true` mirrors to the
+    // `disabled` content attribute (HTML IDL contract).
     get disabled() { return this._attrs.disabled != null; }
     set disabled(v){ if (v) this._attrs.disabled = ''; else delete this._attrs.disabled; }
     get readOnly() { return this._attrs.readonly != null; }
@@ -2563,49 +2559,40 @@
     // an implicit `<tbody>`. Without this, `tr:first-child` against
     // a table whose `<caption>` precedes the first `<tr>` reports
     // no match (the caption is "first child", not the tr).
-    insertImplicitTbodies(body);
+    for (const table of body.querySelectorAll('table')) wrapLooseTrs(table);
     return doc;
   }
-  function insertImplicitTbodies (root) {
-    if (!root || !root._children) return;
-    if (root.nodeType === NODE_ELEMENT && root._tag === 'table') {
-      const kids = root._children;
-      let i = 0;
-      while (i < kids.length) {
-        const c = kids[i];
-        if (c.nodeType === NODE_ELEMENT && c._tag === 'tr') {
-          const tbody = new Element('tbody');
-          tbody._parent = root;
-          // Sweep up consecutive `<tr>` siblings (real HTML parsers
-          // produce one implicit `<tbody>` per run). Inter-`<tr>`
-          // whitespace text nodes are *part of* the run — without
-          // absorbing them too, two `<tr>`s with a newline between
-          // become two `<tbody>`s and break `tr:first-child`.
-          let j = i;
-          while (j < kids.length) {
-            const k = kids[j];
-            const isTr   = k.nodeType === NODE_ELEMENT && k._tag === 'tr';
-            const isWs   = k.nodeType === NODE_TEXT && /^\s*$/.test(String(k.data || ''));
-            if (!isTr && !isWs) break;
-            // Stop if a non-`tr` element follows (caption / thead / etc.).
-            if (!isTr && j > i) {
-              // peek next non-ws: if not tr, end the run here.
-              let p = j + 1;
-              while (p < kids.length && kids[p].nodeType === NODE_TEXT && /^\s*$/.test(String(kids[p].data || ''))) p++;
-              if (p >= kids.length || !(kids[p].nodeType === NODE_ELEMENT && kids[p]._tag === 'tr')) break;
-            }
-            k._parent = tbody;
-            tbody._children.push(k);
-            j++;
-          }
-          kids.splice(i, j - i, tbody);
-          i++;
-        } else {
-          i++;
-        }
+  // Sweep up consecutive `<tr>` siblings (plus the inter-`<tr>`
+  // whitespace text nodes — they're part of the run; absorbing them
+  // keeps two `<tr>`s separated by a newline in the same implicit
+  // `<tbody>`).
+  function wrapLooseTrs (table) {
+    const kids = table._children;
+    if (!kids) return;
+    const isWs = (k) => k.nodeType === NODE_TEXT && /^\s*$/.test(String(k.data || ''));
+    const isTr = (k) => k.nodeType === NODE_ELEMENT && k._tag === 'tr';
+    let i = 0;
+    while (i < kids.length) {
+      if (!isTr(kids[i])) { i++; continue; }
+      const tbody = new Element('tbody');
+      tbody._parent = table;
+      let j = i;
+      while (j < kids.length) {
+        const k = kids[j];
+        if (isTr(k))      { /* absorb */ }
+        else if (isWs(k)) {
+          // Continue only if the next non-ws is another tr.
+          let p = j + 1;
+          while (p < kids.length && isWs(kids[p])) p++;
+          if (p >= kids.length || !isTr(kids[p])) break;
+        } else break;
+        k._parent = tbody;
+        tbody._children.push(k);
+        j++;
       }
+      kids.splice(i, j - i, tbody);
+      i++;
     }
-    for (const c of root._children) insertImplicitTbodies(c);
   }
 
   function stripHtmlWrapper(html) {
@@ -3192,12 +3179,8 @@
   function makeLocation(url) {
     return parseUrlForLocation(url);
   }
-  // Assigning to a property on `window.location` (`location.href = X`,
-  // `location.pathname = X`, `location.hash = X`, …) navigates in real
-  // browsers — it's syntactic sugar over `location.assign(resolved)`.
-  // Without setters here the assignment silently no-ops, so any test
-  // that triggers a setTimeout-driven path change via assignment hangs
-  // until its `default_max_wait_time` expires.
+  // `location.{href,pathname,hash,search} = X` navigates; defining
+  // setters on the location object reproduces that.
   function parseUrlForLocation(url) {
     try {
       const u = __csim_parseUrl(url, null);
@@ -3214,10 +3197,8 @@
           get() { return u.href; },
           set(v) { navTarget(String(v)); }
         });
-        // Rebuild the absolute URL from this location's parts with one
-        // part swapped — our `URL` doesn't update `href` when a part
-        // setter fires, so a `new URL(u.href)` + assign approach would
-        // navigate back to the original href instead of the new one.
+        // Our URL impl doesn't update `href` when a part setter fires,
+        // so rebuild the absolute URL by string-composing the parts.
         const composeWith = (overrides) => {
           const o = Object.assign({}, u, overrides);
           const cred = o.username || o.password
@@ -3721,10 +3702,8 @@
     return el._computedStyleProxy || (el._computedStyleProxy = __makeComputedStyleProxy(el));
   };
 
-  // Read N computed-style properties for `handle` in one host fn call.
-  // Capybara's `assert_matches_style` / `Node#style` reads several
-  // properties per matcher invocation; batching avoids paying the V8
-  // round-trip per property.
+  // Batched style read — `Node#style(['width', 'height'])` pays one
+  // V8 round-trip instead of one per property.
   globalThis.__csimComputedStyle = function (handle, names) {
     const el = __handles.get(handle);
     if (!el || el.nodeType !== NODE_ELEMENT) return {};
@@ -4869,17 +4848,10 @@
     }
     return collectVisibleText(n);
   };
-  // Replace non-space whitespace (tabs, newlines, vertical tabs) with
-  // a single regular space inside each text node. The HTML rendering
-  // model treats inline-whitespace runs as a single space; without
-  // this collapse, raw newlines from the source leak through and
-  // Capybara's whitespace normaliser (which only squeezes ` `, not
-  // `\n`) can't recover the expected output.
+  // Per innerText: collapse inline-whitespace runs (tab/newline/VT)
+  // to a single space in each text node.
   const INLINE_WS_RE = /[\t\n\v\f\r]+/g;
-  // Tags that introduce a block boundary in the rendered text. Real
-  // browsers' innerText inserts a newline between adjacent block
-  // boxes; Capybara's text comparisons depend on `<p>` / `<div>` /
-  // `<h1>` content being newline-separated rather than concatenated.
+  // Block-shaped tags get a `\n` boundary before/after their content.
   const BLOCK_TAGS = new Set([
     'address','article','aside','blockquote','dd','div','dl','dt',
     'figcaption','figure','footer','form','h1','h2','h3','h4','h5',
@@ -4907,10 +4879,6 @@
     for (const c of node._children) {
       const part = collectVisibleText(c);
       if (!part) continue;
-      // Insert a newline at block boundaries (before the block if
-      // there's preceding output, after the block's content for the
-      // next sibling). Avoid doubling when neighbours already end
-      // with `\n`.
       const isBlock = c.nodeType === NODE_ELEMENT && BLOCK_TAGS.has(c._tag);
       if (isBlock && out && !out.endsWith('\n')) out += '\n';
       out += part;
@@ -5007,17 +4975,6 @@
   }
   globalThis.__pollAsyncResult = function () { return __asyncResult; };
 
-  // Walk up to the nearest <select> ancestor and report whether
-  // it's a `multiple` select. Drives Ruby-side
-  // `Capybara::UnselectNotAllowed` decisions without a second
-  // round-trip to read the attribute.
-  // Build an XPath that uniquely targets this element. Each step uses
-  // `tag[index]` keyed by the position among same-tag siblings, so the
-  // result resolves back to the same node when handed to `find_xpath`.
-  // Return the document's `<base href>` (or '' if absent / unset).
-  // Ruby resolves link / form-action URLs against this when the page
-  // declares one, but `visit` skips it — same as real browsers'
-  // address-bar navigation semantics.
   globalThis.__csimBaseHref = function () {
     const doc = globalThis.document;
     if (!doc || !doc.head) return '';
@@ -5260,11 +5217,7 @@
     if (pendingSubmit) return { kind: 'submit', formHandle: pendingSubmit.formHandle, submitter: pendingSubmit.submitterHandle || 0 };
     if (click.defaultPrevented) return null;
 
-    // Clicking a <summary> toggles its parent <details>'s `open`
-    // attribute (the only built-in default action <summary> has).
-    // Capybara's `#visible? works when details is toggled` test
-    // hits this — without the toggle, opening / closing a
-    // collapsible block via click is a no-op.
+    // Summary click toggles its parent <details>'s `open` attribute.
     if (n._tag === 'summary' && !click.defaultPrevented) {
       let parent = n._parent;
       while (parent && parent._tag !== 'details') parent = parent._parent;
@@ -5866,15 +5819,10 @@
     const submitter = submitterHandle ? lookup(submitterHandle) : null;
     const fields = [];
     // HTML's `form` IDL: controls participate via either DOM ancestry
-    // (descendant of the form) *or* an explicit `form="<form-id>"`
-    // attribute pointing at the form. Skip descendant controls whose
-    // `form` attr points elsewhere — they belong to another form.
-    // Collect controls in DOCUMENT ORDER. Walk the whole document
-    // once, keep any control whose form-association lands on this
-    // form — either via DOM ancestry (and no overriding `form` attr)
-    // or an explicit `form="<id>"` pointing at us. This is the order
-    // browsers serialise in, and Capybara's spec checks for it
-    // (`should send button in document order`).
+    // Walk the whole document once and keep controls whose form
+    // association lands on this form (explicit `form=<id>` wins,
+    // otherwise DOM-descendant). Document order matters — browsers
+    // serialise in tree order regardless of where the control lives.
     const formId = form._attrs.id;
     const isDescendant = (el) => {
       for (let cur = el._parent; cur; cur = cur._parent) if (cur === form) return true;

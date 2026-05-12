@@ -42,12 +42,10 @@ module Capybara
         @sticky_headers               = {}
         @timers_active                = false
         @intersection_observer_active = false
-        # Bumped on each context rebuild. V3Node captures this at
-        # construction and `check_stale` rejects any handle whose
-        # captured generation no longer matches — handle IDs are
-        # per-Context integer sequences, so a handle from a pre-refresh
-        # context could otherwise collide with a fresh node in the
-        # new context and silently dodge staleness detection.
+        # Handle IDs are per-Context integer sequences: a handle from
+        # a pre-rebuild context could collide with a fresh node's id
+        # in the new context. V3Node captures this on construction;
+        # `check_stale` rejects on mismatch.
         @context_gen                  = 0
         @find_cache_dirty             = true
         @find_cache_kind              = nil
@@ -58,10 +56,6 @@ module Capybara
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_until                = nil
         @ticking                      = false
-        # Navigation history for go_back / go_forward. `@history`
-        # holds Request entries; `@history_idx` is the current
-        # entry's index. Visits and link clicks append, then trim
-        # the redo tail; back/forward shift the index.
         @history                      = []
         @history_idx                  = -1
         @modal_handlers               = []
@@ -88,16 +82,9 @@ module Capybara
 
       # ── Capybara DSL surface (just enough for milestone 2) ──────
 
+      # Address-bar navigation: no Referer, and relative paths resolve
+      # against the host root (not the current page's directory).
       def visit(url)
-        # Address-bar navigation: no Referer, even if we already had
-        # a page loaded. Link clicks / form submits / `location.assign`
-        # routes carry the current URL as Referer, which the default
-        # `navigate` arg handles.
-        # A relative path on visit is resolved against the host root
-        # (`http://www.example.com/<path>`), not the current page's
-        # directory — that's "I typed this in the address bar", and
-        # we don't want a previous `/base/foo` page to make
-        # `visit('with_html')` land at `/base/with_html`.
         navigate(resolve_visit_url(url), referer: nil)
       end
 
@@ -150,10 +137,7 @@ module Capybara
             prefix = context_handle ? './/' : '//'
             xpaths = Nokogiri::CSS.xpath_for(s, prefix: prefix)
             unless xpaths.empty?
-              # `Nokogiri::CSS.xpath_for("h1, p")` returns one xpath per
-              # selector group. Union them with ` | ` so the wgxpath
-              # pass returns matches across all groups in document order
-              # instead of just the first group.
+              # Comma groups emit one xpath each — union with ` | `.
               combined = xpaths.length == 1 ? xpaths.first : xpaths.join(' | ')
               return find_xpath(combined, context_handle)
             end
@@ -265,13 +249,8 @@ module Capybara
       end
       def visible?(handle)    = @runtime.call('__csimVisible', handle) ? true : false
 
-      # Capybara::Driver::Node surface ----------------------------------
-      #
-      # PoC: text == all_text == visible_text. Cascade-driven visibility
-      # filtering is deferred (V3_DESIGN.md milestone 5+). V3Node calls
-      # `check_stale` before each of these, and `check_stale` advances
-      # the virtual clock — so a single tick covers both the staleness
-      # decision and the read against post-drain state.
+      # Capybara::Driver::Node surface — V3Node calls `check_stale`
+      # before each read, and that advances the virtual clock.
       def all_text(handle)     = text(handle)
       def visible_text(handle) = @runtime.call('__csimVisibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
@@ -290,12 +269,9 @@ module Capybara
         handle if @runtime.call('__csimAlive', handle)
       end
 
-      # Advance the virtual clock first so a `setTimeout`-driven DOM
-      # mutation that detaches `handle` between Capybara's polls is
-      # observed before the staleness check decides whether the
-      # node is still in the document. Without this, V3Node#check_stale
-      # would read the pre-drain state and let a stale handle's
-      # subsequent read return empty content instead of raising.
+      # Tick first so a setTimeout-driven detach lands before the
+      # alive check — otherwise a stale handle's later read returns
+      # empty content instead of raising.
       def check_stale(handle, initial, gen = nil)
         tick_real_time
         return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
@@ -440,9 +416,6 @@ module Capybara
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', {'bubbles' => true, 'cancelable' => true}.merge(modifier_flags(keys)))
       end
 
-      # Capybara passes a flat array of modifier symbols (`[:shift,
-      # :control]`) to `click` / `right_click` / `double_click`. Map
-      # them to the MouseEventInit fields the JS dispatch path reads.
       MODIFIER_KEYS = {
         shift:    'shiftKey',
         control:  'ctrlKey',
@@ -452,6 +425,7 @@ module Capybara
         meta:     'metaKey',
         command:  'metaKey'
       }.freeze
+      MODIFIER_KEY_NAMES = MODIFIER_KEYS.keys.to_set.freeze
       def modifier_flags(keys)
         Array(keys).each_with_object({}) {|k, h|
           field = MODIFIER_KEYS[k.is_a?(Symbol) ? k : k.to_sym]
@@ -491,7 +465,6 @@ module Capybara
       # An Array combo is the canonical "modifier + key" pattern:
       # everything but the last entry is a modifier; the last entry
       # is the key being pressed (String char or Symbol special).
-      MODIFIER_KEY_NAMES = %i[shift control ctrl alt option meta command].to_set.freeze
       def send_keys(handle, keys)
         tick_real_time
         invalidate_find_cache
@@ -579,13 +552,15 @@ module Capybara
       end
 
       def status_code      = (@last_response_status || 200)
-      # Rack 3 lowercases header names (`content-type`), but Capybara
-      # tests expect the canonical mixed-case (`Content-Type`).
-      # Title-case each segment so either lookup style works.
+      # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
       def response_headers
         (@last_response_headers || {}).each_with_object({}) {|(k, v), h|
           h[k.to_s.split('-').map(&:capitalize).join('-')] = v
         }
+      end
+      def record_response(status, headers)
+        @last_response_status  = status
+        @last_response_headers = headers.to_h
       end
 
       # Driver surface bits that v2 Browser exposes; stubbed for v3 PoC.
@@ -739,9 +714,9 @@ module Capybara
         end
         # Drain navigation intents queued by JS-side handlers that fired
         # during the drain (e.g. `setTimeout(() => location.pathname = X)`).
-        # Doing it outside the @ticking guard means the navigate's own
-        # rebuild_ctx is well-clear of the V8 call we just made.
-        consume_pending_location
+        # Outside the @ticking guard so the navigate's rebuild_ctx is
+        # well-clear of the V8 call we just made.
+        consume_pending_location if @pending_location
       end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
@@ -815,10 +790,8 @@ module Capybara
           return
         end
         @current_url = url
-        @last_request = {method: :post, url: url, body: body, content_type: content_type}
-        @last_response_status  = status
-        @last_response_headers = headers.to_h
-        html                   = read_rack_body(resp_body)
+        record_response(status, headers)
+        html         = read_rack_body(resp_body)
         # Same rebuild-on-full-load contract as `navigate`. POST
         # responses (form submissions that don't redirect, AJAX-less
         # data-remote replies) replace the page; we follow real-browser
@@ -839,7 +812,6 @@ module Capybara
         @document_handle = 0
         @history.clear
         @history_idx     = -1
-        @last_request    = nil
         @runtime.reset_page
         reset_timer_state
         invalidate_find_cache
@@ -984,12 +956,9 @@ module Capybara
         buf
       end
 
-      # `window.location.assign(url)` / `location.pathname = '/x'` / etc.
-      # routes through here from the JS bridge. Real browsers navigate
-      # synchronously, but doing so from inside the running V8 call
-      # would rebuild the Context mid-call (ScriptTerminatedError). Stash
-      # the target and drain after the call returns — same deferred-
-      # intent shape we use for `__csimPendingFormSubmit`.
+      # Defer the navigation: doing it from inside the running V8 call
+      # would dispose the Context mid-call. tick_real_time drains
+      # after the call returns. Same pattern as `__csimPendingFormSubmit`.
       def location_assign(url)
         @pending_location = resolve_against_current(url.to_s)
       end
@@ -998,18 +967,10 @@ module Capybara
         @pending_location = nil
         navigate(url)
       end
-      # Replay the last navigation. After a form POST, real browsers
-      # re-send the POST (with the usual "Resubmit?" prompt); a
-      # GET-after-GET is just a re-GET. `@last_request` captures the
-      # method + payload so we can match that contract.
+      # POST-after-POST resubmits with the original body; GET-after-GET
+       # is just a re-GET. Replay the current history entry.
       def refresh
-        req = @last_request
-        return unless req
-        if req[:method] == :post
-          navigate_post(req[:url], req[:body], req[:content_type])
-        else
-          navigate(req[:url])
-        end
+        replay_history_entry(@history[@history_idx])
       end
       def history_state(url)   ; @current_url = url.to_s ; end
       def set_listened_type(*) ; end
@@ -1075,10 +1036,8 @@ module Capybara
           return
         end
         @current_url = url
-        @last_request = {method: :get, url: url}
-        @last_response_status  = status
-        @last_response_headers = headers.to_h
-        html                   = read_rack_body(body)
+        record_response(status, headers)
+        html         = read_rack_body(body)
         # @module_cache and @importmap survive across navigates;
         # set_importmap flushes the cache only when the new page
         # ships a different importmap (handles cross-app navigation).
@@ -1132,10 +1091,6 @@ module Capybara
         File.binwrite(File.join(dir, filename), read_rack_body(body))
       end
 
-      # Honour `Capybara.save_path` when set so tests using the Capybara
-      # download contract (`Capybara.save_path/<filename>`) find the
-      # file we wrote. `CSIM_DOWNLOADS_DIR` is the explicit override;
-      # `tmp/downloads/` is the legacy fallback for vs-world apps.
       def downloads_directory
         ENV['CSIM_DOWNLOADS_DIR'] || Capybara.save_path || File.join(Dir.pwd, 'tmp', 'downloads')
       end

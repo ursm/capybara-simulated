@@ -101,10 +101,6 @@ module Capybara
         handle = browser.active_element_handle
         handle ? V3Node.new(self, handle) : nil
       end
-      # `Capybara::Session#send_keys(:tab, …)` and other session-level
-       # keystrokes route here. Tab / shift-tab move focus through the
-       # tabbable chain; everything else falls through to the currently
-       # focused element if any.
       def send_keys(*keys)
         keys.flatten.each {|k| browser.send_session_key(k) }
         nil
@@ -128,9 +124,7 @@ module Capybara
         }
         browser.with_modal(handler) do
           yield if block_given?
-          # Async alerts (`setTimeout(() => alert(...), N)`) don't
-          # fire inside the block — they sit on the virtual clock.
-          # Pump timers until the modal lands or the wait expires.
+          # Pump timers so a setTimeout-driven alert can land.
           timeout = (wait || Capybara.default_max_wait_time).to_f
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
           while captured.nil? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
