@@ -343,13 +343,16 @@ module Capybara
 
       def self.build_app_snapshot(scripts)
         # Build the snapshot source: same prologue as the base snapshot,
-        # then evaluate each captured library body inside its own IIFE
-        # (so a thrown error doesn't abort the whole warmup), and
-        # register the URL in `__externalScriptsRun` so the per-visit
-        # __csimLoadDocument pass skips re-evaluating it. Epilogue calls
-        # `__csimEnterSnapshotState()` to roll per-visit state back to
-        # baseline (clear timers, virtual clock, MO records, handles)
-        # while leaving library globals + delegates intact.
+        # then evaluate each captured library body at top level so
+        # `function fooBar() {}` / `var foo = ...` declarations hoist
+        # to the global scope. Wrapping each body in an IIFE silently
+        # confines those declarations and breaks call sites like
+        # `showModal(...)` that the on-attribute handlers rely on.
+        # `eval(body)` invoked at module top runs in the surrounding
+        # scope, which is what `<script>` tags do in real browsers.
+        # We isolate failures per script via separate `eval(body)`
+        # calls with try/catch so one bad bundle doesn't abort the
+        # whole warmup.
         src = +SNAPSHOT_HOST_STUBS.dup
         src << File.read(BRIDGE_JS)
         src << File.read(WGXPATH_JS) << ";\n"
@@ -357,12 +360,12 @@ module Capybara
         scripts.each {|s|
           url  = s['url'].to_s
           body = s['body'].to_s
-          src << ";(function(){\n"
-          src << "try {\n"
+          # Top-level body inside a try block; declarations hoist to
+          # the enclosing (global) scope just like a real `<script>`.
+          src << ";try {\n"
           src << body
           src << "\n} catch (e) { try { console.error('[csim warmup script]', #{url.to_json}, ':', e && e.message); } catch (_) {} }\n"
           src << "__csim_markScriptLoaded(#{url.to_json});\n"
-          src << "})();\n"
         }
         src << "__csimEnterSnapshotState();\n"
         snap = MiniRacer::Snapshot.new(src)
