@@ -626,8 +626,8 @@
     // querySelector / matches: PoC supports the small subset Capybara
     // emits internally (tag, #id, .class, [attr=value], descendant
     // combinator). Full CSS3 deferred to a proper port.
-    querySelector(sel)        { return findFirst(this, parseSelector(sel)); }
-    querySelectorAll(sel)     { return findAll(this, parseSelector(sel)); }
+    querySelector(sel)        { return findFirst(this, parseSelector(__normaliseScopedSelector(sel))); }
+    querySelectorAll(sel)     { return findAll(this, parseSelector(__normaliseScopedSelector(sel))); }
     matches(sel)              { return matchOne(this, parseSelector(sel)); }
     closest(sel) {
       const p = parseSelector(sel);
@@ -704,6 +704,37 @@
       out.length = out.length;
       return out;
     }
+    // `HTMLButtonElement.form` (and the IDL for all form-associated
+    // controls) — returns the owning form. Per spec the `form="<id>"`
+    // attribute takes precedence over the ancestor `<form>`; we
+    // mirror that. Redmine's settings page uses
+    // `onclick="moveOptions(this.form.selected_..., this.form.
+    // available_...)"` to wire up its column-mover buttons — without
+    // `this.form` the onclick threw and the columns never moved.
+    get form() {
+      if (this._tag !== 'input' && this._tag !== 'select' &&
+          this._tag !== 'textarea' && this._tag !== 'button' &&
+          this._tag !== 'fieldset' && this._tag !== 'object' &&
+          this._tag !== 'output') return undefined;
+      const explicit = this._attrs.form;
+      let form = null;
+      if (explicit) {
+        const root = globalThis.document.documentElement;
+        if (root) {
+          for (const f of root.getElementsByTagName('form')) {
+            if (f._attrs && f._attrs.id === explicit) { form = f; break; }
+          }
+        }
+      }
+      if (!form) {
+        let cur = this._parent;
+        while (cur && cur.nodeType === NODE_ELEMENT) {
+          if (cur._tag === 'form') { form = cur; break; }
+          cur = cur._parent;
+        }
+      }
+      return form ? __formNamedAccess(form) : null;
+    }
     // Form-control IDL attributes. v2 leans on Nokogiri attribute
     // mirroring; here we expose the same pair-of-attr-and-IDL shape
     // so JS like `input.value = 'x'` / `input.checked = true` works
@@ -759,8 +790,24 @@
     }
     set selected(v) {
       if (this._tag !== 'option') return;
-      if (v) this._attrs.selected = '';
-      else delete this._attrs.selected;
+      if (v) {
+        this._attrs.selected = '';
+        // HTML spec: setting `selected = true` on an option in a
+        // single-select select implicitly clears `selected` from the
+        // other options. Redmine's `selectTracker` sets
+        // `target.find('option[value="X"]').prop('selected', true)`
+        // and expects the previously-selected option to no longer
+        // win the `.value` resolution.
+        let p = this._parent;
+        while (p && p.nodeType === NODE_ELEMENT && p._tag !== 'select') p = p._parent;
+        if (p && p._tag === 'select' && p._attrs.multiple == null) {
+          for (const o of p.querySelectorAll('option')) {
+            if (o !== this) delete o._attrs.selected;
+          }
+        }
+      } else {
+        delete this._attrs.selected;
+      }
     }
     // `<select>.selectedIndex` — index of the first selected option,
     // or 0 (the default) when no option is explicitly selected.
@@ -2437,9 +2484,6 @@
         }
         return true;
       case 'root': return el._parent && el._parent.nodeType === NODE_DOC;
-      case 'scope':
-        // No scoped-element tracking yet — treat as root-fallback.
-        return el._parent && el._parent.nodeType === NODE_DOC;
       case 'checked': {
         if (el._tag === 'option') return el._attrs.selected != null;
         const t = (el._attrs.type || '').toLowerCase();
@@ -2458,6 +2502,13 @@
       // cascade rules that gate on them — and those rules generally
       // *reveal* content rather than hide it (so reporting false here
       // keeps the element visibility-stable until a real test cares).
+      case 'scope':
+        // CSS Selectors 4 :scope — matches the context element of a
+        // scoped selector query. `qsa('> li', el)` is normalised to
+        // `qsa(':scope > li', el)` and we set `__scopeRoot = el`
+        // around the walk, so a match against `:scope` succeeds when
+        // the candidate equals the root.
+        return __scopeRoot != null && el === __scopeRoot;
       case 'hover': {
         // CSS `:hover` applies to the hovered element AND every
         // ancestor. We track the last-moused-over node on
@@ -2559,14 +2610,23 @@
     if (s1[1] !== s2[1]) return s1[1] - s2[1];
     return s1[2] - s2[2];
   }
+  // Scope root for `:scope` pseudo-class. matchPseudo reads this slot
+  // when resolving `:scope` so qsa with relative combinator selectors
+  // (`> *`, `+ li`, `~ span`) — normalised to `:scope > …` — match
+  // against the context element rather than every descendant.
+  let __scopeRoot = null;
   function findAll(root, group) {
     const out = [];
-    walk(root, el => { if (matchOne(el, group)) out.push(el); });
+    const prev = __scopeRoot; __scopeRoot = root;
+    try { walk(root, el => { if (matchOne(el, group)) out.push(el); }); }
+    finally { __scopeRoot = prev; }
     return out;
   }
   function findFirst(root, group) {
     let hit = null;
-    walk(root, el => { if (!hit && matchOne(el, group)) hit = el; });
+    const prev = __scopeRoot; __scopeRoot = root;
+    try { walk(root, el => { if (!hit && matchOne(el, group)) hit = el; }); }
+    finally { __scopeRoot = prev; }
     return hit;
   }
   function walk(node, fn) {
@@ -2708,6 +2768,48 @@
 
   function makeText(s) {
     return new Text(decodeEntities(s));
+  }
+  // HTMLFormElement named-item access: `form.foo` returns the form
+  // control whose `name` (or `id`) is `foo`. The Proxy delegates
+  // anything Element already owns (methods, attrs, IDL) and falls
+  // back to a named lookup on miss. Cached on the form so identity
+  // checks (`button.form === form`) hold across multiple reads.
+  function __formNamedAccess (form) {
+    if (form._namedAccessProxy) return form._namedAccessProxy;
+    const proxy = new Proxy(form, {
+      get (target, key) {
+        if (key in target) return target[key];
+        if (typeof key !== 'string') return target[key];
+        // Search descendants for matching name / id form controls.
+        for (const f of target.elements || []) {
+          if (f._attrs && (f._attrs.name === key || f._attrs.id === key)) return f;
+        }
+        return undefined;
+      }
+    });
+    form._namedAccessProxy = proxy;
+    return proxy;
+  }
+  // Selectors that start with a combinator (`> *`, `+ li`, `~ span`)
+  // are relative to the context — jQuery's `.find('> *')` exercises
+  // this for children-only queries. Native qsa doesn't accept the
+  // leading combinator; we strip it and rely on `findAll` /
+  // `findFirst` only descending into direct children for the first
+  // selector unit when this flag is set. Since `parseSelector`
+  // already produces a "child combinator from context" semantic with
+  // a leading `>`, the simplest patch is: pass it through to the
+  // selector parser unchanged after dropping the leading whitespace
+  // — the parser already handles a leading combinator.
+  function __normaliseScopedSelector(sel) {
+    if (typeof sel !== 'string') return sel;
+    const trimmed = sel.replace(/^\s+/, '');
+    if (trimmed.startsWith('>') || trimmed.startsWith('+') || trimmed.startsWith('~')) {
+      // Use `:scope` so `parseSelector` can match against the
+      // context element (we handle `:scope` in matchPseudo). The
+      // overall effect: `:scope > li` selects direct `<li>` children.
+      return ':scope ' + trimmed;
+    }
+    return sel;
   }
   // Tag the returned Array as HTMLCollection-shaped (Array + `.item(i)`
   // + `.namedItem(name)`). DOM spec returns HTMLCollection; lots of
