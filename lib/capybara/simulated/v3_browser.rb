@@ -1409,10 +1409,18 @@ module Capybara
 
       def merge_set_cookie(headers)
         sc = headers['set-cookie'] || headers['Set-Cookie']
-        return unless sc
-        Array(sc).each {|c|
-          name, rest = c.split(';', 2).first.to_s.split('=', 2)
-          @cookies[name] = rest.to_s if name && !name.empty?
+        return if sc.nil? || sc.empty?
+        # Rack 2 returns multiple Set-Cookie headers as a single
+        # newline-separated string; Rack 3 returns an Array. Treat both
+        # uniformly — splitting first means the second cookie in a
+        # multi-cookie response (Rails' session cookie alongside the
+        # remember_user_token) doesn't get silently dropped.
+        lines = sc.is_a?(Array) ? sc : sc.split("\n")
+        lines.each {|line|
+          pair, * = line.split(';', 2)
+          name, value = pair.to_s.split('=', 2)
+          next if name.nil? || name.empty?
+          @cookies[name.strip] = value.to_s.strip
         }
       end
 
