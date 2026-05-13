@@ -926,6 +926,15 @@ module Capybara
         # Outside the @ticking guard so the navigate's rebuild_ctx is
         # well-clear of the V8 call we just made.
         consume_pending_location if @pending_location
+        # Same shape for `form.submit()` queued by a timer callback —
+        # Forem's comment-edit form has an `onsubmit` handler that
+        # `preventDefault`s, polls for the CSRF meta tag inside
+        # `setInterval(…, 1)`, then calls `form.submit()` once the
+        # meta is present. The click that originally fired the submit
+        # event has already returned by the time the interval triggers,
+        # so without this drain the intent sits on the slot forever
+        # and the form never posts.
+        consume_pending_form_submit
       end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
