@@ -14,6 +14,7 @@ require 'rack/mock'
 require 'uri'
 require_relative 'errors'
 require_relative 'esm_rewriter'
+require_relative 'trace'
 require_relative 'v3_runtime'
 
 module Capybara
@@ -61,6 +62,17 @@ module Capybara
         @history_idx                  = -1
         @modal_handlers               = []
         @module_cache                 = {}
+        # Per-test action trace. `@trace` is the live recorder; `reset!`
+        # moves it to `@pending_trace` so an after-hook running after
+        # session reset still has access. `@trace_autostart` caches the
+        # env-var probe so `record_action`'s hot path doesn't pay an
+        # ENV lookup; `@trace_full` enables the v2-equivalent per-action
+        # DOM snapshot (default: skip dom_after, capture only on error).
+        @trace                        = nil
+        @pending_trace                = nil
+        @recording_action             = false
+        @trace_autostart              = !ENV['CSIM_TRACE_DIR'].nil?
+        @trace_full                   = ENV['CSIM_TRACE_FULL'] == '1'
         # ESM loading is on by default — Stimulus boots end-to-end with
         # the EventListener-object branch in `addEventListener`, and
         # `CSIM_V3_ESM=1`'s previous gating on a
@@ -698,10 +710,77 @@ module Capybara
         end
       end
       def with_modal(_)                   ; yield ; end
-      def start_trace(_)                  ; nil ; end
-      def trace                           ; nil ; end
-      def pending_trace                   ; nil ; end
-      def clear_trace!                    ; nil ; end
+      attr_reader :trace, :pending_trace
+
+      def start_trace(metadata = {})
+        @trace = Trace.new(metadata: metadata)
+      end
+
+      # Persist `trace` (defaults to live or pending) to `path` and
+      # return the path. Doesn't clear — `clear_trace!` is the explicit
+      # follow-up so a caller can inspect after writing if it wants.
+      def finish_trace_to(path, trace = (@trace || @pending_trace))
+        return nil unless trace
+        trace.write_json(path)
+      end
+
+      def clear_trace!
+        @trace         = nil
+        @pending_trace = nil
+      end
+
+      # Wraps a driver action so the trace records description, urls,
+      # console / network activity, and (on failure or in full-trace
+      # mode) a post-action DOM snapshot. Re-entrant: a recorded action
+      # that internally drives another recorded action (label-click →
+      # click, session send_keys → send_keys) lets the outer step own
+      # the boundary and the inner just yields.
+      #
+      # `description` is a String or Proc — Procs are lazy-evaluated
+      # only when a step is actually being recorded, so the no-trace
+      # off-path doesn't pay `describe_node_handle`'s V8 round-trip.
+      def record_action(kind, description)
+        if @trace.nil?
+          return yield unless @trace_autostart
+          @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
+        end
+        return yield if @recording_action
+        @recording_action = true
+        desc = description.is_a?(Proc) ? description.call : description
+        @trace.begin_step(kind, description: desc, url_before: @current_url)
+        error = nil
+        begin
+          yield
+        rescue => e
+          error = {class: e.class.name, message: e.message}
+          raise
+        ensure
+          # Skip the full-DOM serialize on the happy path — that's a
+          # V8 round-trip whose wall cost dwarfs everything else in the
+          # trace record. Snapshot only when the action errored (the
+          # interesting state to debug) or when full mode is on.
+          dom = (error || @trace_full) ? html : nil
+          @trace.finish_step(url_after: @current_url, dom_after: dom, error: error)
+          @recording_action = false
+        end
+      end
+
+      def log_console(severity, message) = @trace&.log_console(severity, message)
+      def log_network(method, url, status) = @trace&.log_network(method, url, status)
+
+      # `tag#id.class` short description of the handle, for trace
+      # `description` fields. One V8 round-trip; only paid when a step
+      # is actively being recorded (`record_action` lazy-evaluates the
+      # description Proc).
+      def describe_node_handle(handle)
+        return "handle=#{handle}" if handle.nil? || handle.zero?
+        info = @runtime.call('__csimDescribeNode', handle)
+        return "handle=#{handle}" unless info.is_a?(Hash)
+        s = info['tag'].to_s
+        s += "##{info['id']}"  if info['id'].to_s != ''
+        s += ".#{info['cls']}" if info['cls'].to_s != ''
+        s
+      end
       def evaluate_script(code, args = [])
         # Drain timers first so ready handlers (jQuery `$(handler)`,
         # framework `DOMContentLoaded` listeners) run before the
@@ -956,6 +1035,14 @@ module Capybara
         @history.clear
         @history_idx     = -1
         @file_picks      = {} if @file_picks
+        # Hand the live trace off to `@pending_trace` so an after-hook
+        # running after `reset_session!` (Capybara's per-test teardown
+        # order) still finds it. Anything stuck in `@pending_trace`
+        # from a prior test is dropped — better than fusing two
+        # tests' actions into one record.
+        @pending_trace    = @trace
+        @trace            = nil
+        @recording_action = false
         @runtime.reset_page
         reset_timer_state
         invalidate_find_cache
@@ -1083,6 +1170,7 @@ module Capybara
         @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
         status, resp_headers, resp_body = @app.call(env)
         body_str = read_rack_body(resp_body)
+        log_network(method, url, status)
         {'status' => status, 'headers' => stringify(resp_headers), 'body' => body_str}
       rescue StandardError => e
         warn "[capybara-simulated v3] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
@@ -1281,6 +1369,45 @@ module Capybara
       rescue URI::InvalidURIError
         to_url
       end
+
+      # Trace-wrap layer: prepended so the canonical method bodies above
+      # stay un-instrumented and a no-trace caller pays only the
+      # `record_action` early-exit. `super` forwards to the real impl
+      # within the `record_action` block, which handles begin/finish
+      # step bookkeeping + on-failure DOM snapshot.
+      module RecordedActions
+        def visit(url)
+          record_action(:visit, "visit #{url}") { super }
+        end
+        def refresh
+          record_action(:refresh, 'refresh') { super }
+        end
+        def go_back
+          record_action(:go_back, 'go_back') { super }
+        end
+        def go_forward
+          record_action(:go_forward, 'go_forward') { super }
+        end
+        def click(handle, keys = [], **opts)
+          record_action(:click, -> { "click #{describe_node_handle(handle)}" }) { super }
+        end
+        def set_value_with_events(handle, value)
+          record_action(:set, -> { "set #{describe_node_handle(handle)} = #{value.inspect[0, 80]}" }) { super }
+        end
+        def send_keys(handle, keys)
+          record_action(:send_keys, -> { "send_keys #{describe_node_handle(handle)} #{keys.inspect[0, 80]}" }) { super }
+        end
+        def select_option(handle)
+          record_action(:select, -> { "select #{describe_node_handle(handle)}" }) { super }
+        end
+        def unselect_option(handle)
+          record_action(:unselect, -> { "unselect #{describe_node_handle(handle)}" }) { super }
+        end
+        def submit_form(handle)
+          record_action(:submit, -> { "submit #{describe_node_handle(handle)}" }) { super }
+        end
+      end
+      prepend RecordedActions
     end
   end
 end

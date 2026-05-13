@@ -3039,6 +3039,41 @@
 
   globalThis.document = new Document();
   globalThis.window   = globalThis;
+
+  // console.* — wrap so each call lands on the Ruby host fn
+  // `__csim_logConsole(severity, message)` for trace capture, and
+  // also stays visible on stderr via mini_racer's default. App logs
+  // can be primitive-heavy on the hot path (Stimulus controller
+  // connect noise), so the fast path skips object formatting unless
+  // an arg is actually an object / Error.
+  const __consoleFmt = (v, seen) => {
+    if (v && typeof v === 'object') {
+      if (v instanceof Error) return v.stack || (v.name + ': ' + v.message);
+      if (seen.has(v)) return '[Circular]';
+      seen.add(v);
+      try { return JSON.stringify(v); } catch (_) { return String(v); }
+    }
+    return v;
+  };
+  const __consoleJoin = (args) => {
+    let needsFormat = false;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a !== null && typeof a === 'object') { needsFormat = true; break; }
+    }
+    if (!needsFormat) return Array.prototype.join.call(args, ' ');
+    const seen = new WeakSet();
+    const out  = new Array(args.length);
+    for (let i = 0; i < args.length; i++) out[i] = __consoleFmt(args[i], seen);
+    return out.join(' ');
+  };
+  globalThis.console = ['log', 'info', 'warn', 'error', 'debug'].reduce((acc, level) => {
+    acc[level] = function () {
+      try { __csim_logConsole(level, __consoleJoin(arguments)); } catch (_) {}
+      return undefined;
+    };
+    return acc;
+  }, {});
   // Window self-references that frame-aware code consults at boot:
   // `top`, `parent`, `self`, `frames`, `frameElement`. We're a
   // single-window runtime, so all of them point at the same global
@@ -4367,6 +4402,15 @@
     if (n._tag) return n._tag;
     if (n instanceof ShadowRoot) return 'ShadowRoot';
     return '';
+  };
+  // Trace `description` helper: `{tag, id, cls}` for a CSS-selector-ish
+  // short form. Class is truncated to the first whitespace-separated
+  // token so a node with 10 utility classes doesn't drown the trace.
+  globalThis.__csimDescribeNode = function (h) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) return null;
+    const cls = (n._attrs.class || '').trim().split(/\s+/)[0] || '';
+    return { tag: n._tag || '', id: n._attrs.id || '', cls: cls };
   };
   globalThis.__csimAttr      = function (h, name) {
     const n = lookup(h);

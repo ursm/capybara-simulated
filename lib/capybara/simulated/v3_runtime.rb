@@ -61,6 +61,7 @@ module Capybara
         // reference it inside the bridge's IIFE.
         globalThis.__csim_fetchModuleSource = function () { return null; };
         globalThis.__csim_pushImportmap     = function () { return null; };
+        globalThis.__csim_logConsole        = function () { return null; };
       JS
 
       @@snapshot_lock = Mutex.new
@@ -304,6 +305,7 @@ module Capybara
         c.attach('__csim_parseUrl',    ->(*a) { parse_url_for_js(a[0], a[1]) })
         c.attach('__csim_fetchModuleSource', ->(*a) { sc.() { fetch_module_source(browser, a[0]) } })
         c.attach('__csim_pushImportmap',     ->(*a) { sc.() { browser.set_importmap(a[0]); nil } })
+        c.attach('__csim_logConsole',        ->(*a) { sc.() { browser.log_console(a[0], a[1]); nil } })
       end
 
       # Bridges Ruby-side `Browser#load_module` (Rack fetch +

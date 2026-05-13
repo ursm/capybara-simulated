@@ -15,10 +15,36 @@ module Capybara
     class V3Driver < Capybara::Driver::Base
       attr_reader :app
 
+      class << self
+        # Thread-local "active driver" for the auto-trace RSpec /
+        # Minitest hooks. Capybara's `using_session` swaps the active
+        # session inside tests; by after-hook time the live session
+        # may not be `:simulated_v3` any more, so the hook reads from
+        # this slot instead of from `Capybara.current_session`.
+        def current      = Thread.current[:capybara_simulated_v3_driver]
+        def current=(d)  ; Thread.current[:capybara_simulated_v3_driver] = d ; end
+      end
+
       def initialize(app)
         @app     = app
         @browser = V3Browser.new(app)
+        self.class.current = self
       end
+
+      # Per-test trace recording. Mirrors capybara-playwright-driver's
+      # `start_tracing` / `stop_tracing` shape so suites can swap
+      # drivers without rewriting hooks.
+      def start_tracing(**metadata) = browser.start_trace(metadata)
+
+      def stop_tracing(path: nil)
+        active = current_trace or return nil
+        result = path ? browser.finish_trace_to(path, active) : active
+        browser.clear_trace!
+        result
+      end
+
+      def tracing?      = !current_trace.nil?
+      def current_trace = browser.trace || browser.pending_trace
 
       attr_reader :browser
       alias current_browser browser
