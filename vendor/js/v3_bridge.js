@@ -1199,6 +1199,16 @@
     // getter the call hits `undefined.search` and the whole bundle's
     // top-level module init aborts before the search-feed fetch fires.
     get location()      { return globalThis.location; }
+    // DOM spec URL accessors — all return the document's URL string.
+    // Honeybadger's XHR breadcrumb instrumentation calls
+    // `parseURL(document.URL)` to decide same-origin; without `URL`
+    // the parser is fed `undefined`, throws on `.match`, and the
+    // entire XHR open path that triggered the breadcrumb aborts
+    // (which on Forem's top-bar is the `/notifications/counts`
+    // request that populates the notification badge).
+    get URL()           { return (globalThis.location && globalThis.location.href) || ''; }
+    get documentURI()   { return this.URL; }
+    get baseURI()       { return this.URL; }
     // `document.cookie` IDL — getter returns the serialised cookie
     // jar, setter parses a single `name=value; flags…` line. The Ruby
     // host fns (`__getDocumentCookie` / `__setDocumentCookie`) own
@@ -4171,7 +4181,10 @@
       }
       if (!body) continue;
       try { (0, eval)(body); } catch (e) {
-        try { console.error('[csim v3] script threw in', s._attrs.src || '(inline)', ':', e && e.message); } catch (_) {}
+        try {
+          const where = s._attrs.src || ('(inline) ' + body.slice(0, 120).replace(/\s+/g, ' '));
+          console.error('[csim v3] script threw in', where, ':', e && (e.stack || e.message));
+        } catch (_) {}
       }
     }
     if (__observers.size && __pendingRecords.length) deliverMutations();
@@ -6734,7 +6747,7 @@
       catch (e) {
         try {
           const where = (t.handler && t.handler.toString && t.handler.toString().slice(0, 200)) || '(no source)';
-          console.error('[csim v3] timer threw:', e && e.message, '\n  handler:', where);
+          console.error('[csim v3] timer threw:', e && (e.stack || e.message), '\n  handler:', where);
         } catch (_) {}
       }
       if (__observers.size && __pendingRecords.length) deliverMutations();
