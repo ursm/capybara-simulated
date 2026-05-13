@@ -3826,20 +3826,67 @@
   globalThis.URL = function URL (input, base) {
     const u = __csim_parseUrl(String(input), base != null ? String(base) : null);
     if (!u || u.error) throw new TypeError('Invalid URL: ' + input);
-    this.href     = u.href;
-    this.protocol = u.protocol;
-    this.username = u.username;
-    this.password = u.password;
-    this.host     = u.host;
-    this.hostname = u.hostname;
-    this.port     = u.port;
-    this.pathname = u.pathname;
-    this.search   = u.search;
-    this.hash     = u.hash;
-    this.origin   = u.origin;
-    this.searchParams = new URLSearchParams(this.search);
+    this._protocol = u.protocol;
+    this._username = u.username;
+    this._password = u.password;
+    this._host     = u.host;
+    this._hostname = u.hostname;
+    this._port     = u.port;
+    this._pathname = u.pathname;
+    this._search   = u.search;
+    this._hash     = u.hash;
+    this._origin   = u.origin;
+    this.searchParams = new URLSearchParams(this._search);
   };
-  globalThis.URL.prototype.toString = function () { return this.href; };
+  // Recompute `href` from the parts so mutations to `search` / `pathname`
+  // / `hash` (Forem's followButtons.js builds the bulk-status URL via
+  // `url.search = sp`) propagate through `toString()` / `fetch(url)`.
+  // The simple `__csim_parseUrl` shape we keep on `_*` slots is enough
+  // to rebuild a same-origin URL by concatenation.
+  function __csimUrlBuildHref (u) {
+    const search = u._search && u._search[0] !== '?' && u._search.length ? '?' + u._search : (u._search || '');
+    const hash   = u._hash   && u._hash[0]   !== '#' && u._hash.length   ? '#' + u._hash   : (u._hash   || '');
+    return u._protocol + '//' +
+           (u._username ? (u._username + (u._password ? ':' + u._password : '') + '@') : '') +
+           u._host +
+           u._pathname +
+           search +
+           hash;
+  }
+  function __csimUrlNormSearch (val) {
+    const s = String(val == null ? '' : val);
+    if (!s.length) return '';
+    return s[0] === '?' ? s : '?' + s;
+  }
+  function __csimUrlNormHash (val) {
+    const s = String(val == null ? '' : val);
+    if (!s.length) return '';
+    return s[0] === '#' ? s : '#' + s;
+  }
+  Object.defineProperties(globalThis.URL.prototype, {
+    href:     { get () { return __csimUrlBuildHref(this); },
+                set (v) {
+                  const u = __csim_parseUrl(String(v), null);
+                  if (!u || u.error) throw new TypeError('Invalid URL: ' + v);
+                  this._protocol = u.protocol; this._username = u.username; this._password = u.password;
+                  this._host = u.host; this._hostname = u.hostname; this._port = u.port;
+                  this._pathname = u.pathname; this._search = u.search; this._hash = u.hash; this._origin = u.origin;
+                  this.searchParams = new URLSearchParams(this._search);
+                } },
+    protocol: { get () { return this._protocol; }, set (v) { this._protocol = String(v); } },
+    username: { get () { return this._username; }, set (v) { this._username = String(v); } },
+    password: { get () { return this._password; }, set (v) { this._password = String(v); } },
+    host:     { get () { return this._host; },     set (v) { this._host = String(v); } },
+    hostname: { get () { return this._hostname; }, set (v) { this._hostname = String(v); } },
+    port:     { get () { return this._port; },     set (v) { this._port = String(v); } },
+    pathname: { get () { return this._pathname; }, set (v) { this._pathname = String(v); } },
+    search:   { get () { return this._search; },
+                set (v) { this._search = __csimUrlNormSearch(v); this.searchParams = new URLSearchParams(this._search); } },
+    hash:     { get () { return this._hash; }, set (v) { this._hash = __csimUrlNormHash(v); } },
+    origin:   { get () { return this._origin; } }
+  });
+  globalThis.URL.prototype.toString = function () { return __csimUrlBuildHref(this); };
+  globalThis.URL.prototype.toJSON   = function () { return __csimUrlBuildHref(this); };
   // Real Blob URL bindings — `__csimInstallBlobURL` wires
   // createObjectURL / revokeObjectURL to the shared Blob registry
   // defined further up. The earlier conditional install is a no-op
