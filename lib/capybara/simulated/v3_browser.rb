@@ -114,6 +114,16 @@ module Capybara
         @runtime.call('__csimSetTraceActive', !@trace.nil?)
       end
 
+      # The viewport size lives on the JS-side `globalThis.innerWidth`
+      # / `globalThis.innerHeight` slots. Per-visit `rebuild_ctx` boots
+      # a fresh Context from the snapshot (1024×768) so we have to
+      # re-apply a resize made before the visit. Caller-level resizes
+      # via `set_viewport` use the same setter directly.
+      def apply_viewport
+        return unless @viewport_width && @viewport_height
+        @runtime.eval("globalThis.innerWidth = #{@viewport_width}; globalThis.innerHeight = #{@viewport_height};")
+      end
+
       # ── Capybara DSL surface (just enough for milestone 2) ──────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -683,9 +693,31 @@ module Capybara
 
       # Driver surface bits that v2 Browser exposes; stubbed for v3 PoC.
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
-      def set_viewport(*)                 ; nil ; end
-      def viewport_width                  ; 1024 ; end
-      def viewport_height                 ; 768 ; end
+      # Capybara's `current_window.resize_to(w, h)` lands here; the
+      # ahoy hamburger test (mobile breakpoint at 425×694) and any
+      # responsive-utility-aware test (Tailwind `m:` show / hide,
+      # bootstrap `.d-md-flex`, …) depends on this surfacing through
+      # the JS-side `innerWidth` / `innerHeight` so the cascade's
+      # `mediaMatches` and `matchMedia()` evaluate against the test's
+      # chosen viewport instead of the 1024×768 default.
+      def set_viewport(w, h)
+        @viewport_width  = w.to_i
+        @viewport_height = h.to_i
+        invalidate_find_cache
+        @runtime.eval("globalThis.innerWidth = #{@viewport_width}; globalThis.innerHeight = #{@viewport_height};")
+        # Recompute the cascade `@media` rules against the new
+        # viewport so visibility checks (Capybara `visible?`,
+        # `getComputedStyle().display`) re-reflect mobile-breakpoint
+        # `display: none` / `display: block` flips. Without this the
+        # cascade keeps the pre-resize hide-rule set.
+        @runtime.call('__csimRebuildCascade') if @document_handle.to_i > 0
+        # Re-fire a `resize` event so libraries that re-layout on
+        # resize (responsive nav, sidebar collapse) see the new size.
+        @runtime.eval("try { (globalThis.dispatchEvent || function(){})(new Event('resize')); } catch (_) {}")
+        nil
+      end
+      def viewport_width                  ; @viewport_width  || 1024 ; end
+      def viewport_height                 ; @viewport_height || 768  ; end
       def go_back
         return if @history_idx <= 0
         @history_idx -= 1
@@ -1068,6 +1100,7 @@ module Capybara
         reset_timer_state
         apply_esm_flag
         apply_trace_flag
+        apply_viewport
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
@@ -1077,6 +1110,14 @@ module Capybara
         @local_storage.clear
         @session_storage.clear
         @sticky_headers.clear
+        # The driver-side resize buffer has to clear too — without
+        # this the previous test's `driver.resize(425, …)` leaks into
+        # the next test's default viewport and any cascade rule that
+        # gates on `(min-width: …)` reports the wrong answer for the
+        # whole new test (Forem's comment-actions dropdown is
+        # mobile-collapsed-by-default).
+        @viewport_width = nil
+        @viewport_height = nil
         @current_url     = nil
         @document_handle = 0
         @history.clear
@@ -1368,6 +1409,7 @@ module Capybara
         reset_timer_state
         apply_esm_flag
         apply_trace_flag
+        apply_viewport
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
         # `runInlineScripts`. The JS bridge pushes the importmap back

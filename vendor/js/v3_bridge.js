@@ -4812,6 +4812,18 @@
       height: Number(globalThis.innerHeight) || VIEWPORT_DEFAULT.height
     };
   }
+  // Re-run the cascade resolution against the current viewport. Called
+  // from Ruby after `set_viewport` so `@media` rules update without a
+  // full reload — without this, a mobile-breakpoint resize (Forem's
+  // ahoy spec drops to 425×694) keeps every desktop-only `display`
+  // / `visibility` rule active and the hamburger trigger still
+  // reports as hidden via the cascade.
+  globalThis.__csimRebuildCascade = function () {
+    if (!globalThis.document || !globalThis.document.documentElement) return;
+    __hideRules = collectHideRules(globalThis.document);
+    __hideRuleIdx = null;
+    __layoutRules = collectLayoutRules(globalThis.document);
+  };
 
   function stripCssComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, ''); }
 

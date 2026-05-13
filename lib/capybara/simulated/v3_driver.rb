@@ -88,6 +88,10 @@ module Capybara
       def close_window(_)          ; nil ; end
       def switch_to_window(_)      ; nil ; end
       def resize_window_to(_, w, h) = browser.set_viewport(w, h)
+      # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly
+      # rather than through `current_window.resize_to`; mirror v2 by
+      # exposing the same shortcut.
+      def resize(w, h) = browser.set_viewport(w, h)
       def maximize_window(_)       ; nil ; end
 
       def evaluate_script(script, *args)
