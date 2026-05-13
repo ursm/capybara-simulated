@@ -3099,6 +3099,35 @@
 
   globalThis.Document = Document;     // so wgxpath patches Document.prototype.evaluate
   globalThis.Element  = Element;
+
+  // Per HTML spec GlobalEventHandlers, every standard `onX` event-
+  // handler IDL attribute exists as a property on Element /
+  // HTMLElement, default `null`. Preact normalizes `<form onSubmit=…>`
+  // to lowercase `addEventListener('submit', …)` only when its `l in
+  // n` probe sees `'onsubmit' in element` as truthy — otherwise it
+  // falls through to the case-sensitive `addEventListener('Submit',
+  // …)` branch and the event never fires. Pre-install all the names
+  // Preact / framework code touches as `null` slots on the prototype
+  // so the `in` probe succeeds and our existing `fireListeners`
+  // bubble pass (which already reads `node['on' + type]`) keeps
+  // picking up any later property assignment.
+  (function () {
+    const onNames = ('abort blur cancel canplay canplaythrough change click close ' +
+      'contextmenu copy cuechange cut dblclick drag dragend dragenter dragexit ' +
+      'dragleave dragover dragstart drop durationchange emptied ended error focus ' +
+      'formdata input invalid keydown keypress keyup load loadeddata loadedmetadata ' +
+      'loadstart mousedown mouseenter mouseleave mousemove mouseout mouseover ' +
+      'mouseup paste pause play playing pointercancel pointerdown pointerenter ' +
+      'pointerleave pointermove pointerout pointerover pointerup progress ratechange ' +
+      'reset resize scroll seeked seeking select selectstart selectionchange show ' +
+      'stalled submit suspend timeupdate toggle touchcancel touchend touchmove ' +
+      'touchstart transitioncancel transitionend transitionrun transitionstart ' +
+      'volumechange waiting wheel').split(/\s+/);
+    for (const n of onNames) {
+      const prop = 'on' + n;
+      if (!(prop in Element.prototype)) Element.prototype[prop] = null;
+    }
+  })();
   globalThis.Node     = Node;
   globalThis.Text     = Text;
   // DOM collection / element-subtype aliases. Libraries do constructor
