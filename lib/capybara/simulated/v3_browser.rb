@@ -71,7 +71,7 @@ module Capybara
         @trace                        = nil
         @pending_trace                = nil
         @recording_action             = false
-        @trace_autostart              = !ENV['CSIM_TRACE_DIR'].nil?
+        @trace_autostart              = ENV.key?('CSIM_TRACE_DIR')
         @trace_full                   = ENV['CSIM_TRACE_FULL'] == '1'
         # ESM loading is on by default — Stimulus boots end-to-end with
         # the EventListener-object branch in `addEventListener`, and
@@ -714,6 +714,7 @@ module Capybara
 
       def start_trace(metadata = {})
         @trace = Trace.new(metadata: metadata)
+        @runtime.call('__csimSetTraceActive', true)
       end
 
       # Persist `trace` (defaults to live or pending) to `path` and
@@ -727,6 +728,7 @@ module Capybara
       def clear_trace!
         @trace         = nil
         @pending_trace = nil
+        @runtime.call('__csimSetTraceActive', false)
       end
 
       # Wraps a driver action so the trace records description, urls,
@@ -743,6 +745,7 @@ module Capybara
         if @trace.nil?
           return yield unless @trace_autostart
           @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
+          @runtime.call('__csimSetTraceActive', true)
         end
         return yield if @recording_action
         @recording_action = true
@@ -777,8 +780,8 @@ module Capybara
         info = @runtime.call('__csimDescribeNode', handle)
         return "handle=#{handle}" unless info.is_a?(Hash)
         s = info['tag'].to_s
-        s += "##{info['id']}"  if info['id'].to_s != ''
-        s += ".#{info['cls']}" if info['cls'].to_s != ''
+        s += "##{info['id']}"  unless info['id'].to_s.empty?
+        s += ".#{info['cls']}" unless info['cls'].to_s.empty?
         s
       end
       def evaluate_script(code, args = [])
@@ -1044,6 +1047,10 @@ module Capybara
         @trace            = nil
         @recording_action = false
         @runtime.reset_page
+        # Per-visit ctx rebuild drops the JS-side trace-active flag,
+        # so re-flip it if we're carrying a pending trace into the
+        # next visit (apply_esm_flag pattern).
+        @runtime.call('__csimSetTraceActive', false)
         reset_timer_state
         invalidate_find_cache
       end

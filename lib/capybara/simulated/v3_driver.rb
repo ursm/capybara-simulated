@@ -21,8 +21,10 @@ module Capybara
         # session inside tests; by after-hook time the live session
         # may not be `:simulated_v3` any more, so the hook reads from
         # this slot instead of from `Capybara.current_session`.
-        def current      = Thread.current[:capybara_simulated_v3_driver]
-        def current=(d)  ; Thread.current[:capybara_simulated_v3_driver] = d ; end
+        def current = Thread.current[:capybara_simulated_v3_driver]
+        def current=(d)
+          Thread.current[:capybara_simulated_v3_driver] = d
+        end
       end
 
       def initialize(app)

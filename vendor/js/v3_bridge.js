@@ -3040,12 +3040,13 @@
   globalThis.document = new Document();
   globalThis.window   = globalThis;
 
-  // console.* — wrap so each call lands on the Ruby host fn
-  // `__csim_logConsole(severity, message)` for trace capture, and
-  // also stays visible on stderr via mini_racer's default. App logs
-  // can be primitive-heavy on the hot path (Stimulus controller
-  // connect noise), so the fast path skips object formatting unless
-  // an arg is actually an object / Error.
+  // Ruby flips `globalThis.__csim_traceActive` from `start_trace` /
+  // `clear_trace!` so the no-trace fast path skips the V8 → Ruby host
+  // fn round-trip entirely. Stimulus-heavy apps emit `console.debug`
+  // on every controller connect; without this gate each one paid ~6μs
+  // even though `log_console` would no-op Ruby-side.
+  globalThis.__csim_traceActive = false;
+  globalThis.__csimSetTraceActive = function (v) { globalThis.__csim_traceActive = !!v; };
   const __consoleFmt = (v, seen) => {
     if (v && typeof v === 'object') {
       if (v instanceof Error) return v.stack || (v.name + ': ' + v.message);
@@ -3055,6 +3056,8 @@
     }
     return v;
   };
+  // Primitive-only fast path: most app logs are strings / numbers,
+  // skip the WeakSet + arg-array allocation when there's no object.
   const __consoleJoin = (args) => {
     let needsFormat = false;
     for (let i = 0; i < args.length; i++) {
@@ -3067,13 +3070,18 @@
     for (let i = 0; i < args.length; i++) out[i] = __consoleFmt(args[i], seen);
     return out.join(' ');
   };
-  globalThis.console = ['log', 'info', 'warn', 'error', 'debug'].reduce((acc, level) => {
-    acc[level] = function () {
-      try { __csim_logConsole(level, __consoleJoin(arguments)); } catch (_) {}
-      return undefined;
-    };
-    return acc;
-  }, {});
+  const __consoleFn = (level) => function () {
+    if (!globalThis.__csim_traceActive) return undefined;
+    try { __csim_logConsole(level, __consoleJoin(arguments)); } catch (_) {}
+    return undefined;
+  };
+  globalThis.console = {
+    log:   __consoleFn('log'),
+    info:  __consoleFn('info'),
+    warn:  __consoleFn('warn'),
+    error: __consoleFn('error'),
+    debug: __consoleFn('debug')
+  };
   // Window self-references that frame-aware code consults at boot:
   // `top`, `parent`, `self`, `frames`, `frameElement`. We're a
   // single-window runtime, so all of them point at the same global
