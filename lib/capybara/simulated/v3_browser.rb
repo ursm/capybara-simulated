@@ -64,15 +64,23 @@ module Capybara
         @module_cache                 = {}
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
-        # session reset still has access. `@trace_autostart` caches the
-        # env-var probe so `record_action`'s hot path doesn't pay an
-        # ENV lookup; `@trace_full` enables the v2-equivalent per-action
-        # DOM snapshot (default: skip dom_after, capture only on error).
-        @trace                        = nil
-        @pending_trace                = nil
-        @recording_action             = false
-        @trace_autostart              = ENV.key?('CSIM_TRACE_DIR')
-        @trace_full                   = ENV['CSIM_TRACE_FULL'] == '1'
+        # session reset still has access. `@trace_mode` is cached at
+        # construction so `record_action`'s hot path doesn't pay an
+        # ENV lookup.
+        #
+        # `CSIM_TRACE=off|on-failure|full` (default `on-failure`):
+        # - `off`       — no recording at all; `record_action` early-exits.
+        # - `on-failure` — record kind/url/console/network in-memory;
+        #                  snapshot `dom_after` only on action error.
+        # - `full`      — record + snapshot DOM after every action
+        #                 (v2-equivalent; debug-heavy).
+        # File output is orthogonal — `CSIM_TRACE_DIR=path` makes the
+        # test-runner hook persist the trace JSON there; unset means
+        # in-memory only (no files written without explicit opt-in).
+        @trace            = nil
+        @pending_trace    = nil
+        @recording_action = false
+        @trace_mode       = parse_trace_mode(ENV['CSIM_TRACE'])
         # ESM loading is on by default — Stimulus boots end-to-end with
         # the EventListener-object branch in `addEventListener`, and
         # `CSIM_V3_ESM=1`'s previous gating on a
@@ -710,7 +718,15 @@ module Capybara
         end
       end
       def with_modal(_)                   ; yield ; end
-      attr_reader :trace, :pending_trace
+      attr_reader :trace, :pending_trace, :trace_mode
+
+      TRACE_MODES = {'off' => :off, 'on-failure' => :on_failure, 'full' => :full}.freeze
+      private_constant :TRACE_MODES
+
+      def parse_trace_mode(raw)
+        return :on_failure if raw.nil? || raw.empty?
+        TRACE_MODES[raw] || raise(ArgumentError, "CSIM_TRACE must be one of #{TRACE_MODES.keys.join(', ')}; got #{raw.inspect}")
+      end
 
       def start_trace(metadata = {})
         @trace = Trace.new(metadata: metadata)
@@ -732,18 +748,20 @@ module Capybara
       end
 
       # Wraps a driver action so the trace records description, urls,
-      # console / network activity, and (on failure or in full-trace
-      # mode) a post-action DOM snapshot. Re-entrant: a recorded action
-      # that internally drives another recorded action (label-click →
-      # click, session send_keys → send_keys) lets the outer step own
-      # the boundary and the inner just yields.
+      # console / network activity, and (on action error / full mode)
+      # a post-action DOM snapshot. Re-entrant: nested recorded actions
+      # (label-click → click, session send_keys → send_keys) let the
+      # outer step own the boundary and the inner just yields.
       #
       # `description` is a String or Proc — Procs are lazy-evaluated
-      # only when a step is actually being recorded, so the no-trace
-      # off-path doesn't pay `describe_node_handle`'s V8 round-trip.
+      # only when a step is actually being recorded, so the off-path
+      # doesn't pay `describe_node_handle`'s V8 round-trip.
       def record_action(kind, description)
+        # Off-mode: no autostart, only proceed if a trace was started
+        # explicitly via `driver.start_tracing`. Hot path for users
+        # who set CSIM_TRACE=off.
+        return yield if @trace.nil? && @trace_mode == :off
         if @trace.nil?
-          return yield unless @trace_autostart
           @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
           @runtime.call('__csimSetTraceActive', true)
         end
@@ -758,11 +776,12 @@ module Capybara
           error = {class: e.class.name, message: e.message}
           raise
         ensure
-          # Skip the full-DOM serialize on the happy path — that's a
-          # V8 round-trip whose wall cost dwarfs everything else in the
-          # trace record. Snapshot only when the action errored (the
-          # interesting state to debug) or when full mode is on.
-          dom = (error || @trace_full) ? html : nil
+          # `full` mode serializes the document after every action; the
+          # default `on_failure` mode only snapshots when an action
+          # errored. The V8 round-trip + DOM serialize is the
+          # expensive part of trace recording, so skipping it on the
+          # happy path is the whole point of the default.
+          dom = (error || @trace_mode == :full) ? html : nil
           @trace.finish_step(url_after: @current_url, dom_after: dom, error: error)
           @recording_action = false
         end
