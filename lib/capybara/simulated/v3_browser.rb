@@ -101,6 +101,17 @@ module Capybara
         @runtime.call('__csimSetEsmEnabled', @esm_enabled)
       end
 
+      # `console.*` short-circuits to a property read when this flag
+      # is false (see `vendor/js/v3_bridge.js`). The flag is a JS-side
+      # global, so it has to be re-applied after every `rebuild_ctx`
+      # while a trace is live — without this, page scripts that run
+      # during the per-visit `__csimLoadDocument` log to a stale
+      # (false) flag and their console output is dropped from the
+      # trace.
+      def apply_trace_flag
+        @runtime.call('__csimSetTraceActive', !@trace.nil?)
+      end
+
       # ── Capybara DSL surface (just enough for milestone 2) ──────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -1045,6 +1056,7 @@ module Capybara
         @runtime.rebuild_ctx
         reset_timer_state
         apply_esm_flag
+        apply_trace_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
@@ -1309,6 +1321,7 @@ module Capybara
         @runtime.rebuild_ctx
         reset_timer_state
         apply_esm_flag
+        apply_trace_flag
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
         # `runInlineScripts`. The JS bridge pushes the importmap back

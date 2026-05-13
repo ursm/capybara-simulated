@@ -1157,6 +1157,11 @@
     // undefined (reading 'pageYOffset')".
     get defaultView()   { return globalThis; }
     get parentWindow()  { return globalThis; }
+    // HTML spec `Document.location` aliases `window.location`. Forem's
+    // searchParams.js reads `document.location.search`; without this
+    // getter the call hits `undefined.search` and the whole bundle's
+    // top-level module init aborts before the search-feed fetch fires.
+    get location()      { return globalThis.location; }
     // Public accessor over the internal `_activeElement` slot that the
     // Element focus/blur methods write to. Returns the document's
     // body as a sentinel when no element is focused, matching real
@@ -4123,7 +4128,7 @@
       }
       if (!body) continue;
       try { (0, eval)(body); } catch (e) {
-        try { console.error('[csim v3] script threw:', e && e.message); } catch (_) {}
+        try { console.error('[csim v3] script threw in', s._attrs.src || '(inline)', ':', e && e.message); } catch (_) {}
       }
     }
     if (__observers.size && __pendingRecords.length) deliverMutations();
