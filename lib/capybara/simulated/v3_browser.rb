@@ -41,6 +41,8 @@ module Capybara
         @runtime                      = V3Runtime.new(self)
         @current_url                  = nil
         @cookies                      = {}
+        @local_storage                = {}
+        @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
         @intersection_observer_active = false
@@ -1063,6 +1065,8 @@ module Capybara
 
       def reset!
         @cookies.clear
+        @local_storage.clear
+        @session_storage.clear
         @sticky_headers.clear
         @current_url     = nil
         @document_handle = 0
@@ -1249,6 +1253,39 @@ module Capybara
         return if s.nil? || s.empty?
         name, rest = s.split('=', 2)
         @cookies[name] = (rest || '').split(';', 2).first.to_s
+      end
+
+      # Web Storage host-fn shims. The Ruby-side hashes survive
+      # `rebuild_ctx` between visits, so apps that cache user data in
+      # `localStorage` on page A (Forem's `browserStoreCache('set')`
+      # inside fetchBaseData) see it on page B — without this, every
+      # visit boots into a JS-side Map that starts empty and the
+      # first-call branches that hinge on cached user data (the
+      # onboarding task-card render, `initializeLocalStorageRender`,
+      # etc.) silently skip.
+      def storage_get(kind, key)
+        store(kind)[key.to_s]
+      end
+      def storage_set(kind, key, value)
+        store(kind)[key.to_s] = value.to_s
+        nil
+      end
+      def storage_remove(kind, key)
+        store(kind).delete(key.to_s)
+        nil
+      end
+      def storage_clear(kind)
+        store(kind).clear
+        nil
+      end
+      def storage_key(kind, index)
+        store(kind).keys[index.to_i]
+      end
+      def storage_length(kind)
+        store(kind).size
+      end
+      private def store(kind)
+        kind.to_s == 'session' ? @session_storage : @local_storage
       end
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops

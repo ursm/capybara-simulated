@@ -3509,28 +3509,30 @@
 
   // ── Web Storage ─────────────────────────────────────────────────
   //
-  // localStorage / sessionStorage — in-process Map per Browser. Per
-  // memory `web_storage_persistence`, v2 routes these through Ruby so
-  // they survive `boot_vm` rebuilds; v3 rebuilds per visit too, so
-  // we'd need the same Ruby-backed model for cross-visit persistence.
-  // For same-visit reads/writes the JS-side map is enough.
-  function __csimMakeStorage () {
-    const m = new Map();
-    const storage = {
-      get length () { return m.size; },
+  // localStorage / sessionStorage — Ruby-backed hashes on Browser so
+  // entries survive the per-visit `rebuild_ctx`. Without that, apps
+  // that cache state in `localStorage` on page A (Forem's
+  // `browserStoreCache('set')` inside fetchBaseData) lose it on
+  // page B and the first-call branches that hinge on cached data
+  // silently skip.
+  function __csimMakeStorage (kind) {
+    return {
+      get length () { return __csim_storageLength(kind); },
       key (i) {
-        const keys = Array.from(m.keys());
-        return i >= 0 && i < keys.length ? keys[i] : null;
+        const v = __csim_storageKey(kind, i | 0);
+        return v == null ? null : String(v);
       },
-      getItem (k)    { return m.has(String(k)) ? m.get(String(k)) : null; },
-      setItem (k, v) { m.set(String(k), String(v == null ? '' : v)); },
-      removeItem (k) { m.delete(String(k)); },
-      clear ()       { m.clear(); }
+      getItem (k) {
+        const v = __csim_storageGet(kind, String(k));
+        return v == null ? null : String(v);
+      },
+      setItem (k, v) { __csim_storageSet(kind, String(k), String(v == null ? '' : v)); },
+      removeItem (k) { __csim_storageRemove(kind, String(k)); },
+      clear ()       { __csim_storageClear(kind); }
     };
-    return storage;
   }
-  globalThis.localStorage   = __csimMakeStorage();
-  globalThis.sessionStorage = __csimMakeStorage();
+  globalThis.localStorage   = __csimMakeStorage('local');
+  globalThis.sessionStorage = __csimMakeStorage('session');
 
   // ── ClipboardEvent ──────────────────────────────────────────────
   //
@@ -3769,6 +3771,58 @@
   // also return Promises). V8 microtasks drain after each Context#eval
   // so the `await fetch(...)` chains in request.js progress without
   // any explicit ticking.
+  // `btoa(data)` / `atob(data)` — WindowOrWorkerGlobalScope base64
+  // helpers. Spec restricts input to Latin1 (each codepoint ≤ 0xFF);
+  // higher codepoints throw `InvalidCharacterError`. Apps that need
+  // Unicode base64 wrap their input through `encodeURIComponent` and
+  // the `%XX → char` round-trip (Forem's `base64EncodeUnicode`), so
+  // matching real-browser behaviour is what unlocks them.
+  const __B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const __B64_INDEX = (function () {
+    const m = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) m[i] = 255;
+    for (let i = 0; i < 64; i++) m[__B64_CHARS.charCodeAt(i)] = i;
+    return m;
+  })();
+  globalThis.btoa = function btoa (data) {
+    const s = String(data);
+    let out = '';
+    for (let i = 0; i < s.length; i += 3) {
+      const c1 = s.charCodeAt(i);
+      const c2 = i + 1 < s.length ? s.charCodeAt(i + 1) : NaN;
+      const c3 = i + 2 < s.length ? s.charCodeAt(i + 2) : NaN;
+      if (c1 > 0xff || (i + 1 < s.length && c2 > 0xff) || (i + 2 < s.length && c3 > 0xff)) {
+        throw new Error("InvalidCharacterError: 'btoa' input contained non-Latin1 char");
+      }
+      const b1 = c1 >> 2;
+      const b2 = ((c1 & 3) << 4) | (Number.isNaN(c2) ? 0 : (c2 >> 4));
+      const b3 = Number.isNaN(c2) ? 64 : (((c2 & 15) << 2) | (Number.isNaN(c3) ? 0 : (c3 >> 6)));
+      const b4 = Number.isNaN(c3) ? 64 : (c3 & 63);
+      out += __B64_CHARS[b1] + __B64_CHARS[b2] +
+             (b3 === 64 ? '=' : __B64_CHARS[b3]) +
+             (b4 === 64 ? '=' : __B64_CHARS[b4]);
+    }
+    return out;
+  };
+  globalThis.atob = function atob (data) {
+    let s = String(data).replace(/[\t\n\f\r ]/g, '');
+    if (s.length % 4 === 1) throw new Error("InvalidCharacterError: bad 'atob' length");
+    s = s.replace(/=+$/, '');
+    let out = '';
+    let bits = 0, value = 0;
+    for (let i = 0; i < s.length; i++) {
+      const idx = __B64_INDEX[s.charCodeAt(i)];
+      if (idx === 255) throw new Error("InvalidCharacterError: bad 'atob' char");
+      value = (value << 6) | idx;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out += String.fromCharCode((value >> bits) & 0xff);
+      }
+    }
+    return out;
+  };
+
   globalThis.URL = function URL (input, base) {
     const u = __csim_parseUrl(String(input), base != null ? String(base) : null);
     if (!u || u.error) throw new TypeError('Invalid URL: ' + input);

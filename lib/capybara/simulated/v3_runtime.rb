@@ -55,6 +55,12 @@ module Capybara
         globalThis.__setCurrentUrl          = function () { return null; };
         globalThis.__getDocumentCookie      = function () { return ''; };
         globalThis.__setDocumentCookie      = function () { return null; };
+        globalThis.__csim_storageGet        = function () { return null; };
+        globalThis.__csim_storageSet        = function () { return null; };
+        globalThis.__csim_storageRemove     = function () { return null; };
+        globalThis.__csim_storageClear      = function () { return null; };
+        globalThis.__csim_storageKey        = function () { return null; };
+        globalThis.__csim_storageLength     = function () { return 0; };
         globalThis.__modalDialog            = function () { return null; };
         // ESM loader callback — overridden by Ruby host fn at boot.
         // Has to exist on the snapshot so `__csim_require` can
@@ -295,6 +301,12 @@ module Capybara
         c.attach('__setCurrentUrl',                 ->(*a) { sc.() { browser.history_state(a[0]); nil } })
         c.attach('__getDocumentCookie',             ->(*a) { sc.() { browser.document_cookie } })
         c.attach('__setDocumentCookie',             ->(*a) { sc.() { browser.write_document_cookie(a[0].to_s); nil } })
+        c.attach('__csim_storageGet',               ->(*a) { sc.() { browser.storage_get(a[0], a[1]) } })
+        c.attach('__csim_storageSet',               ->(*a) { sc.() { browser.storage_set(a[0], a[1], a[2]); nil } })
+        c.attach('__csim_storageRemove',            ->(*a) { sc.() { browser.storage_remove(a[0], a[1]); nil } })
+        c.attach('__csim_storageClear',             ->(*a) { sc.() { browser.storage_clear(a[0]); nil } })
+        c.attach('__csim_storageKey',               ->(*a) { sc.() { browser.storage_key(a[0], a[1]) } })
+        c.attach('__csim_storageLength',            ->(*a) { sc.() { browser.storage_length(a[0]) } })
         c.attach('__modalDialog',                   ->(*a) { sc.() { browser.handle_modal(a[0], a[1], a[2]) } })
         c.attach('__csim_randomUUID',  ->(*a) { SecureRandom.uuid })
         c.attach('__csim_randomBytes', ->(*a) { SecureRandom.bytes(a[0].to_i).bytes })
