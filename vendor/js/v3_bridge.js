@@ -1044,6 +1044,43 @@
       }
     }
     get outerHTML() { return serializeElement(this); }
+    // `insertAdjacentHTML(position, html)` — DOM spec method. Forem's
+    // initializeBroadcast uses `el.insertAdjacentHTML('afterbegin', …)`
+    // to inject the announcement banner. Positions: `beforebegin` /
+    // `afterbegin` / `beforeend` / `afterend`.
+    insertAdjacentHTML(position, html) {
+      const pos  = String(position || '').toLowerCase();
+      const frag = parseFragment(String(html == null ? '' : html));
+      if (pos === 'beforebegin' || pos === 'afterend') {
+        if (!this._parent) return;
+        const ref = pos === 'beforebegin' ? this : this._children && this.nextSibling;
+        for (const c of frag) this._parent.insertBefore(c, pos === 'afterend' ? this.nextSibling : this);
+        return;
+      }
+      if (pos === 'afterbegin') {
+        const first = this._children[0] || null;
+        for (const c of frag) this.insertBefore(c, first);
+        return;
+      }
+      if (pos === 'beforeend') {
+        for (const c of frag) this.appendChild(c);
+      }
+    }
+    insertAdjacentText(position, text) {
+      this.insertAdjacentHTML(position, escapeText(String(text == null ? '' : text)));
+    }
+    insertAdjacentElement(position, element) {
+      const pos = String(position || '').toLowerCase();
+      if (pos === 'beforebegin' || pos === 'afterend') {
+        if (!this._parent) return null;
+        this._parent.insertBefore(element, pos === 'afterend' ? this.nextSibling : this);
+      } else if (pos === 'afterbegin') {
+        this.insertBefore(element, this._children[0] || null);
+      } else if (pos === 'beforeend') {
+        this.appendChild(element);
+      }
+      return element;
+    }
     attachShadow(init) {
       if (this._shadowRoot) return this._shadowRoot;
       const mode = init && init.mode === 'closed' ? 'closed' : 'open';
@@ -1162,6 +1199,12 @@
     // getter the call hits `undefined.search` and the whole bundle's
     // top-level module init aborts before the search-feed fetch fires.
     get location()      { return globalThis.location; }
+    // `document.cookie` IDL — getter returns the serialised cookie
+    // jar, setter parses a single `name=value; flags…` line. The Ruby
+    // host fns (`__getDocumentCookie` / `__setDocumentCookie`) own
+    // the storage; Browser-side cookies survive ctx rebuilds.
+    get cookie()        { return __getDocumentCookie() || ''; }
+    set cookie(v)       { __setDocumentCookie(String(v == null ? '' : v)); }
     // Public accessor over the internal `_activeElement` slot that the
     // Element focus/blur methods write to. Returns the document's
     // body as a sentinel when no element is focused, matching real
@@ -6689,7 +6732,10 @@
       else __timers.delete(nextId);
       try { t.handler.apply(null, t.args || []); }
       catch (e) {
-        try { console.error('[csim v3] timer threw:', e && e.message); } catch (_) {}
+        try {
+          const where = (t.handler && t.handler.toString && t.handler.toString().slice(0, 200)) || '(no source)';
+          console.error('[csim v3] timer threw:', e && e.message, '\n  handler:', where);
+        } catch (_) {}
       }
       if (__observers.size && __pendingRecords.length) deliverMutations();
       fired++;
