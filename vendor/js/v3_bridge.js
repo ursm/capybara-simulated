@@ -2248,6 +2248,42 @@
   // filter — that's preferable to silently matching everything (which
   // was the pre-throw behaviour and broke Redmine's mobile probe).
 
+  // Read a CSS identifier starting at `s[i]`. Handles backslash
+  // escapes per the CSS Syntax spec subset that real apps emit:
+  //
+  //   \<non-hex char>      → the literal char (Tailwind's `\:` `\/`)
+  //   \<1–6 hex digits>    → Unicode code point (optional trailing space)
+  //
+  // Returns `[name, nextIndex]`. Callers reject empty names.
+  function readIdent(s, i) {
+    const len = s.length;
+    let out = '';
+    while (i < len) {
+      const c = s[i];
+      if (/[\w-]/.test(c)) { out += c; i++; continue; }
+      if (c === '\\') {
+        if (i + 1 >= len) break;
+        const next = s[i + 1];
+        if (/[0-9a-fA-F]/.test(next)) {
+          let j = i + 1, hex = '';
+          while (j < len && hex.length < 6 && /[0-9a-fA-F]/.test(s[j])) {
+            hex += s[j];
+            j++;
+          }
+          if (j < len && /\s/.test(s[j])) j++;
+          out += String.fromCodePoint(parseInt(hex, 16));
+          i = j;
+          continue;
+        }
+        out += next;
+        i += 2;
+        continue;
+      }
+      break;
+    }
+    return [out, i];
+  }
+
   function tokenizeSelector(s) {
     const tokens = [];
     let i = 0;
@@ -2265,17 +2301,15 @@
       if (c === ',') { tokens.push({ kind: 'comma' }); i++; continue; }
       if (c === '*') { tokens.push({ kind: 'star' }); i++; continue; }
       if (c === '#') {
-        let j = i + 1;
-        while (j < len && /[\w-]/.test(s[j])) j++;
+        const [name, j] = readIdent(s, i + 1);
         if (j === i + 1) throw new SyntaxError('csim v3: bad #id at ' + i);
-        tokens.push({ kind: 'hash', value: s.slice(i + 1, j) });
+        tokens.push({ kind: 'hash', value: name });
         i = j; continue;
       }
       if (c === '.') {
-        let j = i + 1;
-        while (j < len && /[\w-]/.test(s[j])) j++;
+        const [name, j] = readIdent(s, i + 1);
         if (j === i + 1) throw new SyntaxError('csim v3: bad .class at ' + i);
-        tokens.push({ kind: 'class', value: s.slice(i + 1, j) });
+        tokens.push({ kind: 'class', value: name });
         i = j; continue;
       }
       if (c === '[') {
@@ -3242,12 +3276,18 @@
     colorDepth: 24, pixelDepth: 24,
     orientation: { angle: 0, type: 'landscape-primary' }
   };
-  // `matchMedia(query)` — returns a MediaQueryList-shaped object with
-  // `matches=false` (we don't have layout, so no query matches).
+  // `matchMedia(query)` — reuses the same evaluator the CSS cascade
+  // uses for `@media` blocks (`mediaMatches`), so JS-side feature
+  // queries agree with what the cascade applies. Viewport tracks
+  // `innerWidth` / `innerHeight` (1024×768 by default), which is
+  // enough for `(min-width: …)` / `(max-width: …)` — the breakpoint
+  // queries Tailwind / Bootstrap emit. `MediaQueryList` listener
+  // surface stays inert: with no layout there's no resize event.
   globalThis.matchMedia = function matchMedia (query) {
+    const text = String(query || '');
     return {
-      media: String(query || ''),
-      matches: false,
+      media: text,
+      get matches () { return mediaMatches(text, currentViewport()); },
       onchange: null,
       addListener: () => {}, removeListener: () => {},
       addEventListener: () => {}, removeEventListener: () => {},
