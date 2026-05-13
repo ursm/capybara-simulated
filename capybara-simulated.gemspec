@@ -5,8 +5,8 @@ Gem::Specification.new do |spec|
   spec.version     = Capybara::Simulated::VERSION
   spec.authors     = ['Keita Urashima']
   spec.email       = ['ursm@ursm.jp']
-  spec.summary     = 'Lightweight Capybara driver powered by Nokogiri + a pluggable JS engine'
-  spec.description = "A Capybara driver that runs JavaScript against a Nokogiri-backed DOM. The JS engine is a soft dependency — pick QuickJS, V8 (mini_racer), or 'none' to disable JS entirely. Sits between rack-test and full headless browsers."
+  spec.summary     = 'Lightweight Capybara driver with a V8-resident DOM, in-process and Chrome-free'
+  spec.description = 'A Capybara driver that runs JavaScript against a V8-resident DOM via mini_racer — no Chrome, no Node toolchain. Forms submit through Rack::MockRequest, inline <script> + event handlers run, Hotwire / Stimulus / Turbo work, and Capybara DSL is unchanged. Sits between rack-test and full headless browsers.'
   spec.homepage    = 'https://github.com/ursm/capybara-simulated'
   spec.license     = 'MIT'
 
@@ -31,13 +31,10 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'p_css',    '>= 0.2.0.beta1'
   spec.add_dependency 'rack',     '>= 2.2'
 
-  # JS engines are soft dependencies. Pick one in your own Gemfile:
+  # JS engine is a soft dependency. The v3 driver (`:simulated_v3`)
+  # requires V8 via mini_racer; the legacy v2 driver (`:simulated`)
+  # additionally accepts QuickJS or `none`.
   #
-  #   gem 'quickjs',    '>= 0.17.0.pre' # interpreted, low Ruby↔JS overhead
-  #   gem 'mini_racer'                  # V8, JIT-fast pure JS
-  #
-  # Select at runtime via `CSIM_JS_ENGINE={quickjs,v8,none}` (defaults
-  # to whichever gem is loadable). Without either gem the driver
-  # falls back to `none` — no `<script>` execution (rack-test parity)
-  # but full DOM / forms / cookies / Nokogiri parsing.
+  #   gem 'mini_racer'                  # V8 — required for :simulated_v3
+  #   gem 'quickjs',    '>= 0.17.0.pre' # QuickJS — :simulated only
 end
