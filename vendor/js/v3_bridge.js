@@ -4516,7 +4516,18 @@
     __hideRuleIdx = null; // rebuilt lazily on first lookup
     __layoutRules = collectLayoutRules(globalThis.document);
     runInlineScripts(globalThis.document);
+    // Browsers fire `readystatechange` on every `document.readyState`
+    // transition. Turbo Drive's `PageObserver` listens on document
+    // for it and only dispatches `turbo:load` once readyState reaches
+    // 'complete'; Avo's `initTippy()` (and a long tail of other
+    // `turbo:load`-bound init) won't run unless we fire the
+    // transition. We compress `loading→interactive→complete` into
+    // two dispatches at the end of the parse — close enough for
+    // observers that just gate on the final state.
+    d.readyState = 'interactive';
+    try { dispatchEvent(d, new Event('readystatechange', { bubbles: false, cancelable: false })); } catch (_) {}
     d.readyState = 'complete';
+    try { dispatchEvent(d, new Event('readystatechange', { bubbles: false, cancelable: false })); } catch (_) {}
     // Flip the dynamic-script gate on: post-load <script> appends
     // (Rails-UJS dataType:'script' eval into head, jQuery .html() of
     // a fragment containing <script>) will now run via the
