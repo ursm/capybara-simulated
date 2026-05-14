@@ -5744,6 +5744,47 @@
     'h6','header','hr','li','main','nav','ol','p','pre','section',
     'table','tbody','td','tfoot','th','thead','tr','ul'
   ]);
+  // Adjacent `<th>` / `<td>` cells get a U+0009 between them per the
+  // innerText spec §14.4 step 4 ("required line break count" carries a
+  // tab on table-cell boundaries). The expected text in Avo's
+  // `table thead` assertion is `"A\n\t\nB"`, which only comes out
+  // after appending this tab AFTER each cell that has a next cell
+  // sibling.
+  const TABLE_CELL_TAGS = new Set(['td','th']);
+  function hasNextCellSibling(node) {
+    const siblings = node._parent && node._parent._children;
+    if (!siblings) return false;
+    const i = siblings.indexOf(node);
+    for (let j = i + 1; j < siblings.length; j++) {
+      const s = siblings[j];
+      if (s.nodeType === NODE_ELEMENT && TABLE_CELL_TAGS.has(s._tag)) return true;
+    }
+    return false;
+  }
+  // CSS flex / grid containers blockify their children, so innerText
+  // joins them with `\n` even when the children are `<a>` / `<span>`
+  // (Avo's tab switcher: a `<div class="flex flex-wrap">` of `<a>`s).
+  // Detection covers the inline-style override and the Tailwind utility
+  // class — the two ways every observed real-world flex container in
+  // the test suites declares itself. Other CSS rules can flow in later
+  // via the cascade if a test needs it.
+  const FLEX_LIKE_DISPLAY = new Set(['flex','grid','inline-flex','inline-grid']);
+  const INLINE_DISPLAY_RE = /(?:^|;)\s*display\s*:\s*([^;!]+?)\s*(?:!important)?\s*(?:;|$)/i;
+  function isFlexLikeContainer(el) {
+    const style = el._attrs && el._attrs.style;
+    if (style) {
+      const m = INLINE_DISPLAY_RE.exec(style);
+      if (m) {
+        const v = m[1].trim().toLowerCase();
+        // Inline `display` wins over class-derived `flex`, either way.
+        return FLEX_LIKE_DISPLAY.has(v);
+      }
+    }
+    for (const tok of classTokens(el)) {
+      if (FLEX_LIKE_DISPLAY.has(tok)) return true;
+    }
+    return false;
+  }
   // text-transform inherits per CSS — resolve once per element by
   // walking inline style → cascade → parent. Capybara's case-insensitive
   // assertion message ("found 1 time using a case insensitive search")
@@ -5843,14 +5884,22 @@
       }
       transform = effTransform;
     }
+    const flexContext = node.nodeType === NODE_ELEMENT && isFlexLikeContainer(node);
     let out = '';
     for (const c of node._children) {
+      // Whitespace-only text nodes between flex/grid items don't
+      // produce visible runs (no anonymous flex item is generated
+      // for whitespace).
+      if (flexContext && c.nodeType === NODE_TEXT && !/\S/.test(String(c.data || ''))) continue;
       const part = collectVisibleText(c, transform);
       if (!part) continue;
-      const isBlock = c.nodeType === NODE_ELEMENT && BLOCK_TAGS.has(c._tag);
+      const isBlock = c.nodeType === NODE_ELEMENT && (BLOCK_TAGS.has(c._tag) || flexContext);
       if (isBlock && out && !out.endsWith('\n')) out += '\n';
       out += part;
       if (isBlock && !part.endsWith('\n')) out += '\n';
+      if (c.nodeType === NODE_ELEMENT && TABLE_CELL_TAGS.has(c._tag) && hasNextCellSibling(c)) {
+        out += '\t';
+      }
     }
     return out;
   }
