@@ -2955,13 +2955,20 @@
     // and split the value into bogus garbage attributes. The repeated
     // alternation handles bare chars, double-quoted strings, and
     // single-quoted strings; everything else stops at `>`.
-    const re = /<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+    //
+    // Comment alternative `<!-- … -->` matches first so an HTML
+    // comment doesn't leak into the surrounding text run and end up
+    // as part of `Element.textContent` (Avo renders ViewComponent
+    // slot-controls cells as `<!-- Item controls cell -->` markers
+    // that would otherwise show up in column-header text assertions).
+    const re = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
     let m, last = 0;
     while ((m = re.exec(html)) !== null) {
       if (m.index > last) {
         const text = html.slice(last, m.index);
         if (text.length) pushChild(makeText(text));
       }
+      if (m[0].startsWith('<!--')) { last = re.lastIndex; continue; }
       const closing = m[1] === '/';
       const tag = m[2].toLowerCase();
       const rest = m[3];
