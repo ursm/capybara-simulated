@@ -1546,6 +1546,8 @@ module Capybara
       # (the rack_fetch path) preserves any value the caller already
       # set on `env`, so JS-supplied `XHR.setRequestHeader` /
       # `fetch(..., {headers: ...})` overrides win.
+      DEFAULT_HTTP_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'.freeze
+
       def apply_default_request_env(env, referer:, force: true)
         if force
           env['HTTP_USER_AGENT'] = USER_AGENT
@@ -1556,6 +1558,19 @@ module Capybara
           env['REMOTE_ADDR']     ||= REMOTE_ADDR
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
         end
+        # Browsers always send an `Accept` header; Rack::MockRequest
+        # leaves it nil, which Rails reads as `Mime::HTML` *only* in
+        # its formats list. Controllers with only `format.turbo_stream`
+        # (Avo's actions / flash-render path) then raise
+        # `ActionController::UnknownFormat`. Send the same
+        # wildcard-trailing Accept Chromium / Firefox use so the
+        # server can negotiate — HTML-only routes still pick html,
+        # both-available pick the first registered. (Turbo-stream-
+        # only routes will respond with turbo-stream HTML which v3
+        # still loads as a page; those tests stay broken until v3
+        # can apply turbo-stream actions, but at least the controller
+        # doesn't raise UnknownFormat for them.)
+        env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
         env['HTTP_REFERER'] = referer         unless referer.nil? || referer.empty?
         env['HTTP_COOKIE']  = document_cookie unless @cookies.empty?
       end
