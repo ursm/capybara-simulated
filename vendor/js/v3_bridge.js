@@ -230,8 +230,35 @@
     // never submits.
     click() {
       try {
+        // HTML spec activation behaviour for `<input type=checkbox>` /
+        // `<input type=radio>` toggles the checked state *before* the
+        // click event fires (the "pre-click activation steps"), then
+        // fires `input` + `change` after the click if the event wasn't
+        // canceled. Avo's item-select-all controller relies on this:
+        // its `toggle` handler does `checkbox.click()` per item and
+        // expects each one to flip its checked state — without the
+        // toggle here those clicks bubble out as no-ops.
+        let isInputControl = false;
+        let inputType = '';
+        if (this._tag === 'input') {
+          inputType = (this._attrs.type || '').toLowerCase();
+          isInputControl = inputType === 'checkbox' || inputType === 'radio';
+        }
+        const wasChecked = isInputControl ? (this._attrs.checked != null) : null;
+        if (isInputControl) {
+          if (inputType === 'checkbox') toggleChecked(this);
+          else                          setRadio(this);
+        }
         const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, which: 1 });
         dispatchEvent(this, ev);
+        if (ev.defaultPrevented && isInputControl) {
+          // Roll back the state change if the click was cancelled.
+          if (wasChecked) this._attrs.checked = '';
+          else            delete this._attrs.checked;
+        } else if (isInputControl && (this._attrs.checked != null) !== wasChecked) {
+          try { dispatchEvent(this, new InputEvent('input',  { bubbles: true, cancelable: true })); } catch (_) {}
+          try { dispatchEvent(this, new Event('change', { bubbles: true, cancelable: false })); } catch (_) {}
+        }
         if (!ev.defaultPrevented && isSubmitButton(this)) {
           const form = formForControl(this);
           if (form) {
