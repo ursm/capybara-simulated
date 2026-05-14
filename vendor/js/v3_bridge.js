@@ -6798,13 +6798,16 @@
       }
     }
     let tag = n._tag;
-    // readonly / disabled inputs reject programmatic value changes —
-    // mirrors what real browsers + selenium do.
-    // `readonly` only applies to text-shaped controls per HTML;
-    // checkboxes / radios / file inputs ignore it. `disabled` rejects
-    // every control type.
+    // `readonly` reject programmatic value changes for text-shaped
+    // inputs. `disabled` does NOT — real-browser parity (and Cuprite,
+    // which uses the native HTMLInputElement value setter) lets
+    // programmatic assignment write through. The form-submit gate
+    // separately drops disabled controls' values. Avo's KeyValueField
+    // with `disable_editing_values: true` renders the value `<input
+    // disabled>` and relies on the Stimulus controller's `input`
+    // event listener to copy the typed value into a sibling
+    // `<textarea>` that IS submitted.
     if (tag === 'input' || tag === 'textarea') {
-      if (n._attrs.disabled != null) return false;
       if (n._attrs.readonly != null) {
         const t = (n._attrs.type || 'text').toLowerCase();
         const READONLY_RESPECTING = new Set(['text', 'email', 'password', 'tel', 'url', 'search', 'number', 'date', 'datetime-local', 'time', 'week', 'month']);
