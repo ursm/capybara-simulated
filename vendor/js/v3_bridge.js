@@ -1934,8 +1934,17 @@
     const prevWinEvent = globalThis.event;
     globalThis.event = event;
     try {
-      // capture: root → target's parent
+      // Capture: window → root → target's parent. Turbo Drive's
+      // FormSubmitObserver / LinkClickObserver attach to `window`
+      // with `{capture: true}` and call `event.preventDefault()` to
+      // take over the navigation / submission; skipping the window
+      // hop means every form falls through to v3's Ruby-side
+      // submit_form_handle without Turbo's turbo-stream Accept
+      // header, and the receiving controller (e.g. Avo actions)
+      // raises `ActionController::UnknownFormat`.
       event.eventPhase = 1;
+      fireWindowListeners(event, true);
+      if (event._propagationStopped) return !event.defaultPrevented;
       for (let i = path.length - 1; i > 0; i--) {
         fireListeners(path[i], event, true);
         if (event._propagationStopped) return !event.defaultPrevented;
@@ -1945,16 +1954,31 @@
       fireListeners(target, event, false);
       fireListeners(target, event, true);
       if (event._propagationStopped || !event.bubbles) return !event.defaultPrevented;
-      // bubble: target's parent → root
+      // bubble: target's parent → root → window
       event.eventPhase = 3;
       for (let i = 1; i < path.length; i++) {
         fireListeners(path[i], event, false);
         if (event._propagationStopped) return !event.defaultPrevented;
       }
+      fireWindowListeners(event, false);
       return !event.defaultPrevented;
     } finally {
       if (__observers.size && __pendingRecords.length) deliverMutations();
       globalThis.event = prevWinEvent;
+    }
+  }
+  // Surface window-registered listeners during the capture / bubble
+  // phases of an element dispatch — Turbo attaches its observers
+  // there and we'd otherwise never invoke them.
+  function fireWindowListeners(event, capture) {
+    const list = __windowListeners[event.type];
+    if (!list || !list.length) return;
+    event.currentTarget = globalThis;
+    for (const { handler, capture: cap } of list.slice()) {
+      if (!!cap !== !!capture) continue;
+      if (event._propagationStopped) return;
+      try { handler.call(globalThis, event); }
+      catch (e) { try { console.error('[csim v3] window listener threw:', e && e.message); } catch (_) {} }
     }
   }
   function fireListeners(node, event, capture) {
