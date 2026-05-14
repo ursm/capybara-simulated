@@ -4462,8 +4462,8 @@
     // children. In the base case we just append onto the empty doc.
     __initialScriptsDone = false;
     __hideRules = [];
-    __hideRuleIdx = null;
     __layoutRules = [];
+    __hideRuleIdx = __layoutRuleIdx = null;
     // Hover / pending-submit slots are per-visit transient state —
     // clear them so a stale `_hoverElement` from the previous page
     // can't keep matching `:hover` cascade rules against detached
@@ -4531,7 +4531,7 @@
     // queries Capybara-visible elements would otherwise see the
     // pre-cascade state.
     ({ hide: __hideRules, layout: __layoutRules } = collectCascadeRules(globalThis.document));
-    __hideRuleIdx = null; // rebuilt lazily on first lookup
+    __hideRuleIdx = __layoutRuleIdx = null; // rebuilt lazily on first lookup
     runInlineScripts(globalThis.document);
     // Browsers fire `readystatechange` on every `document.readyState`
     // transition. Turbo Drive's `PageObserver` listens on document
@@ -5017,7 +5017,7 @@
   globalThis.__csimRebuildCascade = function () {
     if (!globalThis.document || !globalThis.document.documentElement) return;
     ({ hide: __hideRules, layout: __layoutRules } = collectCascadeRules(globalThis.document));
-    __hideRuleIdx = null;
+    __hideRuleIdx = __layoutRuleIdx = null;
   };
 
   function stripCssComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, ''); }
@@ -5457,8 +5457,16 @@
   // resolution (specificity + source order + !important) works the
   // same — each rule already carries its `spec` / `source` /
   // `displayImp` / `visibilityImp` so per-bucket order doesn't matter.
-  let __hideRuleIdx = null;
-  function buildHideRuleIndex(rules) {
+  let __hideRuleIdx   = null;
+  let __layoutRuleIdx = null;
+  // Bucket rules by their terminal compound's most-discriminating
+  // signal (id > class > tag > universal). The resolver then only
+  // walks buckets the element can plausibly match — typically
+  // ~5–20 rules per element instead of the full 4000 on a
+  // Redmine/Tailwind page. Layout-rule cascade uses the same shape;
+  // we maintain a separate index per rule list because the records
+  // carry different decl shapes.
+  function buildRuleIndex(rules) {
     const idx = {
       byTag:     new Map(),
       byId:      new Map(),
@@ -5486,6 +5494,27 @@
     }
     return idx;
   }
+  // Walk the rule buckets that could match `el`, calling `cb(rule)`
+  // for each candidate. Matches the bucket-selection logic that used
+  // to live inline in `matchesAnyHideRule`.
+  function forEachCandidateRule(idx, el, cb) {
+    const tagBucket = idx.byTag.get(el._tag);
+    if (tagBucket) for (const r of tagBucket) cb(r);
+    const idAttr = el._attrs.id;
+    if (idAttr) {
+      const idBucket = idx.byId.get(idAttr);
+      if (idBucket) for (const r of idBucket) cb(r);
+    }
+    const clsAttr = el._attrs.class;
+    if (clsAttr) {
+      for (const c of clsAttr.split(/\s+/)) {
+        if (!c) continue;
+        const cb2 = idx.byClass.get(c);
+        if (cb2) for (const r of cb2) cb(r);
+      }
+    }
+    if (idx.universal.length) for (const r of idx.universal) cb(r);
+  }
 
   // Captured by `collectCascadeRules` into the `layout` slice.
   // `top/left/width/height` resolve to numeric coordinates for the
@@ -5512,19 +5541,22 @@
   function resolveLayoutProp (el, prop) {
     const inline = parseInlineLayout(el)[prop];
     let best = inline ? { spec: [1,0,0,0], source: Infinity, ...inline } : null;
-    for (const r of __layoutRules) {
-      const cap = r.captured[prop];
-      if (!cap) continue;
-      let m;
-      try { m = matchOne(el, r.group); } catch (_) { continue; }
-      if (!m) continue;
-      if (!best ||
-          (cap.important && !best.important) ||
-          (cap.important === best.important &&
-           (specCompare(r.spec, best.spec) > 0 ||
-            (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
-        best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
-      }
+    if (__layoutRules.length) {
+      if (!__layoutRuleIdx) __layoutRuleIdx = buildRuleIndex(__layoutRules);
+      forEachCandidateRule(__layoutRuleIdx, el, (r) => {
+        const cap = r.captured[prop];
+        if (!cap) return;
+        let m;
+        try { m = matchOne(el, r.group); } catch (_) { return; }
+        if (!m) return;
+        if (!best ||
+            (cap.important && !best.important) ||
+            (cap.important === best.important &&
+             (specCompare(r.spec, best.spec) > 0 ||
+              (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
+          best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
+        }
+      });
     }
     return best ? parsePx(best.value) : null;
   }
@@ -5557,41 +5589,19 @@
 
   function matchesAnyHideRule(el) {
     if (__hideRules.length === 0) return false;
-    if (!__hideRuleIdx) __hideRuleIdx = buildHideRuleIndex(__hideRules);
-    const idx = __hideRuleIdx;
+    if (!__hideRuleIdx) __hideRuleIdx = buildRuleIndex(__hideRules);
     let bestD = null, bestV = null;
-
-    function check(bucket) {
-      for (const r of bucket) {
-        let m;
-        try { m = matchOne(el, r.group); } catch (_) { continue; }
-        if (!m) continue;
-        if (r.display != null && winsCascade(bestD, r, true)) {
-          bestD = { value: r.display, important: r.displayImp, spec: r.spec, source: r.source };
-        }
-        if (r.visibility != null && winsCascade(bestV, r, false)) {
-          bestV = { value: r.visibility, important: r.visibilityImp, spec: r.spec, source: r.source };
-        }
+    forEachCandidateRule(__hideRuleIdx, el, (r) => {
+      let m;
+      try { m = matchOne(el, r.group); } catch (_) { return; }
+      if (!m) return;
+      if (r.display != null && winsCascade(bestD, r, true)) {
+        bestD = { value: r.display, important: r.displayImp, spec: r.spec, source: r.source };
       }
-    }
-
-    const tagBucket = idx.byTag.get(el._tag);
-    if (tagBucket) check(tagBucket);
-    const idAttr = el._attrs.id;
-    if (idAttr) {
-      const idBucket = idx.byId.get(idAttr);
-      if (idBucket) check(idBucket);
-    }
-    const clsAttr = el._attrs['class'];
-    if (clsAttr) {
-      for (const c of clsAttr.split(/\s+/)) {
-        if (!c) continue;
-        const cb = idx.byClass.get(c);
-        if (cb) check(cb);
+      if (r.visibility != null && winsCascade(bestV, r, false)) {
+        bestV = { value: r.visibility, important: r.visibilityImp, spec: r.spec, source: r.source };
       }
-    }
-    if (idx.universal.length) check(idx.universal);
-
+    });
     if (bestD && bestD.value === 'none') return true;
     if (bestV && bestV.value === 'hidden') return true;
     return false;
@@ -5670,6 +5680,29 @@
   // assertion message ("found 1 time using a case insensitive search")
   // hinges on visible_text being `TEXT HERE` for `text-transform:uppercase`,
   // not the underlying `text here`.
+  // Utility-class shortcut: Tailwind / similar frameworks ship one
+  // class per text-transform value. When an element carries the
+  // class AND has no inline `style="text-transform: …"` override,
+  // skip the full cascade walk — the matching rule's value is
+  // determined by the class name. Falls back to the cascade for
+  // anything more elaborate (inline style with `!important`, a
+  // higher-specificity stylesheet rule). Mirrors v2's
+  // `CLASS_TEXT_TRANSFORM` shortcut in `Browser#node_transform`.
+  const TAILWIND_TEXT_TRANSFORM = Object.assign(Object.create(null), {
+    uppercase:    'uppercase',
+    lowercase:    'lowercase',
+    capitalize:   'capitalize',
+    'normal-case': 'none',
+  });
+  function tailwindTextTransform (el) {
+    const cls = el._attrs.class;
+    if (!cls) return null;
+    for (const tok of cls.split(/\s+/)) {
+      const t = TAILWIND_TEXT_TRANSFORM[tok];
+      if (t) return t;
+    }
+    return null;
+  }
   function parseInlineTextTransform (el) {
     const s = el._attrs && el._attrs.style;
     if (!s) return null;
@@ -5678,20 +5711,29 @@
   }
   function cascadedTextTransform (el) {
     const inline = parseInlineTextTransform(el);
+    // Fast path: no inline override + a Tailwind utility-class token
+    // present. Skip the cascade walk entirely.
+    if (!inline) {
+      const tw = tailwindTextTransform(el);
+      if (tw) return tw;
+    }
     let best = inline ? { value: inline, spec: [1,0,0,0], important: /!important/i.test(el._attrs.style || ''), source: Infinity } : null;
-    for (const r of __layoutRules) {
-      const cap = r.captured['text-transform'];
-      if (!cap) continue;
-      let m;
-      try { m = matchOne(el, r.group); } catch (_) { continue; }
-      if (!m) continue;
-      if (!best ||
-          (cap.important && !best.important) ||
-          (cap.important === best.important &&
-           (specCompare(r.spec, best.spec) > 0 ||
-            (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
-        best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
-      }
+    if (__layoutRules.length) {
+      if (!__layoutRuleIdx) __layoutRuleIdx = buildRuleIndex(__layoutRules);
+      forEachCandidateRule(__layoutRuleIdx, el, (r) => {
+        const cap = r.captured['text-transform'];
+        if (!cap) return;
+        let m;
+        try { m = matchOne(el, r.group); } catch (_) { return; }
+        if (!m) return;
+        if (!best ||
+            (cap.important && !best.important) ||
+            (cap.important === best.important &&
+             (specCompare(r.spec, best.spec) > 0 ||
+              (specCompare(r.spec, best.spec) === 0 && r.source >= best.source)))) {
+          best = { value: cap.value, important: cap.important, spec: r.spec, source: r.source };
+        }
+      });
     }
     return best ? best.value : null;
   }
