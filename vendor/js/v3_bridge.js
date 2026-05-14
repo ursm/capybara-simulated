@@ -6456,12 +6456,50 @@
                      !(n._attrs.readonly != null || n._attrs.disabled != null);
     if (typeable) { try { n.focus(); } catch (_) {} }
     const startValue = typeable ? (n._attrs.value || '') : null;
+    // HTML5 implicit form submission: Enter in a text-like input
+    // submits the enclosing form if the form has either a default
+    // submit-style button or exactly one text-like input. Avo's
+    // `submits the form on enter` spec depends on this exact
+    // algorithm; we can't fold it into the typing branch because
+    // the trigger is a (non-cancelled) keydown, not a value mutation.
+    const TEXT_LIKE = new Set(['text', 'email', 'password', 'search', 'tel', 'url', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
+    function implicitSubmitForm (input) {
+      if (input._tag !== 'input') return null;
+      const type = (input._attrs.type || 'text').toLowerCase();
+      if (!TEXT_LIKE.has(type)) return null;
+      let form = input._parent;
+      while (form && form._tag !== 'form') form = form._parent;
+      if (!form) return null;
+      if (form.querySelector('button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]')) return form;
+      let textCount = 0;
+      for (const i of form.querySelectorAll('input')) {
+        const t = (i._attrs.type || 'text').toLowerCase();
+        if (TEXT_LIKE.has(t)) {
+          if (++textCount > 1) return null;
+        }
+      }
+      return textCount === 1 ? form : null;
+    }
     const pressKey = (info, modifiers) => {
       const initBase = Object.assign({ bubbles: true, cancelable: true }, modifiers || {});
       const init = Object.assign({}, initBase, { key: info.key, code: info.code, keyCode: info.keyCode, which: info.keyCode });
       const kd = new KeyboardEvent('keydown', init);
       dispatchEvent(n, kd);
       let blocked = kd.defaultPrevented;
+      // Enter's default action in a text-like input runs the form's
+      // implicit-submit algorithm. If the page handler called
+      // preventDefault, skip (Tagify / Tribute do this to chip the
+      // current token instead of submitting).
+      if (!blocked && info.key === 'Enter' && typeable && (!modifiers || (!modifiers.ctrlKey && !modifiers.metaKey && !modifiers.altKey))) {
+        const form = implicitSubmitForm(n);
+        if (form) {
+          const submit = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: null });
+          dispatchEvent(form, submit);
+          if (!submit.defaultPrevented) {
+            globalThis.__csimPendingFormSubmit = { form, submitter: null };
+          }
+        }
+      }
       const wouldType =
         typeable && !blocked &&
         (info.char != null || info.inputType === 'deleteContentBackward' || info.inputType === 'deleteContentForward') &&
