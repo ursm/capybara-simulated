@@ -139,6 +139,17 @@ module Capybara
         @runtime.eval("globalThis.innerWidth = #{@viewport_width}; globalThis.innerHeight = #{@viewport_height};")
       end
 
+      # V8 caches the local-zone resolution at platform init; tests
+      # that flip `ENV['TZ']` per example (Avo's `tz:` metadata)
+      # otherwise leave Luxon's `DateTime.local()` and Avo's
+      # date_field controller reading the boot-time zone. The bridge
+      # patches `Intl.DateTimeFormat`'s default `timeZone` to this
+      # Ruby-supplied target — Luxon's `SystemZone` routes through
+      # Intl so the override propagates to the user-visible date.
+      def apply_timezone
+        @runtime.call('__csimSetTimezone', ENV['TZ'].to_s)
+      end
+
       # ── Capybara DSL surface (just enough for milestone 2) ──────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -1148,6 +1159,7 @@ module Capybara
         apply_esm_flag
         apply_trace_flag
         apply_viewport
+        apply_timezone
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
       end
@@ -1488,6 +1500,7 @@ module Capybara
         apply_esm_flag
         apply_trace_flag
         apply_viewport
+        apply_timezone
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         # `__csimLoadDocument` walks importmaps + module scripts during
         # `runInlineScripts`. The JS bridge pushes the importmap back
