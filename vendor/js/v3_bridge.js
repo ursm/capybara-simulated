@@ -1413,6 +1413,48 @@
     // on text nodes etc.); only document-order comparison between two
     // nodes' start containers, which is the only thing wgxpath drives.
     createRange() { return new DocumentOrderRange(); }
+    // Minimal NodeIterator. DOMPurify is the canonical consumer —
+    // it walks a freshly-parsed sanitisation fragment via
+    // `nextNode()` and uses `whatToShow` to gate ELEMENT / TEXT /
+    // COMMENT visits. We pre-collect descendants in document order;
+    // DOMPurify operates on small per-call fragments so the up-front
+    // walk is cheaper than the per-step sibling/ancestor traversal.
+    createNodeIterator(root, whatToShow, filter) {
+      if (whatToShow == null) whatToShow = 0xFFFFFFFF;
+      const all = [];
+      (function walk(n) {
+        all.push(n);
+        if (n && n._children) for (const c of n._children) walk(c);
+      })(root);
+      let i = -1;
+      return {
+        root,
+        whatToShow,
+        filter,
+        referenceNode: root,
+        pointerBeforeReferenceNode: true,
+        nextNode() {
+          while (++i < all.length) {
+            const n = all[i];
+            const mask = 1 << (n.nodeType - 1);
+            if (!(mask & whatToShow)) continue;
+            if (filter) {
+              const fn = typeof filter === 'function' ? filter : (filter && filter.acceptNode);
+              if (fn) {
+                const r = fn.call(filter || null, n);
+                if (r === 2 || r === 3) continue;
+              }
+            }
+            this.referenceNode = n;
+            this.pointerBeforeReferenceNode = false;
+            return n;
+          }
+          return null;
+        },
+        previousNode() { return null; },
+        detach() {}
+      };
+    }
   }
   class DocumentOrderRange {
     constructor() {
