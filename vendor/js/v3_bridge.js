@@ -699,9 +699,33 @@
     // `<option>` descendant (jQuery's `.val()` getter reads this with
     // an indexed lookup based on `selectedIndex`; without the property
     // the read returns undefined → `undefined.length` TypeError).
+    // Spec adds collection mutators (`add` / `remove` / `item` /
+    // `namedItem`) that controllers reach for — Avo's `city-in-country`
+    // controller does `select.options.remove(0)` per option to wipe
+    // and rebuild before populating the new country's cities.
     get options() {
       if (this._tag !== 'select') return undefined;
-      return this.querySelectorAll('option');
+      const arr = this.querySelectorAll('option');
+      const owner = this;
+      arr.add = function (option, before) {
+        if (before == null) owner.appendChild(option);
+        else owner.insertBefore(option, typeof before === 'number' ? arr[before] : before);
+      };
+      arr.remove    = function (idx) { const o = arr[idx]; if (o && o._parent) o._parent.removeChild(o); };
+      arr.item      = function (i) { return arr[i] || null; };
+      arr.namedItem = function (n) { return arr.find(o => o._attrs.id === n || o._attrs.name === n) || null; };
+      return arr;
+    }
+    // HTMLSelectElement.add(option, before?) — spec method that
+    // Avo's city-in-country controller uses to rebuild the city
+    // list after a country change.
+    add(element, before) {
+      if (this._tag !== 'select') return;
+      if (before == null || before === undefined) this.appendChild(element);
+      else if (typeof before === 'number') {
+        const opts = this.querySelectorAll('option');
+        this.insertBefore(element, opts[before] || null);
+      } else this.insertBefore(element, before);
     }
     get title() { return this._attrs.title != null ? this._attrs.title : ''; }
     set title(v){ this.setAttribute('title', String(v == null ? '' : v)); }
