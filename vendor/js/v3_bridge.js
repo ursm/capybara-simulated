@@ -3057,7 +3057,16 @@
     // as part of `Element.textContent` (Avo renders ViewComponent
     // slot-controls cells as `<!-- Item controls cell -->` markers
     // that would otherwise show up in column-header text assertions).
-    const re = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+    //
+    // The `<!-->` / `<!--->` shapes are HTML5's abrupt-closing-of-
+    // empty-comment quirk: per spec both are empty comments. DOMPurify
+    // ≥3 uses `<!-->` as its empty-input placeholder, so without the
+    // quirk handling the literal string leaks into a text node and
+    // serialises back as `&lt;!--&gt;` in the input's `value` attr
+    // — the key_value_field controller's `addRow()` (which sanitises
+    // `''`) and Avo's `meta_data = {nil => "bar"}` /show path both
+    // hit this.
+    const re = /<!--(?:>|->|[\s\S]*?-->)|<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
     let m, last = 0;
     while ((m = re.exec(html)) !== null) {
       if (m.index > last) {
