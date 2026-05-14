@@ -5449,33 +5449,59 @@
   // getBoundingClientRect-equivalent path so click-offset tests can
   // translate `click(x: 10, y: 5)` into MouseEvent.clientX/clientY
   // against the element's CSS-declared position.
-  const LAYOUT_PROPS = ['top', 'left', 'width', 'height'];
+  // Captured by `collectLayoutRules`. `top/left/width/height` feed
+  // the click-offset path; `text-transform` feeds the visible-text
+  // upper/lower-case path (Avo's table headers carry the Tailwind
+  // `.uppercase` class and the test asserts the upper-cased label
+  // text — without it column headers come back as `Id` / `Name`
+  // instead of `ID` / `NAME`).
+  const LAYOUT_PROPS = ['top', 'left', 'width', 'height', 'text-transform'];
+  function extractLayoutRulesFromCss(cssText, vp) {
+    const out = [];
+    let tree;
+    try { tree = parseCssTree(cssText); } catch (_) { return out; }
+    for (const r of flattenCssTree(tree, vp)) {
+      if (!r.selectorText || !r.decls.length) continue;
+      const captured = {};
+      for (const d of r.decls) {
+        if (LAYOUT_PROPS.includes(d.prop)) captured[d.prop] = { value: d.value, important: d.important };
+      }
+      if (Object.keys(captured).length === 0) continue;
+      for (const sel of splitTopLevel(r.selectorText, ',')) {
+        const trimmed = sel.trim();
+        if (!trimmed) continue;
+        let group;
+        try { group = parseSelector(trimmed); } catch (_) { continue; }
+        if (!group || !group.length) continue;
+        const spec = specificity(group[0]);
+        out.push({ group, spec, source: __ruleSerial++, captured });
+      }
+    }
+    return out;
+  }
   function collectLayoutRules(doc) {
     if (!doc || !doc.documentElement) return [];
     const vp = currentViewport();
     const rules = [];
     for (const s of doc.documentElement.querySelectorAll('style')) {
       const txt = scriptText(s);
-      if (!txt) continue;
-      let tree;
-      try { tree = parseCssTree(txt); } catch (_) { continue; }
-      for (const r of flattenCssTree(tree, vp)) {
-        if (!r.selectorText || !r.decls.length) continue;
-        const captured = {};
-        for (const d of r.decls) {
-          if (LAYOUT_PROPS.includes(d.prop)) captured[d.prop] = { value: d.value, important: d.important };
+      if (txt) rules.push(...extractLayoutRulesFromCss(txt, vp));
+    }
+    // External stylesheets carry the bulk of utility-class rules
+    // (Tailwind's `.uppercase`, `.lowercase`, …) in app bundles —
+    // without this fetch Avo's `<th class="uppercase">` cascade lookup
+    // finds nothing and visible_text returns mixed-case headers.
+    for (const l of doc.documentElement.querySelectorAll('link')) {
+      const rel = (l._attrs.rel || '').toLowerCase();
+      if (!rel.split(/\s+/).includes('stylesheet')) continue;
+      const href = l._attrs.href;
+      if (!href) continue;
+      try {
+        const resp = __rackFetch('GET', href, '', null, 'follow');
+        if (resp && resp.status < 400 && resp.body) {
+          rules.push(...extractLayoutRulesFromCss(resp.body, vp));
         }
-        if (Object.keys(captured).length === 0) continue;
-        for (const sel of splitTopLevel(r.selectorText, ',')) {
-          const trimmed = sel.trim();
-          if (!trimmed) continue;
-          let group;
-          try { group = parseSelector(trimmed); } catch (_) { continue; }
-          if (!group || !group.length) continue;
-          const spec = specificity(group[0]);
-          rules.push({ group, spec, source: __ruleSerial++, captured });
-        }
-      }
+      } catch (_) {}
     }
     return rules;
   }
