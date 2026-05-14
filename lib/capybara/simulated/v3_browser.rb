@@ -1115,13 +1115,9 @@ module Capybara
         invalidate_find_cache
         record_history({method: :post, url: url, body: body, content_type: content_type}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
-        env['CONTENT_TYPE']    = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
-        env['CONTENT_LENGTH']  = body.bytesize.to_s
-        env['HTTP_USER_AGENT'] = USER_AGENT
-        env['REMOTE_ADDR']     = REMOTE_ADDR
-        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
-        @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
+        env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
+        env['CONTENT_LENGTH'] = body.bytesize.to_s
+        apply_default_request_env(env, referer: @current_url)
         status, headers, resp_body = @app.call(env)
         merge_set_cookie(headers)
         if (loc = redirect_location(status, headers))
@@ -1315,11 +1311,7 @@ module Capybara
               env["HTTP_#{name}"] = v.to_s
             end
           }
-          @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
-          env['HTTP_USER_AGENT'] ||= USER_AGENT
-          env['REMOTE_ADDR']     ||= REMOTE_ADDR
-          env['HTTP_REFERER'] = @current_url unless @current_url.nil? || @current_url.empty?
-          @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
+          apply_default_request_env(env, referer: @current_url, force: false)
           status, resp_headers, resp_body = @app.call(env)
           merge_set_cookie(resp_headers)
           log_network(method, target, status)
@@ -1462,11 +1454,7 @@ module Capybara
         invalidate_find_cache
         record_history({method: :get, url: url}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'GET')
-        env['HTTP_USER_AGENT'] = USER_AGENT
-        env['REMOTE_ADDR']     = REMOTE_ADDR
-        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']    = referer         unless referer.nil? || referer.empty?
-        @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
+        apply_default_request_env(env, referer: referer)
         status, headers, body = @app.call(env)
         merge_set_cookie(headers)
         if (loc = redirect_location(status, headers))
@@ -1537,6 +1525,26 @@ module Capybara
 
       def downloads_directory
         ENV['CSIM_DOWNLOADS_DIR'] || Capybara.save_path || File.join(Dir.pwd, 'tmp', 'downloads')
+      end
+
+      # Stamps the default headers every driver-originated request
+      # carries: UA, REMOTE_ADDR, cookies, referer, and any sticky
+      # headers a previous response asked us to echo. `force: false`
+      # (the rack_fetch path) preserves any value the caller already
+      # set on `env`, so JS-supplied `XHR.setRequestHeader` /
+      # `fetch(..., {headers: ...})` overrides win.
+      def apply_default_request_env(env, referer:, force: true)
+        if force
+          env['HTTP_USER_AGENT'] = USER_AGENT
+          env['REMOTE_ADDR']     = REMOTE_ADDR
+          @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
+        else
+          env['HTTP_USER_AGENT'] ||= USER_AGENT
+          env['REMOTE_ADDR']     ||= REMOTE_ADDR
+          @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
+        end
+        env['HTTP_REFERER'] = referer         unless referer.nil? || referer.empty?
+        env['HTTP_COOKIE']  = document_cookie unless @cookies.empty?
       end
 
       def merge_set_cookie(headers)
