@@ -38,13 +38,16 @@ module Capybara
       TICK_CAP_MS = 5_000
 
       # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
-      # mirrors the JS-side `navigator.userAgent` and must lead with
-      # `Mozilla/5.0` so server-side bot detectors (ahoy_matey's
-      # `Browser.new(ua).bot?`) treat us as a real client. `REMOTE_ADDR`
-      # has to be a non-empty, parseable IP — Devise's `trackable`
-      # mixin runs `IPAddr.new(request.remote_ip)` during
-      # `set_user`/sign-in, and an empty string trips
+      # must lead with `Mozilla/5.0` so server-side bot detectors
+      # (ahoy_matey's `Browser.new(ua).bot?`) treat us as a real
+      # client. `REMOTE_ADDR` has to be a non-empty, parseable IP —
+      # Devise's `trackable` mixin runs `IPAddr.new(request.remote_ip)`
+      # during `set_user`/sign-in, and an empty string trips
       # `IPAddr::AddressFamilyError`.
+      # Keep `USER_AGENT` in sync with `navigator.userAgent` in
+      # `vendor/js/v3_bridge.js` — the JS side ships in the V8
+      # snapshot, so injecting from Ruby at boot would defeat snapshot
+      # warmth.
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated/v3 (V8-resident DOM)'
       REMOTE_ADDR = '127.0.0.1'
 

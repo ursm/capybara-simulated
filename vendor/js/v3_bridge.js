@@ -838,8 +838,7 @@
       } catch (_) { return v; }
     }
     set href(v) { this._attrs.href = String(v == null ? '' : v); }
-    // HTMLHyperlinkElementUtils mixin: `<a>` / `<area>` (and `<link>`,
-    // though `<link>.toString()` is rarely meaningful) override
+    // HTMLHyperlinkElementUtils mixin: `<a>` / `<area>` override
     // `toString()` to return the resolved `href`. Forem's
     // `trackNotification` reads `target.toString()` on the clicked
     // link to build an ahoy event property; without this, every
@@ -3700,7 +3699,9 @@
     // Lead with `Mozilla/5.0` so server-side bot detectors (`browser`
     // gem, ahoy_matey's `Browser.new(ua).bot?`) recognise us as a
     // regular client rather than a crawler. Without it Ahoy's exclude
-    // path drops every visit/event we POST.
+    // path drops every visit/event we POST. Keep in sync with
+    // `V3Browser::USER_AGENT` in `lib/capybara/simulated/v3_browser.rb`,
+    // which sets the same string as `HTTP_USER_AGENT` on the Rack env.
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated/v3 (V8-resident DOM)',
     appName:   'Netscape',
     appVersion:'5.0',
@@ -3744,6 +3745,9 @@
         } else if (typeof data === 'string') {
           body = data;
           headers['Content-Type'] = 'text/plain;charset=UTF-8';
+        } else if (data instanceof globalThis.Blob) {
+          body = (data._parts || []).join('');
+          headers['Content-Type'] = data.type || 'application/octet-stream';
         } else if (data == null) {
           body = '';
         } else {
