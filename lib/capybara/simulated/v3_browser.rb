@@ -711,6 +711,7 @@ module Capybara
         }.compact
         @runtime.call('__csimSendKeys', handle, atoms)
         consume_pending_form_submit
+        consume_pending_navigation
       end
 
       def select_option(handle)
@@ -719,6 +720,7 @@ module Capybara
         @runtime.call('__csimSelectOption', handle)
         tick_real_time
         consume_pending_form_submit
+        consume_pending_navigation
       end
 
       def unselect_option(handle)
@@ -736,6 +738,7 @@ module Capybara
         @runtime.call('__csimUnselectOption', handle)
         tick_real_time
         consume_pending_form_submit
+        consume_pending_navigation
       end
 
       # Read the form-submit pending intent set by JS-side
