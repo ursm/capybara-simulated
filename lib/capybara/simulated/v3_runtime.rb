@@ -20,6 +20,15 @@ begin
   else
     MiniRacer::Platform.set_flags!(stack_size: stack_kb)
   end
+  # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
+  # lands in `isolate-*-v8.log`; process with:
+  #   node --prof-process isolate-*-v8.log > prof.txt
+  # (Standard Node distribution ships the post-processor; no extra
+  # install needed.) The log is per-isolate, so v3's per-visit
+  # `rebuild_ctx` produces one file per Context.
+  if ENV['CSIM_V8_PROF'] == '1'
+    MiniRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
+  end
 rescue MiniRacer::PlatformAlreadyInitialized
 end
 
