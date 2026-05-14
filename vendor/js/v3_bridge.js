@@ -4414,7 +4414,17 @@
         Object.assign(liveBody._attrs, freshBody._attrs);
       }
     }
-    d.readyState = 'complete';
+    // Stay on 'loading' through inline-script evaluation to match real
+    // browsers, where parser-blocking scripts see readyState='loading'
+    // and register `DOMContentLoaded` listeners instead of running
+    // their ready callbacks inline. Forem's `base.js` bundle is the
+    // canonical case: it pulls in ahoy.js via `//= require`, then
+    // later in the same bundle calls `ahoy.configure({cookies: false,
+    // trackVisits: false})`. ahoy.js's IIFE schedules `ahoy.start()`
+    // via `documentReady` — if readyState is already 'complete', that
+    // callback fires synchronously and the visit POST goes out before
+    // `ahoy.configure` runs, undoing the test-environment opt-out.
+    d.readyState = 'loading';
     // Cascade-derived hide rules need to land *before* scripts run —
     // a script that tests visibility (`offsetWidth`-style probes) or
     // queries Capybara-visible elements would otherwise see the
@@ -4423,6 +4433,7 @@
     __hideRuleIdx = null; // rebuilt lazily on first lookup
     __layoutRules = collectLayoutRules(globalThis.document);
     runInlineScripts(globalThis.document);
+    d.readyState = 'complete';
     // Flip the dynamic-script gate on: post-load <script> appends
     // (Rails-UJS dataType:'script' eval into head, jQuery .html() of
     // a fragment containing <script>) will now run via the

@@ -15,6 +15,7 @@ require 'uri'
 require_relative 'errors'
 require_relative 'esm_rewriter'
 require_relative 'trace'
+require 'time'
 require_relative 'v3_runtime'
 
 module Capybara
@@ -1362,7 +1363,14 @@ module Capybara
       def write_document_cookie(s)
         return if s.nil? || s.empty?
         name, rest = s.split('=', 2)
-        @cookies[name] = (rest || '').split(';', 2).first.to_s
+        return if name.nil? || name.empty?
+        parts = (rest || '').split(';').map(&:strip)
+        value = parts.shift.to_s
+        if cookie_deletion?(parts)
+          @cookies.delete(name.strip)
+        else
+          @cookies[name.strip] = value
+        end
       end
 
       # Web Storage host-fn shims. The Ruby-side hashes survive
@@ -1519,10 +1527,35 @@ module Capybara
         # remember_user_token) doesn't get silently dropped.
         lines = sc.is_a?(Array) ? sc : sc.split("\n")
         lines.each {|line|
-          pair, * = line.split(';', 2)
-          name, value = pair.to_s.split('=', 2)
+          parts = line.split(';').map(&:strip)
+          pair = parts.shift.to_s
+          name, value = pair.split('=', 2)
           next if name.nil? || name.empty?
-          @cookies[name.strip] = value.to_s.strip
+          if cookie_deletion?(parts)
+            @cookies.delete(name.strip)
+          else
+            @cookies[name.strip] = value.to_s.strip
+          end
+        }
+      end
+
+      # Real browsers treat `Set-Cookie: foo=; Max-Age=0` (or an
+      # `Expires=<past>`) as a delete instruction and drop the cookie
+      # entirely. ahoy_matey's controller uses this exact pattern to
+      # invalidate `ahoy_visit` / `ahoy_visitor` when it decides to
+      # mint a new visit. Without honoring the delete, the empty value
+      # sits in the jar; the next `getCookie('ahoy_visit')` returns
+      # `""` (truthy-ish but useless), and ahoy.js stamps the event
+      # with `visit_token: ""` — the server then rejects the POST.
+      def cookie_deletion?(attrs)
+        attrs.any? {|attr|
+          k, v = attr.split('=', 2)
+          case k.to_s.downcase
+          when 'max-age'
+            v.to_s.strip.to_i <= 0
+          when 'expires'
+            (Time.parse(v.to_s) < Time.now rescue false)
+          end
         }
       end
 
