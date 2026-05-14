@@ -305,7 +305,7 @@ module Capybara
         sc      = method(:safe_call)
         c.attach('__rackFetch',                     ->(*a) { sc.() { browser.rack_fetch(a[0], a[1], a[2], a[3], a[4]) } })
         c.attach('__locationAssign',                ->(*a) { sc.() { browser.location_assign(a[0]); nil } })
-        c.attach('__locationReload',                ->(*a) { sc.() { browser.refresh; nil } })
+        c.attach('__locationReload',                ->(*a) { sc.() { browser.location_reload; nil } })
         c.attach('__setListenedType',               ->(*a) { sc.() { browser.set_listened_type(a[0], !!a[1]); nil } })
         c.attach('__setTimersActive',               ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
         c.attach('__setIntersectionObserverActive', ->(*a) { sc.() { browser.intersection_observer_active = !!a[0]; nil } })

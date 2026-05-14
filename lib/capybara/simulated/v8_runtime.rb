@@ -532,7 +532,7 @@ module Capybara
         c.attach('__modalDialog',               ->(*a) { sc.() { coerce.(browser.handle_modal(a[0], a[1], a[2])) } })
         c.attach('__setCurrentUrl',             ->(*a) { sc.() { browser.history_state(a[0]); nil } })
         c.attach('__locationAssign',            ->(*a) { sc.() { browser.location_assign(a[0]); nil } })
-        c.attach('__locationReload',            ->(*a) { sc.() { browser.refresh; nil } })
+        c.attach('__locationReload',            ->(*a) { sc.() { browser.location_reload; nil } })
         c.attach('__rackFetch',                 ->(*a) { sc.() { coerce.(browser.rack_fetch(a[0], a[1], a[2], a[3], a[4])) } })
         c.attach('__getDocumentCookie',         ->(*a) { sc.() { browser.document_cookie } })
         c.attach('__setDocumentCookie',         ->(*a) { sc.() { browser.write_document_cookie(a[0].to_s); nil } })

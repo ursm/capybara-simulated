@@ -1040,6 +1040,7 @@ module Capybara
         # Outside the @ticking guard so the navigate's rebuild_ctx is
         # well-clear of the V8 call we just made.
         consume_pending_location if @pending_location
+        consume_pending_reload if @pending_reload
         # Same shape for `form.submit()` queued by a timer callback —
         # Forem's comment-edit form has an `onsubmit` handler that
         # `preventDefault`s, polls for the CSRF meta tag inside
@@ -1397,6 +1398,18 @@ module Capybara
         return unless (url = @pending_location)
         @pending_location = nil
         navigate(url)
+      end
+      # Mirror of `location_assign`'s deferral for `location.reload()`:
+      # the JS call lands here from `__locationReload`; running
+      # `browser.refresh` directly would `navigate` (rebuilding the
+      # Context) while we're still inside the V8 call, which V8
+      # terminates with a `ScriptTerminatedError`. Stash the intent
+      # and drain it from `tick_real_time` after the call returns.
+      def location_reload   ; @pending_reload = true ; end
+      def consume_pending_reload
+        return unless @pending_reload
+        @pending_reload = false
+        refresh
       end
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
