@@ -784,6 +784,18 @@
         }
         return implicit == null ? '' : implicit;
       }
+      if (this._tag === 'textarea') {
+        // HTML spec: `<textarea>.value` returns the "raw value", which
+        // is the child text content minus one leading line terminator
+        // (CR LF / CR / LF) — the "first newline removal" rule. After
+        // a `set` / direct assignment, `_attrs.value` carries the new
+        // raw value verbatim, so prefer that. Avo's KeyValueField stores
+        // a JSON blob in a hidden `<textarea>` and parses it on Stimulus
+        // connect — without this getter the parse runs on '' and the
+        // controller's fieldValue stays empty on /show.
+        if (this._attrs.value != null) return this._attrs.value;
+        return __stripOneLeadingNewline(this.textContent);
+      }
       return this._attrs.value != null ? this._attrs.value : '';
     }
     set value(v)   {
