@@ -5123,6 +5123,11 @@
     let depth = 0;
     while (i < s.length) {
       const c = s[i];
+      // CSS escape outside strings: `\<char>` consumes one extra char.
+      // Avo's Tailwind utilities encode every attribute-selector punct
+      // (`\[disabled\=\'true\'\]`) this way — without the skip, a bare
+      // `\'` flips us into quote mode and we miss the next `}`.
+      if (c === '\\' && i + 1 < s.length) { i += 2; continue; }
       if (c === '"' || c === "'") {
         const q = c; i++;
         while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
@@ -5150,6 +5155,7 @@
     let depth = 0;
     while (i < s.length) {
       const c = s[i];
+      if (c === '\\' && i + 1 < s.length) { i += 2; continue; }
       if (c === '"' || c === "'") {
         const q = c; i++;
         while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
@@ -5185,6 +5191,7 @@
     let depth = 1;
     while (i < s.length && depth > 0) {
       const c = s[i];
+      if (c === '\\' && i + 1 < s.length) { i += 2; continue; }
       if (c === '"' || c === "'") {
         const q = c; i++;
         while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
