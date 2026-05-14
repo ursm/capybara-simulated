@@ -1384,7 +1384,13 @@ module Capybara
       def refresh
         replay_history_entry(@history[@history_idx])
       end
-      def history_state(url)   ; @current_url = url.to_s ; end
+      # `history.pushState(state, '', '/path')` ships the URL through
+      # `__setCurrentUrl` and lands here. Tab controllers / SPA frameworks
+      # pass a relative path; resolve it against the existing absolute
+      # `@current_url` so subsequent `resolve_against_current(href)`
+      # calls (e.g. click_link to a relative href) don't hit
+      # `URI::BadURIError: both URI are relative`.
+      def history_state(url) ; @current_url = resolve_against_current(url.to_s) ; end
       def set_listened_type(*) ; end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
       def write_document_cookie(s)
@@ -1646,7 +1652,7 @@ module Capybara
             @current_url || DEFAULT_HOST
           end
         URI.join(base, url.to_s).to_s
-      rescue URI::InvalidURIError
+      rescue URI::InvalidURIError, URI::BadURIError
         url
       end
 
