@@ -5505,15 +5505,30 @@
       const idBucket = idx.byId.get(idAttr);
       if (idBucket) for (const r of idBucket) cb(r);
     }
-    const clsAttr = el._attrs.class;
-    if (clsAttr) {
-      for (const c of clsAttr.split(/\s+/)) {
-        if (!c) continue;
-        const cb2 = idx.byClass.get(c);
-        if (cb2) for (const r of cb2) cb(r);
-      }
+    for (const c of classTokens(el)) {
+      const cb2 = idx.byClass.get(c);
+      if (cb2) for (const r of cb2) cb(r);
     }
     if (idx.universal.length) for (const r of idx.universal) cb(r);
+  }
+  // Tokenise `element.class` with a per-element cache. `\s+`-splitting
+  // is the single hottest regex in v3's JS profile because every
+  // cascade lookup, `tailwindTextTransform` probe, and `[class~=…]`
+  // selector match re-splits the same string. The cache key is the
+  // raw class string — V8 interns string literals so the equality
+  // check is cheap, and a `class` mutation (via setAttribute / IDL
+  // setters / classList) produces a fresh string that misses the
+  // cache and re-splits once. Empty / missing class returns a
+  // shared empty array.
+  const EMPTY_CLASS_TOKENS = Object.freeze([]);
+  function classTokens(el) {
+    const cls = el._attrs.class;
+    if (!cls) return EMPTY_CLASS_TOKENS;
+    if (el._classTokensKey !== cls) {
+      el._classTokensKey   = cls;
+      el._classTokensCache = cls.split(/\s+/).filter(Boolean);
+    }
+    return el._classTokensCache;
   }
 
   // Captured by `collectCascadeRules` into the `layout` slice.
@@ -5695,9 +5710,7 @@
     'normal-case': 'none',
   });
   function tailwindTextTransform (el) {
-    const cls = el._attrs.class;
-    if (!cls) return null;
-    for (const tok of cls.split(/\s+/)) {
+    for (const tok of classTokens(el)) {
       const t = TAILWIND_TEXT_TRANSFORM[tok];
       if (t) return t;
     }
