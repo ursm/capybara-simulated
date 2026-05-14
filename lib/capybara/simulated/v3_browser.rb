@@ -198,7 +198,7 @@ module Capybara
         if xpath_shaped?(s)
           return find_xpath(s, context_handle)
         end
-        unless s.match?(DYNAMIC_PSEUDO_RE)
+        unless s.match?(DYNAMIC_PSEUDO_RE) || scoped_chain_selector?(s, context_handle)
           begin
             # When scoped, emit context-relative XPath (`.//`) so wgxpath
             # honors the context node. Without the prefix Nokogiri returns
@@ -241,6 +241,25 @@ module Capybara
         # exactly like that (`.contextual`); only the `./` form is
         # unambiguous.
         !!(s =~ %r{\A\s*(?:/|\(\s*/|\./|\.\.)})
+      end
+
+      # CSS qsa spec: `el.querySelectorAll("a b c")` matches the
+      # selector against the document, then filters to descendants of
+      # `el`. Nokogiri::CSS.xpath_for with the `.//` prefix instead
+      # requires `a`, `b`, `c` to all be inside the context, so a
+      # `find_all("table tbody tr td")` inside a `<tr>` scope returns
+      # zero matches. Falling back to the JS-side qsa (whose
+      # `matchComplex` walks the *document* ancestor chain) is the
+      # correct way to honour CSS semantics; the heuristic catches any
+      # selector with a combinator and a context.
+      COMBINATOR_RE = /[\s>+~]/
+      def scoped_chain_selector?(s, context_handle)
+        return false unless context_handle
+        # Strip the inside of `:not(...)` / `:is(...)` etc. before
+        # probing — a combinator inside a pseudo doesn't add an
+        # outer ancestor step and is safe for the Nokogiri path.
+        stripped = s.gsub(/\([^()]*\)/, '')
+        stripped.match?(COMBINATOR_RE)
       end
 
       # XPath reverse-bridge (see V3_DESIGN.md "HTML parsing in v3"):
