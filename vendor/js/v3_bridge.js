@@ -6596,7 +6596,13 @@
         // typed as one keydown plus `info.char='side'` would either
         // miss the shift-uppercase mapping or land in the value as
         // the literal modifier name (the previous behaviour).
-        if (typeof keyName === 'string' && keyName.length > 1) {
+        // BUT: `[:control, :enter]` arrives with keyName='enter'
+        // (Ruby stringifies symbols at the JSON boundary), and we
+        // can't unfold a special-key name into 'e','n','t','e','r'.
+        // Probe `__KEY_NAME_MAP` first so named keys take precedence
+        // over per-character unfolding.
+        const isNamedKey = typeof keyName === 'string' && __KEY_NAME_MAP[keyName.toLowerCase()];
+        if (typeof keyName === 'string' && keyName.length > 1 && !isNamedKey) {
           for (const ch of keyName) {
             const cooked = mods.shiftKey ? ch.toUpperCase() : ch;
             pressKey(__resolveKey(cooked), mods);
