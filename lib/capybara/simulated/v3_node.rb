@@ -26,11 +26,13 @@ module Capybara
       attr_reader :handle_id, :context_gen
 
       def all_text
+        browser.send(:tick_real_time)
         check_stale
         normalize_spacing(browser.all_text(handle_id))
       end
 
       def visible_text
+        browser.send(:tick_real_time)
         check_stale
         normalize_visible_spacing(browser.visible_text(handle_id))
       end

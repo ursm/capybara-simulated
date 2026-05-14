@@ -103,6 +103,154 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     expect(s.evaluate_script('globalThis.__matches')).to be true
   end
 
+  it 'omits default ports from URL and location parts' do
+    port_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, port_app)
+    s.visit 'http://example.test:80/'
+
+    result = s.evaluate_script(<<~JS)
+      const http = new URL('http://example.test:80/path');
+      const https = new URL('https://example.test:443/path');
+      ({
+        locationHost: location.host,
+        locationPort: location.port,
+        locationOrigin: location.origin,
+        httpHost: http.host,
+        httpPort: http.port,
+        httpHref: http.href,
+        httpOrigin: http.origin,
+        httpsHost: https.host,
+        httpsPort: https.port,
+        httpsHref: https.href,
+        httpsOrigin: https.origin
+      })
+    JS
+
+    expect(result).to eq(
+      'locationHost' => 'example.test',
+      'locationPort' => '',
+      'locationOrigin' => 'http://example.test',
+      'httpHost' => 'example.test',
+      'httpPort' => '',
+      'httpHref' => 'http://example.test/path',
+      'httpOrigin' => 'http://example.test',
+      'httpsHost' => 'example.test',
+      'httpsPort' => '',
+      'httpsHref' => 'https://example.test/path',
+      'httpsOrigin' => 'https://example.test'
+    )
+  end
+
+  it 'follows redirects for fetch and XMLHttpRequest without navigating the page' do
+    redirect_app = Rack::Builder.new {
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'
+          [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
+        when '/bounce'
+          [302, {'location' => '/final'}, []]
+        when '/final'
+          [200, {'content-type' => 'text/plain'}, ['done']]
+        else
+          [404, {}, ['nope']]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, redirect_app)
+    s.visit '/'
+
+    result = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      Promise.resolve()
+        .then(() => fetch('/bounce'))
+        .then((response) => response.text().then((text) => ({
+          fetchStatus: response.status,
+          fetchText: text,
+          fetchUrl: response.url,
+          fetchRedirected: response.redirected,
+          afterFetchPath: location.pathname
+        })))
+        .then((out) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => {
+            out.xhrStatus = xhr.status;
+            out.xhrText = xhr.responseText;
+            out.xhrUrl = xhr.responseURL;
+            out.afterXhrPath = location.pathname;
+            done(out);
+          };
+          xhr.onerror = () => done({ error: 'xhr error' });
+          xhr.open('GET', '/bounce');
+          xhr.send();
+        });
+    JS
+
+    expect(result).to include(
+      'fetchStatus' => 200,
+      'fetchText' => 'done',
+      'fetchUrl' => 'http://www.example.com/final',
+      'fetchRedirected' => true,
+      'afterFetchPath' => '/',
+      'xhrStatus' => 200,
+      'xhrText' => 'done',
+      'xhrUrl' => 'http://www.example.com/final',
+      'afterXhrPath' => '/'
+    )
+  end
+
+  it 'queries the current DOM before advancing pending timers' do
+    timer_app = Rack::Builder.new {
+      run lambda {|_env|
+        [
+          200,
+          {'content-type' => 'text/html'},
+          [
+            <<~HTML
+              <!doctype html>
+              <html>
+                <body>
+                  <div id="transient">still here</div>
+                  <script>setTimeout(() => document.getElementById('transient').remove(), 0)</script>
+                </body>
+              </html>
+            HTML
+          ]
+        ]
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, timer_app)
+    s.visit '/'
+
+    expect(s).to have_selector('#transient')
+  end
+
+  it 'parses full documents assigned to a detached documentElement innerHTML' do
+    s = Capybara::Session.new(:simulated_v3, app)
+    s.visit '/'
+
+    result = s.evaluate_script(<<~JS)
+      const doc = document.implementation.createHTMLDocument('');
+      doc.documentElement.innerHTML = '<!doctype html><html><head><title>Loaded</title></head><body><main id="page-content"><p>body</p></main></body></html>';
+      ({
+        title: doc.title,
+        hasPageContent: !!doc.getElementById('page-content'),
+        bodyText: doc.body.textContent.trim(),
+        htmlChildTags: Array.from(doc.documentElement.children).map((n) => n.tagName)
+      })
+    JS
+
+    expect(result).to eq(
+      'title' => 'Loaded',
+      'hasPageContent' => true,
+      'bodyText' => 'body',
+      'htmlChildTags' => %w[HEAD BODY]
+    )
+  end
+
   it 'mutates the DOM from inline JS and the changes show up via Capybara' do
     mut_app = Rack::Builder.new {
       run lambda {|env|
@@ -211,6 +359,117 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     s.click_link 'Go'
     expect(s.current_path).to eq('/about')
     expect(s.title).to eq('About')
+  end
+
+  it 'fires mouseover before a click when moving to a new target' do
+    hover_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <a id="target" href="/next">Next</a>
+            <div id="log"></div>
+            <script>
+              const log = document.querySelector('#log');
+              function append(t) { log.textContent = (log.textContent + ' ' + t).trim(); }
+              document.body.addEventListener('mouseover', (event) => {
+                if (event.target.id === 'target') append('mouseover');
+              }, true);
+              document.body.addEventListener('mousedown', (event) => {
+                if (event.target.id === 'target') append('mousedown');
+              }, true);
+              document.querySelector('#target').addEventListener('click', (event) => {
+                event.preventDefault();
+                append('click');
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, hover_app)
+    s.visit '/'
+
+    s.click_link 'Next'
+
+    expect(s.find('#log').text).to eq('mouseover mousedown click')
+  end
+
+  it 'sets the focused replacement control when focus swaps the original field' do
+    replace_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <textarea id="body"></textarea>
+            <script>
+              document.querySelector('#body').addEventListener('focus', (event) => {
+                const next = document.createElement('textarea');
+                next.id = 'body';
+                event.target.replaceWith(next);
+                next.focus();
+              }, { once: true });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, replace_app)
+    s.visit '/'
+
+    s.find('#body').set('replacement value')
+
+    expect(s.find('#body').value).to eq('replacement value')
+  end
+
+  it 'settles select-triggered async form replacements before the next action' do
+    replace_form_app = Rack::Builder.new {
+      run lambda {|env|
+        req = Rack::Request.new(env)
+        if req.post? && req.path_info == '/submit'
+          [
+            200,
+            {'content-type' => 'text/html'},
+            ['<!doctype html><html><body><div id="flash_notice">saved</div></body></html>']
+          ]
+        else
+          [
+            200,
+            {'content-type' => 'text/html'},
+            [<<~HTML]
+              <!doctype html><html><body>
+                <div id="content">
+                  <form action="/submit" method="post">
+                    <select id="status" name="status">
+                      <option value="">No change</option>
+                      <option value="assigned">Assigned</option>
+                    </select>
+                    <input type="submit" name="commit" value="Submit">
+                  </form>
+                </div>
+                <script>
+                  document.addEventListener('change', (event) => {
+                    if (event.target.id !== 'status') return;
+                    setTimeout(() => {
+                      document.querySelector('#content').innerHTML =
+                        '<form action="/submit" method="post">' +
+                        '<input type="hidden" name="status" value="' + event.target.value + '">' +
+                        '<input type="submit" name="commit" value="Submit">' +
+                        '</form>';
+                    }, 0);
+                  });
+                </script>
+              </body></html>
+            HTML
+          ]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated_v3, replace_form_app)
+    s.visit '/'
+
+    s.select 'Assigned', from: 'status'
+    s.click_button 'Submit'
+
+    expect(s).to have_css('#flash_notice', text: 'saved')
   end
 
   it 'drains setTimeout / setInterval / requestAnimationFrame on the virtual clock' do

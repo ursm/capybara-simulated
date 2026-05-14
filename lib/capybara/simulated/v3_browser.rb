@@ -165,7 +165,6 @@ module Capybara
       DYNAMIC_PSEUDO_RE = /:(focus|focus-within|focus-visible|hover|active|checked|disabled|enabled|valid|invalid|required|optional|read-only|read-write|placeholder-shown|target)\b/
 
       def find_css(css, context_handle = nil)
-        tick_real_time
         s = css.to_s
         if xpath_shaped?(s)
           return find_xpath(s, context_handle)
@@ -192,18 +191,19 @@ module Capybara
             # JS path either supports or ignores predictably.
           end
         end
-        cached_find(:css, s, context_handle) do
+        find_with_timer_fallback(:css, s, context_handle) do
           @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
         end
       end
 
       def find_first_css(css, context_handle = nil)
-        tick_real_time
         s = css.to_s
-        cached_find(:css_first, s, context_handle) do
+        result = find_with_timer_fallback(:css_first, s, context_handle) do
           h = @runtime.call('__csimQueryOne', context_handle || @document_handle, s).to_i
-          h.zero? ? nil : h
+          value = h.zero? ? nil : h
+          value.nil? ? [] : [value]
         end
+        result.first
       end
 
       def xpath_shaped?(s)
@@ -229,15 +229,31 @@ module Capybara
       # reparse path for debugging when wgxpath chokes on a query.
       XPATH_BACKEND = ENV['CSIM_V3_XPATH'] == 'nokogiri' ? :nokogiri : :wgxpath
       def find_xpath(xpath, context_handle = nil)
-        tick_real_time
         xpath_str = xpath.to_s
-        cached_find(:xpath, xpath_str, context_handle) do
+        find_with_timer_fallback(:xpath, xpath_str, context_handle) do
           if XPATH_BACKEND == :nokogiri
             find_xpath_via_nokogiri(xpath, context_handle)
           else
             @runtime.call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
           end
         end
+      end
+
+      def find_with_timer_fallback(kind, arg, ctx)
+        tick_real_time if timer_wait_elapsed?
+        result = cached_find(kind, arg, ctx) { yield }
+        return result unless result.empty? && @timers_active
+
+        tick_real_time
+        return result unless @find_cache_dirty
+
+        cached_find(kind, arg, ctx) { yield }
+      end
+
+      FIND_PRE_TICK_MIN_S = 0.05
+      def timer_wait_elapsed?
+        @timers_active &&
+          (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
       end
 
       # Single-slot cache for the most recent find_xpath / find_css /
@@ -306,6 +322,7 @@ module Capybara
         h.zero? ? nil : h
       end
       def computed_style(handle, names)
+        tick_real_time
         result = @runtime.call('__csimComputedStyle', handle, names.map(&:to_s))
         return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
         result.transform_keys(&:to_s)
@@ -316,12 +333,12 @@ module Capybara
         handle if @runtime.call('__csimAlive', handle)
       end
 
-      # Tick first so a setTimeout-driven detach lands before the
-      # alive check — otherwise a stale handle's later read returns
-      # empty content instead of raising.
       def check_stale(handle, initial, gen = nil)
+        return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
+
         tick_real_time
         return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
+
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
@@ -345,7 +362,10 @@ module Capybara
           else
             @runtime.call('__csimClickResolve', handle, init)
           end
-        return unless action.is_a?(Hash)
+        unless action.is_a?(Hash)
+          tick_real_time
+          return
+        end
         case action['kind']
         when 'navigate'
           url = action['url'].to_s
@@ -355,6 +375,13 @@ module Capybara
           if pure_fragment_navigation?(url)
             update_current_hash(url)
           else
+            # Drain any work the click handler queued before the VM gets
+            # rebuilt — analytics libraries (Ahoy / segment / GA) queue
+            # the event into a setTimeout-driven flush and rely on the
+            # browser firing it before navigation tears their context
+            # down. Without this drain the tracking POST is lost on
+            # every internal link click.
+            tick_real_time
             # Link clicks honour `<base href>` (HTML spec); `visit`
             # does not — that's address-bar navigation.
             navigate(resolve_against_current(url, use_base: true))
@@ -628,6 +655,7 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         @runtime.call('__csimSelectOption', handle)
+        tick_real_time
         consume_pending_form_submit
       end
 
@@ -644,6 +672,7 @@ module Capybara
           raise Capybara::UnselectNotAllowed, 'Cannot unselect option from single select box.'
         end
         @runtime.call('__csimUnselectOption', handle)
+        tick_real_time
         consume_pending_form_submit
       end
 
@@ -744,6 +773,7 @@ module Capybara
         end
       end
       def active_element_handle
+        tick_real_time
         h = @runtime.call('__csimActiveElement').to_i
         h.zero? ? nil : h
       end
@@ -1242,28 +1272,56 @@ module Capybara
         result['body'].to_s
       end
 
-      def rack_fetch(method, url, body, headers, _redirect_mode)
-        env = Rack::MockRequest.env_for(url, method: method.to_s.upcase, input: body || '')
-        (headers || {}).each {|k, v|
-          name = k.to_s.upcase.tr('-', '_')
-          # CGI convention: `Content-Type` and `Content-Length` land in
-          # the env *without* the HTTP_ prefix. Rails / Rack params
-          # parsing reads `CONTENT_TYPE` and dispatches JSON / multipart
-          # parsers off it; sending it as `HTTP_CONTENT_TYPE` lets the
-          # request through but with the default `text/plain`, so JSON
-          # bodies from `@rails/request.js` never deserialise and the
-          # server reads an empty params hash.
-          if name == 'CONTENT_TYPE' || name == 'CONTENT_LENGTH'
-            env[name] = v.to_s
-          else
-            env["HTTP_#{name}"] = v.to_s
+      MAX_FETCH_REDIRECTS = 20
+      def rack_fetch(method, url, body, headers, redirect_mode)
+        target = resolve_against_current(url.to_s)
+        method = (method || 'GET').to_s.upcase
+        redirected = false
+        MAX_FETCH_REDIRECTS.times do
+          env = Rack::MockRequest.env_for(target, method: method, input: body || '')
+          (headers || {}).each {|k, v|
+            name = k.to_s.upcase.tr('-', '_')
+            # CGI convention: `Content-Type` and `Content-Length` land in
+            # the env *without* the HTTP_ prefix. Rails / Rack params
+            # parsing reads `CONTENT_TYPE` and dispatches JSON / multipart
+            # parsers off it; sending it as `HTTP_CONTENT_TYPE` lets the
+            # request through but with the default `text/plain`, so JSON
+            # bodies from `@rails/request.js` never deserialise and the
+            # server reads an empty params hash.
+            if name == 'CONTENT_TYPE' || name == 'CONTENT_LENGTH'
+              env[name] = v.to_s
+            else
+              env["HTTP_#{name}"] = v.to_s
+            end
+          }
+          @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
+          env['HTTP_REFERER'] = @current_url unless @current_url.nil? || @current_url.empty?
+          @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
+          status, resp_headers, resp_body = @app.call(env)
+          merge_set_cookie(resp_headers)
+          log_network(method, target, status)
+          if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
+            raise StandardError, '[capybara-simulated v3] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            redirected = true
+            preserve = [307, 308].include?(status)
+            next_url = resolve_against(loc, target)
+            target = carry_fragment(target, next_url)
+            method = 'GET' unless preserve
+            body = nil unless preserve
+            resp_body.close if resp_body.respond_to?(:close)
+            next
           end
-        }
-        @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
-        status, resp_headers, resp_body = @app.call(env)
-        body_str = read_rack_body(resp_body)
-        log_network(method, url, status)
-        {'status' => status, 'headers' => stringify(resp_headers), 'body' => body_str}
+          body_str = read_rack_body(resp_body)
+          return {
+            'status' => status,
+            'headers' => stringify(resp_headers),
+            'body' => body_str,
+            'url' => target,
+            'redirected' => redirected,
+            'type' => 'basic'
+          }
+        end
+        raise StandardError, "[capybara-simulated v3] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
         warn "[capybara-simulated v3] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
@@ -1470,6 +1528,11 @@ module Capybara
         out = {}
         headers.each {|k, v| out[k.to_s] = v.is_a?(Array) ? v.join(',') : v.to_s }
         out
+      end
+
+      def redirect_location(status, headers)
+        return nil unless (300..399).include?(status.to_i)
+        headers['location'] || headers['Location']
       end
 
       def resolve_against_current(url, use_base: false)

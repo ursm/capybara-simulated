@@ -490,12 +490,23 @@
       // (`attributes['id']`) access. The array gives us numeric for
       // free; assign named keys for getNamedItem-equivalent lookups
       // that frameworks (jQuery 1.x, Sizzle) use during feature
-      // detection.
-      for (const n of names) list[n] = makeAttr(el, n);
-      list.getNamedItem = name => {
-        const lower = String(name).toLowerCase();
-        return Object.prototype.hasOwnProperty.call(el._attrs, lower) ? makeAttr(el, lower) : null;
-      };
+      // detection. Mark them non-enumerable so `Object.keys(attributes)`
+      // matches a real browser (numeric indices only) — Forem's
+      // `replaceTextArea` does `Object.keys(attributes).forEach(k =>
+      // newEl.setAttribute(attributes[k].name, attributes[k].value))`,
+      // and would otherwise iterate `getNamedItem` (an anonymous
+      // function with `.name === ''`, `.value === undefined`) and call
+      // `setAttribute('', 'undefined')` on the replacement node.
+      for (const n of names) {
+        Object.defineProperty(list, n, { value: makeAttr(el, n), enumerable: false, configurable: true, writable: true });
+      }
+      Object.defineProperty(list, 'getNamedItem', {
+        value: name => {
+          const lower = String(name).toLowerCase();
+          return Object.prototype.hasOwnProperty.call(el._attrs, lower) ? makeAttr(el, lower) : null;
+        },
+        enumerable: false, configurable: true, writable: true
+      });
       return list;
     }
     getAttributeNode(name) {
@@ -1036,7 +1047,13 @@
     set innerHTML(html) {
       for (const c of this._children) unregisterSubtree(c);
       this._children = [];
-      const frag = parseFragment(String(html == null ? '' : html));
+      let frag;
+      if (this._tag === 'html') {
+        const parsed = parseDocument(String(html == null ? '' : html));
+        frag = parsed.documentElement ? parsed.documentElement._children.slice() : [];
+      } else {
+        frag = parseFragment(String(html == null ? '' : html));
+      }
       for (const c of frag) {
         c._parent = this;
         this._children.push(c);
@@ -1262,6 +1279,35 @@
         if (c._tag === 'head') return c;
       }
       return null;
+    }
+    get title() {
+      const head = this.head;
+      const title = head && head.querySelector('title');
+      return title ? title.textContent : '';
+    }
+    // Per HTML spec, `document.referrer` is always a string — empty for
+    // a top-level navigation with no referrer. Tracking libraries
+    // (Ahoy / Honeybadger) read `document.referrer.length` during their
+    // setTimeout-scheduled init; without this getter the read returns
+    // `undefined`, throws, and the timer's downstream side effects
+    // (visit registration, follow-up render scheduling) never happen.
+    get referrer() { return ''; }
+    set title(v) {
+      let head = this.head;
+      if (!head) {
+        head = new Element('head');
+        head._parent = this.documentElement;
+        this.documentElement._children.unshift(head);
+        registerSubtree(head);
+      }
+      let title = head.querySelector('title');
+      if (!title) {
+        title = new Element('title');
+        title._parent = head;
+        head._children.push(title);
+        registerSubtree(title);
+      }
+      title.textContent = String(v == null ? '' : v);
     }
     getElementById(id) {
       return findFirst(this.documentElement, parseSelector('#' + String(id)));
@@ -4002,12 +4048,12 @@
     const bodyText = (raw && raw.body) || '';
     const status   = raw ? raw.status : 0;
     const resp = {
-      url,
+      url: raw && raw.url || url,
       status,
       statusText: '',
       ok: status >= 200 && status < 300,
-      redirected: false,
-      type: 'basic',
+      redirected: !!(raw && raw.redirected),
+      type: raw && raw.type || 'basic',
       headers,
       bodyUsed: false,
       _raw: raw,
@@ -4100,8 +4146,30 @@
   globalThis.history = {
     length: 1,
     state:  null,
-    pushState(state, _title, url) { this.state = state; if (url) __setCurrentUrl(String(url)); },
-    replaceState(state, _title, url) { this.state = state; if (url) __setCurrentUrl(String(url)); },
+    pushState(state, _title, url) {
+      this.state = state;
+      if (url) {
+        const s = String(url);
+        __setCurrentUrl(s);
+        // Keep `window.location` in sync. InstantClick / Turbo-style
+        // SPA navigation flips the URL via pushState without a real
+        // document reload, and any subsequent `window.location.pathname`
+        // read must see the new pathname (Forem's top-bar inline
+        // script gates its notifications-counts XHR on
+        // `pathname !== '/notifications'`; without this update the
+        // gate stays open on the notifications page and the badge
+        // gets re-populated).
+        globalThis.__csimUpdateLocation(s);
+      }
+    },
+    replaceState(state, _title, url) {
+      this.state = state;
+      if (url) {
+        const s = String(url);
+        __setCurrentUrl(s);
+        globalThis.__csimUpdateLocation(s);
+      }
+    },
     back()    { __locationReload(); },
     forward() { __locationReload(); },
     go()      { __locationReload(); }
@@ -5965,23 +6033,28 @@
     // `:active` selector + sortable plugins drag-detect off mousedown.
     // Without these dispatches, clicking a Tribute `<li>` does not
     // call `selectItemAtIndex` and the autocomplete never inserts.
-    // Track the click target as the hover element so `:hover`
-    // cascade matches resolve correctly afterwards (Redmine's
-    // `#context-menu .folder` reveals its nested `<ul>` via
-    // `#context-menu li:hover ul { display: block }`). We don't
-    // dispatch a mouseover here — real browsers do, but redispatching
-    // mouseover at click time recursed into hover listeners that
-    // re-clicked / re-hovered (the gantt tooltip controller is the
-    // canonical case). Setting the slot is enough for the CSS path.
-    try { if (globalThis.document) globalThis.document._hoverElement = n; } catch (_) {}
-    // Reset the form-submit intent slot before dispatch so the
-    // click handler can populate it if it ends in `form.submit()`
-    // (Rails-UJS data-method / data-confirm chain).
-    globalThis.__csimPendingFormSubmit = null;
     const base = { bubbles: true, cancelable: true, button: 0, which: 1,
                    shiftKey: !!mods.shiftKey, ctrlKey: !!mods.ctrlKey,
                    altKey: !!mods.altKey, metaKey: !!mods.metaKey,
                    clientX: +mods.clientX || 0, clientY: +mods.clientY || 0 };
+    // A real user click first moves the pointer over the target. Apps
+    // such as InstantClick use mouseover capture to start link preload
+    // before the subsequent click handler prevents the native
+    // navigation. Avoid redispatching for an already-hovered target;
+    // hover-driven widgets can be sensitive to duplicate mouseover.
+    try {
+      if (globalThis.document && globalThis.document._hoverElement !== n) {
+        const prev = globalThis.document._hoverElement || null;
+        globalThis.document._hoverElement = n;
+        dispatchEvent(n, new MouseEvent('mouseover', Object.assign({}, base, { relatedTarget: prev })));
+      } else if (globalThis.document) {
+        globalThis.document._hoverElement = n;
+      }
+    } catch (_) {}
+    // Reset the form-submit intent slot before dispatch so the
+    // click handler can populate it if it ends in `form.submit()`
+    // (Rails-UJS data-method / data-confirm chain).
+    globalThis.__csimPendingFormSubmit = null;
     dispatchEvent(n, new MouseEvent('mousedown', base));
     if (mods.mouseDownOnly) {
       // Caller (Ruby) handles the wall-clock delay between mousedown
@@ -6431,9 +6504,28 @@
     return true;
   };
   globalThis.__csimSetValue = function (h, value) {
-    const n = lookup(h);
-    if (!n || n.nodeType !== NODE_ELEMENT) return false;
-    const tag = n._tag;
+    let n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT) {
+      // The element vanished between the test's `find` and the `set`
+      // host call. Forem's reply-form path is the canonical case: the
+      // toggle handler schedules a setTimeout that focuses the textarea
+      // 30 ms later; Capybara's `Element#set` calls `tick_real_time`
+      // first, the focus fires inside that drain, the focus handler
+      // hands off to Preact's `replaceTextArea` (microtask), and the
+      // original textarea gets `remove()`d (with its handle unmapped)
+      // before we ever reach this function. Fall back to whatever the
+      // page just focused — which is what the test expected to type
+      // into.
+      const doc = globalThis.document;
+      const active = doc && doc.activeElement;
+      if (active && active !== doc.body && active.nodeType === NODE_ELEMENT &&
+          (active._tag === 'input' || active._tag === 'textarea' || isContenteditable(active))) {
+        n = active;
+      } else {
+        return false;
+      }
+    }
+    let tag = n._tag;
     // readonly / disabled inputs reject programmatic value changes —
     // mirrors what real browsers + selenium do.
     // `readonly` only applies to text-shaped controls per HTML;
@@ -6458,6 +6550,31 @@
     // radios get focused for parity with selenium's `.click()` path.
     if (tag === 'input' || tag === 'textarea' || isContenteditable(n)) {
       try { n.focus(); } catch (_) {}
+      // Focus handlers may swap the focused control out from under us:
+      //   - `<trix-editor>` focuses its internal `[contenteditable]`
+      //     descendant.
+      //   - A replaceWith-style swap detaches the original node and
+      //     focuses the freshly-inserted replacement.
+      // Drain any zero-delay work the focus handler queued, then
+      // retarget either when the active element is a descendant of
+      // the original *or* the original was detached. Apps that mount
+      // a sibling Preact tree alongside the focused textarea (Forem
+      // comments) keep the original attached and the new control
+      // outside its subtree, so they fall through and we still write
+      // into the field the user/test asked for.
+      try {
+        if (typeof globalThis.__drainTimers === 'function') globalThis.__drainTimers(0, 1000);
+      } catch (_) {}
+      const active = globalThis.document && globalThis.document.activeElement;
+      const nDetached = !n._parent;
+      const activeInside = active && n.contains && n.contains(active);
+      if (active && active.nodeType === NODE_ELEMENT &&
+          active !== n &&
+          (activeInside || nDetached) &&
+          (active._tag === 'input' || active._tag === 'textarea' || isContenteditable(active))) {
+        n = active;
+        tag = n._tag;
+      }
     }
     const v = value == null ? '' : String(value);
     let kind = 'value';

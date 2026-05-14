@@ -13,6 +13,36 @@ RSpec.describe 'browser global surface' do
 
   before { session.visit '/' }
 
+  describe 'URL / location' do
+    it 'omits default ports from host, port, href, and origin' do
+      result = session.evaluate_script(<<~JS)
+        const http = new URL('http://example.test:80/path');
+        const https = new URL('https://example.test:443/path');
+        ({
+          httpHost: http.host,
+          httpPort: http.port,
+          httpHref: http.href,
+          httpOrigin: http.origin,
+          httpsHost: https.host,
+          httpsPort: https.port,
+          httpsHref: https.href,
+          httpsOrigin: https.origin
+        })
+      JS
+
+      expect(result).to eq(
+        'httpHost' => 'example.test',
+        'httpPort' => '',
+        'httpHref' => 'http://example.test/path',
+        'httpOrigin' => 'http://example.test',
+        'httpsHost' => 'example.test',
+        'httpsPort' => '',
+        'httpsHref' => 'https://example.test/path',
+        'httpsOrigin' => 'https://example.test'
+      )
+    end
+  end
+
   describe 'localStorage / sessionStorage' do
     it 'round-trips set + get within a session' do
       session.evaluate_script("localStorage.setItem('k', 'v')")
