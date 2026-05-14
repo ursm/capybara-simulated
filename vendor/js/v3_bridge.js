@@ -838,6 +838,16 @@
       } catch (_) { return v; }
     }
     set href(v) { this._attrs.href = String(v == null ? '' : v); }
+    // HTMLHyperlinkElementUtils mixin: `<a>` / `<area>` (and `<link>`,
+    // though `<link>.toString()` is rarely meaningful) override
+    // `toString()` to return the resolved `href`. Forem's
+    // `trackNotification` reads `target.toString()` on the clicked
+    // link to build an ahoy event property; without this, every
+    // anchor stringifies to the default `[object Object]`.
+    toString() {
+      if (this._tag === 'a' || this._tag === 'area') return this.href;
+      return Object.prototype.toString.call(this);
+    }
     // HTMLFormElement IDL — `method` / `action` / `enctype` /
     // `target` are reflections of the corresponding attributes.
     // Rails-UJS's `handleMethod` builds a synthetic form via
@@ -3687,7 +3697,11 @@
   // copy-then-paste flow tested by `copy_*_to_clipboard`).
   let __clipboardText = '';
   globalThis.navigator = {
-    userAgent: 'capybara-simulated/v3 (V8-resident DOM)',
+    // Lead with `Mozilla/5.0` so server-side bot detectors (`browser`
+    // gem, ahoy_matey's `Browser.new(ua).bot?`) recognise us as a
+    // regular client rather than a crawler. Without it Ahoy's exclude
+    // path drops every visit/event we POST.
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated/v3 (V8-resident DOM)',
     appName:   'Netscape',
     appVersion:'5.0',
     platform:  'Linux',
@@ -3705,6 +3719,40 @@
       // code; provide a stub so feature-detection doesn't trip).
       write () { return Promise.resolve(); },
       read  () { return Promise.resolve([]); }
+    },
+    // `sendBeacon` is what analytics libraries (Ahoy.js, Segment) use to
+    // POST a payload at page-unload time without blocking navigation.
+    // Real browsers queue the request and fire it asynchronously; we
+    // route through `__rackFetch` synchronously which is fine for tests
+    // — the assertion that follows the click sees the POST through.
+    // Without this method, `typeof navigator.sendBeacon === "undefined"`
+    // makes Ahoy.js's `canTrackNow()` return false and the code falls
+    // back to `setTimeout(trackEvent, 1000)`, which a fast synchronous
+    // test never advances past.
+    sendBeacon (url, data) {
+      try {
+        let body = '';
+        const headers = {};
+        if (data instanceof globalThis.FormData) {
+          const parts = [];
+          data.forEach((v, k) => parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v))));
+          body = parts.join('&');
+          headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+        } else if (data instanceof globalThis.URLSearchParams) {
+          body = data.toString();
+          headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
+        } else if (typeof data === 'string') {
+          body = data;
+          headers['Content-Type'] = 'text/plain;charset=UTF-8';
+        } else if (data == null) {
+          body = '';
+        } else {
+          body = String(data);
+          headers['Content-Type'] = 'application/octet-stream';
+        }
+        const resp = __rackFetch('POST', String(url), body, headers, 'follow');
+        return !!resp;
+      } catch (_) { return false; }
     }
   };
   globalThis.__csimClipboardGet = function () { return __clipboardText; };

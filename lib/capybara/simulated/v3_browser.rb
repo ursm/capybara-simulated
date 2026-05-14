@@ -37,6 +37,17 @@ module Capybara
       TICK_MIN_MS = 10
       TICK_CAP_MS = 5_000
 
+      # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
+      # mirrors the JS-side `navigator.userAgent` and must lead with
+      # `Mozilla/5.0` so server-side bot detectors (ahoy_matey's
+      # `Browser.new(ua).bot?`) treat us as a real client. `REMOTE_ADDR`
+      # has to be a non-empty, parseable IP — Devise's `trackable`
+      # mixin runs `IPAddr.new(request.remote_ip)` during
+      # `set_user`/sign-in, and an empty string trips
+      # `IPAddr::AddressFamilyError`.
+      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated/v3 (V8-resident DOM)'
+      REMOTE_ADDR = '127.0.0.1'
+
       def initialize(app)
         @app                          = app
         @runtime                      = V3Runtime.new(self)
@@ -398,8 +409,10 @@ module Capybara
 
       def download_link(url, filename_hint = '')
         env = Rack::MockRequest.env_for(url, method: 'GET')
-        env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']  = @current_url    unless @current_url.nil? || @current_url.empty?
+        env['HTTP_USER_AGENT'] = USER_AGENT
+        env['REMOTE_ADDR']     = REMOTE_ADDR
+        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
         status, headers, body = @app.call(env)
         return unless status.to_i == 200
         # Fall back to the link's `download="filename"` value or the
@@ -1099,10 +1112,12 @@ module Capybara
         invalidate_find_cache
         record_history({method: :post, url: url, body: body, content_type: content_type}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
-        env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
-        env['CONTENT_LENGTH'] = body.bytesize.to_s
-        env['HTTP_COOKIE']    = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']   = @current_url    unless @current_url.nil? || @current_url.empty?
+        env['CONTENT_TYPE']    = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
+        env['CONTENT_LENGTH']  = body.bytesize.to_s
+        env['HTTP_USER_AGENT'] = USER_AGENT
+        env['REMOTE_ADDR']     = REMOTE_ADDR
+        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, resp_body = @app.call(env)
         merge_set_cookie(headers)
@@ -1298,6 +1313,8 @@ module Capybara
             end
           }
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
+          env['HTTP_USER_AGENT'] ||= USER_AGENT
+          env['REMOTE_ADDR']     ||= REMOTE_ADDR
           env['HTTP_REFERER'] = @current_url unless @current_url.nil? || @current_url.empty?
           @cookies.each {|k, v| env['HTTP_COOKIE'] = "#{env['HTTP_COOKIE']}#{env['HTTP_COOKIE'] ? '; ' : ''}#{k}=#{v}" }
           status, resp_headers, resp_body = @app.call(env)
@@ -1442,8 +1459,10 @@ module Capybara
         invalidate_find_cache
         record_history({method: :get, url: url}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'GET')
-        env['HTTP_COOKIE']   = document_cookie unless @cookies.empty?
-        env['HTTP_REFERER']  = referer         unless referer.nil? || referer.empty?
+        env['HTTP_USER_AGENT'] = USER_AGENT
+        env['REMOTE_ADDR']     = REMOTE_ADDR
+        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER']    = referer         unless referer.nil? || referer.empty?
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, body = @app.call(env)
         merge_set_cookie(headers)
