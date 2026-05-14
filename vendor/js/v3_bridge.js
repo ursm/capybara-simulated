@@ -5947,6 +5947,37 @@
     return out;
   }
 
+  // HTML spec: `<option>.selected` IDL is true when the `selected`
+  // attribute is set OR when no sibling option has `selected` and this
+  // is the first non-disabled option of a single-select `<select>`
+  // (implicit default). Capybara's `have_select(selected: "Choose an
+  // option")` matcher's `selected?` per-option filter relies on the
+  // implicit branch — without it, a `<select>` with no explicit
+  // `<option selected>` reports zero selected options even though the
+  // first option *is* the currently rendered choice.
+  globalThis.__csimOptionSelected = function (h) {
+    const n = lookup(h);
+    if (!n || n.nodeType !== NODE_ELEMENT || n._tag !== 'option') return false;
+    if (n._attrs.selected != null) return true;
+    // Find the owning <select>; walk past optgroup wrappers.
+    let sel = n._parent;
+    while (sel && sel.nodeType === NODE_ELEMENT && sel._tag === 'optgroup') sel = sel._parent;
+    if (!sel || sel._tag !== 'select') return false;
+    // Multi-select has no implicit default — only explicit `selected`
+    // counts.
+    if (sel._attrs.multiple != null) return false;
+    const opts = sel.querySelectorAll('option');
+    // Walk all options. Any explicit `<option selected>` kills the
+    // implicit pick (only explicit counts). Track the first non-
+    // disabled candidate; n is the implicit selection iff it matches.
+    let firstEnabled = null;
+    for (const o of opts) {
+      if (o._attrs.selected != null) return false;
+      if (o._attrs.disabled == null && firstEnabled === null) firstEnabled = o;
+    }
+    return n === firstEnabled;
+  };
+
   // `disabled?` mirrors v2's logic: only form controls (+ fieldset)
   // can be disabled; an `<option>` inherits disabled from an ancestor
   // `<select>` / `<optgroup>`; form controls inherit from an ancestor

@@ -366,7 +366,16 @@ module Capybara
       def tag_name(handle)     = tag(handle)
       def value(handle)        = @runtime.call('__csimValue', handle)
       def disabled?(handle)    = @runtime.call('__csimDisabled', handle)
-      def option_selected?(h)  = !!attr(h, 'selected')
+      # HTML spec: `<option>.selected` IDL is true when the `selected`
+      # *attribute* is set OR when no sibling option has `selected` and
+      # this is the first non-disabled option of a single-select
+      # `<select>` (implicit default). Capybara's `have_select(selected:
+      # "Choose an option")` filter calls `selected?` on each option;
+      # without the implicit-default branch, a select with no explicit
+      # `<option selected>` reports no selected options and the matcher
+      # fails even though the first option *is* the currently chosen
+      # one in real browsers.
+      def option_selected?(h)  = !!@runtime.call('__csimOptionSelected', h)
       def shadow_root_handle(handle)
         h = @runtime.call('__csimShadowRoot', handle).to_i
         h.zero? ? nil : h
