@@ -158,6 +158,19 @@
           copy._children.push(cc);
         }
       }
+      // `<template>.content` carries the inert children; mirror them
+      // onto the clone so `template.content.cloneNode(true)` (Avo's
+      // belongs_to polymorphic pattern, Turbo's StreamMessage parsing)
+      // lands on a real DocumentFragment.
+      if (deep && this.nodeType === NODE_ELEMENT && this._tag === 'template' && this._templateContent) {
+        const frag = new DocumentFragment();
+        for (const c of this._templateContent._children) {
+          const cc = c.cloneNode(true);
+          cc._parent = frag;
+          frag._children.push(cc);
+        }
+        copy._templateContent = frag;
+      }
       return copy;
     }
     _cloneShell() {
@@ -481,6 +494,16 @@
     get nodeName()   { return this.tagName; }
     get nodeValue()  { return null; }
     get localName()  { return this._tag; }
+    // `<template>.content` — the DocumentFragment containing the
+    // template's inert children per HTML spec. Lazy-initialised for
+    // templates created via `document.createElement`; the HTML parser
+    // pre-populates `_templateContent` when it encounters
+    // `<template>…</template>`.
+    get content() {
+      if (this._tag !== 'template') return undefined;
+      if (!this._templateContent) this._templateContent = new DocumentFragment();
+      return this._templateContent;
+    }
     // XPath 1.0 `*` wildcard matches names in *no* namespace. Reporting
     // the XHTML namespace here would silently mismatch Capybara-emitted
     // `//*` queries. We don't model XML namespaces; null is what
@@ -1111,6 +1134,21 @@
 
     get innerHTML() { return serializeChildren(this); }
     set innerHTML(html) {
+      // `<template>.innerHTML` setter populates the template's
+      // `.content` fragment, not the template's own children (per
+      // HTML spec — the inert subtree lives on the fragment).
+      if (this._tag === 'template') {
+        const frag = this.content;
+        for (const c of frag._children) unregisterSubtree(c);
+        frag._children = [];
+        const parsed = parseFragment(String(html == null ? '' : html));
+        for (const c of parsed) {
+          c._parent = frag;
+          frag._children.push(c);
+          registerSubtree(c);
+        }
+        return;
+      }
       for (const c of this._children) unregisterSubtree(c);
       this._children = [];
       let frag;
@@ -1416,6 +1454,22 @@
     // for `appendChild` / `childNodes` to work.
     createDocumentFragment() {
       return new DocumentFragment();
+    }
+    // `Document.importNode(node, deep)` — clone of `node` adopted into
+    // this document. v3 only has one document at a time, so this is
+    // an alias for `cloneNode(deep)`. Turbo Drive's
+    // `importStreamElements` uses `document.importNode(streamElement,
+    // true)` to graft turbo-stream fragments into the live tree.
+    importNode(node, deep) {
+      if (!node || typeof node.cloneNode !== 'function') return null;
+      return node.cloneNode(!!deep);
+    }
+    adoptNode(node) {
+      if (!node) return null;
+      if (node._parent && typeof node._parent.removeChild === 'function') {
+        try { node._parent.removeChild(node); } catch (_) {}
+      }
+      return node;
     }
     // `document.implementation.createHTMLDocument(title)` — DOMParser
     // shims and Turbo Drive page-snapshot logic both probe it. We
@@ -3058,16 +3112,23 @@
 
   function parseFragment(html) {
     const out = [];
-    const stack = []; // { el }
+    const stack = []; // { el, parentForChildren, container }
     let target = out;
     // Text / nested-element pushes inside `target` need `_parent` set
     // to the owning Element so `firstChild` / `nextSibling` traversal
     // (the path wgxpath uses) walks the full sibling chain. Without
     // this, text nodes were created with `_parent = null` and the
     // sibling walk fell off after the first text child.
+    //
+    // `<template>` is special: per spec its children belong to an
+    // inert `DocumentFragment` exposed as `.content`, not the
+    // template's own tree. Parsing routes them into that fragment so
+    // `querySelector` / `textContent` / cascade walks naturally skip
+    // them, and `template.content.cloneNode(true)` (Avo's polymorphic
+    // belongs_to pattern) lands on a real DocumentFragment.
     const pushChild = (child) => {
-      const parent = stack.length ? stack[stack.length - 1].el : null;
-      child._parent = parent;
+      const frame = stack.length ? stack[stack.length - 1] : null;
+      child._parent = frame ? frame.parentForChildren : null;
       target.push(child);
     };
     let i = 0;
@@ -3110,7 +3171,7 @@
         for (let s = stack.length - 1; s >= 0; s--) {
           if (stack[s].el._tag === tag) {
             stack.length = s;
-            target = stack.length ? stack[stack.length - 1].el._children : out;
+            target = stack.length ? stack[stack.length - 1].container : out;
             break;
           }
         }
@@ -3134,7 +3195,18 @@
         last = end; re.lastIndex = end;
         continue;
       }
-      stack.push({ el });
+      // `<template>` routes descendants into an inert
+      // `DocumentFragment` (the template's `.content`) so they don't
+      // bleed into qsa / textContent / cascade walks.
+      if (tag === 'template') {
+        const frag = new DocumentFragment();
+        frag._parent = null;
+        el._templateContent = frag;
+        stack.push({ el, parentForChildren: frag, container: frag._children });
+        target = frag._children;
+        continue;
+      }
+      stack.push({ el, parentForChildren: el, container: el._children });
       target = el._children;
     }
     if (last < html.length) {
