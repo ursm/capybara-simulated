@@ -695,36 +695,30 @@
       return this._attrs.type != null ? this._attrs.type : '';
     }
     set type(v) { this.setAttribute('type', String(v == null ? '' : v)); }
-    // `<select>.options` — live HTMLOptionsCollection of every
-    // `<option>` descendant (jQuery's `.val()` getter reads this with
-    // an indexed lookup based on `selectedIndex`; without the property
-    // the read returns undefined → `undefined.length` TypeError).
-    // Spec adds collection mutators (`add` / `remove` / `item` /
-    // `namedItem`) that controllers reach for — Avo's `city-in-country`
-    // controller does `select.options.remove(0)` per option to wipe
-    // and rebuild before populating the new country's cities.
+    // `<select>.options` — HTMLOptionsCollection of every `<option>`
+    // descendant. jQuery's `.val()` reads it with an indexed lookup
+    // based on `selectedIndex`; controllers also reach for the
+    // collection's spec mutators (`add` / `remove` / `item` /
+    // `namedItem`) — Avo's `city-in-country` does `options.remove(0)`
+    // per option to wipe and rebuild after a country change.
     get options() {
       if (this._tag !== 'select') return undefined;
       const arr = this.querySelectorAll('option');
       const owner = this;
-      arr.add = function (option, before) {
-        if (before == null) owner.appendChild(option);
-        else owner.insertBefore(option, typeof before === 'number' ? arr[before] : before);
-      };
-      arr.remove    = function (idx) { const o = arr[idx]; if (o && o._parent) o._parent.removeChild(o); };
-      arr.item      = function (i) { return arr[i] || null; };
-      arr.namedItem = function (n) { return arr.find(o => o._attrs.id === n || o._attrs.name === n) || null; };
+      arr.add       = function (option, before) { owner.add(option, before); };
+      arr.remove    = function (idx)  { const o = arr[idx]; if (o && o._parent) o._parent.removeChild(o); };
+      arr.item      = function (i)    { return arr[i] || null; };
+      arr.namedItem = function (name) { return arr.find(o => o._attrs.id === name || o._attrs.name === name) || null; };
       return arr;
     }
-    // HTMLSelectElement.add(option, before?) — spec method that
-    // Avo's city-in-country controller uses to rebuild the city
-    // list after a country change.
+    // HTMLSelectElement.add(option, before?) — `before` may be a
+    // numeric index into the existing options or the reference
+    // element itself.
     add(element, before) {
       if (this._tag !== 'select') return;
-      if (before == null || before === undefined) this.appendChild(element);
+      if (before == null) this.appendChild(element);
       else if (typeof before === 'number') {
-        const opts = this.querySelectorAll('option');
-        this.insertBefore(element, opts[before] || null);
+        this.insertBefore(element, this.querySelectorAll('option')[before] || null);
       } else this.insertBefore(element, before);
     }
     get title() { return this._attrs.title != null ? this._attrs.title : ''; }
@@ -4536,18 +4530,15 @@
     // a script that tests visibility (`offsetWidth`-style probes) or
     // queries Capybara-visible elements would otherwise see the
     // pre-cascade state.
-    __hideRules = collectHideRules(globalThis.document);
+    ({ hide: __hideRules, layout: __layoutRules } = collectCascadeRules(globalThis.document));
     __hideRuleIdx = null; // rebuilt lazily on first lookup
-    __layoutRules = collectLayoutRules(globalThis.document);
     runInlineScripts(globalThis.document);
     // Browsers fire `readystatechange` on every `document.readyState`
     // transition. Turbo Drive's `PageObserver` listens on document
     // for it and only dispatches `turbo:load` once readyState reaches
     // 'complete'; Avo's `initTippy()` (and a long tail of other
     // `turbo:load`-bound init) won't run unless we fire the
-    // transition. We compress `loading→interactive→complete` into
-    // two dispatches at the end of the parse — close enough for
-    // observers that just gate on the final state.
+    // transition.
     d.readyState = 'interactive';
     try { dispatchEvent(d, new Event('readystatechange', { bubbles: false, cancelable: false })); } catch (_) {}
     d.readyState = 'complete';
@@ -5025,9 +5016,8 @@
   // reports as hidden via the cascade.
   globalThis.__csimRebuildCascade = function () {
     if (!globalThis.document || !globalThis.document.documentElement) return;
-    __hideRules = collectHideRules(globalThis.document);
+    ({ hide: __hideRules, layout: __layoutRules } = collectCascadeRules(globalThis.document));
     __hideRuleIdx = null;
-    __layoutRules = collectLayoutRules(globalThis.document);
   };
 
   function stripCssComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, ''); }
@@ -5396,71 +5386,63 @@
     return out.join(', ');
   }
 
-  function extractHideRules(cssText, vp) {
-    const out = [];
-    let tree;
-    try { tree = parseCssTree(cssText); }
-    catch (_) { return out; }
-    const flat = flattenCssTree(tree, vp);
-    for (const r of flat) {
-      const selector = r.selectorText;
-      const decls = r.decls;
-      if (!selector || !decls.length) continue;
-      // Pick out only display + visibility — done at parse time, so
-      // the loop below already sees pre-filtered decls.
-      let display = null, displayImp = false;
-      let visibility = null, visibilityImp = false;
-      for (const d of decls) {
-        if (d.prop === 'display')    { display = d.value; displayImp = d.important; }
-        if (d.prop === 'visibility') { visibility = d.value; visibilityImp = d.important; }
-      }
-      if (display == null && visibility == null) continue;
-      // Split the selector group so each match-test is one chain — the
-      // resolver iterates flat and ties break on (specificity, order).
-      for (const sel of splitTopLevel(selector, ',')) {
-        const trimmed = sel.trim();
-        if (!trimmed) continue;
-        let group;
-        try { group = parseSelector(trimmed); } catch (_) { continue; }
-        if (!group || !group.length) continue;
-        // group has exactly one complex selector here (we split the
-        // comma list above). Compute its specificity.
-        const seq = group[0];
-        const spec = specificity(seq);
-        out.push({
-          group, spec, source: __ruleSerial++,
-          display, displayImp,
-          visibility, visibilityImp
-        });
-      }
-    }
-    return out;
-  }
-
-  function collectHideRules(doc) {
-    if (!doc || !doc.documentElement) return [];
+  // Walk every `<style>` and `<link rel=stylesheet>` once and pull
+  // out the two slices of cascade state v3 cares about — hide rules
+  // (display / visibility, for `visible?`) and layout rules
+  // (`top/left/width/height` + `text-transform`, for click-offset
+  // resolution and visible-text upper-casing). One Rack fetch per
+  // external stylesheet, one `parseCssTree` per blob.
+  function collectCascadeRules(doc) {
+    const empty = { hide: [], layout: [] };
+    if (!doc || !doc.documentElement) return empty;
     __ruleSerial = 0;
     const vp = currentViewport();
-    const rules = [];
-    const styles = doc.documentElement.querySelectorAll('style');
-    for (const s of styles) {
+    const hide   = [];
+    const layout = [];
+    const consume = (cssText) => {
+      let tree;
+      try { tree = parseCssTree(cssText); } catch (_) { return; }
+      for (const r of flattenCssTree(tree, vp)) {
+        if (!r.selectorText || !r.decls.length) continue;
+        let display = null, displayImp = false;
+        let visibility = null, visibilityImp = false;
+        const captured = {};
+        for (const d of r.decls) {
+          if      (d.prop === 'display')    { display = d.value; displayImp = d.important; }
+          else if (d.prop === 'visibility') { visibility = d.value; visibilityImp = d.important; }
+          if (LAYOUT_PROPS.includes(d.prop)) captured[d.prop] = { value: d.value, important: d.important };
+        }
+        const hasHide   = display != null || visibility != null;
+        const hasLayout = Object.keys(captured).length > 0;
+        if (!hasHide && !hasLayout) continue;
+        for (const sel of splitTopLevel(r.selectorText, ',')) {
+          const trimmed = sel.trim();
+          if (!trimmed) continue;
+          let group;
+          try { group = parseSelector(trimmed); } catch (_) { continue; }
+          if (!group || !group.length) continue;
+          const spec   = specificity(group[0]);
+          const source = __ruleSerial++;
+          if (hasHide)   hide  .push({ group, spec, source, display, displayImp, visibility, visibilityImp });
+          if (hasLayout) layout.push({ group, spec, source, captured });
+        }
+      }
+    };
+    for (const s of doc.documentElement.querySelectorAll('style')) {
       const txt = scriptText(s);
-      if (txt) rules.push(...extractHideRules(txt, vp));
+      if (txt) consume(txt);
     }
-    const links = doc.documentElement.querySelectorAll('link');
-    for (const l of links) {
+    for (const l of doc.documentElement.querySelectorAll('link')) {
       const rel = (l._attrs.rel || '').toLowerCase();
       if (!rel.split(/\s+/).includes('stylesheet')) continue;
       const href = l._attrs.href;
       if (!href) continue;
       try {
         const resp = __rackFetch('GET', href, '', null, 'follow');
-        if (resp && resp.status < 400 && resp.body) {
-          rules.push(...extractHideRules(resp.body, vp));
-        }
+        if (resp && resp.status < 400 && resp.body) consume(resp.body);
       } catch (_) {}
     }
-    return rules;
+    return { hide, layout };
   }
 
   // Hide-rule index: bucket each rule by the terminal compound's
@@ -5505,72 +5487,12 @@
     return idx;
   }
 
-  // Cascade resolution for {display, visibility} on `el`. Priority
-  // order (highest wins):
-  //   1. !important declarations
-  //   2. specificity (a, b, c) — higher wins
-  //   3. source order — later wins
-  // Parallel to collectHideRules but capturing layout properties
-  // (top/left/width/height) instead of display/visibility. Used by
-  // getBoundingClientRect-equivalent path so click-offset tests can
-  // translate `click(x: 10, y: 5)` into MouseEvent.clientX/clientY
-  // against the element's CSS-declared position.
-  // Captured by `collectLayoutRules`. `top/left/width/height` feed
-  // the click-offset path; `text-transform` feeds the visible-text
-  // upper/lower-case path (Avo's table headers carry the Tailwind
-  // `.uppercase` class and the test asserts the upper-cased label
-  // text — without it column headers come back as `Id` / `Name`
-  // instead of `ID` / `NAME`).
+  // Captured by `collectCascadeRules` into the `layout` slice.
+  // `top/left/width/height` resolve to numeric coordinates for the
+  // click-offset path; `text-transform` feeds the visible-text
+  // upper/lower-case path (Tailwind `.uppercase` etc. — without it
+  // Avo's column headers come back mixed-case instead of `ID`/`NAME`).
   const LAYOUT_PROPS = ['top', 'left', 'width', 'height', 'text-transform'];
-  function extractLayoutRulesFromCss(cssText, vp) {
-    const out = [];
-    let tree;
-    try { tree = parseCssTree(cssText); } catch (_) { return out; }
-    for (const r of flattenCssTree(tree, vp)) {
-      if (!r.selectorText || !r.decls.length) continue;
-      const captured = {};
-      for (const d of r.decls) {
-        if (LAYOUT_PROPS.includes(d.prop)) captured[d.prop] = { value: d.value, important: d.important };
-      }
-      if (Object.keys(captured).length === 0) continue;
-      for (const sel of splitTopLevel(r.selectorText, ',')) {
-        const trimmed = sel.trim();
-        if (!trimmed) continue;
-        let group;
-        try { group = parseSelector(trimmed); } catch (_) { continue; }
-        if (!group || !group.length) continue;
-        const spec = specificity(group[0]);
-        out.push({ group, spec, source: __ruleSerial++, captured });
-      }
-    }
-    return out;
-  }
-  function collectLayoutRules(doc) {
-    if (!doc || !doc.documentElement) return [];
-    const vp = currentViewport();
-    const rules = [];
-    for (const s of doc.documentElement.querySelectorAll('style')) {
-      const txt = scriptText(s);
-      if (txt) rules.push(...extractLayoutRulesFromCss(txt, vp));
-    }
-    // External stylesheets carry the bulk of utility-class rules
-    // (Tailwind's `.uppercase`, `.lowercase`, …) in app bundles —
-    // without this fetch Avo's `<th class="uppercase">` cascade lookup
-    // finds nothing and visible_text returns mixed-case headers.
-    for (const l of doc.documentElement.querySelectorAll('link')) {
-      const rel = (l._attrs.rel || '').toLowerCase();
-      if (!rel.split(/\s+/).includes('stylesheet')) continue;
-      const href = l._attrs.href;
-      if (!href) continue;
-      try {
-        const resp = __rackFetch('GET', href, '', null, 'follow');
-        if (resp && resp.status < 400 && resp.body) {
-          rules.push(...extractLayoutRulesFromCss(resp.body, vp));
-        }
-      } catch (_) {}
-    }
-    return rules;
-  }
   // Inline `style="top: 100px; left: 100px"` parsing for one element.
   function parseInlineLayout (el) {
     const out = {};
@@ -6480,30 +6402,6 @@
                      !(n._attrs.readonly != null || n._attrs.disabled != null);
     if (typeable) { try { n.focus(); } catch (_) {} }
     const startValue = typeable ? (n._attrs.value || '') : null;
-    // HTML5 implicit form submission: Enter in a text-like input
-    // submits the enclosing form if the form has either a default
-    // submit-style button or exactly one text-like input. Avo's
-    // `submits the form on enter` spec depends on this exact
-    // algorithm; we can't fold it into the typing branch because
-    // the trigger is a (non-cancelled) keydown, not a value mutation.
-    const TEXT_LIKE = new Set(['text', 'email', 'password', 'search', 'tel', 'url', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
-    function implicitSubmitForm (input) {
-      if (input._tag !== 'input') return null;
-      const type = (input._attrs.type || 'text').toLowerCase();
-      if (!TEXT_LIKE.has(type)) return null;
-      let form = input._parent;
-      while (form && form._tag !== 'form') form = form._parent;
-      if (!form) return null;
-      if (form.querySelector('button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]')) return form;
-      let textCount = 0;
-      for (const i of form.querySelectorAll('input')) {
-        const t = (i._attrs.type || 'text').toLowerCase();
-        if (TEXT_LIKE.has(t)) {
-          if (++textCount > 1) return null;
-        }
-      }
-      return textCount === 1 ? form : null;
-    }
     const pressKey = (info, modifiers) => {
       const initBase = Object.assign({ bubbles: true, cancelable: true }, modifiers || {});
       const init = Object.assign({}, initBase, { key: info.key, code: info.code, keyCode: info.keyCode, which: info.keyCode });
@@ -6515,7 +6413,7 @@
       // preventDefault, skip (Tagify / Tribute do this to chip the
       // current token instead of submitting).
       if (!blocked && info.key === 'Enter' && typeable && (!modifiers || (!modifiers.ctrlKey && !modifiers.metaKey && !modifiers.altKey))) {
-        const form = implicitSubmitForm(n);
+        const form = implicitSubmitFormFor(n);
         if (form) {
           const submit = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: null });
           dispatchEvent(form, submit);
@@ -6880,10 +6778,9 @@
     // stored value, and queue a form-submit intent for Ruby to drain
     // (same channel as Rails-UJS data-method chains).
     if (tag === 'input' && typeof value === 'string' && value.endsWith('\n')) {
-      const stripped = String(n._attrs.value || '').replace(/\n$/, '');
-      n._attrs.value = stripped;
-      const form = formForControl(n);
-      if (form && __formImplicitSubmit(form, n)) {
+      n._attrs.value = String(n._attrs.value || '').replace(/\n$/, '');
+      const form = implicitSubmitFormFor(n);
+      if (form) {
         // Match the shape `__takePendingFormSubmit` reads: an object
         // with the raw form/submitter Element refs, not handle ids.
         globalThis.__csimPendingFormSubmit = { form, submitter: null };
@@ -6891,19 +6788,32 @@
     }
     return true;
   };
-  // HTML "implicit submission" eligibility: the form must have exactly
-  // one text-shaped input control. Multiple text inputs disqualify
-  // (browsers fall back to needing a submit button) — Capybara's
-  // `should not submit single text input forms if ended with \n and
-  // has multiple values` test pins that branch.
-  function __formImplicitSubmit (form, control) {
+  // HTML5 implicit form submission. Returns the form to submit when
+  // `control` is the target of an Enter keypress (or a `.set("...\n")`
+  // trailing-newline). A form is eligible if it has a default submit
+  // button OR exactly one text-shaped input; the control itself must
+  // be a text-shaped input. Capybara's `should not submit single
+  // text input forms if ended with \n and has multiple values` pins
+  // the multi-input branch.
+  const TEXT_LIKE_INPUT_TYPES = new Set([
+    'text', 'email', 'password', 'search', 'tel', 'url',
+    'number', 'date', 'datetime-local', 'month', 'time', 'week'
+  ]);
+  const DEFAULT_SUBMIT_SELECTOR = 'button[type="submit"], button:not([type]), input[type="submit"], input[type="image"]';
+  function implicitSubmitFormFor (control) {
+    if (!control || control._tag !== 'input') return null;
+    const type = (control._attrs.type || 'text').toLowerCase();
+    if (!TEXT_LIKE_INPUT_TYPES.has(type)) return null;
+    const form = formForControl(control);
+    if (!form) return null;
+    if (form.querySelector(DEFAULT_SUBMIT_SELECTOR)) return form;
     let count = 0;
     for (const el of form.querySelectorAll('input')) {
-      const t = (el._attrs.type || 'text').toLowerCase();
-      if (['text', 'email', 'password', 'tel', 'url', 'search', 'number'].includes(t)) count++;
-      if (count > 1) return false;
+      if (TEXT_LIKE_INPUT_TYPES.has((el._attrs.type || 'text').toLowerCase())) {
+        if (++count > 1) return null;
+      }
     }
-    return count === 1 && (control._attrs.type || 'text').toLowerCase() !== 'submit';
+    return count === 1 ? form : null;
   }
   function selectOptionExclusive(select, opt) {
     const multi = select._attrs.multiple != null;
@@ -7369,10 +7279,10 @@
     const OrigDTF = Intl.DateTimeFormat;
     function PatchedDTF (locales, options) {
       if (!(this instanceof PatchedDTF)) return new PatchedDTF(locales, options);
-      if (__targetTZ && (!options || !options.timeZone)) {
-        options = Object.assign({}, options, {timeZone: __targetTZ});
-      }
-      return Reflect.construct(OrigDTF, [locales, options]);
+      // Hot path: no override active → fall through to the native
+      // constructor without `Reflect.construct`'s extra hop.
+      if (!__targetTZ || (options && options.timeZone)) return new OrigDTF(locales, options);
+      return new OrigDTF(locales, Object.assign({}, options, {timeZone: __targetTZ}));
     }
     PatchedDTF.prototype          = OrigDTF.prototype;
     PatchedDTF.supportedLocalesOf = function (l, o) { return OrigDTF.supportedLocalesOf(l, o); };

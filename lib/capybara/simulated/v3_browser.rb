@@ -146,6 +146,9 @@ module Capybara
       # patches `Intl.DateTimeFormat`'s default `timeZone` to this
       # Ruby-supplied target — Luxon's `SystemZone` routes through
       # Intl so the override propagates to the user-visible date.
+      # Per-visit Context rebuilds reset the JS-side override, so
+      # we always re-apply after `rebuild_ctx` regardless of whether
+      # ENV['TZ'] changed.
       def apply_timezone
         @runtime.call('__csimSetTimezone', ENV['TZ'].to_s)
       end
