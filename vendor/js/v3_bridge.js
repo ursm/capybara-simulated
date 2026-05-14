@@ -4273,16 +4273,33 @@
     if (n._children) for (const c of n._children) registerNode(c);
   }
   function lookup(h) { return __handles.get(h) || null; }
-  // Ruby-callable hover dispatch. Updates `document._hoverElement` so
-  // `:hover` cascade matches resolve against this node, then fires
-  // mouseover + mouseenter — both side effects in one host call so
-  // Ruby doesn't need an interleaved eval that re-enters JS twice.
+  // Shared hover-target update: sets `document._hoverElement` so
+  // `:hover` cascade matches resolve against this node, then dispatches
+  // mouseover (always) and mouseenter (opt-in). Pass `dedupe: true` to
+  // skip the dispatch when the node was already the hover target —
+  // hover-driven widgets recurse into their own listeners when fed
+  // duplicate mouseover events.
+  function dispatchHover(n, opts) {
+    opts = opts || {};
+    const doc = globalThis.document;
+    if (!doc) return;
+    const prev = doc._hoverElement || null;
+    const changed = prev !== n;
+    doc._hoverElement = n;
+    if (opts.dedupe && !changed) return;
+    const init = Object.assign({ bubbles: true, cancelable: true, relatedTarget: prev }, opts.init || {});
+    try { dispatchEvent(n, new MouseEvent('mouseover', init)); } catch (_) {}
+    if (opts.dispatchEnter) {
+      try { dispatchEvent(n, new MouseEvent('mouseenter', { bubbles: false, cancelable: false, relatedTarget: prev })); } catch (_) {}
+    }
+  }
+  // Ruby-callable hover dispatch: combines `_hoverElement` update +
+  // mouseover + mouseenter in one host call so Ruby doesn't re-enter
+  // JS twice.
   globalThis.__csimSetHover = function (h) {
     const n = lookup(h);
     if (!n) return false;
-    globalThis.document._hoverElement = n;
-    try { dispatchEvent(n, new MouseEvent('mouseover',  { bubbles: true,  cancelable: true })); } catch (_) {}
-    try { dispatchEvent(n, new MouseEvent('mouseenter', { bubbles: false, cancelable: false })); } catch (_) {}
+    dispatchHover(n, { dispatchEnter: true });
     return true;
   };
   // Drain the JS-side pending-submit slot for the Ruby side. Returns
@@ -6031,17 +6048,10 @@
     // A real user click first moves the pointer over the target. Apps
     // such as InstantClick use mouseover capture to start link preload
     // before the subsequent click handler prevents the native
-    // navigation. Avoid redispatching for an already-hovered target;
-    // hover-driven widgets can be sensitive to duplicate mouseover.
-    try {
-      if (globalThis.document && globalThis.document._hoverElement !== n) {
-        const prev = globalThis.document._hoverElement || null;
-        globalThis.document._hoverElement = n;
-        dispatchEvent(n, new MouseEvent('mouseover', Object.assign({}, base, { relatedTarget: prev })));
-      } else if (globalThis.document) {
-        globalThis.document._hoverElement = n;
-      }
-    } catch (_) {}
+    // navigation. `dedupe: true` skips the dispatch when the node was
+    // already hovered — hover-driven widgets recurse on duplicate
+    // mouseover events.
+    dispatchHover(n, { dedupe: true, init: base });
     // Reset the form-submit intent slot before dispatch so the
     // click handler can populate it if it ends in `form.submit()`
     // (Rails-UJS data-method / data-confirm chain).

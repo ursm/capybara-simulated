@@ -1105,8 +1105,8 @@ module Capybara
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, resp_body = @app.call(env)
         merge_set_cookie(headers)
-        if (300..399).include?(status) && headers['location']
-          next_url = resolve_against_current(headers['location'])
+        if (loc = redirect_location(status, headers))
+          next_url = resolve_against_current(loc)
           resp_body.close if resp_body.respond_to?(:close)
           # HTTP semantics: 301/302/303 → method becomes GET; 307/308
           # require the method (and body) to be preserved.
@@ -1439,8 +1439,8 @@ module Capybara
         @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         status, headers, body = @app.call(env)
         merge_set_cookie(headers)
-        if (300..399).include?(status) && headers['location']
-          next_url = resolve_against_current(headers['location'])
+        if (loc = redirect_location(status, headers))
+          next_url = resolve_against_current(loc)
           # Per RFC 7231: if the original request URL had a fragment
           # and the redirect target doesn't specify one, preserve
           # the original fragment in the final URL.
