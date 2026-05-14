@@ -282,6 +282,32 @@
             }
           }
         }
+        // HTML-spec anchor activation behaviour for programmatic
+        // `el.click()`. Walk to the nearest `<a href>` ancestor — Avo's
+        // `text-filter`/`select-filter`/etc. controllers do
+        // `this.urlRedirectTarget.click()` on a hidden `<a>` after
+        // building the filtered URL; without queuing the navigation
+        // here the controller silently no-ops and the filters panel
+        // never closes (filters_panel_open_spec's "keeps the panel
+        // closed on selection"). We DEFER the navigation to a Ruby-
+        // side drain slot rather than navigating in-call: navigating
+        // from inside a V8 callback rebuilds the Context mid-eval and
+        // terminates the script (see `feedback_visit_always_rebuilds`).
+        // Mirrors `__csimPendingFormSubmit`.
+        if (!ev.defaultPrevented && !globalThis.__csimPendingFormSubmit) {
+          let anchor = this;
+          while (anchor && anchor.nodeType === NODE_ELEMENT && anchor._tag !== 'a') {
+            anchor = anchor._parent;
+          }
+          if (anchor && anchor.nodeType === NODE_ELEMENT && anchor._tag === 'a' &&
+              anchor._attrs.href != null && (anchor._attrs.href || '').trim() !== '' &&
+              !(anchor._attrs.href || '').toLowerCase().startsWith('javascript:')) {
+            globalThis.__csimPendingNavigation = {
+              url: String(anchor._attrs.href),
+              target: anchor._attrs.target || ''
+            };
+          }
+        }
       } catch (_) {}
     }
     // `Element.remove()` / `ChildNode.remove()` — detach this node from
@@ -4132,6 +4158,68 @@
     return out;
   };
 
+  // `TextEncoder` / `TextDecoder` — UTF-8 only (per spec, encoder is
+  // UTF-8 exclusive; decoder defaults to UTF-8). Avo's
+  // `filter_controller` round-trips its encoded_filters payload via
+  // `btoa(String.fromCodePoint(...new TextEncoder().encode(...)))`
+  // and `new TextDecoder().decode(Uint8Array.from(atob(...), ...))`;
+  // without these the controller throws on `changeFilter`, the
+  // redirect-target href stays stale, and the filters panel never
+  // navigates → "User names filter" stays visible in
+  // filters_panel_open_spec's "keeps the panel closed on selection".
+  globalThis.TextEncoder = function TextEncoder () {};
+  globalThis.TextEncoder.prototype.encoding = 'utf-8';
+  globalThis.TextEncoder.prototype.encode = function encode (input) {
+    const s = String(input == null ? '' : input);
+    const bytes = [];
+    for (let i = 0; i < s.length; i++) {
+      let cp = s.charCodeAt(i);
+      if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < s.length) {
+        const low = s.charCodeAt(i + 1);
+        if (low >= 0xDC00 && low <= 0xDFFF) {
+          cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+          i++;
+        }
+      }
+      if (cp < 0x80) {
+        bytes.push(cp);
+      } else if (cp < 0x800) {
+        bytes.push(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F));
+      } else if (cp < 0x10000) {
+        bytes.push(0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+      } else {
+        bytes.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F),
+                   0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+      }
+    }
+    return new Uint8Array(bytes);
+  };
+  globalThis.TextDecoder = function TextDecoder (label) {
+    this.encoding = (label || 'utf-8').toString().toLowerCase();
+  };
+  globalThis.TextDecoder.prototype.decode = function decode (input) {
+    if (input == null) return '';
+    const buf = input.buffer ? new Uint8Array(input.buffer, input.byteOffset || 0, input.byteLength) :
+                input instanceof ArrayBuffer ? new Uint8Array(input) : input;
+    let out = '';
+    for (let i = 0; i < buf.length; ) {
+      const b1 = buf[i++];
+      let cp;
+      if (b1 < 0x80) cp = b1;
+      else if ((b1 & 0xE0) === 0xC0) cp = ((b1 & 0x1F) << 6) | (buf[i++] & 0x3F);
+      else if ((b1 & 0xF0) === 0xE0) cp = ((b1 & 0x0F) << 12) | ((buf[i++] & 0x3F) << 6) | (buf[i++] & 0x3F);
+      else if ((b1 & 0xF8) === 0xF0) cp = ((b1 & 0x07) << 18) | ((buf[i++] & 0x3F) << 12) | ((buf[i++] & 0x3F) << 6) | (buf[i++] & 0x3F);
+      else cp = 0xFFFD;
+      if (cp > 0xFFFF) {
+        cp -= 0x10000;
+        out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+      } else {
+        out += String.fromCharCode(cp);
+      }
+    }
+    return out;
+  };
+
   globalThis.URL = function URL (input, base) {
     const u = __csim_parseUrl(String(input), base != null ? String(base) : null);
     if (!u || u.error) throw new TypeError('Invalid URL: ' + input);
@@ -6433,10 +6521,12 @@
     // already hovered — hover-driven widgets recurse on duplicate
     // mouseover events.
     dispatchHover(n, { dedupe: true, init: base });
-    // Reset the form-submit intent slot before dispatch so the
-    // click handler can populate it if it ends in `form.submit()`
-    // (Rails-UJS data-method / data-confirm chain).
+    // Reset the form-submit / navigation intent slots before dispatch
+    // so the click handler can populate either if it ends in
+    // `form.submit()` (Rails-UJS data-method / data-confirm chain) or
+    // a programmatic `link.click()` (Avo's filter controller).
     globalThis.__csimPendingFormSubmit = null;
+    globalThis.__csimPendingNavigation = null;
     dispatchEvent(n, new MouseEvent('mousedown', base));
     if (mods.mouseDownOnly) {
       // Caller (Ruby) handles the wall-clock delay between mousedown
@@ -6452,6 +6542,14 @@
     // precedence: the page intent is to submit, not navigate.
     const pendingSubmit = __takePendingFormSubmit();
     if (pendingSubmit) return { kind: 'submit', formHandle: pendingSubmit.formHandle, submitter: pendingSubmit.submitterHandle || 0 };
+    // A click handler that ended in `link.click()` on an `<a href>`
+    // (Avo's filter-controller: builds the filtered URL on a hidden
+    // anchor, then `.click()`s it) wants a navigation.
+    const pendingNav = globalThis.__csimPendingNavigation;
+    if (pendingNav && pendingNav.url) {
+      globalThis.__csimPendingNavigation = null;
+      return { kind: 'navigate', url: String(pendingNav.url) };
+    }
     if (click.defaultPrevented) return null;
 
     // Summary click toggles its parent <details>'s `open` attribute.
