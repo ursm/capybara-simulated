@@ -13,6 +13,7 @@ require 'set'
 require 'digest'
 
 require_relative 'esm_rewriter'
+require_relative 'url_shape'
 
 # V8 flag setup. Must run before the first `MiniRacer::Context.new`;
 # idempotent calls raise `PlatformAlreadyInitialized`.
@@ -541,7 +542,7 @@ module Capybara
         c.attach('__csim_btoa',        ->(*a) { Base64.strict_encode64(a[0].to_s) })
         c.attach('__csim_utf8Encode',  ->(*a) { a[0].to_s.b.bytes })
         c.attach('__csim_utf8Decode',  ->(*a) { a[0].pack('C*').force_encoding('UTF-8') })
-        c.attach('__csim_parseUrl',    ->(*a) { parse_url_for_js(a[0], a[1]) })
+        c.attach('__csim_parseUrl',    ->(*a) { UrlShape.parse_for_js(a[0], a[1]) })
         c.attach('__csim_fetchModuleSource', ->(*a) { sc.() { fetch_module_source(browser, a[0]) } })
       end
 
@@ -557,39 +558,6 @@ module Capybara
         end
       end
 
-      def parse_url_for_js(input, base)
-        require 'uri'
-        u = base ? URI.join(base, input) : URI.parse(input)
-        host = u.host || ''
-        userinfo = u.userinfo.to_s.split(':', 2)
-        port = default_port?(u.scheme, u.port) ? nil : u.port
-        path = u.path.to_s.empty? ? '/' : u.path
-        href = begin
-          out = u.dup
-          out.port = port if out.respond_to?(:port=)
-          out.path = path if out.respond_to?(:path=)
-          out.to_s
-        end
-        {
-          'href'     => href,
-          'protocol' => "#{u.scheme}:",
-          'username' => userinfo[0] || '',
-          'password' => userinfo[1] || '',
-          'host'     => port ? "#{host}:#{port}" : host,
-          'hostname' => host,
-          'port'     => port ? port.to_s : '',
-          'pathname' => path,
-          'search'   => u.query ? "?#{u.query}" : '',
-          'hash'     => u.fragment ? "##{u.fragment}" : '',
-          'origin'   => u.scheme && host && !host.empty? ? "#{u.scheme}://#{host}#{port ? ":#{port}" : ''}" : 'null'
-        }
-      rescue StandardError
-        {'error' => true}
-      end
-
-      def default_port?(scheme, port)
-        (scheme == 'http' && port == 80) || (scheme == 'https' && port == 443)
-      end
     end
   end
 end

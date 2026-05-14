@@ -198,12 +198,10 @@ module Capybara
 
       def find_first_css(css, context_handle = nil)
         s = css.to_s
-        result = find_with_timer_fallback(:css_first, s, context_handle) do
+        find_with_timer_fallback(:css_first, s, context_handle) do
           h = @runtime.call('__csimQueryOne', context_handle || @document_handle, s).to_i
-          value = h.zero? ? nil : h
-          value.nil? ? [] : [value]
+          h.zero? ? nil : h
         end
-        result.first
       end
 
       def xpath_shaped?(s)
@@ -242,12 +240,16 @@ module Capybara
       def find_with_timer_fallback(kind, arg, ctx)
         tick_real_time if timer_wait_elapsed?
         result = cached_find(kind, arg, ctx) { yield }
-        return result unless result.empty? && @timers_active
+        return result unless empty_find_result?(result) && @timers_active
 
         tick_real_time
         return result unless @find_cache_dirty
 
         cached_find(kind, arg, ctx) { yield }
+      end
+
+      def empty_find_result?(result)
+        result.nil? || (result.respond_to?(:empty?) && result.empty?)
       end
 
       FIND_PRE_TICK_MIN_S = 0.05

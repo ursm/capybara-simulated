@@ -4143,33 +4143,24 @@
     });
   };
 
+  // Keep `globalThis.location` in sync with Ruby's `@current_url`.
+  // InstantClick / Turbo-style SPA navigation flips the URL via
+  // pushState without a real document reload; any inline script that
+  // gates on `window.location.pathname` (Forem's top-bar XHR check
+  // for `!== '/notifications'`) must observe the new value.
+  function applyHistoryUrl(self, state, url) {
+    self.state = state;
+    if (!url) return;
+    const s = String(url);
+    if (globalThis.location && globalThis.location.href === s) return;
+    __setCurrentUrl(s);
+    globalThis.__csimUpdateLocation(s);
+  }
   globalThis.history = {
     length: 1,
     state:  null,
-    pushState(state, _title, url) {
-      this.state = state;
-      if (url) {
-        const s = String(url);
-        __setCurrentUrl(s);
-        // Keep `window.location` in sync. InstantClick / Turbo-style
-        // SPA navigation flips the URL via pushState without a real
-        // document reload, and any subsequent `window.location.pathname`
-        // read must see the new pathname (Forem's top-bar inline
-        // script gates its notifications-counts XHR on
-        // `pathname !== '/notifications'`; without this update the
-        // gate stays open on the notifications page and the badge
-        // gets re-populated).
-        globalThis.__csimUpdateLocation(s);
-      }
-    },
-    replaceState(state, _title, url) {
-      this.state = state;
-      if (url) {
-        const s = String(url);
-        __setCurrentUrl(s);
-        globalThis.__csimUpdateLocation(s);
-      }
-    },
+    pushState(state, _title, url)    { applyHistoryUrl(this, state, url); },
+    replaceState(state, _title, url) { applyHistoryUrl(this, state, url); },
     back()    { __locationReload(); },
     forward() { __locationReload(); },
     go()      { __locationReload(); }
@@ -6566,11 +6557,9 @@
         if (typeof globalThis.__drainTimers === 'function') globalThis.__drainTimers(0, 1000);
       } catch (_) {}
       const active = globalThis.document && globalThis.document.activeElement;
-      const nDetached = !n._parent;
-      const activeInside = active && n.contains && n.contains(active);
       if (active && active.nodeType === NODE_ELEMENT &&
           active !== n &&
-          (activeInside || nDetached) &&
+          (n.contains(active) || !n._parent) &&
           (active._tag === 'input' || active._tag === 'textarea' || isContenteditable(active))) {
         n = active;
         tag = n._tag;
