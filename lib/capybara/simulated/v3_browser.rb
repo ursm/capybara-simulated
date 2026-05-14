@@ -543,6 +543,7 @@ module Capybara
           @runtime.call('__csimSetValue', handle, coerced)
         end
         consume_pending_form_submit
+        consume_pending_navigation
       end
 
       def coerce_set_value(v)
@@ -747,6 +748,26 @@ module Capybara
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
+      end
+
+      # Read the anchor-navigation pending intent set by JS-side
+      # `el.click()` (Element.prototype.click) on an `<a href>`. Avo's
+      # boolean-filter / select-filter controllers respond to `input`
+      # events by building the filtered URL and calling
+      # `urlRedirectTarget.click()` on a hidden anchor; the click chain
+      # starts from Ruby's `set_value_with_events` rather than
+      # `click`, so without a parallel drain here the navigation stays
+      # queued and the page never reloads.
+      def consume_pending_navigation
+        pending = @runtime.eval('(function(){var p = globalThis.__csimPendingNavigation; globalThis.__csimPendingNavigation = null; return p;})()')
+        return unless pending.is_a?(Hash) && pending['url']
+        url = pending['url'].to_s
+        if pure_fragment_navigation?(url)
+          update_current_hash(url)
+        else
+          tick_real_time
+          navigate(resolve_against_current(url, use_base: true))
+        end
       end
 
       # `Node#submit(*)` (Capybara DSL) hits here. Find the enclosing
