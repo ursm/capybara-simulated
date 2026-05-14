@@ -771,17 +771,18 @@
       return this._attrs.type != null ? this._attrs.type : '';
     }
     set type(v) { this.setAttribute('type', String(v == null ? '' : v)); }
-    // `<select>.options` — HTMLOptionsCollection of every `<option>`
-    // descendant. jQuery's `.val()` reads it with an indexed lookup
-    // based on `selectedIndex`; controllers also reach for the
-    // collection's spec mutators (`add` / `remove` / `item` /
-    // `namedItem`) — Avo's `city-in-country` does `options.remove(0)`
-    // per option to wipe and rebuild after a country change.
+    // `<select>.options` / `<datalist>.options` — HTMLOptionsCollection /
+    // live HTMLCollection of every `<option>` descendant. jQuery's
+    // `.val()` reads it with an indexed lookup based on `selectedIndex`;
+    // controllers also reach for the collection's spec mutators
+    // (`add` / `remove` / `item` / `namedItem`) — Avo's
+    // `city-in-country` does `options.remove(0)` per option to wipe and
+    // rebuild after a country change.
     get options() {
-      if (this._tag !== 'select') return undefined;
+      if (this._tag !== 'select' && this._tag !== 'datalist') return undefined;
       const arr = this.querySelectorAll('option');
       const owner = this;
-      arr.add       = function (option, before) { owner.add(option, before); };
+      arr.add       = function (option, before) { owner.add ? owner.add(option, before) : owner.appendChild(option); };
       arr.remove    = function (idx)  { const o = arr[idx]; if (o && o._parent) o._parent.removeChild(o); };
       arr.item      = function (i)    { return arr[i] || null; };
       arr.namedItem = function (name) { return arr.find(o => o._attrs.id === name || o._attrs.name === name) || null; };
@@ -999,12 +1000,6 @@
       const id = this._attrs.list;
       if (!id) return null;
       return globalThis.document && globalThis.document.getElementById(id);
-    }
-    // HTMLDataListElement.options: live HTMLCollection of <option>
-    // descendants.
-    get options() {
-      if (this._tag !== 'datalist' && this._tag !== 'select') return undefined;
-      return __htmlCollection(this.querySelectorAll('option'));
     }
     get checked()  { return this._attrs.checked != null; }
     set checked(v) { if (v) this._attrs.checked = ''; else delete this._attrs.checked; }
