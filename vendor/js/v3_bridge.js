@@ -6335,8 +6335,17 @@
       }
     }
 
-    if (n._tag === 'a' && n._attrs.href != null) {
-      const href = String(n._attrs.href);
+    // Click default action follows the nearest ancestor `<a>` per spec
+    // ("activation behaviour of A is to follow the hyperlink"). Avo's
+    // sort buttons render `<a href><svg data-tippy-content=...></svg></a>`,
+    // and the test clicks on the inner `<svg>`; without the walk we
+    // missed the link entirely.
+    let __anchor = n;
+    while (__anchor && __anchor.nodeType === NODE_ELEMENT && __anchor._tag !== 'a') {
+      __anchor = __anchor._parent;
+    }
+    if (__anchor && __anchor.nodeType === NODE_ELEMENT && __anchor._tag === 'a' && __anchor._attrs.href != null) {
+      const href = String(__anchor._attrs.href);
       // `javascript:` URLs only ever ran the embedded script (already
       // handled by the click dispatch above, which fires the JS).
       // The default action is a no-op.
@@ -6346,8 +6355,8 @@
       // this regardless of the response's Content-Disposition, so we
       // tell Ruby to take the download path even if the server only
       // sets a Content-Type.
-      if (n._attrs.download != null) {
-        return { kind: 'download', url: href, filename: String(n._attrs.download || '') };
+      if (__anchor._attrs.download != null) {
+        return { kind: 'download', url: href, filename: String(__anchor._attrs.download || '') };
       }
       return { kind: 'navigate', url: href };
     }
