@@ -3841,17 +3841,37 @@
   // don't ReferenceError. Real subclass shapes are out of scope; the
   // structural check is the only consumer.
   for (const name of [
-    'HTMLFormElement', 'HTMLInputElement', 'HTMLTextAreaElement',
+    'HTMLInputElement', 'HTMLTextAreaElement',
     'HTMLSelectElement', 'HTMLOptionElement', 'HTMLButtonElement',
     'HTMLAnchorElement', 'HTMLImageElement', 'HTMLScriptElement',
     'HTMLDivElement', 'HTMLSpanElement', 'HTMLTableElement',
     'HTMLLabelElement', 'HTMLLIElement', 'HTMLUListElement',
-    'HTMLOListElement', 'HTMLAreaElement', 'HTMLBodyElement',
+    'HTMLOListElement', 'HTMLAreaElement',
     'HTMLCanvasElement', 'HTMLDialogElement', 'HTMLHeadElement',
     'HTMLHtmlElement', 'HTMLIFrameElement', 'HTMLLinkElement',
     'HTMLMetaElement', 'HTMLStyleElement', 'HTMLTemplateElement',
     'ShadowRoot', 'SVGElement'
   ]) globalThis[name] = Element;
+  // `HTMLFormElement` and `HTMLBodyElement` need tag-aware `instanceof`:
+  // Turbo Drive's `#shouldInterceptNavigation` branches on `element
+  // instanceof HTMLFormElement` to call form-only `#formActionIsVisitable`
+  // (which feeds `getAction$1` → `expandURL(undefined.toString())` and
+  // throws on `<a>` elements aliased to Element); PageRenderer's
+  // `renderElement` picks between `body.replaceWith(newBody)` and
+  // `documentElement.appendChild(newBody)` on `newElement instanceof
+  // HTMLBodyElement`, and the always-true alias steered every page
+  // visit into the appendChild branch — body content stayed un-replaced
+  // and post-attach modal flows never closed. Each ctor's
+  // `Symbol.hasInstance` matches the tag exclusively.
+  const __makeTagCtor = (tagName) => {
+    const ctor = function () {};
+    Object.defineProperty(ctor, Symbol.hasInstance, {
+      value: (obj) => obj != null && obj._tag === tagName
+    });
+    return ctor;
+  };
+  globalThis.HTMLFormElement = __makeTagCtor('form');
+  globalThis.HTMLBodyElement = __makeTagCtor('body');
   globalThis.HTMLDocument  = Document;
   globalThis.CharacterData = Text;
   globalThis.Comment       = Text;
