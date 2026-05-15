@@ -1649,6 +1649,18 @@
       if (node._parent && typeof node._parent.removeChild === 'function') {
         try { node._parent.removeChild(node); } catch (_) {}
       }
+      // Per HTML spec, adoptNode walks the subtree and reassigns
+      // `ownerDocument` to the document on which the method was called.
+      // Turbo Drive's `PageRenderer.activateNewBody()` calls
+      // `document.adoptNode(this.newElement)` right before
+      // `body.replaceWith(newElement)`, and FrameController.isActive
+      // (= `this.element.ownerDocument === document && #connected`)
+      // depends on it — without re-tagging, the new body's
+      // `<turbo-frame>`s still report the DOMParser's parsed doc as
+      // their owner, `isActive` stays false, and link-into-frame
+      // clicks fall through to a full-page navigation.
+      const dest = this;
+      walkSubtree(node, n => { n._ownerDoc = dest; });
       return node;
     }
     // `document.implementation.createHTMLDocument(title)` — DOMParser
