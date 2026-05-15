@@ -7039,12 +7039,20 @@
     // checkbox / radio: toggle *before* the click dispatch so listeners
     // observe the new state. Mirrors what real browsers do (the IDL
     // mutation precedes the click event chain when the user clicks
-    // a form control).
+    // a form control). `wasChecked` is captured so we can roll back the
+    // toggle if the click is cancelled, and fire `input` / `change` if
+    // it isn't — matching HTML spec activation behavior for checkboxes.
     let preToggled = null;
+    let wasChecked = null;
     if (n._tag === 'input') {
       const type = (n._attrs.type || '').toLowerCase();
-      if (type === 'checkbox') { toggleChecked(n); preToggled = 'checkbox'; }
-      else if (type === 'radio') { setRadio(n);   preToggled = 'radio'; }
+      if (type === 'checkbox') {
+        wasChecked = n._attrs.checked != null;
+        toggleChecked(n); preToggled = 'checkbox';
+      } else if (type === 'radio') {
+        wasChecked = n._attrs.checked != null;
+        setRadio(n); preToggled = 'radio';
+      }
     }
 
     // Real clicks fire `mousedown` → `mouseup` → `click` (with
@@ -7082,6 +7090,22 @@
     dispatchEvent(n, new MouseEvent('mouseup',   base));
     const click = new MouseEvent('click', base);
     dispatchEvent(n, click);
+    // HTML spec activation for `<input type=checkbox|radio>`: if the
+    // click was cancelled, roll back the IDL-mutated state; otherwise
+    // fire `input` then `change` (both bubble). Avo's row-select
+    // checkbox (`data-action="input->item-selector#toggle"`) and a
+    // dozen other Stimulus controllers listen for `input` to react to
+    // toggle state; without this dispatch, clicking the checkbox flips
+    // the IDL state silently and the dependent UI never updates.
+    if (preToggled) {
+      if (click.defaultPrevented) {
+        if (wasChecked) n._attrs.checked = '';
+        else            delete n._attrs.checked;
+      } else if ((n._attrs.checked != null) !== wasChecked) {
+        try { dispatchEvent(n, new InputEvent('input', { bubbles: true, cancelable: true })); } catch (_) {}
+        try { dispatchEvent(n, new Event('change',     { bubbles: true, cancelable: false })); } catch (_) {}
+      }
+    }
     // A click handler that ended in `form.submit()` (Rails-UJS
     // data-method link → builds synthetic form → submit) takes
     // precedence: the page intent is to submit, not navigate.
