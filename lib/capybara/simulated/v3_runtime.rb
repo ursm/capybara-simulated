@@ -201,17 +201,6 @@ module Capybara
         max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
-      # QuickJS via js_runtime drains microtasks at the call boundary
-      # too, so the same pattern works: each no-op `eval` gives the
-      # VM one microtask round for chained `await`/`.then` queues
-      # that Turbo's Visit pipeline relies on.
-      def drain_microtasks(iters = 16)
-        i = iters.to_i
-        return if i <= 0
-        c = ctx
-        i.times { c.eval('0') }
-      end
-
       def has_ready_timer?
         return false if @ctx.nil?
         !!ctx.call('__hasReadyTimer')

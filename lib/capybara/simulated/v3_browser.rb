@@ -38,13 +38,6 @@ module Capybara
       TICK_CAP_MS = 5_000
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
-      # mini_racer drains pending microtasks once per `eval`/`call`
-      # boundary, so a Turbo Visit's `await fetch → await responseHTML
-      # → await renderer.render` chain (≈ 6–12 awaits) stalls after the
-      # first hop unless we re-enter the VM the same number of times.
-      # Settle ends with this many no-op evals to let chained
-      # `await`/`.then` queues drain when no timers are pending.
-      SETTLE_MICROTASK_DRAIN_ITER = 24
 
       # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
       # must lead with `Mozilla/5.0` so server-side bot detectors
@@ -767,20 +760,9 @@ module Capybara
       end
 
       def settle
-        # Advance the virtual clock in fixed steps. Don't short-circuit
-        # on `has_ready_timer?`: a Turbo Visit's `await new Promise(r =>
-        # requestAnimationFrame(r))` queues the next rAF at due=now+16
-        # which isn't ready at the moment we check, so the loop has to
-        # keep ticking until either we've exhausted the budget or the
-        # timer set drains.
         SETTLE_MAX_ITER.times do
-          break unless @timers_active
-          @runtime.drain_timers(SETTLE_DRAIN_MS)
-          # Drain the microtask chain that the timer callbacks queued
-          # so the next iter sees the rAF / setTimeout the chain
-          # registers next. mini_racer drains microtasks at each
-          # `eval` boundary, one round per call.
-          @runtime.drain_microtasks(SETTLE_MICROTASK_DRAIN_ITER) if @runtime.respond_to?(:drain_microtasks)
+          @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
+          break unless @timers_active && @runtime.has_ready_timer?
         end
         @find_cache_dirty = true
       end

@@ -295,19 +295,6 @@ module Capybara
         ctx.eval("__drainTimers(#{arg})")
       end
 
-      # Each `ctx.eval` boundary gives V8 one microtask drain round.
-      # A Turbo Visit's `await fetch → await responseHTML → await
-      # renderer.render` chain takes several rounds to reach
-      # `turbo:render`/`turbo:load`; without these no-op evals we
-      # leave the chain queued past `turbo:before-cache` and the
-      # body swap never lands.
-      def drain_microtasks(iters = 16)
-        i = iters.to_i
-        return if i <= 0
-        c = ctx
-        i.times { c.eval('0') }
-      end
-
       def has_ready_timer?
         return false if @ctx.nil?
         ctx.eval('!!__hasReadyTimer()')
