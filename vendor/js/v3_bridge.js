@@ -213,6 +213,17 @@
     }
     get parentNode()    { return this._parent; }
     get parentElement() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
+    // `Node.isConnected` — true iff this node's root is its owner
+    // document (i.e. it's attached to the live tree). Turbo's
+    // `dispatch` helper checks `target.isConnected` before
+    // `target.dispatchEvent(event)` and falls back to
+    // `document.documentElement.dispatchEvent(event)` when false — so
+    // a missing `isConnected` getter makes every dispatched event's
+    // `target` resolve to `<html>`, which breaks `clickEventIsSignificant`
+    // (`element.closest("turbo-frame, html") == this.element` is no
+    // longer the link's html-ancestor relationship). Frame-redirect
+    // for link clicks with `data-turbo-frame` stops working.
+    get isConnected() { return isConnected(this); }
     get firstChild()    { return this._children[0] || null; }
     get lastChild()     { return this._children[this._children.length - 1] || null; }
     get childNodes()    { return this._children.slice(); }
@@ -601,8 +612,10 @@
     setAttribute(name, value) {
       const n = String(name).toLowerCase();
       const old = this._attrs[n];
-      this._attrs[n] = String(value);
+      const next = String(value);
+      this._attrs[n] = next;
       recordAttrMutation(this, n, old == null ? null : old);
+      if (old !== next) fireAttrChangedCallback(this, n, old == null ? null : old, next);
     }
     removeAttribute(name) {
       const n = String(name).toLowerCase();
@@ -610,6 +623,7 @@
       const old = this._attrs[n];
       delete this._attrs[n];
       recordAttrMutation(this, n, old == null ? null : old);
+      fireAttrChangedCallback(this, n, old == null ? null : old, null);
     }
     hasAttribute(name)        { return Object.prototype.hasOwnProperty.call(this._attrs, String(name).toLowerCase()); }
     // `attributes` returns a NamedNodeMap-shaped collection — array-
@@ -2522,6 +2536,21 @@
     } finally {
       __pendingUpgrade = null;
     }
+    // Per the CE spec, after upgrading, fire
+    // `attributeChangedCallback` once per observed attribute already
+    // present on the element with `oldValue = null` — so a parsed
+    // `<turbo-frame src="…">` sees its `src` change from null to the
+    // attribute value and the FrameController kicks off the load.
+    const observed = ctor.observedAttributes;
+    const fn = el.attributeChangedCallback;
+    if (observed && observed.length && typeof fn === 'function') {
+      for (const name of observed) {
+        if (Object.prototype.hasOwnProperty.call(el._attrs, name)) {
+          try { fn.call(el, name, null, el._attrs[name], null); }
+          catch (e) { try { console.error('[csim v3] attributeChangedCallback (upgrade) threw:', e && e.message); } catch (_) {} }
+        }
+      }
+    }
   }
   function fireCEHook(el, hookName) {
     try {
@@ -2530,6 +2559,24 @@
     } catch (e) {
       try { console.error('[csim v3] custom element ' + hookName + ' threw:', e && e.message); } catch (_) {}
     }
+  }
+  // `attributeChangedCallback(name, oldValue, newValue, namespace)`
+  // for custom elements per the CE spec. Gated on the element's
+  // class declaring an `observedAttributes` array so non-CE elements
+  // (and CEs that opted out) pay nothing. Turbo's `FrameElement`
+  // observes `loading`/`src`/`disabled`/`complete`/`busy`; setting
+  // `frame.src = url` would otherwise mutate the attribute but never
+  // dispatch the chain that issues the fetch.
+  function fireAttrChangedCallback(el, name, oldValue, newValue) {
+    if (!el || el.nodeType !== NODE_ELEMENT) return;
+    const ctor = el.constructor;
+    if (!ctor || ctor === Element) return;
+    const observed = ctor.observedAttributes;
+    if (!observed || observed.indexOf(name) < 0) return;
+    const fn = el.attributeChangedCallback;
+    if (typeof fn !== 'function') return;
+    try { fn.call(el, name, oldValue, newValue, null); }
+    catch (e) { try { console.error('[csim v3] attributeChangedCallback threw:', e && e.message); } catch (_) {} }
   }
   function isConnected(node) {
     let cur = node;
