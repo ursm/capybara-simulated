@@ -2728,11 +2728,16 @@
   }
 
   function parseAttrToken(s) {
-    const m = /^\s*([\w-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*([isIS])?\s*$/.exec(s);
+    // CSS identifiers allow `\X` to escape a non-identifier char so
+    // `[a:b]` can be written `[a\:b]`. Turbo's link-click observer
+    // matches `a[xlink\:href]` to catch SVG `<a>` elements, so we
+    // accept `(?:\\.|[\w-])+` in the name and strip the backslashes
+    // before lower-casing.
+    const m = /^\s*((?:\\.|[\w-])+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*([isIS])?\s*$/.exec(s);
     if (!m) throw new SyntaxError('csim v3: bad attr selector: ' + s);
     const flag = m[6];
     return {
-      name: m[1].toLowerCase(),
+      name: m[1].replace(/\\(.)/g, '$1').toLowerCase(),
       op: m[2] || null,
       value: m[3] != null ? m[3] : (m[4] != null ? m[4] : (m[5] || '')),
       ci: flag === 'i' || flag === 'I'
