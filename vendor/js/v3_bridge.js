@@ -2413,6 +2413,7 @@
       return !event.defaultPrevented;
     } finally {
       if (__observers.size && __pendingRecords.length) deliverMutations();
+      if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
       globalThis.event = prevWinEvent;
     }
   }
@@ -2636,6 +2637,11 @@
           }
         }
       }
+      // Visibility-tracking IOs piggyback on the same drain so that a
+      // class/attribute mutation that uncovers a previously hidden
+      // ancestor (Avo tabs' `.hidden` class removal) fires the lazy
+      // `<turbo-frame>` inside.
+      if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
     }
   }
   globalThis.__deliverMutations = deliverMutations;
@@ -4063,6 +4069,13 @@
   // their fetches — with a no-op stub, lazy turbo-frames never load
   // their `src` and `has_many`/`has_and_belongs_to_many`/`comments_frame`
   // assertions all see the "Loading…" placeholder forever.
+  //
+  // `__activeIOs` tracks IOs whose `_observed` set still has targets that
+  // haven't fired yet, so `__recheckIntersectionObservers` can retry on
+  // visibility transitions (Avo tabs reveal hidden panes by removing the
+  // `.hidden` class — the IO observe()'d the frame while hidden, and
+  // without a re-check the lazy frame would never load).
+  const __activeIOs = new Set();
   globalThis.IntersectionObserver = class IntersectionObserver {
     constructor (cb) {
       this._cb = cb;
@@ -4071,16 +4084,24 @@
     observe (target) {
       if (!target || this._observed.has(target)) return;
       this._observed.add(target);
+      __activeIOs.add(this);
       const self = this;
       Promise.resolve().then(() => self._maybeFire(target));
     }
-    unobserve (target)  { this._observed.delete(target); }
-    disconnect ()       { this._observed.clear(); }
+    unobserve (target)  {
+      this._observed.delete(target);
+      if (this._observed.size === 0) __activeIOs.delete(this);
+    }
+    disconnect ()       {
+      this._observed.clear();
+      __activeIOs.delete(this);
+    }
     takeRecords ()      { return []; }
     _maybeFire (target) {
       if (!this._observed.has(target)) return;
       if (!__isVisibleNode(target)) return;
       this._observed.delete(target);
+      if (this._observed.size === 0) __activeIOs.delete(this);
       const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
       try {
         this._cb([{
@@ -4097,6 +4118,19 @@
       }
     }
   };
+  // Re-fire pending IO targets whose visibility may have changed. Called
+  // after each mutation batch (deliverMutations) so a `.hidden` class
+  // removal on a tab pane triggers the lazy `<turbo-frame>` inside it
+  // without us having to re-observe.
+  function __recheckIntersectionObservers () {
+    if (__activeIOs.size === 0) return;
+    for (const io of Array.from(__activeIOs)) {
+      for (const target of Array.from(io._observed)) {
+        io._maybeFire(target);
+      }
+    }
+  }
+  globalThis.__recheckIntersectionObservers = __recheckIntersectionObservers;
   globalThis.ResizeObserver        = class extends CsimStubObserver {};
   globalThis.PerformanceObserver   = class extends CsimStubObserver {};
 
@@ -4353,7 +4387,21 @@
              reload:  () => __locationReload() };
   }
   globalThis.__csimUpdateLocation = function (url) {
-    globalThis.location = makeLocation(String(url || ''));
+    let s = String(url || '');
+    // SPA helpers (Turbo Drive's `history.replace`, Avo's tabs controller)
+    // pass `pathname + search` rather than a full URL. Real browsers
+    // resolve the URL argument of pushState/replaceState against the
+    // document's current location; storing the raw path leaves
+    // `location.href` / `document.baseURI` schemeless, which breaks any
+    // downstream `new URL(x, document.baseURI)` (Turbo's lazy-frame
+    // `expandURL` is the canonical failure mode).
+    if (s && !/^[a-z][a-z0-9+.-]*:/i.test(s)) {
+      try {
+        const base = (globalThis.location && globalThis.location.href) || null;
+        if (base && /^[a-z][a-z0-9+.-]*:/i.test(base)) s = new URL(s, base).href;
+      } catch (_) {}
+    }
+    globalThis.location = makeLocation(s);
     // URL change is observable progress; settle yields on it the same
     // way it yields on DOM mutations.
     __bumpSettleGen();
@@ -5317,6 +5365,7 @@
       }
     }
     if (__observers.size && __pendingRecords.length) deliverMutations();
+    if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
     // After scripts have run, fire the readiness lifecycle events
     // libraries hook into (`DOMContentLoaded` on document, `load` on
     // window). jQuery 1.x's `$(handler)` short-circuits if
@@ -8136,6 +8185,7 @@
         } catch (_) {}
       }
       if (__observers.size && __pendingRecords.length) deliverMutations();
+      if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
       fired++;
     }
     // Pin clock at limit even when nothing fired, so a follow-up
