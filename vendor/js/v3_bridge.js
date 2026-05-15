@@ -2494,8 +2494,16 @@
   globalThis.__csimDispatchEvent = function (h, type, init) {
     const n = lookup(h);
     if (!n) return false;
-    const ctor = MOUSE_EVENT_TYPES.has(String(type)) ? MouseEvent : Event;
-    return dispatchEvent(n, new ctor(String(type), init || {}));
+    const typeStr = String(type);
+    const ctor = MOUSE_EVENT_TYPES.has(typeStr) ? MouseEvent : Event;
+    // Capybara's `.trigger("click")` is a synthetic-but-real click; in
+    // real browsers it bubbles and is cancellable, which is what makes
+    // Turbo Drive's window-capture LinkClickObserver intercept the
+    // navigation. Empty init turns it into a non-bubbling event that
+    // never reaches window-level listeners; default bubbles+cancelable
+    // to `true` so the dispatch matches a user click.
+    const merged = Object.assign({ bubbles: true, cancelable: true }, init || {});
+    return dispatchEvent(n, new ctor(typeStr, merged));
   };
 
   // ── Modal dialogs ───────────────────────────────────────────────
@@ -5720,6 +5728,14 @@
   const VISIBILITY_OTHER_RE   = /(^|;|\s)visibility\s*:\s*(?!hidden\b)[^;]+/i;
   function selfHidden(el) {
     if (el._attrs.hidden != null) return true;
+    // `<dialog>` HTML spec UA stylesheet: `dialog:not([open]) { display: none }`.
+    // Avo's confirm-dialog template (the "Close modal / Are you sure? /
+    // Yes, I'm sure / No, cancel" block) is rendered into every page
+    // and stays in the DOM without `open` until `data-turbo-confirm`
+    // triggers `showModal()`. Without honouring the UA hide here,
+    // Capybara's `click_on "Close modal"` matches both the dropdown
+    // action item and the dialog's close button → ambiguous-match.
+    if (el._tag === 'dialog' && el._attrs.open == null) return true;
     const style = el._attrs.style;
     if (style && (DISPLAY_NONE_RE.test(style) || VISIBILITY_HIDDEN_RE.test(style))) return true;
     // Inline display:<other> overrides any class-derived display:none.
