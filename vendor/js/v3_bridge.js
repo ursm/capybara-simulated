@@ -646,6 +646,23 @@
       fireAttrChangedCallback(this, n, old == null ? null : old, null);
     }
     hasAttribute(name)        { return Object.prototype.hasOwnProperty.call(this._attrs, String(name).toLowerCase()); }
+    // `Element.toggleAttribute(name, force?)` per DOM spec. Without
+    // `force`, flips the attribute (present → absent, absent →
+    // present-with-empty-value); with `force`, asserts the state.
+    // Returns the resulting presence as a boolean. Trix's
+    // `makeEditable(element)` calls `element.toggleAttribute(
+    // "contenteditable", !element.disabled)` and throws if the
+    // method is missing — connectedCallback aborts before the
+    // EditorController is wired up.
+    toggleAttribute(name, force) {
+      const has = this.hasAttribute(name);
+      const next = arguments.length > 1 ? !!force : !has;
+      if (next === has) return next;
+      if (next) this.setAttribute(name, '');
+      else      this.removeAttribute(name);
+      return next;
+    }
+    getAttributeNames() { return Object.keys(this._attrs); }
     // `attributes` returns a NamedNodeMap-shaped collection — array-
     // indexed + `getNamedItem(name)`. wgxpath iterates via `length` +
     // index access; Capybara's `Element#native.attributes` reads
@@ -1570,6 +1587,31 @@
     createDocumentFragment() {
       return new DocumentFragment();
     }
+    // `Document.createEvent(interfaceName)` — legacy DOM Level 2 API
+    // still used by libraries that target older browsers (Trix's
+    // `triggerEvent` builds `document.createEvent("Event")` /
+    // `event.initEvent(...)` so it works without `new Event()`
+    // support detection). The returned event needs `initEvent` /
+    // `initCustomEvent` mutators per the spec.
+    createEvent(interfaceName) {
+      const name = String(interfaceName || '').toLowerCase();
+      const Ctor = (name === 'customevent' || name === 'customevents')
+        ? globalThis.CustomEvent
+        : globalThis.Event;
+      const ev = new Ctor('', { bubbles: false, cancelable: false });
+      ev.initEvent = function (type, bubbles, cancelable) {
+        ev.type = String(type || '');
+        ev.bubbles = !!bubbles;
+        ev.cancelable = !!cancelable;
+      };
+      ev.initCustomEvent = function (type, bubbles, cancelable, detail) {
+        ev.type = String(type || '');
+        ev.bubbles = !!bubbles;
+        ev.cancelable = !!cancelable;
+        ev.detail = detail;
+      };
+      return ev;
+    }
     // `Document.importNode(node, deep)` — clone of `node` adopted into
     // this document. v3 only has one document at a time, so this is
     // an alias for `cloneNode(deep)`. Turbo Drive's
@@ -1674,6 +1716,85 @@
         previousNode() { return null; },
         detach() {}
       };
+    }
+    // `Document.createTreeWalker(root, whatToShow, filter)` — Trix
+    // builds one to traverse the editable subtree by nodeType (its
+    // `walkTree` helper passes `SHOW_ELEMENT` / `SHOW_TEXT` /
+    // `SHOW_COMMENT`). We pre-walk descendants in document order and
+    // serve `nextNode` / sibling navigation off the buffer; Trix only
+    // uses `nextNode()` and `currentNode` so the rest of the
+    // TreeWalker surface (`firstChild` / `nextSibling` / etc.) is a
+    // light shim.
+    createTreeWalker(root, whatToShow, filter) {
+      if (whatToShow == null) whatToShow = 0xFFFFFFFF;
+      const all = [];
+      (function walk(n) {
+        all.push(n);
+        if (n && n._children) for (const c of n._children) walk(c);
+      })(root);
+      const accept = (n) => {
+        if (!n) return 2;
+        const mask = 1 << (n.nodeType - 1);
+        if (!(mask & whatToShow)) return 3; // skip
+        if (filter) {
+          const fn = typeof filter === 'function' ? filter : (filter && filter.acceptNode);
+          if (fn) return fn.call(filter || null, n);
+        }
+        return 1;
+      };
+      const tw = {
+        root,
+        whatToShow,
+        filter,
+        currentNode: root,
+        nextNode() {
+          const i = all.indexOf(this.currentNode);
+          for (let j = i + 1; j < all.length; j++) {
+            if (accept(all[j]) === 1) { this.currentNode = all[j]; return all[j]; }
+          }
+          return null;
+        },
+        previousNode() {
+          const i = all.indexOf(this.currentNode);
+          for (let j = i - 1; j >= 0; j--) {
+            if (accept(all[j]) === 1) { this.currentNode = all[j]; return all[j]; }
+          }
+          return null;
+        },
+        parentNode() {
+          let p = this.currentNode && this.currentNode._parent;
+          while (p && p !== root && accept(p) !== 1) p = p._parent;
+          if (p && p !== root) { this.currentNode = p; return p; }
+          return null;
+        },
+        firstChild() {
+          const c = this.currentNode && this.currentNode._children;
+          if (c) for (const k of c) if (accept(k) === 1) { this.currentNode = k; return k; }
+          return null;
+        },
+        lastChild() {
+          const c = this.currentNode && this.currentNode._children;
+          if (c) for (let i = c.length - 1; i >= 0; i--) if (accept(c[i]) === 1) { this.currentNode = c[i]; return c[i]; }
+          return null;
+        },
+        nextSibling() {
+          const p = this.currentNode && this.currentNode._parent;
+          const c = p && p._children;
+          if (!c) return null;
+          const i = c.indexOf(this.currentNode);
+          for (let j = i + 1; j < c.length; j++) if (accept(c[j]) === 1) { this.currentNode = c[j]; return c[j]; }
+          return null;
+        },
+        previousSibling() {
+          const p = this.currentNode && this.currentNode._parent;
+          const c = p && p._children;
+          if (!c) return null;
+          const i = c.indexOf(this.currentNode);
+          for (let j = i - 1; j >= 0; j--) if (accept(c[j]) === 1) { this.currentNode = c[j]; return c[j]; }
+          return null;
+        }
+      };
+      return tw;
     }
   }
   class DocumentOrderRange {
@@ -2226,10 +2347,20 @@
       // InputEvent fields — `data` is the typed text, `inputType`
       // distinguishes 'insertText' / 'deleteContentBackward' / etc.
       // Stimulus-driven `beforeinput` handlers branch on inputType.
-      this.data      = init.data      != null ? String(init.data) : null;
-      this.inputType = init.inputType != null ? String(init.inputType) : '';
-      this.isComposing = !!init.isComposing;
+      // Stored on a backing slot rather than as own data properties
+      // so the prototype-level getters below satisfy
+      // `"data" in InputEvent.prototype` — Trix uses that feature
+      // probe to decide between Level 2 (uses `beforeinput`) and
+      // Level 0 input controllers.
+      this._data      = init.data      != null ? String(init.data) : null;
+      this._inputType = init.inputType != null ? String(init.inputType) : '';
+      this._isComposing = !!init.isComposing;
+      this._targetRanges = Array.isArray(init.targetRanges) ? init.targetRanges.slice() : [];
     }
+    get data()       { return this._data; }
+    get inputType()  { return this._inputType; }
+    get isComposing(){ return this._isComposing; }
+    getTargetRanges(){ return this._targetRanges.slice(); }
   };
   globalThis.SubmitEvent     = class extends Event {
     constructor(type, init) { super(type, init); this.submitter = init && init.submitter || null; }
@@ -7521,11 +7652,25 @@
       }
       if (!hit) return false;
     } else if (isContenteditable(n)) {
-      // Capybara `.set('text')` on a contenteditable element replaces
-      // the text content. Real browsers fire `input` (no `change`)
-      // and don't touch a `value` attribute.
-      n.textContent = v;
-      dispatchEvent(n, new InputEvent('input', { bubbles: true, cancelable: true }));
+      // Capybara `.set('text')` on a contenteditable element. Per the
+      // UI Events spec, replacing text fires `beforeinput` (with
+      // `inputType: 'insertText'` and `data: text`) THEN `input`.
+      // Cancelable rich editors (Trix, ProseMirror, Lexical) call
+      // `preventDefault()` on `beforeinput` and update their own
+      // model from `data`; if we mutate the contenteditable's text
+      // before that, we race with their composition pipeline and
+      // overwrite the editor model with raw text the editor then
+      // tries to reconcile.
+      const bi = new InputEvent('beforeinput', {
+        bubbles: true, cancelable: true, data: v, inputType: 'insertText'
+      });
+      dispatchEvent(n, bi);
+      if (!bi.defaultPrevented) {
+        n.textContent = v;
+      }
+      dispatchEvent(n, new InputEvent('input', {
+        bubbles: true, cancelable: false, data: v, inputType: 'insertText'
+      }));
       return true;
     } else {
       n._attrs.value = v;
