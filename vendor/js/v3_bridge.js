@@ -3743,7 +3743,48 @@
     disconnect ()            {}
     takeRecords ()           { return []; }
   }
-  globalThis.IntersectionObserver  = class extends CsimStubObserver {};
+  // Eager `IntersectionObserver` — fires `isIntersecting: true` for any
+  // observed element that v3's visibility check ("true unless something
+  // says hidden") accepts. v3 has no layout, so we treat anything not
+  // explicitly hidden as in-viewport. Turbo's lazy `<turbo-frame>`s and
+  // Stimulus's lazy-load patterns rely on the observer firing to start
+  // their fetches — with a no-op stub, lazy turbo-frames never load
+  // their `src` and `has_many`/`has_and_belongs_to_many`/`comments_frame`
+  // assertions all see the "Loading…" placeholder forever.
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    constructor (cb) {
+      this._cb = cb;
+      this._observed = new Set();
+    }
+    observe (target) {
+      if (!target || this._observed.has(target)) return;
+      this._observed.add(target);
+      const self = this;
+      Promise.resolve().then(() => self._maybeFire(target));
+    }
+    unobserve (target)  { this._observed.delete(target); }
+    disconnect ()       { this._observed.clear(); }
+    takeRecords ()      { return []; }
+    _maybeFire (target) {
+      if (!this._observed.has(target)) return;
+      if (!__isVisibleNode(target)) return;
+      this._observed.delete(target);
+      const rect = { x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0 };
+      try {
+        this._cb([{
+          target,
+          isIntersecting:     true,
+          intersectionRatio:  1,
+          boundingClientRect: rect,
+          intersectionRect:   rect,
+          rootBounds:         rect,
+          time:               0
+        }], this);
+      } catch (e) {
+        try { console.error('[csim v3] IntersectionObserver cb threw:', e && e.message); } catch (_) {}
+      }
+    }
+  };
   globalThis.ResizeObserver        = class extends CsimStubObserver {};
   globalThis.PerformanceObserver   = class extends CsimStubObserver {};
 
