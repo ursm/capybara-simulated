@@ -1040,6 +1040,17 @@
       }
       return opts.length > 0 ? 0 : -1;
     }
+    // `<select>.selectedOptions` — live HTMLCollection of every
+    // currently-selected `<option>` descendant. Avo's
+    // `multiple-select-filter` controller reads
+    // `Array.from(selectorTarget.selectedOptions).map(...)` to build
+    // the filter query; without this accessor the filter button click
+    // throws silently and the URL never gains the `encoded_filters`
+    // param.
+    get selectedOptions() {
+      if (this._tag !== 'select') return undefined;
+      return this.querySelectorAll('option').filter(o => o._attrs.selected != null);
+    }
     // <a> / <area> / <link>.href: IDL attribute returns the *resolved*
     // URL against the document base (per HTML spec). Rails-UJS reads
     // `element.href` to get the AJAX target; without this getter it
