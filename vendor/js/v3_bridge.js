@@ -533,7 +533,7 @@
     get prefix()       { return null; }
     get namespaceURI() { return null; }
     get localName()    { return null; }
-    get ownerDocument(){ return globalThis.document; }
+    get ownerDocument(){ return this._ownerDoc || globalThis.document; }
   }
 
   class Element extends Node {
@@ -596,7 +596,7 @@
     // Capybara / Selenium effectively see in real-browser HTML mode.
     get prefix()       { return null; }
     get namespaceURI() { return null; }
-    get ownerDocument(){ return globalThis.document; }
+    get ownerDocument(){ return this._ownerDoc || globalThis.document; }
     getAttribute(name)        { const v = this._attrs[String(name).toLowerCase()]; return v == null ? null : v; }
     setAttribute(name, value) {
       const n = String(name).toLowerCase();
@@ -1312,7 +1312,7 @@
       this.nodeType = NODE_FRAGMENT;
     }
     get nodeName()     { return '#document-fragment'; }
-    get ownerDocument(){ return globalThis.document; }
+    get ownerDocument(){ return this._ownerDoc || globalThis.document; }
     get innerHTML()    { return serializeChildren(this); }
     set innerHTML(html) {
       for (const c of this._children) unregisterSubtree(c);
@@ -1712,9 +1712,25 @@
       return cloneRangeContents(this);
     }
     extractContents() {
-      // For our PoC consumers, extract == clone (no actual deletion);
-      // quote-reply doesn't follow up with mutating the source tree.
-      return cloneRangeContents(this);
+      // Spec: removes the range's contents from the tree AND returns
+      // them as a DocumentFragment. Turbo's `FrameRenderer.renderElement`
+      // uses this to MOVE children out of the parsed `<turbo-frame>`
+      // into the live frame (`currentElement.appendChild(sourceRange.
+      // extractContents())`); a clone-only impl loses the move
+      // semantics — `appendChild` would then re-parent each clone but
+      // leave the originals orphaned, and the frame's live content
+      // stays empty.
+      const frag = cloneRangeContents(this);
+      deleteRangeContents(this);
+      return frag;
+    }
+    // Spec: removes everything inside the range from its container.
+    // Turbo's `FrameRenderer` calls `selectNodeContents(currentElement);
+    // deleteContents()` to clear the lazy frame's loading placeholder
+    // before grafting the response's frame content. Without this the
+    // placeholder stays in place and the comment list never appears.
+    deleteContents() {
+      deleteRangeContents(this);
     }
     collapse(toStart) {
       if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
@@ -1854,6 +1870,28 @@
     const shell = subtree.cloneNode(false);
     __emitSlice(shell, subtree, startCut, endCut);
     return shell;
+  }
+  // Spec-best-effort removal: for `selectNodeContents`-style ranges
+  // (both endpoints on the same element container) remove the
+  // children inside the range and collapse it. Cross-container
+  // ranges are no-op'd; nothing in the app workloads we run reaches
+  // for delete on a non-trivial selection.
+  function deleteRangeContents (range) {
+    const sc = range.startContainer, so = range.startOffset | 0;
+    const ec = range.endContainer,   eo = range.endOffset | 0;
+    if (sc === ec && sc && sc._children) {
+      const end = Math.min(eo, sc._children.length);
+      for (let i = end - 1; i >= so; i--) {
+        const child = sc._children[i];
+        if (child) sc.removeChild(child);
+      }
+      range.endOffset = range.startOffset;
+      range.endContainer = range.startContainer;
+    } else if (sc === ec && sc && sc.nodeType === NODE_TEXT) {
+      const data = sc.data || '';
+      sc.data = data.slice(0, so) + data.slice(eo);
+      range.endOffset = range.startOffset;
+    }
   }
   function cloneRangeContents (range) {
     const frag = new DocumentFragment();
@@ -3712,6 +3750,45 @@
       dispatchEvent: () => false
     };
   };
+  // `CSS.escape(s)` per CSSOM — serialise `s` as a CSS identifier
+  // (control chars become `\xx ` hex escapes, leading digits / `-`
+  // get escaped, etc.). Turbo Drive's `extractForeignFrameElement`
+  // builds `\`turbo-frame#${CSS.escape(this.id)}\`` to scope its
+  // `querySelector` to the right frame; without `CSS` the whole
+  // chain throws and `turbo-frame[loading=lazy]` content never
+  // renders. `supports()` is a stub (we have no layout / cascade
+  // capability checks) and returns false; callers that gate
+  // progressive enhancement on it fall through to the legacy path.
+  globalThis.CSS = {
+    escape (value) {
+      if (arguments.length === 0) throw new TypeError('CSS.escape requires an argument.');
+      const s = String(value);
+      const len = s.length;
+      const first = s.charCodeAt(0);
+      if (len === 1 && first === 0x002D) return '\\-';
+      let out = '';
+      for (let i = 0; i < len; i++) {
+        const c = s.charCodeAt(i);
+        if (c === 0) { out += '�'; continue; }
+        if ((c >= 0x0001 && c <= 0x001F) || c === 0x007F ||
+            (i === 0 && c >= 0x0030 && c <= 0x0039) ||
+            (i === 1 && c >= 0x0030 && c <= 0x0039 && first === 0x002D)) {
+          out += '\\' + c.toString(16) + ' ';
+          continue;
+        }
+        if (c >= 0x0080 || c === 0x002D || c === 0x005F ||
+            (c >= 0x0030 && c <= 0x0039) ||
+            (c >= 0x0041 && c <= 0x005A) ||
+            (c >= 0x0061 && c <= 0x007A)) {
+          out += s.charAt(i);
+          continue;
+        }
+        out += '\\' + s.charAt(i);
+      }
+      return out;
+    },
+    supports () { return false; }
+  };
   // `performance.now()` returns ms since the runtime started — not the
   // virtual JS clock, since most callers (perf timing, jitter
   // smoothing) want monotonic wall time, not virtual ticks.
@@ -4259,10 +4336,25 @@
     parseFromString(input, mimeType) {
       const html = String(input == null ? '' : input);
       const t = String(mimeType || 'text/html').toLowerCase();
-      if (t.indexOf('html') >= 0) return parseDocument(html);
-      // XML / SVG / etc.: parse with the same loose parser, just for
-      // the shape — Capybara-driven tests rarely poke past the root.
-      return parseDocument(html);
+      // Note `text/xml` / `application/xml`: we use the same loose
+      // parser for shape — Capybara-driven tests rarely poke past
+      // the root.
+      const doc = parseDocument(html);
+      // Tag every node with its owner doc so `Element.ownerDocument`
+      // returns this parsed Document rather than `globalThis.document`.
+      // Turbo Drive's `activateElement` gates on `element.ownerDocument
+      // !== document` before calling `importNode` — without this
+      // tagging the cross-document check is silently false (every
+      // ownerDocument resolves to the live document), importNode is
+      // skipped, the cloned `<turbo-frame>` never upgrades to
+      // FrameElement, and `<turbo-frame loading=lazy>` lazy responses
+      // come back "did not contain the expected <turbo-frame>".
+      // Scoped to DOMParser only — the visit pipeline's internal
+      // `parseDocument` call grafts the parsed tree onto
+      // `globalThis.document`, so those nodes must continue to report
+      // the live document as their owner.
+      walkSubtree(doc, n => { n._ownerDoc = doc; });
+      return doc;
     }
   };
 
