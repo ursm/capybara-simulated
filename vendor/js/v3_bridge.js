@@ -560,15 +560,35 @@
     get nodeName()   { return this.tagName; }
     get nodeValue()  { return null; }
     get localName()  { return this._tag; }
-    // `<template>.content` — the DocumentFragment containing the
-    // template's inert children per HTML spec. Lazy-initialised for
-    // templates created via `document.createElement`; the HTML parser
-    // pre-populates `_templateContent` when it encounters
-    // `<template>…</template>`.
+    // `.content` is tag-specific per HTML spec:
+    //   - `<template>`: the inert `DocumentFragment` carrying the
+    //     template's children. Lazy-initialised for templates created
+    //     via `document.createElement`; the HTML parser pre-populates
+    //     `_templateContent` when it encounters `<template>…</template>`.
+    //     Readonly per IDL — the setter is a silent no-op.
+    //   - `<meta>`: reflects the `content` attribute. Forem's
+    //     `initializeBodyData.js` builds the csrf-token meta via
+    //     `createElement('meta'); el.content = token; head.append(el)`,
+    //     so without the setter the csrf wait loop never resolves and
+    //     Preact never mounts.
+    // Any other element treats `.content` as an own data property,
+    // matching real-browser behaviour for tags without a `content`
+    // IDL slot.
     get content() {
-      if (this._tag !== 'template') return undefined;
-      if (!this._templateContent) this._templateContent = new DocumentFragment();
-      return this._templateContent;
+      if (this._tag === 'template') {
+        if (!this._templateContent) this._templateContent = new DocumentFragment();
+        return this._templateContent;
+      }
+      if (this._tag === 'meta') {
+        const v = this._attrs['content'];
+        return v == null ? '' : v;
+      }
+      return undefined;
+    }
+    set content(v) {
+      if (this._tag === 'template') return;
+      if (this._tag === 'meta') { this.setAttribute('content', v == null ? '' : String(v)); return; }
+      Object.defineProperty(this, 'content', {value: v, writable: true, configurable: true, enumerable: true});
     }
     // XPath 1.0 `*` wildcard matches names in *no* namespace. Reporting
     // the XHTML namespace here would silently mismatch Capybara-emitted
