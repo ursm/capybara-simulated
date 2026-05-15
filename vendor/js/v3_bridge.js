@@ -601,6 +601,26 @@
       if (this._tag === 'meta') { this.setAttribute('content', v == null ? '' : String(v)); return; }
       Object.defineProperty(this, 'content', {value: v, writable: true, configurable: true, enumerable: true});
     }
+    // `<dialog>` HTML interface — show() / showModal() / close() per
+    // HTMLDialogElement. Turbo's confirm flow uses this: opens
+    // `<dialog id="turbo-confirm">` via `showModal()`, waits for the
+    // `close` event, reads `returnValue`. The `<form method="dialog">`
+    // submit path in `__csimClickResolve` is the close trigger; show
+    // simply flips the `open` attribute (no real layout / focus
+    // trapping — Capybara just queries the visible-by-attribute
+    // descendants and that suffices).
+    show() {
+      if (this._tag !== 'dialog') return;
+      this.setAttribute('open', '');
+    }
+    showModal() {
+      if (this._tag !== 'dialog') return;
+      this.setAttribute('open', '');
+    }
+    close(returnValue) {
+      if (this._tag !== 'dialog') return;
+      closeDialog(this, returnValue);
+    }
     // XPath 1.0 `*` wildcard matches names in *no* namespace. Reporting
     // the XHTML namespace here would silently mismatch Capybara-emitted
     // `//*` queries. We don't model XML namespaces; null is what
@@ -6926,10 +6946,38 @@
       const pendingFromHandler = __takePendingFormSubmit();
       if (pendingFromHandler) return { kind: 'submit', formHandle: pendingFromHandler.formHandle, submitter: pendingFromHandler.submitterHandle || 0 };
       if (submit.defaultPrevented) return null;
+      // `<form method="dialog">` per HTML spec: submitting the form
+      // closes the form's nearest ancestor `<dialog>` rather than
+      // issuing a request. `dialog.returnValue` becomes the
+      // submitter's `value`. Turbo's `confirm` flow uses this:
+      // `data-turbo-confirm` opens a `<dialog id="turbo-confirm">`
+      // with `<form method=dialog>`, and resolves its `Promise` on
+      // the dialog's `close` event by reading `returnValue`.
+      const methodAttr = ((n._attrs.formmethod || form._attrs.method) || '').toLowerCase();
+      if (methodAttr === 'dialog') {
+        let dlg = form._parent;
+        while (dlg && dlg._tag !== 'dialog') dlg = dlg._parent;
+        if (dlg) closeDialog(dlg, String(n._attrs.value == null ? '' : n._attrs.value));
+        return null;
+      }
       return { kind: 'submit', formHandle: form._id, submitter: n._id };
     }
     return null;
   };
+  // Spec-minimal `<dialog>.close(returnValue)` — strip `open`,
+  // dispatch a non-bubbling, non-cancelable `close` event. Turbo's
+  // `confirm` flow waits on this event and reads `dialog.returnValue`
+  // to decide whether to proceed.
+  function closeDialog(dlg, returnValue) {
+    if (!dlg || dlg._tag !== 'dialog') return;
+    dlg.returnValue = String(returnValue == null ? '' : returnValue);
+    if (Object.prototype.hasOwnProperty.call(dlg._attrs, 'open')) {
+      const old = dlg._attrs.open;
+      delete dlg._attrs.open;
+      recordAttrMutation(dlg, 'open', old == null ? null : old);
+    }
+    try { dispatchEvent(dlg, new Event('close', { bubbles: false, cancelable: false })); } catch (_) {}
+  }
   // Resolve a `<label>` element to its labeled form control per HTML
   // spec. Preference order: `for` attribute → first labelable
   // descendant (input / textarea / select / button / output / meter
