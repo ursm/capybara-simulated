@@ -50,6 +50,13 @@ module Capybara
       def tag_name = browser.tag_name(handle_id)
 
       def [](name)
+        # Tick the virtual clock so Capybara's helpers that poll an
+        # attribute in a tight `sleep(0.1) until` loop (e.g. Avo's
+        # `wait_for_body_class_missing`) actually see the JS chain
+        # progress. Without this the body class never transitions
+        # because we only advance time during `find`, and the helper
+        # caches the body node before its poll loop.
+        browser.tick_real_time
         check_stale
         browser.attr(handle_id, name.to_s)
       end

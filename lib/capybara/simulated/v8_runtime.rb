@@ -295,6 +295,24 @@ module Capybara
         ctx.eval("__drainTimers(#{arg})")
       end
 
+      # Each `ctx.eval` boundary gives V8 one microtask round; chained
+      # `await`/`.then` queues need one boundary per step. `settle`
+      # uses this to advance the chain without committing to a full
+      # bulk-drain (see `feedback_settle_microtask_drain`).
+      def drain_microtasks(iters = 4)
+        i = iters.to_i
+        return if i <= 0
+        c = ctx
+        i.times { c.eval('0') }
+      end
+
+      # Settle-generation counter — JS-side bumps on every observable
+      # DOM / URL change. Ruby reads it across a `settle` call to
+      # yield on the first observable change.
+      def settle_gen
+        ctx.eval('__settleGenGet()').to_i
+      end
+
       def has_ready_timer?
         return false if @ctx.nil?
         ctx.eval('!!__hasReadyTimer()')

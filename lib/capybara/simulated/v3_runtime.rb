@@ -201,6 +201,20 @@ module Capybara
         max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
+      # QuickJS via js_runtime drains microtasks at the call boundary
+      # too — each no-op `eval` gives one round, used by `settle` to
+      # advance chained `await`/`.then` queues one step at a time.
+      def drain_microtasks(iters = 4)
+        i = iters.to_i
+        return if i <= 0
+        c = ctx
+        i.times { c.eval('0') }
+      end
+
+      def settle_gen
+        ctx.eval('__settleGenGet()').to_i
+      end
+
       def has_ready_timer?
         return false if @ctx.nil?
         !!ctx.call('__hasReadyTimer')

@@ -2325,7 +2325,18 @@
   const __observers = new Set();
   const __pendingRecords = [];
 
+  // Settle-generation counter. Bumped on every observable DOM/URL
+  // change (childList mutation, attribute mutation, location update)
+  // regardless of whether a MutationObserver is watching. The Ruby
+  // side compares this across a `settle` call to yield on the first
+  // observable change, matching the "1 paint = 1 observable moment"
+  // semantics real browsers offer to polling helpers.
+  let __settleGen = 0;
+  globalThis.__settleGenGet = () => __settleGen;
+  function __bumpSettleGen() { __settleGen = (__settleGen + 1) | 0; }
+
   function recordAttrMutation(target, name, oldValue) {
+    __bumpSettleGen();
     if (__observers.size === 0) return;
     __pendingRecords.push({
       type:           'attributes',
@@ -2340,6 +2351,7 @@
     });
   }
   function recordChildList(target, added, removed) {
+    __bumpSettleGen();
     if (__observers.size === 0) return;
     __pendingRecords.push({
       type:           'childList',
@@ -4067,6 +4079,9 @@
   }
   globalThis.__csimUpdateLocation = function (url) {
     globalThis.location = makeLocation(String(url || ''));
+    // URL change is observable progress; settle yields on it the same
+    // way it yields on DOM mutations.
+    __bumpSettleGen();
   };
 
   // `getComputedStyle(el)` — minimal stub. We don't run a real cascade

@@ -38,6 +38,12 @@ module Capybara
       TICK_CAP_MS = 5_000
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
+      # Per-iter microtask drain depth. mini_racer drains one round
+      # per `eval` boundary, so this is the supported chained-await
+      # depth before we punt to drain_timers and let the virtual clock
+      # advance. 4 covers Turbo's `await fetch → response → text →
+      # stream` fan-out without blowing the per-iter cost.
+      SETTLE_MICRO_DRAIN_PER_ITER = 4
 
       # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
       # must lead with `Mozilla/5.0` so server-side bot detectors
@@ -759,10 +765,44 @@ module Capybara
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
       end
 
+      # Yield on the first observable change. Each iter (a) drains
+      # the chained-await/`.then` microtask queue a few rounds, (b)
+      # checks the JS-side `__settleGen` counter — bumped on every
+      # DOM mutation / URL change — and bails if it ticked, otherwise
+      # (c) advances the virtual clock to fire rAF / setTimeout that
+      # the chain is parked on. Capybara's outer polling loop drives
+      # the next iter on the next find / has_? — matching real
+      # browsers' "one paint = one observable moment" semantics.
+      #
+      # This makes a user-action settle as cheap as ~4 evals when
+      # the click immediately mutates DOM, and lets `wait_for_*`
+      # helpers catch transient states like "modal removed before
+      # the redirect_to Visit's render rebuilds it" — exactly the
+      # window real browsers paint at.
       def settle
+        gen_tracked = @runtime.respond_to?(:settle_gen)
+        start_gen   = gen_tracked ? @runtime.settle_gen : 0
+        prev_gen    = start_gen
         SETTLE_MAX_ITER.times do
-          @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
-          break unless @timers_active && @runtime.has_ready_timer?
+          if @runtime.respond_to?(:drain_microtasks)
+            @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
+          end
+          break if gen_tracked && @runtime.settle_gen > start_gen
+          break unless @timers_active
+          @runtime.drain_timers(SETTLE_DRAIN_MS)
+          break if gen_tracked && @runtime.settle_gen > start_gen
+          # No progress this iter (no DOM/URL change observed) — the
+          # remaining timers are queued for the future; bail and let
+          # Capybara's wall-clock-driven poll loop drive the next tick
+          # via `tick_real_time`. Without this guard we'd burn the
+          # full SETTLE_MAX_ITER × per-iter budget every find whenever
+          # an idle `setInterval` is registered.
+          if gen_tracked
+            break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer?
+            prev_gen = @runtime.settle_gen
+          else
+            break unless @runtime.has_ready_timer?
+          end
         end
         @find_cache_dirty = true
       end
