@@ -36,6 +36,8 @@ module Capybara
       # setInterval can't loop indefinitely in a single tick.
       TICK_MIN_MS = 10
       TICK_CAP_MS = 5_000
+      SETTLE_DRAIN_MS = 32
+      SETTLE_MAX_ITER = 10
 
       # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
       # must lead with `Mozilla/5.0` so server-side bot detectors
@@ -422,7 +424,7 @@ module Capybara
             @runtime.call('__csimClickResolve', handle, init)
           end
         unless action.is_a?(Hash)
-          tick_real_time
+          settle
           return
         end
         case action['kind']
@@ -544,6 +546,7 @@ module Capybara
         end
         consume_pending_form_submit
         consume_pending_navigation
+        settle
       end
 
       def coerce_set_value(v)
@@ -712,6 +715,7 @@ module Capybara
         @runtime.call('__csimSendKeys', handle, atoms)
         consume_pending_form_submit
         consume_pending_navigation
+        settle
       end
 
       def select_option(handle)
@@ -721,6 +725,7 @@ module Capybara
         tick_real_time
         consume_pending_form_submit
         consume_pending_navigation
+        settle
       end
 
       def unselect_option(handle)
@@ -739,6 +744,7 @@ module Capybara
         tick_real_time
         consume_pending_form_submit
         consume_pending_navigation
+        settle
       end
 
       # Read the form-submit pending intent set by JS-side
@@ -751,6 +757,14 @@ module Capybara
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
+      end
+
+      def settle
+        SETTLE_MAX_ITER.times do
+          @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
+          break unless @timers_active && @runtime.has_ready_timer?
+        end
+        @find_cache_dirty = true
       end
 
       # Read the anchor-navigation pending intent set by JS-side

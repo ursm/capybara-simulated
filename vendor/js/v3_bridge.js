@@ -36,6 +36,40 @@
       this._listeners = null;    // type → [{handler, capture}]; lazy
       this.nodeType   = NODE_ELEMENT;
     }
+    getRootNode(_options) {
+      let cur = this;
+      while (cur._parent) cur = cur._parent;
+      return cur;
+    }
+    isSameNode(other) { return other != null && this === other; }
+    // `Node.isEqualNode(other)` per DOM spec — structural equality
+    // ignoring node identity. Turbo Drive's `PageRenderer.
+    // mergeProvisionalElements` walks the old/new head's provisional
+    // elements and calls `newElement.isEqualNode(element)` to decide
+    // which to keep; without this the render chain throws "isEqualNode
+    // is not a function" inside `await prepareToRenderSnapshot`,
+    // never fires `turbo:before-render`, and the body swap that should
+    // turn `/edit` into the `/show` page silently aborts (the URL
+    // updates via history.pushState earlier in the chain but the DOM
+    // stays on the edit form).
+    isEqualNode(other) {
+      if (other == null || this.nodeType !== other.nodeType) return false;
+      if (this.nodeType === NODE_ELEMENT) {
+        if (this._tag !== other._tag) return false;
+        const a = this._attrs || {}, b = other._attrs || {};
+        const akeys = Object.keys(a), bkeys = Object.keys(b);
+        if (akeys.length !== bkeys.length) return false;
+        for (const k of akeys) if (a[k] !== b[k]) return false;
+      } else if (this.nodeType === NODE_TEXT || this.nodeType === NODE_COMMENT) {
+        if ((this._data || '') !== (other._data || '')) return false;
+      }
+      const ac = this._children || [], bc = other._children || [];
+      if (ac.length !== bc.length) return false;
+      for (let i = 0; i < ac.length; i++) {
+        if (!ac[i].isEqualNode(bc[i])) return false;
+      }
+      return true;
+    }
     addEventListener(type, handler, options) {
       // DOM spec: handler may be either a function OR an EventListener
       // object with a `handleEvent` method. Stimulus's central
@@ -504,6 +538,12 @@
 
   class Element extends Node {
     constructor(tagName) {
+      if (__pendingUpgrade) {
+        const target = __pendingUpgrade;
+        __pendingUpgrade = null;
+        try { Object.setPrototypeOf(target, new.target.prototype); } catch (_) {}
+        return target;
+      }
       super();
       // Allow subclasses (custom elements) to call `super()` without
       // a tagName — `__currentTag` carries the registered tag through
@@ -2366,6 +2406,7 @@
 
   globalThis.HTMLElement = Element;
   const __customElementRegistry = new Map(); // tag → ctor
+  let __pendingUpgrade = null;
 
   globalThis.customElements = {
     define(tag, ctor) {
@@ -2389,11 +2430,16 @@
   };
 
   function upgradeElement(el, ctor) {
-    // Prototype-swap into the user's class so methods + hooks are
-    // visible. Skips running user constructor again — close enough for
-    // the smoke spec; full spec runs the ctor with `customElements
-    // upgrade` semantics.
-    try { Object.setPrototypeOf(el, ctor.prototype); } catch (_) {}
+    if (Object.getPrototypeOf(el) === ctor.prototype) return;
+    __pendingUpgrade = el;
+    try {
+      Reflect.construct(ctor, [], ctor);
+    } catch (e) {
+      try { console.error('[csim v3] custom element constructor threw:', e && e.message); } catch (_) {}
+      try { Object.setPrototypeOf(el, ctor.prototype); } catch (_) {}
+    } finally {
+      __pendingUpgrade = null;
+    }
   }
   function fireCEHook(el, hookName) {
     try {
@@ -3450,6 +3496,30 @@
     }
   })();
   globalThis.Node     = Node;
+  // DOM Node.nodeType constants per spec. Libraries that compare
+  // `node.nodeType == Node.ELEMENT_NODE` (Stimulus's `elementFromNode`
+  // is the canonical case — it gates Stimulus's add-to-tree path on
+  // this check, so without the constant a Turbo body swap's added
+  // body never gets its `[data-controller]` descendants connected).
+  Node.ELEMENT_NODE                = 1;
+  Node.ATTRIBUTE_NODE              = 2;
+  Node.TEXT_NODE                   = 3;
+  Node.CDATA_SECTION_NODE          = 4;
+  Node.PROCESSING_INSTRUCTION_NODE = 7;
+  Node.COMMENT_NODE                = 8;
+  Node.DOCUMENT_NODE               = 9;
+  Node.DOCUMENT_TYPE_NODE          = 10;
+  Node.DOCUMENT_FRAGMENT_NODE      = 11;
+  // Spec exposes the same constants on instances (`node.ELEMENT_NODE`).
+  Node.prototype.ELEMENT_NODE                = 1;
+  Node.prototype.ATTRIBUTE_NODE              = 2;
+  Node.prototype.TEXT_NODE                   = 3;
+  Node.prototype.CDATA_SECTION_NODE          = 4;
+  Node.prototype.PROCESSING_INSTRUCTION_NODE = 7;
+  Node.prototype.COMMENT_NODE                = 8;
+  Node.prototype.DOCUMENT_NODE               = 9;
+  Node.prototype.DOCUMENT_TYPE_NODE          = 10;
+  Node.prototype.DOCUMENT_FRAGMENT_NODE      = 11;
   globalThis.Text     = Text;
   // DOM collection / element-subtype aliases. Libraries do constructor
   // identity tests (`x.constructor === NodeList`, `x instanceof
