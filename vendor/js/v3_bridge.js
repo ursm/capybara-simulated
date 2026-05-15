@@ -436,6 +436,7 @@
           registerSubtree(c);
           recordChildList(this, [c], []);
           if (isConnected(this)) fireCEConnect(c);
+          __askForReset(c);
         }
         child._children.length = 0;
         return child;
@@ -446,6 +447,7 @@
       registerSubtree(child);
       recordChildList(this, [child], []);
       if (isConnected(this)) fireCEConnect(child);
+      __askForReset(child);
       return child;
     }
     removeChild(child) {
@@ -473,6 +475,7 @@
           registerSubtree(c);
           recordChildList(this, [c], []);
           if (isConnected(this)) fireCEConnect(c);
+          __askForReset(c);
         }
         child._children.length = 0;
         return child;
@@ -485,6 +488,7 @@
       registerSubtree(child);
       recordChildList(this, [child], []);
       if (isConnected(this)) fireCEConnect(child);
+      __askForReset(child);
       return child;
     }
     replaceChild(neu, old) {
@@ -499,6 +503,7 @@
       registerSubtree(neu);
       recordChildList(this, [neu], [old]);
       if (wasConnected) { fireCEDisconnect(old); fireCEConnect(neu); }
+      __askForReset(neu);
       return old;
     }
     // textContent collects descendant text; setter replaces children
@@ -2775,6 +2780,44 @@
     if (!node) return;
     fn(node);
     if (node._children) for (const c of node._children) walkSubtree(c, fn);
+  }
+  // HTML spec "ask for a reset" — when an option (or an optgroup
+  // containing options) is inserted into a single-select `<select>`,
+  // any pre-existing options whose selectedness is true get cleared
+  // so only the last selected option in tree order wins. Avo's
+  // `reload_belongs_to_field_controller.updateNonSearchable` builds
+  // a new `<option selected>` and appends it to a `<select>` whose
+  // current option also has `selected=""`; without the reset both
+  // come back from `selectedOptions` and `have_select(selected: ...)`
+  // reports two matches. The setter at `option.selected = true`
+  // already clears siblings when the option *has* a parent select,
+  // but `selected` set before `appendChild` runs against a detached
+  // option and can't reach into the target select.
+  function __askForReset(child) {
+    if (!child || child.nodeType !== NODE_ELEMENT) return;
+    const t = child._tag;
+    if (t === 'option') {
+      if (child._attrs.selected == null) return;
+    } else if (t === 'optgroup') {
+      let any = false;
+      for (const o of child._children) {
+        if (o.nodeType === NODE_ELEMENT && o._tag === 'option' && o._attrs.selected != null) {
+          any = true; break;
+        }
+      }
+      if (!any) return;
+    } else {
+      return;
+    }
+    let p = child._parent;
+    while (p && p.nodeType === NODE_ELEMENT && p._tag !== 'select') p = p._parent;
+    if (!p || p._tag !== 'select') return;
+    if (p._attrs.multiple != null) return;
+    const opts = p.querySelectorAll('option');
+    let last = null;
+    for (const o of opts) if (o._attrs.selected != null) last = o;
+    if (!last) return;
+    for (const o of opts) if (o !== last) delete o._attrs.selected;
   }
   // Upgrade-only walk (no connectedCallback) — used by `Document.
   // importNode` to upgrade elements that were inert in
