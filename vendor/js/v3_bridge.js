@@ -1523,7 +1523,19 @@
     // true)` to graft turbo-stream fragments into the live tree.
     importNode(node, deep) {
       if (!node || typeof node.cloneNode !== 'function') return null;
-      return node.cloneNode(!!deep);
+      const out = node.cloneNode(!!deep);
+      // Per HTML spec, elements in `<template>.content` are inert and
+      // NOT upgraded by the customElements registry. When moved into
+      // the destination document via `importNode`, they should be
+      // upgraded if their tag is registered. Turbo's
+      // `importStreamElements` does `document.importNode(turboStream,
+      // true)` and immediately accesses `streamElement.templateElement
+      // .content` — that getter only exists on the upgraded
+      // `StreamElement` prototype, so without the upgrade here we'd
+      // throw "Cannot read property 'content' of undefined" and the
+      // form submit's turbo-stream response would never render.
+      __ceUpgradeTree(out);
+      return out;
     }
     adoptNode(node) {
       if (!node) return null;
@@ -2458,6 +2470,18 @@
     if (!node) return;
     fn(node);
     if (node._children) for (const c of node._children) walkSubtree(c, fn);
+  }
+  // Upgrade-only walk (no connectedCallback) — used by `Document.
+  // importNode` to upgrade elements that were inert in
+  // `<template>.content`. Connection happens later when they're
+  // appended to the live tree.
+  function __ceUpgradeTree(subtree) {
+    walkSubtree(subtree, el => {
+      if (el.nodeType !== NODE_ELEMENT) return;
+      const ctor = __customElementRegistry.get(el._tag);
+      if (!ctor) return;
+      if (Object.getPrototypeOf(el) !== ctor.prototype) upgradeElement(el, ctor);
+    });
   }
   function fireCEConnect(subtree) {
     walkSubtree(subtree, el => {
@@ -6672,6 +6696,15 @@
       if (!form) return null;
       const submit = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: n });
       dispatchEvent(form, submit);
+      // The submit listener may have called `form.submit()` (Avo's
+      // sign-out controller: `e.preventDefault(); confirm(); this.
+      // element.submit()` — `form.submit()` per spec doesn't re-fire
+      // the submit event, so the queued intent has to be honoured
+      // even though the original submit was preventDefault'd). Take
+      // the pending intent first; otherwise the queued submit sits
+      // forever and the page never navigates.
+      const pendingFromHandler = __takePendingFormSubmit();
+      if (pendingFromHandler) return { kind: 'submit', formHandle: pendingFromHandler.formHandle, submitter: pendingFromHandler.submitterHandle || 0 };
       if (submit.defaultPrevented) return null;
       return { kind: 'submit', formHandle: form._id, submitter: n._id };
     }
