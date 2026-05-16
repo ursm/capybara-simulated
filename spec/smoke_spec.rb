@@ -1,12 +1,17 @@
+# frozen_string_literal: true
+
 require 'capybara/simulated'
 require 'rack'
 
-RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
+# Smoke coverage for the `:simulated` driver — visit / find / event
+# dispatch / virtual-clock timers / MutationObserver / custom elements /
+# external <script src> / form submission.
+
+RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|
-        req = Rack::Request.new(env)
-        case req.path_info
+        case Rack::Request.new(env).path_info
         when '/'
           [200, {'content-type' => 'text/html'}, [<<~HTML]]
             <!doctype html><html><head><title>Index</title></head><body>
@@ -18,25 +23,6 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
                 <li>Two</li>
                 <li>Three</li>
               </ul>
-              <form action="/submit" method="post" id="profile-form">
-                <label for="name">Name</label>
-                <input type="text" id="name" name="name" value="">
-                <label for="bio">Bio</label>
-                <textarea id="bio" name="bio"></textarea>
-                <fieldset>
-                  <legend>Plan</legend>
-                  <label><input type="radio" name="plan" value="free"> Free</label>
-                  <label><input type="radio" name="plan" value="pro"> Pro</label>
-                </fieldset>
-                <label><input type="checkbox" name="terms" value="yes"> Accept</label>
-                <label for="role">Role</label>
-                <select id="role" name="role">
-                  <option value="">Pick</option>
-                  <option value="dev">Developer</option>
-                  <option value="ops">Operator</option>
-                </select>
-                <button type="submit" id="save">Save</button>
-              </form>
             </body></html>
           HTML
         when '/about'
@@ -44,17 +30,6 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
             <!doctype html><html><head><title>About</title></head><body>
               <h1 id="about-h1">About us</h1>
               <p>The about page.</p>
-            </body></html>
-          HTML
-        when '/submit'
-          [200, {'content-type' => 'text/html'}, [<<~HTML]]
-            <!doctype html><html><head><title>Saved</title></head><body>
-              <h1>Saved</h1>
-              <pre id="r-name">#{req.params['name']}</pre>
-              <pre id="r-bio">#{req.params['bio']}</pre>
-              <pre id="r-plan">#{req.params['plan']}</pre>
-              <pre id="r-terms">#{req.params['terms']}</pre>
-              <pre id="r-role">#{req.params['role']}</pre>
             </body></html>
           HTML
         else
@@ -96,7 +71,7 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     expect(session.title).to eq('About')
   end
 
-  it 'runs inline <script> and reads DOM via the QuickJS bridge' do
+  it 'runs inline <script> and reads back globals via evaluate_script' do
     js_app = Rack::Builder.new {
       run lambda {|env|
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
@@ -109,9 +84,9 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
             </ul>
             <input id="name" value="alice">
             <script>
-              globalThis.__title = document.querySelector('#greeting').textContent;
-              globalThis.__items = document.querySelectorAll('li').map(li => li.textContent);
-              globalThis.__name  = document.querySelector('#name').value;
+              globalThis.__title   = document.querySelector('#greeting').textContent;
+              globalThis.__items   = document.querySelectorAll('li').map(li => li.textContent);
+              globalThis.__name    = document.querySelector('#name').value;
               globalThis.__matches = document.querySelector('#name').matches('input#name');
             </script>
           </body></html>
@@ -124,6 +99,154 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     expect(s.evaluate_script('globalThis.__items')).to eq(%w[One Two Three])
     expect(s.evaluate_script('globalThis.__name')).to eq('alice')
     expect(s.evaluate_script('globalThis.__matches')).to be true
+  end
+
+  it 'omits default ports from URL and location parts' do
+    port_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, port_app)
+    s.visit 'http://example.test:80/'
+
+    result = s.evaluate_script(<<~JS)
+      const http = new URL('http://example.test:80/path');
+      const https = new URL('https://example.test:443/path');
+      ({
+        locationHost: location.host,
+        locationPort: location.port,
+        locationOrigin: location.origin,
+        httpHost: http.host,
+        httpPort: http.port,
+        httpHref: http.href,
+        httpOrigin: http.origin,
+        httpsHost: https.host,
+        httpsPort: https.port,
+        httpsHref: https.href,
+        httpsOrigin: https.origin
+      })
+    JS
+
+    expect(result).to eq(
+      'locationHost' => 'example.test',
+      'locationPort' => '',
+      'locationOrigin' => 'http://example.test',
+      'httpHost' => 'example.test',
+      'httpPort' => '',
+      'httpHref' => 'http://example.test/path',
+      'httpOrigin' => 'http://example.test',
+      'httpsHost' => 'example.test',
+      'httpsPort' => '',
+      'httpsHref' => 'https://example.test/path',
+      'httpsOrigin' => 'https://example.test'
+    )
+  end
+
+  it 'follows redirects for fetch and XMLHttpRequest without navigating the page' do
+    redirect_app = Rack::Builder.new {
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'
+          [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
+        when '/bounce'
+          [302, {'location' => '/final'}, []]
+        when '/final'
+          [200, {'content-type' => 'text/plain'}, ['done']]
+        else
+          [404, {}, ['nope']]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, redirect_app)
+    s.visit '/'
+
+    result = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      Promise.resolve()
+        .then(() => fetch('/bounce'))
+        .then((response) => response.text().then((text) => ({
+          fetchStatus: response.status,
+          fetchText: text,
+          fetchUrl: response.url,
+          fetchRedirected: response.redirected,
+          afterFetchPath: location.pathname
+        })))
+        .then((out) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => {
+            out.xhrStatus = xhr.status;
+            out.xhrText = xhr.responseText;
+            out.xhrUrl = xhr.responseURL;
+            out.afterXhrPath = location.pathname;
+            done(out);
+          };
+          xhr.onerror = () => done({ error: 'xhr error' });
+          xhr.open('GET', '/bounce');
+          xhr.send();
+        });
+    JS
+
+    expect(result).to include(
+      'fetchStatus' => 200,
+      'fetchText' => 'done',
+      'fetchUrl' => 'http://www.example.com/final',
+      'fetchRedirected' => true,
+      'afterFetchPath' => '/',
+      'xhrStatus' => 200,
+      'xhrText' => 'done',
+      'xhrUrl' => 'http://www.example.com/final',
+      'afterXhrPath' => '/'
+    )
+  end
+
+  it 'queries the current DOM before advancing pending timers' do
+    timer_app = Rack::Builder.new {
+      run lambda {|_env|
+        [
+          200,
+          {'content-type' => 'text/html'},
+          [
+            <<~HTML
+              <!doctype html>
+              <html>
+                <body>
+                  <div id="transient">still here</div>
+                  <script>setTimeout(() => document.getElementById('transient').remove(), 0)</script>
+                </body>
+              </html>
+            HTML
+          ]
+        ]
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, timer_app)
+    s.visit '/'
+
+    expect(s).to have_selector('#transient')
+  end
+
+  it 'parses full documents assigned to a detached documentElement innerHTML' do
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+
+    result = s.evaluate_script(<<~JS)
+      const doc = document.implementation.createHTMLDocument('');
+      doc.documentElement.innerHTML = '<!doctype html><html><head><title>Loaded</title></head><body><main id="page-content"><p>body</p></main></body></html>';
+      ({
+        title: doc.title,
+        hasPageContent: !!doc.getElementById('page-content'),
+        bodyText: doc.body.textContent.trim(),
+        htmlChildTags: Array.from(doc.documentElement.children).map((n) => n.tagName)
+      })
+    JS
+
+    expect(result).to eq(
+      'title' => 'Loaded',
+      'hasPageContent' => true,
+      'bodyText' => 'body',
+      'htmlChildTags' => %w[HEAD BODY]
+    )
   end
 
   it 'mutates the DOM from inline JS and the changes show up via Capybara' do
@@ -236,6 +359,117 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     expect(s.title).to eq('About')
   end
 
+  it 'fires mouseover before a click when moving to a new target' do
+    hover_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <a id="target" href="/next">Next</a>
+            <div id="log"></div>
+            <script>
+              const log = document.querySelector('#log');
+              function append(t) { log.textContent = (log.textContent + ' ' + t).trim(); }
+              document.body.addEventListener('mouseover', (event) => {
+                if (event.target.id === 'target') append('mouseover');
+              }, true);
+              document.body.addEventListener('mousedown', (event) => {
+                if (event.target.id === 'target') append('mousedown');
+              }, true);
+              document.querySelector('#target').addEventListener('click', (event) => {
+                event.preventDefault();
+                append('click');
+              });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, hover_app)
+    s.visit '/'
+
+    s.click_link 'Next'
+
+    expect(s.find('#log').text).to eq('mouseover mousedown click')
+  end
+
+  it 'sets the focused replacement control when focus swaps the original field' do
+    replace_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <textarea id="body"></textarea>
+            <script>
+              document.querySelector('#body').addEventListener('focus', (event) => {
+                const next = document.createElement('textarea');
+                next.id = 'body';
+                event.target.replaceWith(next);
+                next.focus();
+              }, { once: true });
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, replace_app)
+    s.visit '/'
+
+    s.find('#body').set('replacement value')
+
+    expect(s.find('#body').value).to eq('replacement value')
+  end
+
+  it 'settles select-triggered async form replacements before the next action' do
+    replace_form_app = Rack::Builder.new {
+      run lambda {|env|
+        req = Rack::Request.new(env)
+        if req.post? && req.path_info == '/submit'
+          [
+            200,
+            {'content-type' => 'text/html'},
+            ['<!doctype html><html><body><div id="flash_notice">saved</div></body></html>']
+          ]
+        else
+          [
+            200,
+            {'content-type' => 'text/html'},
+            [<<~HTML]
+              <!doctype html><html><body>
+                <div id="content">
+                  <form action="/submit" method="post">
+                    <select id="status" name="status">
+                      <option value="">No change</option>
+                      <option value="assigned">Assigned</option>
+                    </select>
+                    <input type="submit" name="commit" value="Submit">
+                  </form>
+                </div>
+                <script>
+                  document.addEventListener('change', (event) => {
+                    if (event.target.id !== 'status') return;
+                    setTimeout(() => {
+                      document.querySelector('#content').innerHTML =
+                        '<form action="/submit" method="post">' +
+                        '<input type="hidden" name="status" value="' + event.target.value + '">' +
+                        '<input type="submit" name="commit" value="Submit">' +
+                        '</form>';
+                    }, 0);
+                  });
+                </script>
+              </body></html>
+            HTML
+          ]
+        end
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, replace_form_app)
+    s.visit '/'
+
+    s.select 'Assigned', from: 'status'
+    s.click_button 'Submit'
+
+    expect(s).to have_css('#flash_notice', text: 'saved')
+  end
+
   it 'drains setTimeout / setInterval / requestAnimationFrame on the virtual clock' do
     timer_app = Rack::Builder.new {
       run lambda {|env|
@@ -247,7 +481,6 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
             <script>
               const out   = document.querySelector('#out');
               const ticks = document.querySelector('#ticks');
-              // Initial setTimeout(0) — must run after page load drain.
               setTimeout(() => { out.textContent = 'ready'; }, 0);
 
               document.querySelector('#b').addEventListener('click', () => {
@@ -273,15 +506,6 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     expect(s.find('#out').text).to eq('ready')
 
     s.click_button 'Go'
-    # Virtual clock order from t=0 click:
-    #   t=16  raf  → 'AR'
-    #   t=30  int  → ticks=1
-    #   t=50  to50 → 'ARB'
-    #   t=60  int  → ticks=2
-    #   t=90  int  → ticks=3 (clears)
-    #   t=100 to100→ 'ARBC'
-    # Use `have_text` so Capybara polls; the virtual JS clock advances as
-    # wall-clock time passes between retries, mirroring real browsers.
     expect(s).to have_css('#out', exact_text: 'ARBC')
     expect(s).to have_css('#ticks', exact_text: '3')
   end
@@ -329,12 +553,15 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     s.visit '/'
 
     s.click_button 'Add'
-    # `id:null` reflects real DOM semantics: oldValue is null when the
-    # attribute didn't exist before — JS string-concat coerces it to 'null'.
-    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)')
+    # Per DOM spec ("queue a mutation record"), the `id`-setting
+    # mutation on the detached `<span>` doesn't match any observer
+    # (the span has no ancestors registered with an observer at the
+    # moment of mutation), so only the subsequent appendChild's
+    # childList record gets delivered.
+    expect(s.find('#audit').text).to eq('+child(leaf)')
 
     s.click_button 'Flip'
-    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)+attr(class:off)')
+    expect(s.find('#audit').text).to eq('+child(leaf)+attr(class:off)')
   end
 
   it 'upgrades custom elements on define and on later insertion' do
@@ -417,20 +644,71 @@ RSpec.describe 'Simulated (Nokogiri + QuickJS) — smoke' do
     expect(s.find('#t').text).to eq('hello alice')
   end
 
-  it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
-    session.visit '/'
-    session.fill_in 'Name', with: 'Daisy'
-    session.fill_in 'Bio',  with: 'hello world'
-    session.choose 'Pro'
-    session.check 'Accept'
-    session.select 'Operator', from: 'Role'
-    session.click_button 'Save'
+  describe 'forms' do
+    let(:form_app) {
+      Rack::Builder.new {
+        run lambda {|env|
+          req = Rack::Request.new(env)
+          case req.path_info
+          when '/'
+            [200, {'content-type' => 'text/html'}, [<<~HTML]]
+              <!doctype html><html><head><title>Form</title></head><body>
+                <form action="/submit" method="post" id="profile-form">
+                  <label for="name">Name</label>
+                  <input type="text" id="name" name="name" value="">
+                  <label for="bio">Bio</label>
+                  <textarea id="bio" name="bio"></textarea>
+                  <fieldset>
+                    <legend>Plan</legend>
+                    <label><input type="radio" name="plan" value="free"> Free</label>
+                    <label><input type="radio" name="plan" value="pro"> Pro</label>
+                  </fieldset>
+                  <label><input type="checkbox" name="terms" value="yes"> Accept</label>
+                  <label for="role">Role</label>
+                  <select id="role" name="role">
+                    <option value="">Pick</option>
+                    <option value="dev">Developer</option>
+                    <option value="ops">Operator</option>
+                  </select>
+                  <button type="submit" id="save">Save</button>
+                </form>
+              </body></html>
+            HTML
+          when '/submit'
+            [200, {'content-type' => 'text/html'}, [<<~HTML]]
+              <!doctype html><html><head><title>Saved</title></head><body>
+                <h1>Saved</h1>
+                <pre id="r-name">#{req.params['name']}</pre>
+                <pre id="r-bio">#{req.params['bio']}</pre>
+                <pre id="r-plan">#{req.params['plan']}</pre>
+                <pre id="r-terms">#{req.params['terms']}</pre>
+                <pre id="r-role">#{req.params['role']}</pre>
+              </body></html>
+            HTML
+          else
+            [404, {}, ['nope']]
+          end
+        }
+      }.to_app
+    }
 
-    expect(session.current_path).to eq('/submit')
-    expect(session.find('#r-name').text).to eq('Daisy')
-    expect(session.find('#r-bio').text).to  eq('hello world')
-    expect(session.find('#r-plan').text).to eq('pro')
-    expect(session.find('#r-terms').text).to eq('yes')
-    expect(session.find('#r-role').text).to eq('ops')
+    let(:form_session) { Capybara::Session.new(:simulated, form_app) }
+
+    it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
+      form_session.visit '/'
+      form_session.fill_in 'Name', with: 'Daisy'
+      form_session.fill_in 'Bio',  with: 'hello world'
+      form_session.choose 'Pro'
+      form_session.check 'Accept'
+      form_session.select 'Operator', from: 'Role'
+      form_session.click_button 'Save'
+
+      expect(form_session.current_path).to eq('/submit')
+      expect(form_session.find('#r-name').text).to eq('Daisy')
+      expect(form_session.find('#r-bio').text).to  eq('hello world')
+      expect(form_session.find('#r-plan').text).to eq('pro')
+      expect(form_session.find('#r-terms').text).to eq('yes')
+      expect(form_session.find('#r-role').text).to eq('ops')
+    end
   end
 end

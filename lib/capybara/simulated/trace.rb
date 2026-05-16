@@ -40,9 +40,10 @@ module Capybara
         @open_step    = nil
       end
 
-      # Pushed from `js_runtime.rb` (console) and `Browser#rack_request`
-      # (network). Entries land on the currently-open step; outside a
-      # step they're dropped (boot noise, post-test cleanup).
+      # Pushed from `Browser#log_console` (the JS bridge's `console.*`
+      # host-fn target) and `Browser#rack_request` (network). Entries
+      # land on the currently-open step; outside a step they're dropped
+      # (boot noise, post-test cleanup).
       def log_console(severity, message)
         return unless @open_step
         @console_buf << {severity: severity.to_s, message: message.to_s}

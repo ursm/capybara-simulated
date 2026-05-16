@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# v3 runtime: mini_racer Context wrapper for the all-in-V8 architecture
-# (DOM lives in JS, no Nokogiri tree). Surface mirrors `V8Runtime` so
-# the rest of the gem doesn't need to know which v we're on.
+# mini_racer Context wrapper. The DOM lives in JS; this class owns the
+# V8 context, the warm snapshot, the host-fn callbacks the bridge reaches
+# back through, and the per-visit `rebuild_ctx` dance.
 
 require 'mini_racer'
 require 'base64'
@@ -34,13 +34,12 @@ end
 
 module Capybara
   module Simulated
-    class V3Runtime
-      BRIDGE_JS  = File.expand_path('../../../vendor/js/v3_bridge.js', __dir__).freeze
-      WGXPATH_JS = File.expand_path('../../../vendor/js/wgxpath.js',   __dir__).freeze
+    class Runtime
+      BRIDGE_JS  = File.expand_path('../../../vendor/js/bridge.js',  __dir__).freeze
+      WGXPATH_JS = File.expand_path('../../../vendor/js/wgxpath.js', __dir__).freeze
 
-      # Stub host fns so the bridge can be baked into a Snapshot. Same
-      # shape as `V8Runtime::SNAPSHOT_HOST_STUBS`; only the host fns
-      # v3_bridge.js actually invokes appear here.
+      # Stub host fns so the bridge can be baked into a Snapshot. Only
+      # the host fns bridge.js actually invokes appear here.
       SNAPSHOT_HOST_STUBS = <<~JS.freeze
         Object.defineProperty(globalThis, Symbol.toStringTag, { value: 'Window' });
         globalThis.__csim_parseUrl = function (input, base) {
@@ -140,7 +139,7 @@ module Capybara
       JS
 
       def self.build_snapshot
-        # Order matters: v3_bridge installs `globalThis.Document` (etc.)
+        # Order matters: bridge.js installs `globalThis.Document` (etc.)
         # first, then wgxpath patches `Document.prototype.evaluate` on
         # top, then the install-on-current-document line ties it to the
         # live `document` instance the bridge created.
@@ -203,9 +202,10 @@ module Capybara
         max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
-      # QuickJS via js_runtime drains microtasks at the call boundary
-      # too — each no-op `eval` gives one round, used by `settle` to
-      # advance chained `await`/`.then` queues one step at a time.
+      # mini_racer drains microtasks at every `eval` boundary, so an
+      # empty `eval('0')` is the cheapest way to advance one round of
+      # chained `await`/`.then` queues. `settle` calls this in a loop
+      # to give the JS side a chance to drain before we tick real time.
       def drain_microtasks(iters = 4)
         i = iters.to_i
         return if i <= 0

@@ -26,15 +26,8 @@ Gem::Specification.new do |spec|
   ]
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'capybara', '>= 3.37'
-  spec.add_dependency 'nokogiri', '>= 1.18'
-  spec.add_dependency 'p_css',    '>= 0.2.0.beta1'
-  spec.add_dependency 'rack',     '>= 2.2'
-
-  # JS engine is a soft dependency. The v3 driver (`:simulated_v3`)
-  # requires V8 via mini_racer; the legacy v2 driver (`:simulated`)
-  # additionally accepts QuickJS or `none`.
-  #
-  #   gem 'mini_racer'                  # V8 — required for :simulated_v3
-  #   gem 'quickjs',    '>= 0.17.0.pre' # QuickJS — :simulated only
+  spec.add_dependency 'capybara',   '>= 3.37'
+  spec.add_dependency 'mini_racer', '>= 0.18'
+  spec.add_dependency 'nokogiri',   '>= 1.18'
+  spec.add_dependency 'rack',       '>= 2.2'
 end

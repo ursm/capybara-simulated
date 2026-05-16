@@ -37,7 +37,7 @@ there's no Node toolchain at consume time.
 
 ## Use
 
-`require 'capybara/simulated'` registers the `:simulated_v3` driver.
+`require 'capybara/simulated'` registers the `:simulated` driver.
 
 ### RSpec
 
@@ -46,9 +46,9 @@ there's no Node toolchain at consume time.
 require 'capybara/rspec'
 require 'capybara/simulated'
 
-Capybara.javascript_driver = :simulated_v3
-# Optional: use :simulated_v3 for non-JS specs too.
-# Capybara.default_driver = :simulated_v3
+Capybara.javascript_driver = :simulated
+# Optional: use :simulated for non-JS specs too.
+# Capybara.default_driver = :simulated
 ```
 
 Tests tagged `js: true` (or `type: :system, js: true` in Rails) run
@@ -70,7 +70,7 @@ For Rails system tests, set the driver via `driven_by`:
 
 ```ruby
 RSpec.describe 'sign-in', type: :system do
-  before { driven_by :simulated_v3 }
+  before { driven_by :simulated }
   # ...
 end
 ```
@@ -86,7 +86,7 @@ require 'capybara/minitest'
 require 'capybara/simulated'
 
 class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
-  driven_by :simulated_v3
+  driven_by :simulated
 end
 ```
 
@@ -97,7 +97,7 @@ require 'capybara/dsl'
 require 'capybara/simulated'
 
 Capybara.app = MyRackApp
-Capybara.default_driver = :simulated_v3
+Capybara.default_driver = :simulated
 
 include Capybara::DSL
 
@@ -297,7 +297,7 @@ run-to-run measurement noise.
 
 ## Architecture
 
-- `vendor/js/v3_bridge.js` — the entire DOM lives here. `Document` /
+- `vendor/js/bridge.js` — the entire DOM lives here. `Document` /
   `Element` / `Text` / `DocumentFragment` / `ShadowRoot` classes;
   CSS selector tokeniser + matcher; event dispatch (capture / target
   / bubble phases with `dispatchEvent(target, event)`); virtual
@@ -306,20 +306,20 @@ run-to-run measurement noise.
   `getSelection`; cascade resolver for `display` / `visibility` /
   `text-transform` / layout primitives. wgxpath sits on top for
   XPath. Approx 7000 lines.
-- `lib/capybara/simulated/v3_browser.rb` — Rack client, history
-  stack, modal handler queue, virtual-clock anchor, trace recorder.
-  Owns the V8 runtime via `V3Runtime`. The hot operations
-  (`find_css` / `find_xpath` / DOM ops / event dispatch) are
-  single-`Context#call` round-trips returning handle id arrays;
-  per-result iteration stays Ruby-side.
-- `lib/capybara/simulated/v3_runtime.rb` — V8 base-snapshot build +
+- `lib/capybara/simulated/browser.rb` — Rack client, history stack,
+  modal handler queue, virtual-clock anchor, trace recorder. Owns
+  the V8 runtime via `Runtime`. The hot operations (`find_css` /
+  `find_xpath` / DOM ops / event dispatch) are single-`Context#call`
+  round-trips returning handle id arrays; per-result iteration stays
+  Ruby-side.
+- `lib/capybara/simulated/runtime.rb` — V8 base-snapshot build +
   per-Context pool. The base snapshot caches bridge.js + wgxpath
   bytecode so each Context spawn is sub-millisecond. Pool refills
   in a background thread.
-- `lib/capybara/simulated/v3_driver.rb` — Capybara `Driver::Base`
+- `lib/capybara/simulated/driver.rb` — Capybara `Driver::Base`
   surface (visit / find / execute_script / window handling / modal /
   tracing API).
-- `lib/capybara/simulated/v3_node.rb` — `Driver::Node` over a
+- `lib/capybara/simulated/node.rb` — `Driver::Node` over a
   `(handle_id, context_gen)` pair so a handle from a pre-rebuild
   Context can't ghost into the next one.
 
@@ -355,11 +355,3 @@ pin '@hotwired/turbo'
 
 `window.fetch` routes through Rack, so Turbo's frame fetch and
 link-action POSTs round-trip the test app.
-
-## Legacy driver
-
-The original Nokogiri-backed driver is still registered as
-`:simulated` (vs the V8-resident `:simulated_v3`). It's slower
-(~1.79× on Redmine system tests) and missing a few of the newer
-features (Shadow DOM stub, `text-transform` on visible text, the
-trace surface above). New projects should pick `:simulated_v3`.

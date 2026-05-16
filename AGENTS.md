@@ -1,8 +1,10 @@
 # capybara-simulated — engineering principles
 
-This driver runs Capybara tests in-process via QuickJS + Nokogiri. The
-codebase has a few load-bearing rules; deviations have repeatedly cost
-us regressions or paint us into a corner.
+This driver runs Capybara tests in-process: a V8-resident DOM (lives in
+`vendor/js/bridge.js`) driven through mini_racer, with Nokogiri reserved
+for the Rack response side. The codebase has a few load-bearing rules;
+deviations have repeatedly cost us regressions or paint us into a
+corner.
 
 ## 1. Real-browser test parity is the bar
 

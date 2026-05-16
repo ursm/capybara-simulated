@@ -3,9 +3,8 @@ require 'uri'
 module Capybara
   module Simulated
     # Shapes a URL string into the component hash the JS bridge expects
-    # for `globalThis.location` / `new URL(...)` reads. Shared between
-    # `V3Runtime` (QuickJS) and `V8Runtime` (mini_racer); both expose
-    # this through their `__csim_parseUrl` host fn.
+    # for `globalThis.location` / `new URL(...)` reads. `Runtime` exposes
+    # this through its `__csim_parseUrl` host fn.
     module UrlShape
       module_function
 

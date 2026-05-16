@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Aggregator for V8 `--prof` log files produced by `CSIM_V8_PROF=1`.
-# v3's per-visit `rebuild_ctx` creates one V8 isolate per Context, so a
+# Per-visit `rebuild_ctx` creates one V8 isolate per Context, so a
 # real workload (a full spec file, Avo suite, etc.) produces dozens
 # of `isolate-*-v8.log` files. Each is processed with
 # `node --prof-process` and the per-function tick counts are summed
@@ -9,7 +9,7 @@
 #
 # Recipe:
 #
-#     CSIM_V8_PROF=1 CSIM_DRIVER=simulated_v3 CSIM_JS_ENGINE=v8 \
+#     CSIM_V8_PROF=1 CSIM_DRIVER=simulated \
 #       bin/run-avo spec/system/avo/has_field_discovery_spec.rb
 #     ruby bench/v8_prof.rb apps/avo/isolate-*-v8.log
 #

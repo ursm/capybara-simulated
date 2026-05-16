@@ -1,10 +1,8 @@
 require 'capybara/simulated'
 
 # Each Capybara user-action method (fill_in / check / choose / select / etc.)
-# should fire the same event sequence a real browser does. v2 writes through
-# the DOM directly, so it's easy to mutate state without dispatching the
-# accompanying input/change/click events that user code listens for. Lock
-# the contract here so a regression in any control surfaces as a failed
+# should fire the same event sequence a real browser does. Lock the
+# contract here so a regression in any control surfaces as a failed
 # expectation rather than a silent listener miss in a downstream app.
 RSpec.describe 'HTML control event dispatch' do
   let(:app) {
@@ -65,9 +63,9 @@ RSpec.describe 'HTML control event dispatch' do
     expect(event_log).to eq(%w[ta:focus ta:input ta:change])
   end
 
-  it 'check on an unchecked checkbox fires click → input → change' do
+  it 'check on an unchecked checkbox fires focus → click → input → change' do
     session.check 'cb'
-    expect(event_log).to eq(%w[cb:click cb:input cb:change])
+    expect(event_log).to eq(%w[cb:focus cb:click cb:input cb:change])
     expect(session.find('#cb')).to be_checked
   end
 
@@ -75,13 +73,14 @@ RSpec.describe 'HTML control event dispatch' do
     session.check 'cb'
     before_len = event_log.length
     session.uncheck 'cb'
+    # No leading `cb:focus` — the prior `check` already focused it.
     expect(event_log.drop(before_len)).to eq(%w[cb:click cb:input cb:change])
     expect(session.find('#cb')).not_to be_checked
   end
 
-  it 'choose on a radio fires click → input → change and clears the peer' do
+  it 'choose on a radio fires focus → click → input → change and clears the peer' do
     session.choose 'ra'
-    expect(event_log).to eq(%w[ra:click ra:input ra:change])
+    expect(event_log).to eq(%w[ra:focus ra:click ra:input ra:change])
     expect(session.find('#ra')).to be_checked
     expect(session.find('#rb', visible: :all)).not_to be_checked
   end

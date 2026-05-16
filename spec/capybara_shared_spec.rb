@@ -2,6 +2,11 @@ require 'timeout'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
 
+# Capybara's upstream shared-spec suite run against our `:simulated`
+# driver. The expected-pending set covers tests that need a real layout
+# engine (`elementFromPoint`, `getBoundingClientRect` truthiness,
+# viewport-clip visibility, …) — see CLAUDE.md for the scoping rule.
+
 module TestSessions
   Simulated = Capybara::Session.new(:simulated, TestApp)
 end
@@ -16,25 +21,12 @@ SKIPPED_TESTS = %i[
   windows
 ].freeze
 
-# Each entry below is a documented out-of-scope class of tests that
-# would fail deterministically without a real layout engine. Filtering
-# them at the suite-runner level (rather than chasing shifting failure
-# counts) is what lets the suite report a stable green/red baseline.
 DESCRIPTION_SKIPS = [
-  # Drag-and-drop resolves drop targets through elementFromPoint, which
-  # needs stacking-context-aware layout.
   'Capybara::Session Simulated node #drag_to ',
-  # Click-retry-on-wait-disabled also routes through elementFromPoint.
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  # `#obscured?` reports whether an element sits under another in
-  # stacking order — pure layout / hit-testing.
   'Capybara::Session Simulated node #obscured?',
-  # `#all` with `obscured: false` filter: same hit-testing dependency.
   'Capybara::Session Simulated #all with obscured filter should not find nodes on top outside the viewport when false',
   'Capybara::Session Simulated #all with obscured filter should find top nodes outside the viewport when true',
-  # `assert_matches_style` exercises a regex-shape edge case the
-  # cascade resolver doesn't reproduce verbatim, and `has_css?`'s
-  # `:style` Hash form depends on a parsing branch we don't model.
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
   'Capybara::Session Simulated #has_css? :style option should support Hash'
 ].freeze
@@ -43,6 +35,12 @@ RSpec.configure do |config|
   config.filter_run_excluding requires: Capybara::SpecHelper.method(:filter).to_proc
   config.shared_context_metadata_behavior = :apply_to_host_groups
 
+  # Capybara's shared specs flip globals (`ignore_hidden_elements`,
+  # `default_selector`, …) inline without restoring them, so an earlier
+  # test's mutation bleeds into the next one. `Capybara::SpecHelper.reset!`
+  # puts everything back to defaults; without it we see false positives
+  # like text-visibility tests failing because a prior spec turned
+  # `ignore_hidden_elements` off and never turned it back on.
   config.around(:each, :capybara_skip) do |example|
     Capybara::SpecHelper.reset!
     example.run

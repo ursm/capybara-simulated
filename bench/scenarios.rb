@@ -41,7 +41,7 @@ Capybara.default_driver = driver_name
 
 RSpec.configure do |c|
   # reset_sessions! drops the per-driver state (Capybara::Simulated tears
-  # down the QuickJS VM, selenium navigates to about:blank). /__reset
+  # down the V8 context, selenium navigates to about:blank). /__reset
   # then snaps the in-memory bench app's `@items` / `@profile` back to
   # their starting values so each example sees the same fixtures.
   c.before do

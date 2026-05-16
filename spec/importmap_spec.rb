@@ -2,10 +2,8 @@ require_relative 'spec_helper'
 
 # Standard Rails importmap-rails layout: `<script type="importmap">`
 # pins specifiers to URLs, `<script type="module">` `import`s from
-# those specifiers. The driver routes module loads through
-# `Browser#load_module` (Rack-backed) via quickjs.rb's
-# `vm.module_loader` callback — same surface the production
-# browser would hit.
+# those specifiers. The bridge routes module loads through Rack via
+# `Browser#load_module`, the same surface a real browser would hit.
 RSpec.describe 'ESM via importmap' do
   STIMULUS_ESM = File.expand_path('fixtures/hotwire/stimulus.js',  __dir__)
   TURBO_ESM    = File.expand_path('fixtures/hotwire/turbo.esm.js', __dir__)
