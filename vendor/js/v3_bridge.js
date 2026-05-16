@@ -167,7 +167,18 @@
     get clientWidth()  { return __isVisibleNode(this) ? 1 : 0; }
     get clientHeight() { return __isVisibleNode(this) ? 1 : 0; }
     get scrollWidth()  { return __isVisibleNode(this) ? 1 : 0; }
-    get scrollHeight() { return __isVisibleNode(this) ? 1 : 0; }
+    // Approximate scrollHeight as 20px/line over 80 chars/line (v2's
+    // heuristic) so content-length gates fire. Avo's Trix body checks
+    // `scrollHeight > some-threshold` to decide whether to inject the
+    // "More content" expander; a flat `1` keeps it from ever rendering.
+    // Mirror v2 verbatim: max(ceil(textLen / 80) * 20, childCount * 20).
+    get scrollHeight() {
+      if (!__isVisibleNode(this)) return 0;
+      const txt  = (this.textContent || '').length;
+      const kids = this.childNodes ? this.childNodes.length : 0;
+      if (txt === 0 && kids === 0) return 0;
+      return Math.max(Math.ceil(txt / 80) * 20, kids * 20);
+    }
     get offsetTop()    { return 0; }
     get offsetLeft()   { return 0; }
     get offsetParent() { return this._parent && this._parent.nodeType === NODE_ELEMENT ? this._parent : null; }
