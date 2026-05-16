@@ -1072,6 +1072,14 @@
       } catch (_) { return v; }
     }
     set href(v) { this._attrs.href = String(v == null ? '' : v); }
+    // `<a>` / `<area>` `download` IDL attribute — reflects the
+    // `download` content attribute as a string. file-saver feature-
+    // detects via `'download' in HTMLAnchorElement.prototype` to pick
+    // its saveAs implementation; without this getter it falls through
+    // to the popup-based fallback (`open('', '_blank')`) which throws
+    // a ReferenceError, breaking Avo's action downloads.
+    get download() { return this._attrs.download == null ? '' : String(this._attrs.download); }
+    set download(v) { this._attrs.download = v == null ? '' : String(v); }
     // HTMLHyperlinkElementUtils mixin: `<a>` / `<area>` override
     // `toString()` to return the resolved `href`. Forem's
     // `trackNotification` reads `target.toString()` on the clicked
@@ -2421,23 +2429,52 @@
       // raises `ActionController::UnknownFormat`.
       event.eventPhase = 1;
       fireWindowListeners(event, true);
-      if (event._propagationStopped) return !event.defaultPrevented;
-      for (let i = path.length - 1; i > 0; i--) {
-        fireListeners(path[i], event, true);
-        if (event._propagationStopped) return !event.defaultPrevented;
+      if (!event._propagationStopped) {
+        for (let i = path.length - 1; i > 0; i--) {
+          fireListeners(path[i], event, true);
+          if (event._propagationStopped) break;
+        }
       }
-      // target
-      event.eventPhase = 2;
-      fireListeners(target, event, false);
-      fireListeners(target, event, true);
-      if (event._propagationStopped || !event.bubbles) return !event.defaultPrevented;
-      // bubble: target's parent → root → window
-      event.eventPhase = 3;
-      for (let i = 1; i < path.length; i++) {
-        fireListeners(path[i], event, false);
-        if (event._propagationStopped) return !event.defaultPrevented;
+      if (!event._propagationStopped) {
+        // target
+        event.eventPhase = 2;
+        fireListeners(target, event, false);
+        fireListeners(target, event, true);
       }
-      fireWindowListeners(event, false);
+      if (!event._propagationStopped && event.bubbles) {
+        // bubble: target's parent → root → window
+        event.eventPhase = 3;
+        for (let i = 1; i < path.length; i++) {
+          fireListeners(path[i], event, false);
+          if (event._propagationStopped) break;
+        }
+        if (!event._propagationStopped) fireWindowListeners(event, false);
+      }
+      // HTML-spec default-action for click events that reach an
+      // `<a download>` ancestor: queue a download intent so Ruby's
+      // tick-time drain saves the file. file-saver's `saveAs` does
+      // `node.dispatchEvent(new MouseEvent('click'))` rather than
+      // `node.click()`, so without this hook the synthetic click is
+      // a no-op and Avo's action-download tests never produce a file.
+      // Default-action runs regardless of `bubbles` (in real browsers
+      // a non-bubbling click on `<a download>` still follows the link).
+      // Non-download anchors stay on the existing Element.click() /
+      // Ruby-driven click paths; we don't want every random
+      // dispatchEvent('click') on a div containing an anchor to
+      // navigate the page.
+      if (!event.defaultPrevented && event.type === 'click') {
+        let anchor = target;
+        while (anchor && anchor.nodeType === NODE_ELEMENT && anchor._tag !== 'a') {
+          anchor = anchor._parent;
+        }
+        if (anchor && anchor.nodeType === NODE_ELEMENT && anchor._tag === 'a' &&
+            anchor._attrs.download != null && anchor._attrs.href != null) {
+          globalThis.__csimPendingDownload = {
+            url: String(anchor._attrs.href),
+            filename: String(anchor._attrs.download || '')
+          };
+        }
+      }
       return !event.defaultPrevented;
     } finally {
       if (__observers.size && __pendingRecords.length) deliverMutations();
@@ -4315,6 +4352,16 @@
           for (let k = 0; k < view.length; k++) s += String.fromCharCode(view[k]);
           return s;
         }
+        // Typed-array views (Uint8Array, Int8Array, …) — file-saver
+        // builds the download Blob from a `Uint8Array` so we have to
+        // serialize the underlying bytes, not `String(typedArray)`
+        // (which gives a comma-joined decimal repr).
+        if (p && typeof p === 'object' && typeof p.byteLength === 'number' && p.buffer instanceof ArrayBuffer) {
+          const view = new Uint8Array(p.buffer, p.byteOffset || 0, p.byteLength);
+          let s = '';
+          for (let k = 0; k < view.length; k++) s += String.fromCharCode(view[k]);
+          return s;
+        }
         return String(p);
       });
       this.size = this._parts.reduce((s, p) => s + (p ? p.length : 0), 0);
@@ -4359,6 +4406,19 @@
     globalThis.URL.revokeObjectURL = function (url) { __csimBlobs.delete(url); };
     globalThis.URL.__csimBlobInstalled = true;
   }
+  // Ruby-side reader for Blob content backing a `blob:` URL. Returns
+  // the bytes base64-encoded so binary content survives the mini_racer
+  // string boundary intact — the JS→Ruby marshal converts UTF-16 code
+  // units to UTF-8, so chars 128-255 become multibyte sequences and
+  // raw PDF/image content arrives mangled. Run btoa in JS first so the
+  // boundary only carries ASCII. Called from the Ruby-side download
+  // drain when an `<a download>` clicks a `blob:` URL.
+  globalThis.__csimReadBlobBase64 = function (url) {
+    const blob = __csimBlobs.get(String(url));
+    if (!blob) return null;
+    const raw = (blob._parts || []).join('');
+    try { return globalThis.btoa(raw); } catch (_) { return null; }
+  };
   if (globalThis.URL) __csimInstallBlobURL();
   // Minimal FileReader — apps that mount file pickers (image preview
   // widgets) read the chosen File via `reader.readAsDataURL` /

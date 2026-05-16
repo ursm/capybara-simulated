@@ -6,6 +6,7 @@
 # wired up so a `Capybara::Session` can `visit` and `find` against
 # the V8-resident DOM. Milestones 3+ grow this incrementally.
 
+require 'base64'
 require 'date'
 require 'fileutils'
 require 'json'
@@ -436,6 +437,28 @@ module Capybara
           end
         unless action.is_a?(Hash)
           settle
+          # Drain the download intent the click chain may have queued.
+          # Avo's action-download path: form submit → Turbo applies a
+          # turbo-stream → `StreamActions.download` → file-saver's
+          # `saveAs` → `setTimeout(() => click(<a download>), 0)` →
+          # our dispatchEvent default-action sets
+          # `__csimPendingDownload`. Settle bails on the first
+          # observable change (the stream-render mutation), so the
+          # await-chain inside the stream's `connectedCallback`
+          # (`await nextRepaint(); await performAction()` →
+          # `setTimeout(click(a), 0)`) hasn't reached saveAs yet —
+          # nudge it forward with a few alternating microtask /
+          # timer drain rounds, then consume directly. (Can't route
+          # via `tick_real_time`: post-drain `@timers_active` is
+          # false and it bails before its own consume_pending_*
+          # drains.)
+          if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
+            8.times do
+              @runtime.drain_microtasks(4)
+              @runtime.drain_timers(50)
+            end
+          end
+          consume_pending_download
           return
         end
         case action['kind']
@@ -832,6 +855,30 @@ module Capybara
         end
       end
 
+      # `<a download>` clicked synthetically (file-saver's saveAs ships
+      # a freshly-created anchor through `dispatchEvent(MouseEvent
+      # 'click')`). The bridge queues `{url, filename}` on
+      # __csimPendingDownload during the click default-action; we drain
+      # here at every tick so the file lands in `downloads_directory`
+      # before Capybara's `wait_for_download` polls.
+      def consume_pending_download
+        pending = @runtime.eval('(function(){var p = globalThis.__csimPendingDownload; globalThis.__csimPendingDownload = null; return p;})()')
+        return unless pending.is_a?(Hash) && pending['url']
+        url = pending['url'].to_s
+        filename = pending['filename'].to_s
+        if url.start_with?('blob:')
+          b64 = @runtime.call('__csimReadBlobBase64', url)
+          return if b64.nil?
+          content = Base64.decode64(b64.to_s)
+          name = filename.empty? ? 'download' : filename
+          dir = downloads_directory
+          FileUtils.mkdir_p(dir)
+          File.binwrite(File.join(dir, name), content)
+        else
+          download_link(resolve_against_current(url, use_base: true), filename)
+        end
+      end
+
       # `Node#submit(*)` (Capybara DSL) hits here. Find the enclosing
       # form, serialise, post.
       def submit_form(handle)
@@ -1142,6 +1189,10 @@ module Capybara
         # so without this drain the intent sits on the slot forever
         # and the form never posts.
         consume_pending_form_submit
+        # And for `<a download>` clicks (Avo's action-download chain
+        # goes via file-saver's `saveAs` → synthetic dispatchEvent
+        # on a freshly-created anchor with `download` + blob URL).
+        consume_pending_download
       end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
