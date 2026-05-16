@@ -1418,7 +1418,8 @@
       // HTML spec — the inert subtree lives on the fragment).
       if (this._tag === 'template') {
         const frag = this.content;
-        for (const c of frag._children) unregisterSubtree(c);
+        const tmplRemoved = frag._children.slice();
+        for (const c of tmplRemoved) { c._parent = null; unregisterSubtree(c); }
         frag._children = [];
         const parsed = parseFragment(String(html == null ? '' : html));
         for (const c of parsed) {
@@ -1428,8 +1429,17 @@
         }
         return;
       }
+      // Spec: replacing all children orphans the removed nodes
+      // (parentNode → null). Tagify's `input.set('')` does
+      // `DOM.input.innerHTML = ''` after committing a tag; if we
+      // don't reset `_parent`, the previous text node still walks
+      // up to a connected ancestor via `_parent`, and our caret-
+      // recovery `isConnected(sc)` check passes when it shouldn't.
+      // Subsequent character inserts then keep splicing into a
+      // phantom text node that Tagify can't see → only the first
+      // comma-separated tag commits.
       const removedChildren = this._children.slice();
-      for (const c of removedChildren) unregisterSubtree(c);
+      for (const c of removedChildren) { c._parent = null; unregisterSubtree(c); }
       this._children = [];
       let frag;
       if (this._tag === 'html') {
@@ -1524,12 +1534,26 @@
     get ownerDocument(){ return this._ownerDoc || globalThis.document; }
     get innerHTML()    { return serializeChildren(this); }
     set innerHTML(html) {
-      for (const c of this._children) unregisterSubtree(c);
+      // Spec: replacing all children must orphan the removed nodes
+      // (parentNode → null) — Tagify's `input.set('')` does
+      // `DOM.input.innerHTML = ''` to clear after committing a tag,
+      // and our typing pipeline checks `isConnected(textNode)` to
+      // decide whether to re-anchor the caret. Without clearing
+      // `_parent`, the removed text node is still "connected" via
+      // its dangling parent pointer and subsequent inserts go into
+      // a phantom node Tagify never reads from.
+      const removed = this._children.slice();
+      for (const c of removed) { c._parent = null; unregisterSubtree(c); }
       this._children = [];
+      const added = [];
       for (const c of parseFragment(String(html == null ? '' : html))) {
         c._parent = this;
         this._children.push(c);
         registerSubtree(c);
+        added.push(c);
+      }
+      if (removed.length > 0 || added.length > 0) {
+        recordChildList(this, added, removed);
       }
     }
     querySelector(sel)    { return findFirst(this, parseSelector(__normaliseScopedSelector(sel))); }
@@ -2230,10 +2254,38 @@
   function __csimInsertTextAtSelection(text) {
     const sel = globalThis.getSelection && globalThis.getSelection();
     if (!sel || !sel._ranges.length) return false;
-    const range = sel._ranges[0];
+    let range = sel._ranges[0];
+    let sc = range.startContainer;
+    try { (globalThis.__csim_inserts = globalThis.__csim_inserts || []).push({ text, sc_tag: sc && (sc._tag || sc.nodeName), sc_data: sc && sc.nodeType === 3 ? (sc._data||'').slice(0, 20) : null, connected: sc && isConnected(sc) }); } catch (_) {}
+    // The previous keystroke's commit-handler (Tagify on `,`, Trix on
+    // <Enter>, etc.) may have detached the text node our cursor was
+    // pointing at. Re-anchor to the active contenteditable when the
+    // current container is no longer attached — without this the
+    // subsequent chars splice into a phantom node that's no longer
+    // in the DOM and the editor never sees the rest of the typing.
+    if (sc && !isConnected(sc)) {
+      const doc = globalThis.document;
+      const active = doc && doc.activeElement;
+      if (active && active.nodeType === NODE_ELEMENT && isContenteditable(active)) {
+        // Walk into the deepest non-void leaf, position at end.
+        const VOID_TAGS = new Set(['br', 'img', 'hr', 'input', 'wbr', 'meta', 'link']);
+        let leaf = active;
+        while (leaf._children && leaf._children.length > 0) {
+          const next = leaf._children.find(c =>
+            c.nodeType === NODE_ELEMENT && !VOID_TAGS.has(c._tag)
+          );
+          if (!next) break;
+          leaf = next;
+        }
+        sel.collapse(leaf, leaf._children ? leaf._children.length : 0);
+        range = sel._ranges[0];
+        sc = range.startContainer;
+      } else {
+        return false;
+      }
+    }
     if (!range.collapsed) deleteRangeContents(range);
 
-    const sc = range.startContainer;
     const so = range.startOffset | 0;
     if (!sc) return false;
 
