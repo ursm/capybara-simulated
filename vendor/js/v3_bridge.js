@@ -4056,12 +4056,13 @@
   // + `.namedItem(name)`). DOM spec returns HTMLCollection; lots of
   // Redmine code paths (updateSVGIcon, etc.) do `collection.item(0)`.
   function __htmlCollection (arr) {
-    arr.item = function (i) { return this[i] || null; };
-    arr.namedItem = function (n) {
+    const hc = HTMLCollection.from(arr);
+    hc.item = function (i) { return this[i] || null; };
+    hc.namedItem = function (n) {
       for (const el of this) if (el && (el._attrs && (el._attrs.id === n || el._attrs.name === n))) return el;
       return null;
     };
-    return arr;
+    return hc;
   }
   // Used by `ChildNode.before/after/replaceWith` + `ParentNode.append
   // /prepend` to accept strings (auto-wrap as Text) alongside nodes.
@@ -4252,9 +4253,25 @@
   // probes from throwing ReferenceError. Tribute hits this on
   // `e.constructor === NodeList`; DOMPurify on `NamedNodeMap` /
   // `HTMLFormElement`.
-  globalThis.NodeList            = Array;
-  globalThis.HTMLCollection      = Array;
-  globalThis.NamedNodeMap        = Array;
+  // DOM collection classes that extend Array. We can't alias them to
+  // `Array` itself — core-js's `web.dom-collections.iterator` polyfill
+  // calls `setToStringTag(globalThis[name].prototype, name)` for each
+  // entry in its DOM-iterables list (HTMLCollection, NodeList,
+  // NamedNodeMap, …), and with the alias all three iterations end
+  // up writing to Array.prototype, leaving Array.prototype's
+  // `@@toStringTag` as "HTMLCollection". Then
+  // `Object.prototype.toString.call([])` returns `[object
+  // HTMLCollection]`, so any library that branches on that string
+  // (Tagify's `isObject` is the canonical example — `type != 'Array'`)
+  // mis-routes our plain arrays. Subclassing keeps each prototype
+  // chain distinct so the polyfill writes to the dedicated
+  // subclass-prototype.
+  class HTMLCollection  extends Array {}
+  class NodeList        extends Array {}
+  class NamedNodeMap    extends Array {}
+  globalThis.HTMLCollection = HTMLCollection;
+  globalThis.NodeList       = NodeList;
+  globalThis.NamedNodeMap   = NamedNodeMap;
   // `instanceof Foo` / `el.constructor === Foo` checks across DOMPurify,
   // Tribute, Stimulus, jQuery — alias every typed-element name to
   // `Element` (or `Text` for character-data subtypes) so the probes
