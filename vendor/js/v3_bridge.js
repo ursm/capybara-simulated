@@ -142,11 +142,40 @@
           const r0  = sel._ranges && sel._ranges[0];
           const inside = r0 && r0.startContainer && nodeContains(this, r0.startContainer);
           if (!inside) {
-            // Collapse to end of this element's content (matches
-            // browser default for click-to-focus into a contenteditable
-            // with existing text; PM's empty placeholder also tolerates
-            // a collapsed range at `(p, 0)`).
-            sel.collapse(this, this._children ? this._children.length : 0);
+            // Descend into the deepest leaf and place the caret at
+            // the end of its text content. PM / Tiptap initialize
+            // empty editors as `<p><br class="ProseMirror-
+            // trailingBreak"></p>`; positioning the caret at the
+            // contenteditable root (offset = children.length) puts
+            // the cursor OUTSIDE the paragraph, and PM's beforeinput
+            // handler sees a selection with no valid inline parent
+            // and bails. Walking to the leaf gives `(p, 1)`
+            // (after the <br>), which PM correctly maps to model
+            // position 1.
+            // Stop at "void" / inline-leaf elements (BR, IMG, HR, INPUT)
+            // — the caret can't go INSIDE them, it must stay in the
+            // parent block. Without this guard the walk descends into
+            // PM's placeholder `<br class="ProseMirror-trailingBreak">`
+            // and the cursor ends up at (BR, 0), which PM rejects as
+            // an out-of-content position.
+            const VOID_TAGS = new Set(['br', 'img', 'hr', 'input', 'wbr', 'meta', 'link']);
+            let leaf = this;
+            while (leaf._children && leaf._children.length > 0) {
+              const next = leaf._children.find(c =>
+                c.nodeType === NODE_ELEMENT && !VOID_TAGS.has(c._tag)
+              );
+              if (!next) break;
+              leaf = next;
+            }
+            // If the leaf has a single text-node child, position at
+            // its end; otherwise position at the leaf's children-
+            // count (after any placeholder <br>).
+            if (leaf._children && leaf._children.length === 1 &&
+                leaf._children[0].nodeType === NODE_TEXT) {
+              sel.collapse(leaf._children[0], leaf._children[0]._data.length);
+            } else {
+              sel.collapse(leaf, leaf._children ? leaf._children.length : 0);
+            }
           }
         } catch (_) {}
       }
@@ -615,6 +644,17 @@
     get namespaceURI() { return null; }
     get localName()    { return null; }
     get ownerDocument(){ return this._ownerDoc || globalThis.document; }
+    // Layout stubs — Text nodes implement getClientRects/getBoundingClientRect
+    // too (browsers wrap each line in a rect; we don't lay out, so
+    // empty/zero-rect responses are the closest spec-shaped fallback).
+    // PM's domchange calls getClientRects on changed text nodes to
+    // decide whether to bail on certain CSS-cursor edge cases; without
+    // these methods PM's flush throws and never delivers the
+    // transaction.
+    getClientRects() { return []; }
+    getBoundingClientRect() {
+      return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+    }
   }
 
   // Comment node. Created via `document.createComment(data)` and
@@ -1595,6 +1635,13 @@
     get activeElement() {
       return this._activeElement || this.body || null;
     }
+    // PM (and other libs) call `view.root.getSelection()` where
+    // `view.root` is the document — `globalThis.getSelection` exists
+    // but `document.getSelection` was missing, throwing
+    // "Cannot read properties of undefined (reading 'getSelection')"
+    // inside `domSelectionRange()`. Per the Selection API spec
+    // `document.getSelection()` is a synonym for window.getSelection().
+    getSelection() { return globalThis.getSelection ? globalThis.getSelection() : null; }
     createElement(tag) {
       const t = String(tag).toLowerCase();
       const ctor = __customElementRegistry.get(t);
@@ -2021,6 +2068,15 @@
       if (toStart) { this.endContainer = this.startContainer; this.endOffset = this.startOffset; }
       else         { this.startContainer = this.endContainer; this.startOffset = this.endOffset; }
     }
+    // Range.getClientRects / getBoundingClientRect — return the
+    // geometry of each rendered fragment covered by the range. PM's
+    // domchange `singleRect` calls `textRange(child, 0, len).
+    // getClientRects()` to measure changed text nodes. Layout-free,
+    // so we return zero-rect stubs (matches Element's geometry stubs).
+    getClientRects() { return []; }
+    getBoundingClientRect() {
+      return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+    }
     cloneRange() {
       const r = new DocumentOrderRange();
       r.startContainer = this.startContainer; r.startOffset = this.startOffset;
@@ -2161,6 +2217,74 @@
   // children inside the range and collapse it. Cross-container
   // ranges are no-op'd; nothing in the app workloads we run reaches
   // for delete on a non-trivial selection.
+  // Spec's "insert text" default action for `beforeinput insertText`:
+  // delete the current selection's content (if non-collapsed) then
+  // insert `text` at the cursor, updating the selection to live at
+  // the end of the inserted text. PM/Trix/Tiptap's beforeinput
+  // handler does this internally and `preventDefault`s; for editors
+  // that don't intercept (plain contenteditable, Lexical's idle
+  // path, …) we run the browser-default-equivalent so the typed
+  // text actually lands. Coalesces text into the adjacent text node
+  // when possible (matches what real browsers do — they don't create
+  // a fresh text node per character).
+  function __csimInsertTextAtSelection(text) {
+    const sel = globalThis.getSelection && globalThis.getSelection();
+    if (!sel || !sel._ranges.length) return false;
+    const range = sel._ranges[0];
+    if (!range.collapsed) deleteRangeContents(range);
+
+    const sc = range.startContainer;
+    const so = range.startOffset | 0;
+    if (!sc) return false;
+
+    // Case 1: cursor is inside a Text node → splice the chars in.
+    if (sc.nodeType === NODE_TEXT) {
+      const before = sc._data.slice(0, so);
+      const after  = sc._data.slice(so);
+      sc.data = before + text + after;
+      const newPos = so + text.length;
+      range.startContainer = sc;
+      range.endContainer   = sc;
+      range.startOffset    = newPos;
+      range.endOffset      = newPos;
+      __notifySelectionChange();
+      return true;
+    }
+
+    // Case 2: cursor is in an element. Try to extend a neighbour text
+    // node (real browsers prefer this — they keep contiguous runs in
+    // one text node); only create a new node when neither neighbour
+    // is text.
+    const children = sc._children || [];
+    const prevNode = children[so - 1];
+    const atNode   = children[so];
+    if (prevNode && prevNode.nodeType === NODE_TEXT) {
+      const oldLen = prevNode._data.length;
+      prevNode.data = prevNode._data + text;
+      range.startContainer = prevNode;
+      range.endContainer   = prevNode;
+      range.startOffset    = oldLen + text.length;
+      range.endOffset      = range.startOffset;
+    } else if (atNode && atNode.nodeType === NODE_TEXT) {
+      atNode.data = text + atNode._data;
+      range.startContainer = atNode;
+      range.endContainer   = atNode;
+      range.startOffset    = text.length;
+      range.endOffset      = range.startOffset;
+    } else {
+      const t = new Text(text);
+      if (atNode) sc.insertBefore(t, atNode);
+      else        sc.appendChild(t);
+      range.startContainer = t;
+      range.endContainer   = t;
+      range.startOffset    = text.length;
+      range.endOffset      = range.startOffset;
+    }
+    __notifySelectionChange();
+    return true;
+  }
+  globalThis.__csimInsertTextAtSelection = __csimInsertTextAtSelection;
+
   function deleteRangeContents (range) {
     const sc = range.startContainer, so = range.startOffset | 0;
     const ec = range.endContainer,   eo = range.endOffset | 0;
@@ -8230,65 +8354,98 @@
       }
       if (!hit) return false;
     } else if (isContenteditable(n)) {
-      // Capybara `.set('text')` on a contenteditable element. Real-
-      // browser behavior simulates "select all + type new text":
+      // Capybara `.set('text')` on a contenteditable element. Real
+      // browsers don't bulk-replace the contenteditable's children;
+      // they simulate per-character typing, driving each keystroke
+      // through the full UI Events pipeline:
       //
-      //   1. Selection covers the contenteditable's current contents.
-      //   2. `beforeinput` fires with `inputType: 'insertText'`,
-      //      `data: v`, and `targetRanges` containing the selected
-      //      range. PM/Trix/Lexical inspect this to update their
-      //      internal model and call `preventDefault()`.
-      //   3. If the editor cancelled, we leave the DOM alone; the
-      //      editor will mutate it from its own pipeline.
-      //   4. Otherwise we mutate the DOM ourselves: replace the
-      //      *innermost block leaf*'s content with a Text node
-      //      holding `v`, preserving the outer block structure
-      //      (e.g. `<p><br></p>` becomes `<p>v</p>`, NOT
-      //      `<root>v</root>` — the latter is a structural change
-      //      PM's `domchange` reconciler rejects as an invalid model
-      //      transform).
-      //   5. `input` fires.
-      //   6. Selection collapses to the end of the inserted text.
+      //   1. Select all current content (Ctrl-A).
+      //   2. For each character of `v`:
+      //        - keydown (cancellable)
+      //        - beforeinput (cancellable; data=char, targetRanges
+      //          = the current selection)
+      //        - if editor preventDefault'd → it ran its own model
+      //          update; otherwise our default action runs:
+      //          deleteRangeContents on the selection then insert
+      //          the char at the cursor (extending an adjacent text
+      //          node, or creating a new one)
+      //        - input (non-cancellable, data=char)
+      //        - keyup
+      //   3. PM/Tiptap's beforeinput reads the selection's static
+      //      range to know what to replace; without that drive
+      //      `onUpdate` never fires.
       //
-      // Selection / targetRanges drive PM's beforeinput entry point
-      // (no targetRanges → PM has nothing to act on → onUpdate never
-      // fires). Mirror real-browser-generated InputEvents per the
-      // UI Events spec.
+      // This matches Cuprite's per-char `set` flow plus the
+      // browser-default text-insertion step that Cuprite gets for
+      // free from CDP's `Input.dispatchKeyEvent` reaching Chromium's
+      // editing pipeline.
       const sel = globalThis.getSelection && globalThis.getSelection();
-      if (sel) sel.selectAllChildren(n);
-      const sr = {
-        startContainer: n, startOffset: 0,
-        endContainer:   n, endOffset:   (n._children ? n._children.length : 0)
-      };
-      const bi = new InputEvent('beforeinput', {
-        bubbles: true, cancelable: true, data: v, inputType: 'insertText',
-        targetRanges: [sr]
-      });
-      dispatchEvent(n, bi);
-      if (!bi.defaultPrevented) {
-        // Find the innermost block leaf to receive the text. Walk
-        // depth-first through element children; stop at the deepest
-        // element with no element children (i.e. the leaf block).
+
+      // Capybara's `.set` semantics on a contenteditable is "make
+      // its value v" — replace, not append. Real user does Ctrl-A +
+      // type, which (a) selects all, (b) the first keystroke replaces
+      // the selection with the typed character. Mirror that:
+      //   1. selectAllChildren(n) — non-collapsed range over the
+      //      contenteditable's content
+      //   2. deleteRangeContents on it — clears existing text
+      //   3. Per-char insertion at the now-empty cursor
+      //
+      // PM/Tiptap observes the "delete all" mutation and resets the
+      // editor to its empty placeholder; the per-char inserts then
+      // land in that placeholder. Plain contenteditable just sees
+      // the cleared element + per-char text inserts.
+      if (sel) {
+        sel.selectAllChildren(n);
+        const r0 = sel._ranges[0];
+        if (r0 && !r0.collapsed) deleteRangeContents(r0);
+        // After delete the range collapses to the empty container;
+        // re-position cursor inside the deepest leaf if one exists.
+        const VOID_TAGS = new Set(['br', 'img', 'hr', 'input', 'wbr', 'meta', 'link']);
         let leaf = n;
-        while (leaf._children && leaf._children.length > 0 &&
-               leaf._children.some(c => c.nodeType === NODE_ELEMENT)) {
-          // Descend into the first element child.
-          const next = leaf._children.find(c => c.nodeType === NODE_ELEMENT);
+        while (leaf._children && leaf._children.length > 0) {
+          const next = leaf._children.find(c =>
+            c.nodeType === NODE_ELEMENT && !VOID_TAGS.has(c._tag)
+          );
           if (!next) break;
           leaf = next;
         }
-        // Replace leaf's contents with a single Text node (or no
-        // children if v is empty).
-        const removed = leaf._children.slice();
-        for (const c of removed) leaf.removeChild(c);
-        if (v.length > 0) {
-          const t = new Text(v);
-          leaf.appendChild(t);
-          // Collapse selection to the end of the inserted text.
-          if (sel) sel.collapse(t, v.length);
-        } else if (sel) {
-          sel.collapse(leaf, 0);
+        sel.collapse(leaf, leaf._children ? leaf._children.length : 0);
+      }
+
+      for (let i = 0; i < v.length; i++) {
+        const ch = v[i];
+        const kd = new KeyboardEvent('keydown', {
+          bubbles: true, cancelable: true, key: ch, char: ch
+        });
+        dispatchEvent(n, kd);
+        if (kd.defaultPrevented) { continue; }
+
+        // Build targetRanges from the current Selection's first range
+        // (live snapshot per UI Events spec). PM uses this to map
+        // back to model positions.
+        const r = sel && sel._ranges[0];
+        const targetRanges = r ? [{
+          startContainer: r.startContainer, startOffset: r.startOffset | 0,
+          endContainer:   r.endContainer,   endOffset:   r.endOffset   | 0
+        }] : [];
+        const bi = new InputEvent('beforeinput', {
+          bubbles: true, cancelable: true, data: ch, inputType: 'insertText',
+          targetRanges
+        });
+        dispatchEvent(n, bi);
+        if (!bi.defaultPrevented) {
+          __csimInsertTextAtSelection(ch);
         }
+        try {
+          dispatchEvent(n, new InputEvent('input', {
+            bubbles: true, cancelable: false, data: ch, inputType: 'insertText'
+          }));
+        } catch (_) {}
+        try {
+          dispatchEvent(n, new KeyboardEvent('keyup', {
+            bubbles: true, cancelable: true, key: ch, char: ch
+          }));
+        } catch (_) {}
       }
       dispatchEvent(n, new InputEvent('input', {
         bubbles: true, cancelable: false, data: v, inputType: 'insertText'
