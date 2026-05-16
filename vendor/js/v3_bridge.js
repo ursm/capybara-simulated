@@ -129,6 +129,27 @@
         try { dispatchEvent(prev, new Event('focusout', { bubbles: true,  cancelable: false })); } catch (_) {}
       }
       globalThis.document._activeElement = this;
+      // Focusing a contenteditable element should leave the cursor at
+      // a valid position (real browsers collapse the selection to the
+      // last known caret, or to start/end if none). PM/Tiptap's
+      // beforeinput handler reads the current Selection to compute
+      // edits; without an active range the handler bails out and
+      // `onUpdate` never fires. Set a collapsed range at the end of
+      // the contenteditable if no selection is currently inside it.
+      if (typeof isContenteditable === 'function' && isContenteditable(this) && typeof globalThis.getSelection === 'function') {
+        try {
+          const sel = globalThis.getSelection();
+          const r0  = sel._ranges && sel._ranges[0];
+          const inside = r0 && r0.startContainer && nodeContains(this, r0.startContainer);
+          if (!inside) {
+            // Collapse to end of this element's content (matches
+            // browser default for click-to-focus into a contenteditable
+            // with existing text; PM's empty placeholder also tolerates
+            // a collapsed range at `(p, 0)`).
+            sel.collapse(this, this._children ? this._children.length : 0);
+          }
+        } catch (_) {}
+      }
       try { dispatchEvent(this, new Event('focus',    { bubbles: false, cancelable: false })); } catch (_) {}
       try { dispatchEvent(this, new Event('focusin',  { bubbles: true,  cancelable: false })); } catch (_) {}
     }
@@ -4881,15 +4902,65 @@
       return frag.textContent || '';
     }
     getRangeAt(i)     { return this._ranges[i] || null; }
-    addRange(r)       { this._ranges.push(r); }
-    removeRange(r)    { const i = this._ranges.indexOf(r); if (i >= 0) this._ranges.splice(i, 1); }
-    removeAllRanges() { this._ranges.length = 0; }
-    empty()           { this._ranges.length = 0; }
-    collapse()        { this._ranges.length = 0; }
-    collapseToStart() {}
-    collapseToEnd()   {}
-    selectAllChildren() {}
-    extend()          {}
+    addRange(r)       { this._ranges = [r]; __notifySelectionChange(); }
+    removeRange(r)    { const i = this._ranges.indexOf(r); if (i >= 0) { this._ranges.splice(i, 1); __notifySelectionChange(); } }
+    removeAllRanges() { if (this._ranges.length) { this._ranges.length = 0; __notifySelectionChange(); } }
+    empty()           { this.removeAllRanges(); }
+    // Per spec: `collapse(node, offset)` clears ranges and inserts a
+    // single collapsed range at (node, offset). PM's editor uses this
+    // (via `Selection.collapse(domNode, offset)`) to drive its cursor
+    // position; rich-text libraries that drive their own focus call
+    // it from selectionchange handlers.
+    collapse(node, offset) {
+      if (node == null) { this.removeAllRanges(); return; }
+      const r = new DocumentOrderRange();
+      r.setStart(node, offset || 0);
+      r.setEnd(node, offset || 0);
+      this._ranges = [r];
+      __notifySelectionChange();
+    }
+    collapseToStart() {
+      if (!this._ranges.length) throw new Error('InvalidStateError: no range');
+      const r = this._ranges[0];
+      r.endContainer = r.startContainer;
+      r.endOffset    = r.startOffset;
+      __notifySelectionChange();
+    }
+    collapseToEnd() {
+      if (!this._ranges.length) throw new Error('InvalidStateError: no range');
+      const r = this._ranges[0];
+      r.startContainer = r.endContainer;
+      r.startOffset    = r.endOffset;
+      __notifySelectionChange();
+    }
+    selectAllChildren(node) {
+      if (!node) return;
+      const r = new DocumentOrderRange();
+      r.setStart(node, 0);
+      const count = node._children ? node._children.length : 0;
+      r.setEnd(node, count);
+      this._ranges = [r];
+      __notifySelectionChange();
+    }
+    // Spec: extend the current range's focus to (node, offset).
+    // Anchor stays; focus moves. We don't track direction separately,
+    // so we just update end to the new focus point. PM uses this to
+    // expand a selection from a known anchor.
+    extend(node, offset) {
+      if (!this._ranges.length) throw new Error('InvalidStateError: no range');
+      const r = this._ranges[0];
+      r.endContainer = node;
+      r.endOffset    = offset | 0;
+      __notifySelectionChange();
+    }
+    setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset) {
+      const r = new DocumentOrderRange();
+      r.setStart(anchorNode, anchorOffset | 0);
+      r.setEnd(focusNode,    focusOffset  | 0);
+      this._ranges = [r];
+      __notifySelectionChange();
+    }
+    setPosition(node, offset) { this.collapse(node, offset); }
     // True if `node` is contained (fully if `partial` is false, or
     // even partially if `partial` is true) within any range of the
     // selection. quote-reply gates `isSelected` on this for the
@@ -4916,6 +4987,17 @@
   globalThis.Selection = CsimSelection;
   const __sharedSelection = new CsimSelection();
   globalThis.getSelection = function () { return __sharedSelection; };
+  // Fires `selectionchange` on `document` whenever the selection's
+  // anchor / focus changes. Synchronous so libraries that update
+  // their internal cursor on selectionchange (PM/Tiptap) have a
+  // valid view state before the next `beforeinput` reads
+  // `view.state.selection`. Real browsers also fire this sync for
+  // JS-initiated selection changes per the Selection API spec.
+  function __notifySelectionChange() {
+    const doc = globalThis.document;
+    if (!doc) return;
+    try { dispatchEvent(doc, new Event('selectionchange', { bubbles: false, cancelable: false })); } catch (_) {}
+  }
 
   // `DOMParser` — parse an HTML / XML string into a Document. Turndown
   // (used by quote-reply Stimulus controller) checks `new DOMParser()`
@@ -8148,37 +8230,65 @@
       }
       if (!hit) return false;
     } else if (isContenteditable(n)) {
-      // Capybara `.set('text')` on a contenteditable element. Per the
-      // UI Events spec, replacing text fires `beforeinput` (with
-      // `inputType: 'insertText'` and `data: text`) THEN `input`.
-      // Cancelable rich editors (Trix, ProseMirror, Lexical) call
-      // `preventDefault()` on `beforeinput` and update their own
-      // model from `data`; if we mutate the contenteditable's text
-      // before that, we race with their composition pipeline and
-      // overwrite the editor model with raw text the editor then
-      // tries to reconcile.
+      // Capybara `.set('text')` on a contenteditable element. Real-
+      // browser behavior simulates "select all + type new text":
       //
-      // Real-browser-generated beforeinput populates `targetRanges`
-      // with the StaticRange the edit will affect (per UI Events
-      // spec). PM/Tiptap's beforeinput handler reads
-      // `event.getTargetRanges()` to find what to replace; if the
-      // array is empty (which our default InputEvent gives) PM
-      // bails out and `onUpdate` never fires. Mirror the real-
-      // browser computation: the target range covers "select all
-      // current content of the contenteditable" — Capybara's
-      // `.set` semantics on a contenteditable means "replace
-      // everything", same as the user pressing Ctrl-A then typing.
-      const tr = {
+      //   1. Selection covers the contenteditable's current contents.
+      //   2. `beforeinput` fires with `inputType: 'insertText'`,
+      //      `data: v`, and `targetRanges` containing the selected
+      //      range. PM/Trix/Lexical inspect this to update their
+      //      internal model and call `preventDefault()`.
+      //   3. If the editor cancelled, we leave the DOM alone; the
+      //      editor will mutate it from its own pipeline.
+      //   4. Otherwise we mutate the DOM ourselves: replace the
+      //      *innermost block leaf*'s content with a Text node
+      //      holding `v`, preserving the outer block structure
+      //      (e.g. `<p><br></p>` becomes `<p>v</p>`, NOT
+      //      `<root>v</root>` — the latter is a structural change
+      //      PM's `domchange` reconciler rejects as an invalid model
+      //      transform).
+      //   5. `input` fires.
+      //   6. Selection collapses to the end of the inserted text.
+      //
+      // Selection / targetRanges drive PM's beforeinput entry point
+      // (no targetRanges → PM has nothing to act on → onUpdate never
+      // fires). Mirror real-browser-generated InputEvents per the
+      // UI Events spec.
+      const sel = globalThis.getSelection && globalThis.getSelection();
+      if (sel) sel.selectAllChildren(n);
+      const sr = {
         startContainer: n, startOffset: 0,
         endContainer:   n, endOffset:   (n._children ? n._children.length : 0)
       };
       const bi = new InputEvent('beforeinput', {
         bubbles: true, cancelable: true, data: v, inputType: 'insertText',
-        targetRanges: [tr]
+        targetRanges: [sr]
       });
       dispatchEvent(n, bi);
       if (!bi.defaultPrevented) {
-        n.textContent = v;
+        // Find the innermost block leaf to receive the text. Walk
+        // depth-first through element children; stop at the deepest
+        // element with no element children (i.e. the leaf block).
+        let leaf = n;
+        while (leaf._children && leaf._children.length > 0 &&
+               leaf._children.some(c => c.nodeType === NODE_ELEMENT)) {
+          // Descend into the first element child.
+          const next = leaf._children.find(c => c.nodeType === NODE_ELEMENT);
+          if (!next) break;
+          leaf = next;
+        }
+        // Replace leaf's contents with a single Text node (or no
+        // children if v is empty).
+        const removed = leaf._children.slice();
+        for (const c of removed) leaf.removeChild(c);
+        if (v.length > 0) {
+          const t = new Text(v);
+          leaf.appendChild(t);
+          // Collapse selection to the end of the inserted text.
+          if (sel) sel.collapse(t, v.length);
+        } else if (sel) {
+          sel.collapse(leaf, 0);
+        }
       }
       dispatchEvent(n, new InputEvent('input', {
         bubbles: true, cancelable: false, data: v, inputType: 'insertText'
