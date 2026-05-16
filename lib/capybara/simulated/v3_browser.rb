@@ -1567,6 +1567,16 @@ module Capybara
       # calls (e.g. click_link to a relative href) don't hit
       # `URI::BadURIError: both URI are relative`.
       def history_state(url) ; @current_url = resolve_against_current(url.to_s) ; end
+      # `history.pushState` from SPA navigation (Turbo Visit, InstantClick,
+      # …) appends a new browser-history entry. Mirror that on the Ruby
+      # side so `Capybara#go_back` can replay it. Without this, the only
+      # entries in `@history` come from `visit` / `navigate` (full page
+      # loads), and `page.go_back` from a Turbo-Visit-rendered page no-ops.
+      def history_push(url)
+        resolved = resolve_against_current(url.to_s)
+        @current_url = resolved
+        record_history({method: :get, url: resolved})
+      end
       def set_listened_type(*) ; end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
       def write_document_cookie(s)

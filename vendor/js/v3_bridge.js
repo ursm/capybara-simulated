@@ -5252,19 +5252,28 @@
   // pushState without a real document reload; any inline script that
   // gates on `window.location.pathname` (Forem's top-bar XHR check
   // for `!== '/notifications'`) must observe the new value.
-  function applyHistoryUrl(self, state, url) {
+  function applyHistoryUrl(self, state, url, push) {
     self.state = state;
     if (!url) return;
     const s = String(url);
     if (globalThis.location && globalThis.location.href === s) return;
-    __setCurrentUrl(s);
+    // pushState appends a new history entry per browser model;
+    // replaceState updates the current entry in place. Ruby's
+    // `@history` mirrors browser history so `Capybara#go_back` can
+    // navigate to the entry the user came from when SPA flows
+    // (Turbo Visit, InstantClick) push the URL without a full nav.
+    if (push && typeof globalThis.__pushHistoryEntry === 'function') {
+      globalThis.__pushHistoryEntry(s);
+    } else {
+      __setCurrentUrl(s);
+    }
     globalThis.__csimUpdateLocation(s);
   }
   globalThis.history = {
     length: 1,
     state:  null,
-    pushState(state, _title, url)    { applyHistoryUrl(this, state, url); },
-    replaceState(state, _title, url) { applyHistoryUrl(this, state, url); },
+    pushState(state, _title, url)    { applyHistoryUrl(this, state, url, true); },
+    replaceState(state, _title, url) { applyHistoryUrl(this, state, url, false); },
     back()    { __locationReload(); },
     forward() { __locationReload(); },
     go()      { __locationReload(); }

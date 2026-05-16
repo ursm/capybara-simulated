@@ -64,6 +64,7 @@ module Capybara
         globalThis.__setTimersActive        = function () { return null; };
         globalThis.__setIntersectionObserverActive = function () { return null; };
         globalThis.__setCurrentUrl          = function () { return null; };
+        globalThis.__pushHistoryEntry       = function () { return null; };
         globalThis.__getDocumentCookie      = function () { return ''; };
         globalThis.__setDocumentCookie      = function () { return null; };
         globalThis.__csim_storageGet        = function () { return null; };
@@ -324,6 +325,7 @@ module Capybara
         c.attach('__setTimersActive',               ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
         c.attach('__setIntersectionObserverActive', ->(*a) { sc.() { browser.intersection_observer_active = !!a[0]; nil } })
         c.attach('__setCurrentUrl',                 ->(*a) { sc.() { browser.history_state(a[0]); nil } })
+        c.attach('__pushHistoryEntry',              ->(*a) { sc.() { browser.history_push(a[0]); nil } })
         c.attach('__getDocumentCookie',             ->(*a) { sc.() { browser.document_cookie } })
         c.attach('__setDocumentCookie',             ->(*a) { sc.() { browser.write_document_cookie(a[0].to_s); nil } })
         c.attach('__csim_storageGet',               ->(*a) { sc.() { browser.storage_get(a[0], a[1]) } })
