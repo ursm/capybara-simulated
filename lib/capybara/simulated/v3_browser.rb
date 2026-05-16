@@ -65,8 +65,11 @@ module Capybara
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated/v3 (V8-resident DOM)'
       REMOTE_ADDR = '127.0.0.1'
 
-      def initialize(app)
+      attr_accessor :driver
+
+      def initialize(app, driver: nil)
         @app                          = app
+        @driver                       = driver
         @runtime                      = V3Runtime.new(self)
         @current_url                  = nil
         @cookies                      = {}
@@ -464,10 +467,17 @@ module Capybara
         case action['kind']
         when 'navigate'
           url = action['url'].to_s
+          target = action['target'].to_s
+          # `target="_blank"` (or any non-_self/_top/_parent name) opens
+          # in a new browsing context. v3's URL-only multi-window mode
+          # records the URL against a fresh aux handle; the primary
+          # stays put (per HTML spec — original window is unaffected).
+          if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
+            @driver.open_aux_window(resolve_against_current(url, use_base: true))
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
-          if pure_fragment_navigation?(url)
+          elsif pure_fragment_navigation?(url)
             update_current_hash(url)
           else
             # Drain any work the click handler queued before the VM gets

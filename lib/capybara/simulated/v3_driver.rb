@@ -28,8 +28,11 @@ module Capybara
       end
 
       def initialize(app)
-        @app     = app
-        @browser = V3Browser.new(app)
+        @app             = app
+        @browser         = V3Browser.new(app, driver: self)
+        @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
+        @active_handle   = nil
+        @next_window_seq = 0
         self.class.current = self
       end
 
@@ -61,10 +64,19 @@ module Capybara
 
       def visit(path)          = browser.visit(path)
       def refresh              = browser.refresh
-      def reset!               = browser.reset!
+      def reset!
+        @aux_windows.clear
+        @active_handle = nil
+        browser.reset!
+      end
       def go_back              = browser.go_back
       def go_forward           = browser.go_forward
-      def current_url          = browser.current_url || ''
+      def current_url
+        if @active_handle && (w = @aux_windows.find {|win| win[:handle] == @active_handle })
+          return w[:url].to_s
+        end
+        browser.current_url || ''
+      end
       def html                 = browser.html
       def title                = browser.title
       def status_code          = browser.status_code
@@ -79,14 +91,39 @@ module Capybara
         browser.find_css(query).map {|id| V3Node.new(self, id) }
       end
 
-      # Single-window PoC. open_aux_window / switch_to_window land with
-      # milestone 5+ once the basic surface is solid.
+      # URL-only multi-window: `<a target="_blank">` clicks record an
+      # aux window {handle, url} pair. Aux windows have no JS VM and no
+      # DOM — `page.current_url` works inside `within_window`, but DOM
+      # queries don't. Sufficient for "PDF opens in new tab" assertions
+      # (Avo's `open_field_attachment` test). Full per-window VMs were
+      # in v2 (`Driver#open_aux_window`); v3 defers them until a real
+      # test needs more than URL tracking.
       PRIMARY_HANDLE = 'csim-v3-window-0'
-      def current_window_handle    = PRIMARY_HANDLE
-      def window_handles           = [PRIMARY_HANDLE]
+      def current_window_handle    = @active_handle || PRIMARY_HANDLE
+      def window_handles
+        [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
+      end
+      def open_aux_window(url)
+        @next_window_seq += 1
+        handle = "csim-v3-window-#{@next_window_seq}"
+        @aux_windows << {handle: handle, url: url}
+        handle
+      end
       def window_size(_)           = [browser.viewport_width, browser.viewport_height]
-      def close_window(_)          ; nil ; end
-      def switch_to_window(_)      ; nil ; end
+      def close_window(h)
+        return if h == PRIMARY_HANDLE
+        @aux_windows.reject! {|w| w[:handle] == h }
+        @active_handle = nil if @active_handle == h
+      end
+      def switch_to_window(h)
+        if h == PRIMARY_HANDLE
+          @active_handle = nil
+        elsif @aux_windows.any? {|w| w[:handle] == h }
+          @active_handle = h
+        else
+          raise Capybara::WindowError, "Unknown window handle: #{h}"
+        end
+      end
       def resize_window_to(_, w, h) = browser.set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly
       # rather than through `current_window.resize_to`; mirror v2 by

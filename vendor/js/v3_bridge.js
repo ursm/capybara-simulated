@@ -7108,7 +7108,7 @@
       if (n._attrs.download != null) {
         return { kind: 'download', url: href, filename: String(n._attrs.download || '') };
       }
-      return { kind: 'navigate', url: href };
+      return { kind: 'navigate', url: href, target: String(n._attrs.target || '') };
     }
     return null;
   };
@@ -7370,7 +7370,7 @@
     const pendingNav = globalThis.__csimPendingNavigation;
     if (pendingNav && pendingNav.url) {
       globalThis.__csimPendingNavigation = null;
-      return { kind: 'navigate', url: String(pendingNav.url) };
+      return { kind: 'navigate', url: String(pendingNav.url), target: String(pendingNav.target || '') };
     }
     if (click.defaultPrevented) return null;
 
@@ -7408,7 +7408,7 @@
       if (__anchor._attrs.download != null) {
         return { kind: 'download', url: href, filename: String(__anchor._attrs.download || '') };
       }
-      return { kind: 'navigate', url: href };
+      return { kind: 'navigate', url: href, target: String(__anchor._attrs.target || '') };
     }
     // `<label>` activation: clicking a label clicks its labeled
     // form control. Redmine's "New member" modal renders user
