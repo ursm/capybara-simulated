@@ -1324,7 +1324,8 @@
         }
         return;
       }
-      for (const c of this._children) unregisterSubtree(c);
+      const removedChildren = this._children.slice();
+      for (const c of removedChildren) unregisterSubtree(c);
       this._children = [];
       let frag;
       if (this._tag === 'html') {
@@ -1337,6 +1338,16 @@
         c._parent = this;
         this._children.push(c);
         registerSubtree(c);
+      }
+      // Per DOM spec ("replace all"), `innerHTML =` queues a single
+      // childList mutation listing removed + added children. Stimulus'
+      // ElementObserver wires event listeners off this — Avo's
+      // `key_value` controller renders new rows via
+      // `rowsTarget.innerHTML = ...`, and without the queueing the
+      // freshly-rendered `data-action="input->…"` inputs never get
+      // their listeners hooked up.
+      if (removedChildren.length || frag.length) {
+        recordChildList(this, frag, removedChildren);
       }
     }
     get outerHTML() { return serializeElement(this); }
