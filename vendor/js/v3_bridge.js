@@ -171,11 +171,13 @@
     // heuristic) so content-length gates fire. Avo's Trix body checks
     // `scrollHeight > some-threshold` to decide whether to inject the
     // "More content" expander; a flat `1` keeps it from ever rendering.
-    // Mirror v2 verbatim: max(ceil(textLen / 80) * 20, childCount * 20).
+    // Counts element children only (whitespace text nodes between
+    // formatted HTML would otherwise inflate the count and trip the
+    // gate on short content).
     get scrollHeight() {
       if (!__isVisibleNode(this)) return 0;
       const txt  = (this.textContent || '').length;
-      const kids = this.childNodes ? this.childNodes.length : 0;
+      const kids = this.children ? this.children.length : 0;
       if (txt === 0 && kids === 0) return 0;
       return Math.max(Math.ceil(txt / 80) * 20, kids * 20);
     }
