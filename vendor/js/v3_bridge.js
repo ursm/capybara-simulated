@@ -1392,7 +1392,7 @@
     }
     querySelector(sel)    { return findFirst(this, parseSelector(__normaliseScopedSelector(sel))); }
     querySelectorAll(sel) { return findAll(this, parseSelector(__normaliseScopedSelector(sel))); }
-    getElementById(id)    { return findFirst(this, parseSelector('#' + String(id))); }
+    getElementById(id)    { return findById(this, id); }
     // wgxpath's descendant axis traversal probes
     // `getElementsByTagName('*')` on the context node. Inherit
     // Element's behaviour so a ShadowRoot context resolves
@@ -1562,7 +1562,7 @@
       title.textContent = String(v == null ? '' : v);
     }
     getElementById(id) {
-      return findFirst(this.documentElement, parseSelector('#' + String(id)));
+      return findById(this.documentElement, id);
     }
     querySelector(sel)    { return this.documentElement ? this.documentElement.querySelector(sel) : null; }
     querySelectorAll(sel) { return this.documentElement ? this.documentElement.querySelectorAll(sel) : []; }
@@ -3459,6 +3459,25 @@
     if (!node) return;
     if (node.nodeType === NODE_ELEMENT) fn(node);
     for (const c of node._children) walk(c, fn);
+  }
+  // Direct id-attribute lookup, bypassing CSS selector parsing.
+  // The CSS-selector path (`parseSelector('#' + id)`) throws on ids
+  // containing characters that aren't valid CSS identifier chars
+  // (slashes, colons, brackets, etc.) — but per the DOM spec
+  // `getElementById` accepts any string verbatim. Avo names its
+  // index components with slashes (`avo/index/grid_item_component_<param>`)
+  // so Turbo's stream-replace targeting these IDs would otherwise
+  // throw inside `targetElementsById` and the action would silently
+  // no-op.
+  function findById(root, id) {
+    if (!root || id == null) return null;
+    const target = String(id);
+    if (target.length === 0) return null;
+    let hit = null;
+    walk(root, el => {
+      if (!hit && el._attrs && el._attrs.id === target) hit = el;
+    });
+    return hit;
   }
 
   // ── HTML parser (tag-soup, just enough for smoke) ───────────────
