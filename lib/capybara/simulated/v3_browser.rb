@@ -608,6 +608,28 @@ module Capybara
         (@file_picks && @file_picks[handle]) || []
       end
 
+      # JS-side `__HostBackedFile.text()` / `arrayBuffer()` route through
+      # this to read attached file bytes on demand — ActiveStorage's
+      # `DirectUpload` MD5-chunks the file via FileReader before
+      # POSTing to `/rails/active_storage/direct_uploads`. Returns
+      # the requested byte range as base64 so binary content
+      # survives the mini_racer string boundary (same approach as
+      # `__csimReadBlobBase64`).
+      def read_file_pick(handle, index, start = nil, finish = nil)
+        paths = file_picks_for(handle.to_i)
+        path = paths && paths[index.to_i]
+        return nil unless path && File.exist?(path)
+        size = File.size(path)
+        s = [start.to_i, 0].max
+        e = finish.nil? ? size : [finish.to_i, size].min
+        return Base64.strict_encode64('') if e <= s
+        bytes = File.open(path, 'rb') do |f|
+          f.seek(s)
+          f.read(e - s)
+        end
+        Base64.strict_encode64(bytes || '')
+      end
+
       def right_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
@@ -1473,6 +1495,13 @@ module Capybara
         target = resolve_against_current(url.to_s)
         method = (method || 'GET').to_s.upcase
         redirected = false
+        # JS-side base64-encodes Blob/File bodies (raw bytes survive
+        # mini_racer's UTF-8 string boundary that way); decode before
+        # handing to Rack so the upload PUT lands intact.
+        if headers.is_a?(Hash) && headers['X-Csim-Body-B64'].to_s == '1'
+          body = Base64.decode64(body.to_s)
+          headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
+        end
         MAX_FETCH_REDIRECTS.times do
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
           (headers || {}).each {|k, v|

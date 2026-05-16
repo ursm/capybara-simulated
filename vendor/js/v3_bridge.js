@@ -4439,7 +4439,10 @@
       this.size = this._parts.reduce((s, p) => s + (p ? p.length : 0), 0);
       this.type = i.type || '';
     }
-    text ()        { return Promise.resolve(this._parts.join('')); }
+    text () {
+      if (this._csimHost) return Promise.resolve(__csimReadHostFile(this));
+      return Promise.resolve(this._parts.join(''));
+    }
     arrayBuffer () {
       return this.text().then(t => {
         const b = new ArrayBuffer(t.length);
@@ -4449,11 +4452,35 @@
       });
     }
     slice (start, end, type) {
+      if (this._csimHost) {
+        const s = Math.max(0, start || 0);
+        const e = end == null ? this.size : Math.min(this.size, end);
+        const next = Object.create(Object.getPrototypeOf(this));
+        next._csimHost  = true;
+        next._handle    = this._handle;
+        next._index     = this._index;
+        next._start     = this._start + s;
+        next._end       = this._start + e;
+        next.size       = Math.max(0, next._end - next._start);
+        next.type       = type == null ? this.type : String(type);
+        next._parts     = [];
+        return next;
+      }
       const all = this._parts.join('');
       return new globalThis.Blob([all.slice(start || 0, end == null ? undefined : end)], { type: type || this.type });
     }
     stream () { return null; }
   };
+  // Read a host-backed Blob/File slice's bytes via the Ruby
+  // `read_file_pick` host fn. Returns a binary string (one char per
+  // byte, range 0–255) so callers can `String.fromCharCode`-marshal
+  // it into an ArrayBuffer in `arrayBuffer()`.
+  function __csimReadHostFile(blob) {
+    if (typeof __csimReadFilePick !== 'function') return '';
+    const b64 = __csimReadFilePick(blob._handle, blob._index, blob._start, blob._end);
+    if (!b64) return '';
+    try { return globalThis.atob(String(b64)); } catch (_) { return ''; }
+  }
   globalThis.File = class File extends globalThis.Blob {
     constructor (parts, name, opts) {
       super(parts, opts);
@@ -7838,10 +7865,33 @@
   // attached to the input as a FileList-shaped array; `el.files`
   // exposes it to JS consumers (jQuery file widgets, Redmine's
   // attachments.js).
+  // Build a File whose bytes lazily load from the Ruby side via
+  // `__csimReadFilePick(handle, index, start, end)` — ActiveStorage's
+  // `DirectUpload` MD5-chunks the file via
+  // `fileSlice.call(file, start, end)` + `FileReader.readAsArrayBuffer`,
+  // so attached files need real Blob slicing and reading rather
+  // than a plain `{name, size, type}` info dict. The host-backed
+  // mode is keyed off the `_csimHost` flag the Blob prototype's
+  // `slice` / `text` check.
+  function __makeHostBackedFile(info, handle, index) {
+    const size = Number(info.size || 0);
+    const file = new globalThis.File([], String(info.name || ''), {
+      type: String(info.type || ''),
+      lastModified: Number(info.lastModified || 0)
+    });
+    file._csimHost = true;
+    file._handle   = handle;
+    file._index    = index;
+    file._start    = 0;
+    file._end      = size;
+    file.size      = size;
+    return file;
+  }
   globalThis.__csimSetFiles = function (h, fileInfos) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
-    n._files = Array.isArray(fileInfos) ? fileInfos.slice() : [];
+    const list = Array.isArray(fileInfos) ? fileInfos : [];
+    n._files = list.map((info, i) => __makeHostBackedFile(info, h, i));
     return true;
   };
   globalThis.__csimSetValue = function (h, value) {
@@ -8404,6 +8454,24 @@
           if (!self._headers['Content-Type'] && !self._headers['content-type']) {
             self._headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
           }
+        } else if (body instanceof globalThis.Blob) {
+          // ActiveStorage's `BlobUpload` PUTs the raw file to disk
+          // storage via `xhr.send(file)`. The bytes need to cross the
+          // mini_racer boundary without UTF-8 reinterpretation, so we
+          // base64 them and signal to Rack via a custom header. The
+          // Ruby side decodes before building the env input.
+          let raw = '';
+          if (body._csimHost && typeof __csimReadFilePick === 'function') {
+            const b64 = __csimReadFilePick(body._handle, body._index, body._start, body._end);
+            raw = b64 ? globalThis.atob(String(b64)) : '';
+          } else if (body._parts) {
+            raw = body._parts.join('');
+          }
+          bodyStr = raw ? globalThis.btoa(raw) : '';
+          self._headers['X-Csim-Body-B64'] = '1';
+          if (!self._headers['Content-Type'] && !self._headers['content-type'] && body.type) {
+            self._headers['Content-Type'] = body.type;
+          }
         } else {
           bodyStr = String(body);
         }
@@ -8421,7 +8489,18 @@
       self.statusText   = resp.statusText || '';
       self.responseURL  = resp.url || self._url;
       self.responseText = resp.body == null ? '' : String(resp.body);
-      self.response     = self.responseText;
+      // `responseType` selects the shape of `response`:
+      // - 'json'  → parsed object (ActiveStorage's BlobRecord uses this
+      //             and reads `response.direct_upload`)
+      // - 'text'/''→ same as `responseText`
+      // Other types (arraybuffer/blob/document) are rare in our workloads
+      // and fall back to the raw text.
+      if (self.responseType === 'json') {
+        try { self.response = self.responseText ? JSON.parse(self.responseText) : null; }
+        catch (_) { self.response = null; }
+      } else {
+        self.response = self.responseText;
+      }
       // Normalise response headers to lowercase for getResponseHeader.
       const headers = resp.headers || {};
       const norm = {};
