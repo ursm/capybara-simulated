@@ -8140,44 +8140,57 @@
          n._selectionEnd   = next;
        }
       if (!blocked && wouldType) {
-        if (ceTypeable) {
-          // Contenteditable target: route through the same selection-
-          // aware insert path the `set()` per-character loop uses
-          // (Tagify, ProseMirror, etc. expect the cursor-tracking
-          // mutation pattern rather than `<input>.value = x`).
-          if (info.char != null) {
-            __csimInsertTextAtSelection(info.char);
+        const doDefault = () => {
+          if (ceTypeable) {
+            if (info.char != null) {
+              __csimInsertTextAtSelection(info.char);
+            } else if (info.inputType === 'deleteContentBackward') {
+              const sel = globalThis.getSelection && globalThis.getSelection();
+              const r = sel && sel._ranges[0];
+              const sc = r && r.startContainer;
+              if (sc && sc.nodeType === NODE_TEXT && r.startOffset > 0) {
+                const pos = r.startOffset;
+                sc.data = sc._data.slice(0, pos - 1) + sc._data.slice(pos);
+                r.startOffset = pos - 1; r.endOffset = pos - 1;
+              }
+            }
+          } else if (info.char != null) {
+            __appendValue(n, info.char);
           } else if (info.inputType === 'deleteContentBackward') {
-            // Backspace at the current selection — splice one char
-            // before the caret in the active text node.
-            const sel = globalThis.getSelection && globalThis.getSelection();
-            const r = sel && sel._ranges[0];
-            const sc = r && r.startContainer;
-            if (sc && sc.nodeType === NODE_TEXT && r.startOffset > 0) {
-              const pos = r.startOffset;
-              sc.data = sc._data.slice(0, pos - 1) + sc._data.slice(pos);
-              r.startOffset = pos - 1; r.endOffset = pos - 1;
+            const cur = n._attrs.value != null ? n._attrs.value : '';
+            const pos = n._selectionStart != null ? n._selectionStart : cur.length;
+            if (pos > 0) {
+              const next = cur.slice(0, pos - 1) + cur.slice(pos);
+              n._attrs.value = next;
+              if (n._tag === 'textarea') n._children = [Object.assign(new Text(next), { _parent: n })];
+              n._selectionStart = pos - 1;
+              n._selectionEnd   = pos - 1;
             }
           }
-        } else if (info.char != null) {
-          __appendValue(n, info.char);
-        } else if (info.inputType === 'deleteContentBackward') {
-          // Backspace: drop the char before the caret.
-          const cur = n._attrs.value != null ? n._attrs.value : '';
-          const pos = n._selectionStart != null ? n._selectionStart : cur.length;
-          if (pos > 0) {
-            const next = cur.slice(0, pos - 1) + cur.slice(pos);
-            n._attrs.value = next;
-            if (n._tag === 'textarea') n._children = [Object.assign(new Text(next), { _parent: n })];
-            n._selectionStart = pos - 1;
-            n._selectionEnd   = pos - 1;
-          }
+          try {
+            dispatchEvent(n, new InputEvent('input', {
+              bubbles: true, cancelable: true,
+              data: info.char != null ? info.char : null,
+              inputType: info.inputType
+            }));
+          } catch (_) {}
+        };
+        // Keys with a promise-deferrable default (Enter / Tab —
+        // Tagify, Algolia's autocomplete, jQuery-UI menu all call
+        // `e.preventDefault()` from a `beforeKeyDown(e).then(...)`
+        // chain for these) defer to a task so listener microtasks
+        // drain first. Regular character typing stays synchronous
+        // so subsequent chars see the cursor mutation from the
+        // previous one (`send_keys 'abc'` must produce "abc", not
+        // an out-of-order shuffle).
+        if (info.key === 'Enter' || info.key === 'Tab') {
+          scheduleTimer(() => {
+            if (kd.defaultPrevented) return;
+            doDefault();
+          }, 0, [], null);
+        } else {
+          doDefault();
         }
-        dispatchEvent(n, new InputEvent('input', {
-          bubbles: true, cancelable: true,
-          data: info.char != null ? info.char : null,
-          inputType: info.inputType
-        }));
       }
       dispatchEvent(n, new KeyboardEvent('keyup', init));
     };
