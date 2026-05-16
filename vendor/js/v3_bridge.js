@@ -530,10 +530,25 @@
       return s;
     }
     set textContent(v) {
+      // Spec: "replace all" — clear children, insert single Text node.
+      // Fire a childList mutation (removedNodes = old children,
+      // addedNodes = the new text node) so MutationObservers see the
+      // change. PM/Tiptap's domchange observer needs this to know
+      // the user's `set()` updated the editor content.
+      const removed = this._children.slice();
+      for (const c of removed) c._parent = null;
       this._children = [];
-      const t = new Text(String(v == null ? '' : v));
-      t._parent = this;
-      this._children.push(t);
+      const text = String(v == null ? '' : v);
+      const added = [];
+      if (text.length > 0) {
+        const t = new Text(text);
+        t._parent = this;
+        this._children.push(t);
+        added.push(t);
+      }
+      if (removed.length > 0 || added.length > 0) {
+        recordChildList(this, added, removed);
+      }
     }
     // `innerText` is the "as rendered" sibling of textContent — line
     // breaks from `<br>` / block boundaries, whitespace collapsed,
@@ -551,14 +566,29 @@
     constructor(data) {
       super();
       this.nodeType = NODE_TEXT;
-      this.data     = String(data == null ? '' : data);
+      this._data    = String(data == null ? '' : data);
     }
     get nodeName()    { return '#text'; }
-    _cloneShell()     { return new Text(this.data); }
+    _cloneShell()     { return new Text(this._data); }
+    get data()        { return this._data; }
+    // Spec: every write to a Text node's `data` (or `nodeValue` /
+    // `textContent`, which proxy through here) queues a
+    // `characterData` mutation record. ProseMirror/Tiptap's
+    // `domchange` reconciler reads these to map browser-side text
+    // edits back into a transaction; without the record, our
+    // `set("text")` on contenteditable updates the DOM but PM
+    // silently skips the model update and `onUpdate` never fires.
+    set data(v) {
+      const next = String(v == null ? '' : v);
+      const prev = this._data;
+      if (prev === next) return;
+      this._data = next;
+      recordCharacterData(this, prev);
+    }
     get nodeValue()   { return this.data; }
-    set nodeValue(v)  { this.data = String(v == null ? '' : v); }
+    set nodeValue(v)  { this.data = v; }
     get textContent() { return this.data; }
-    set textContent(v){ this.data = String(v == null ? '' : v); }
+    set textContent(v){ this.data = v; }
     // wgxpath uses these on text nodes via XPath `text()` / `string()`.
     get prefix()       { return null; }
     get namespaceURI() { return null; }
@@ -2653,6 +2683,13 @@
   // received the records it shouldn't, and Trix's reparse looped.
 
   const __observers = new Set();
+  // Debug hook: expose for probes that need to inspect observer state.
+  globalThis.__csimGetObservers = function () {
+    return Array.from(__observers).map(o => ({
+      observed: o._observed.map(e => ({ tag: e.target && e.target._tag, opts: e.options })),
+      records: o._records.length
+    }));
+  };
 
   // Settle-generation counter. Bumped on every observable DOM/URL
   // change (childList mutation, attribute mutation, location update)
@@ -2666,14 +2703,22 @@
 
   function __queueRecordForObservers(rec) {
     if (__observers.size === 0) return;
+    let queued = false;
     for (const obs of __observers) {
       for (const entry of obs._observed) {
         if (recordMatches(entry, rec)) {
           obs._records.push(rec);
+          queued = true;
           break;
         }
       }
     }
+    // Schedule a microtask-time delivery so MO callbacks fire for
+    // direct DOM mutations (insertBefore / removeChild / data=
+    // setter) too — not just for mutations queued inside a
+    // dispatchEvent chain. Without this, PM's domchange observer
+    // never sees `set()`-driven edits to its contenteditable.
+    if (queued) scheduleMutationDelivery();
   }
   function recordAttrMutation(target, name, oldValue) {
     __bumpSettleGen();
@@ -2701,6 +2746,21 @@
       attributeName: null,
       attributeNamespace: null,
       oldValue:      null,
+      previousSibling: null,
+      nextSibling:    null
+    });
+  }
+  function recordCharacterData(target, oldValue) {
+    __bumpSettleGen();
+    if (__observers.size === 0) return;
+    __queueRecordForObservers({
+      type:           'characterData',
+      target,
+      addedNodes:    [],
+      removedNodes:  [],
+      attributeName: null,
+      attributeNamespace: null,
+      oldValue,
       previousSibling: null,
       nextSibling:    null
     });
@@ -8097,8 +8157,24 @@
       // before that, we race with their composition pipeline and
       // overwrite the editor model with raw text the editor then
       // tries to reconcile.
+      //
+      // Real-browser-generated beforeinput populates `targetRanges`
+      // with the StaticRange the edit will affect (per UI Events
+      // spec). PM/Tiptap's beforeinput handler reads
+      // `event.getTargetRanges()` to find what to replace; if the
+      // array is empty (which our default InputEvent gives) PM
+      // bails out and `onUpdate` never fires. Mirror the real-
+      // browser computation: the target range covers "select all
+      // current content of the contenteditable" — Capybara's
+      // `.set` semantics on a contenteditable means "replace
+      // everything", same as the user pressing Ctrl-A then typing.
+      const tr = {
+        startContainer: n, startOffset: 0,
+        endContainer:   n, endOffset:   (n._children ? n._children.length : 0)
+      };
       const bi = new InputEvent('beforeinput', {
-        bubbles: true, cancelable: true, data: v, inputType: 'insertText'
+        bubbles: true, cancelable: true, data: v, inputType: 'insertText',
+        targetRanges: [tr]
       });
       dispatchEvent(n, bi);
       if (!bi.defaultPrevented) {
