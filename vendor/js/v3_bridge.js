@@ -19,6 +19,7 @@
 
   const NODE_ELEMENT = 1;
   const NODE_TEXT    = 3;
+  const NODE_COMMENT = 8;
   const NODE_DOC     = 9;
 
   let __nextId = 1;
@@ -552,6 +553,22 @@
     get ownerDocument(){ return this._ownerDoc || globalThis.document; }
   }
 
+  // Comment node. Created via `document.createComment(data)` and
+  // serialised as `<!--data-->`. Trix uses `<!--block-->` markers
+  // inside its rendered editor DOM, then strips them with a regex
+  // on `innerHTML` before storing in the form's hidden input — if
+  // we represented comments as text the marker leaked through as
+  // the literal string "block".
+  class Comment extends Text {
+    constructor(data) {
+      super(data);
+      this.nodeType = NODE_COMMENT;
+    }
+    get nodeName() { return '#comment'; }
+    _cloneShell()  { return new Comment(this.data); }
+  }
+  globalThis.Comment = Comment;
+
   class Element extends Node {
     constructor(tagName) {
       if (__pendingUpgrade) {
@@ -626,12 +643,14 @@
       if (this._tag !== 'dialog') return;
       closeDialog(this, returnValue);
     }
-    // XPath 1.0 `*` wildcard matches names in *no* namespace. Reporting
-    // the XHTML namespace here would silently mismatch Capybara-emitted
-    // `//*` queries. We don't model XML namespaces; null is what
-    // Capybara / Selenium effectively see in real-browser HTML mode.
+    // Report the XHTML namespace per HTML spec. wgxpath defaults
+    // missing namespaceURI to XHTML (vendor/js/wgxpath.js:55), so
+    // Capybara's `//*` queries are unaffected by reporting it
+    // explicitly. Required for DOMPurify's `_checkValidNamespace`
+    // to keep elements (Trix's HTMLSanitizer wipes the body
+    // without it).
     get prefix()       { return null; }
-    get namespaceURI() { return null; }
+    get namespaceURI() { return 'http://www.w3.org/1999/xhtml'; }
     get ownerDocument(){ return this._ownerDoc || globalThis.document; }
     getAttribute(name)        { const v = this._attrs[String(name).toLowerCase()]; return v == null ? null : v; }
     setAttribute(name, value) {
@@ -1523,7 +1542,7 @@
     // discriminate by ns either.
     createElementNS(_ns, tag) { return this.createElement(tag); }
     createTextNode(data)   { return new Text(data); }
-    createComment(data)    { return new Text(String(data == null ? '' : data)); }
+    createComment(data)    { return new Comment(String(data == null ? '' : data)); }
     get body() {
       const html = this.documentElement;
       if (!html) return null;
@@ -2477,7 +2496,14 @@
       }
       return !event.defaultPrevented;
     } finally {
-      if (__observers.size && __pendingRecords.length) deliverMutations();
+      // Per spec, MutationObserver delivery is the microtask checkpoint
+      // — synchronous flush at end-of-dispatchEvent re-enters Trix's
+      // reparse → loadHTML inside its own custom-event dispatch and
+      // pegs the heap (the observer's stop()/start() bracket relies on
+      // delivery happening after Trix's synchronous code finishes).
+      // Schedule via microtask; settle's drain_microtasks picks it up
+      // in the same iteration.
+      if (__observers.size && __hasQueuedRecords()) scheduleMutationDelivery();
       if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
       globalThis.event = prevWinEvent;
     }
@@ -2592,15 +2618,17 @@
 
   // ── MutationObserver ────────────────────────────────────────────
   //
-  // Records are queued globally on every attribute / childList
-  // mutation. At delivery time each observer filters by its observed
-  // targets' current containment of the record's target — this is
-  // what makes "set id on detached, then appendChild" deliver both
-  // records (matching v2's behaviour and what real browsers do for
-  // this pattern).
+  // Per spec, mutation records are queued on each observer at the
+  // moment of mutation. When `disconnect()` runs, that observer's
+  // queue is dropped — which is what `Trix`'s render path relies on:
+  // `editorWillSyncDocumentView()` stops the observer before syncing
+  // the editor DOM, `editorDidSyncDocumentView()` starts it again,
+  // and the in-between mutations are bracketed out. Our older
+  // global-queue-and-filter-at-delivery model violated that — if
+  // delivery ran after `start()`, the (now re-registered) observer
+  // received the records it shouldn't, and Trix's reparse looped.
 
   const __observers = new Set();
-  const __pendingRecords = [];
 
   // Settle-generation counter. Bumped on every observable DOM/URL
   // change (childList mutation, attribute mutation, location update)
@@ -2612,10 +2640,21 @@
   globalThis.__settleGenGet = () => __settleGen;
   function __bumpSettleGen() { __settleGen = (__settleGen + 1) | 0; }
 
+  function __queueRecordForObservers(rec) {
+    if (__observers.size === 0) return;
+    for (const obs of __observers) {
+      for (const entry of obs._observed) {
+        if (recordMatches(entry, rec)) {
+          obs._records.push(rec);
+          break;
+        }
+      }
+    }
+  }
   function recordAttrMutation(target, name, oldValue) {
     __bumpSettleGen();
     if (__observers.size === 0) return;
-    __pendingRecords.push({
+    __queueRecordForObservers({
       type:           'attributes',
       target,
       attributeName:  name,
@@ -2630,7 +2669,7 @@
   function recordChildList(target, added, removed) {
     __bumpSettleGen();
     if (__observers.size === 0) return;
-    __pendingRecords.push({
+    __queueRecordForObservers({
       type:           'childList',
       target,
       addedNodes:    added.slice(),
@@ -2692,22 +2731,25 @@
   // each observer's callback with its batch. Looped (bounded) so a
   // mutation inside a callback re-delivers, mirroring spec microtask
   // semantics.
+  let __deliveringMutations = false;
   function deliverMutations() {
-    let iter = 0;
-    while (__pendingRecords.length && iter++ < 16) {
-      const batch = __pendingRecords.splice(0, __pendingRecords.length);
+    // Per spec, MutationObserver delivery is "one pass per microtask
+    // checkpoint" — records queued during the cb are NOT delivered
+    // in the same pass; they wait for the next checkpoint. Records
+    // are kept per-observer (queued at mutation time, see
+    // `__queueRecordForObservers`), so `disconnect()` cleanly drops
+    // an observer's pending queue — which Trix's render path relies
+    // on via `editorWillSyncDocumentView()` / `…DidSyncDocumentView()`.
+    if (__deliveringMutations) return;
+    __deliveringMutations = true;
+    try {
       for (const obs of __observers) {
-        const mine = [];
-        for (const rec of batch) {
-          for (const entry of obs._observed) {
-            if (recordMatches(entry, rec)) { mine.push(rec); break; }
-          }
-        }
-        if (mine.length) {
-          try { obs._cb(mine, obs); }
-          catch (e) {
-            try { console.error('[csim v3] MO callback threw:', e && e.message); } catch (_) {}
-          }
+        if (!obs._records.length) continue;
+        const mine = obs._records;
+        obs._records = [];
+        try { obs._cb(mine, obs); }
+        catch (e) {
+          try { console.error('[csim v3] MO callback threw:', e && e.message); } catch (_) {}
         }
       }
       // Visibility-tracking IOs piggyback on the same drain so that a
@@ -2715,7 +2757,24 @@
       // ancestor (Avo tabs' `.hidden` class removal) fires the lazy
       // `<turbo-frame>` inside.
       if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
+    } finally {
+      __deliveringMutations = false;
     }
+  }
+  let __mutationDeliveryPending = false;
+  function __hasQueuedRecords() {
+    for (const obs of __observers) {
+      if (obs._records.length) return true;
+    }
+    return false;
+  }
+  function scheduleMutationDelivery() {
+    if (__mutationDeliveryPending) return;
+    __mutationDeliveryPending = true;
+    Promise.resolve().then(() => {
+      __mutationDeliveryPending = false;
+      if (__observers.size && __hasQueuedRecords()) deliverMutations();
+    });
   }
   globalThis.__deliverMutations = deliverMutations;
 
@@ -3818,7 +3877,9 @@
     let s = '';
     if (!el || !el._children) return s;
     for (const c of el._children) {
-      s += c.nodeType === NODE_TEXT ? escapeText(c.data) : serializeElement(c);
+      if (c.nodeType === NODE_TEXT) s += escapeText(c.data);
+      else if (c.nodeType === NODE_COMMENT) s += '<!--' + String(c.data == null ? '' : c.data) + '-->';
+      else s += serializeElement(c);
     }
     return s;
   }
@@ -5537,7 +5598,7 @@
         } catch (_) {}
       }
     }
-    if (__observers.size && __pendingRecords.length) deliverMutations();
+    if (__observers.size && __hasQueuedRecords()) deliverMutations();
     if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
     // After scripts have run, fire the readiness lifecycle events
     // libraries hook into (`DOMContentLoaded` on document, `load` on
@@ -8416,7 +8477,7 @@
           console.error('[csim v3] timer threw:', e && (e.stack || e.message), '\n  handler:', where);
         } catch (_) {}
       }
-      if (__observers.size && __pendingRecords.length) deliverMutations();
+      if (__observers.size && __hasQueuedRecords()) deliverMutations();
       if (typeof __recheckIntersectionObservers === 'function') __recheckIntersectionObservers();
       fired++;
     }

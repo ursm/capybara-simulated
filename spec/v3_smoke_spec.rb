@@ -555,10 +555,15 @@ RSpec.describe 'Simulated v3 (V8-resident DOM) — smoke' do
     s.visit '/'
 
     s.click_button 'Add'
-    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)')
+    # Per DOM spec ("queue a mutation record"), the `id`-setting
+    # mutation on the detached `<span>` doesn't match any observer
+    # (the span has no ancestors registered with an observer at the
+    # moment of mutation), so only the subsequent appendChild's
+    # childList record gets delivered.
+    expect(s.find('#audit').text).to eq('+child(leaf)')
 
     s.click_button 'Flip'
-    expect(s.find('#audit').text).to eq('+attr(id:null)+child(leaf)+attr(class:off)')
+    expect(s.find('#audit').text).to eq('+child(leaf)+attr(class:off)')
   end
 
   it 'upgrades custom elements on define and on later insertion' do
