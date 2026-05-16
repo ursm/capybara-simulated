@@ -7284,6 +7284,28 @@
   //     toggling happens inline so Ruby sees the new state on the
   //     follow-up read, and other clicks are no-ops until milestone 4
   //     lands event dispatch).
+  // Minimal "is element focusable by a mouse click?" — used by
+  // `__csimClickResolve` to mirror the HTML/UIEvents spec
+  // mousedown-default-action focus transfer. Conservative whitelist:
+  // standard form controls (input/textarea/select/button), anchors
+  // with `href`, contenteditable hosts, and anything with an explicit
+  // `tabindex`. Disabled controls aren't focusable.
+  function __csimIsFocusable(n) {
+    if (!n || n.nodeType !== NODE_ELEMENT) return false;
+    if (n._attrs.disabled != null) return false;
+    const t = n._tag;
+    if (t === 'input') {
+      const it = (n._attrs.type || '').toLowerCase();
+      if (it === 'hidden') return false;
+      return true;
+    }
+    if (t === 'textarea' || t === 'select' || t === 'button') return true;
+    if (t === 'a' && n._attrs.href != null) return true;
+    if (n._attrs.tabindex != null) return true;
+    if (n._attrs.contenteditable != null && (n._attrs.contenteditable || '').toLowerCase() !== 'false') return true;
+    return false;
+  }
+
   globalThis.__csimClickResolve = function (h, modifiers) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
@@ -7333,7 +7355,17 @@
     // a programmatic `link.click()` (Avo's filter controller).
     globalThis.__csimPendingFormSubmit = null;
     globalThis.__csimPendingNavigation = null;
-    dispatchEvent(n, new MouseEvent('mousedown', base));
+    const mousedownEv = new MouseEvent('mousedown', base);
+    dispatchEvent(n, mousedownEv);
+    // HTML/UIEvents spec: if mousedown wasn't cancelled, the default
+    // action moves focus to the clicked element when it's focusable.
+    // flatpickr opens its calendar on the input's `focus` event, so
+    // without this transfer a `click` on a `<input data-controller=
+    // "date-field">` leaves the picker closed and the `set_picker_day`
+    // helper can't find the (display:none-hidden) day buttons.
+    if (!mousedownEv.defaultPrevented && __csimIsFocusable(n)) {
+      try { n.focus(); } catch (_) {}
+    }
     if (mods.mouseDownOnly) {
       // Caller (Ruby) handles the wall-clock delay between mousedown
       // and mouseup; return the partial event init so the follow-up
@@ -8000,20 +8032,26 @@
         }
         kind = 'checked';
       } else if (type === 'range' || type === 'number') {
-        // Range / number inputs snap to min/max/step. Browsers clamp
-        // out-of-range values to the nearest valid step boundary.
+        // HTML5: number inputs only *validate* against step (via
+        // `:invalid` / `validity.stepMismatch`), they don't snap on
+        // IDL assignment. Only `<input type="range">` snaps to the
+        // nearest valid step. flatpickr's minute/second inputs are
+        // `type="number"` with `step="5"`; snapping at `.set(17)`
+        // turns it into 15 and the picker silently saves the wrong
+        // time. Mirrors v2's `clamp_numeric_input` distinction.
         const num    = parseFloat(v);
         const min    = parseFloat(n._attrs.min);
         const max    = parseFloat(n._attrs.max);
-        const step   = parseFloat(n._attrs.step) || 1;
         let clamped  = isNaN(num) ? (isNaN(min) ? 0 : min) : num;
         if (!isNaN(min) && clamped < min) clamped = min;
         if (!isNaN(max) && clamped > max) clamped = max;
-        if (!isNaN(min) && step > 0) {
-          const k = Math.round((clamped - min) / step);
-          clamped = min + k * step;
-          // Floating-point round to avoid 37.500000000004.
-          clamped = parseFloat(clamped.toFixed(10));
+        if (type === 'range') {
+          const step = parseFloat(n._attrs.step) || 1;
+          if (!isNaN(min) && step > 0) {
+            const k = Math.round((clamped - min) / step);
+            clamped = min + k * step;
+            clamped = parseFloat(clamped.toFixed(10));
+          }
         }
         n._attrs.value = String(clamped);
       } else {
