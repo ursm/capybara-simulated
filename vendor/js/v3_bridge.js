@@ -4382,6 +4382,33 @@
   globalThis.parent  = globalThis;
   globalThis.frames  = globalThis;
   globalThis.frameElement = null;
+  // Web Crypto API — minimal `crypto.randomUUID()` and
+  // `crypto.getRandomValues(typedArray)`. Backed by SecureRandom on
+  // the Ruby side. Tagify, ActiveStorage's DirectUpload, and many
+  // libraries call `crypto.getRandomValues` for IDs/checksums; in
+  // browsers `crypto` lives on `globalThis` directly (it's
+  // `WindowOrWorkerGlobalScope`-mixed), so apps don't even
+  // feature-detect it. Without this, Tagify's `getUID` throws
+  // ReferenceError mid-`addTags` and the whole `<tag>` render
+  // pipeline silently aborts inside Stimulus's `connect` catch.
+  globalThis.crypto = {
+    randomUUID() {
+      return typeof __csim_randomUUID === 'function'
+        ? String(__csim_randomUUID())
+        : '00000000-0000-0000-0000-000000000000';
+    },
+    getRandomValues(typedArray) {
+      if (!typedArray || typeof typedArray.length !== 'number') return typedArray;
+      const bytes = typeof __csim_randomBytes === 'function'
+        ? __csim_randomBytes(typedArray.length)
+        : new Array(typedArray.length).fill(0);
+      const arr = bytes || [];
+      for (let i = 0; i < typedArray.length; i++) {
+        typedArray[i] = (arr[i] | 0) & 0xff;
+      }
+      return typedArray;
+    }
+  };
   // Layout-driven stubs — no real layout, so device pixel ratio is 1
   // and `screen` is a fixed viewport. Libraries probe these for HiDPI
   // / responsive decisions; we let everything fall to the "small
