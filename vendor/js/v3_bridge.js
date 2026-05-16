@@ -8094,10 +8094,37 @@
     if (__timers.delete(id) && __timers.size === 0) __setTimersActive(false);
   };
   globalThis.clearInterval = globalThis.clearTimeout;
+  // `requestAnimationFrame` — real browsers fire callbacks before the
+  // next paint, which sits between current task and microtask drain.
+  // We have no paint pipeline, so the closest semantic match is
+  // "before the next macrotask but after currently-queued microtasks."
+  // Implementing as `Promise.resolve().then(cb)` collapses it into the
+  // microtask queue, which mini_racer drains fully at each eval
+  // boundary. That keeps Turbo's `Visit.render` (which awaits
+  // `new Promise((resolve) => requestAnimationFrame(resolve))`) moving
+  // in the same `settle` iter that triggered the click — without
+  // this, the Promise resolves only after a 16 ms virtual-clock
+  // advance, and settle's "yield on first observable change" bails on
+  // the click's pre-rAF mutations before `drain_timers` runs.
+  // Returns a synthetic id so `cancelAnimationFrame` can match — fall
+  // back to no-op cancel since microtasks aren't directly cancellable;
+  // callbacks check a flag, or guard inside the function. Avo / Turbo
+  // don't cancel rAF in any hot path that matters here.
+  let __rafIdSeq = 1;
+  const __rafCancelled = new Set();
   globalThis.requestAnimationFrame = function (cb) {
-    return scheduleTimer(() => cb(__virtualNow), 16, [], null);
+    const id = __rafIdSeq++;
+    Promise.resolve().then(() => {
+      if (__rafCancelled.has(id)) { __rafCancelled.delete(id); return; }
+      try { cb(__virtualNow); } catch (e) {
+        try { console.error('[csim v3] requestAnimationFrame cb threw:', e && (e.message || e)); } catch (_) {}
+      }
+    });
+    return id;
   };
-  globalThis.cancelAnimationFrame = globalThis.clearTimeout;
+  globalThis.cancelAnimationFrame = function (id) {
+    if (id != null) __rafCancelled.add(id);
+  };
   // queueMicrotask: collapse to setTimeout(0). True microtasks run
   // before the next macrotask, but on a virtual clock the difference
   // is unobservable for the workloads we care about.
