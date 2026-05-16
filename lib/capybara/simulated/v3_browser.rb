@@ -30,6 +30,11 @@ module Capybara
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
       # block before its own `default_max_wait_time` kicks in.
       POLLING_GRACE_S = 10
+      # Brief window after a Ruby-side navigate (context rebuild) so
+      # Capybara's outer synchronize gets one retry against the new
+      # context. See `navigate` for why. Much smaller than POLLING_GRACE_S
+      # to keep failing-assertion paths cheap.
+      POST_NAV_POLL_GRACE_S = 0.1
       # Virtual clock advances on every find / has_?. Floor is 10 ms so
       # tests with `default_retry_interval = 0` still make progress
       # toward `setTimeout(N>0)` callbacks; cap is 5 s so a runaway
@@ -1272,6 +1277,7 @@ module Capybara
         apply_timezone
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        @polling_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + POST_NAV_POLL_GRACE_S
       end
 
       def reset!
@@ -1635,6 +1641,19 @@ module Capybara
         # to Ruby via `__csim_pushImportmap` before any module loads,
         # so `load_module` sees the fully-merged map.
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        # The Ruby-side context_gen just bumped; Capybara's outer
+        # synchronize on `Capybara::Document` (whose `reload` is a
+        # no-op) needs `Driver#wait?` to be true at least once more
+        # so it retries the block — re-finding `/html` against the
+        # new context — instead of giving up on the StaleElement
+        # raised by visible_text's check_stale. A short post-nav
+        # grace bridges the gap when the new page has no scripts of
+        # its own (e.g. Avo's `redirect_to main_app.hey_path` →
+        # static `hey <%= I18n.locale %>` view); if scripts DO
+        # register timers, `@timers_active` flips this true via the
+        # normal path. Kept small (0.1s = ~10 Capybara retry intervals)
+        # to avoid dragging failing-assertion paths through extra wait.
+        @polling_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + POST_NAV_POLL_GRACE_S
       end
 
       # `Content-Disposition: attachment` (or any explicit filename
