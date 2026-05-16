@@ -8075,8 +8075,10 @@
   globalThis.__csimSendKeys = function (h, atoms) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return false;
-    const typeable = (n._tag === 'input' || n._tag === 'textarea') &&
-                     !(n._attrs.readonly != null || n._attrs.disabled != null);
+    const ceTypeable = isContenteditable(n);
+    const typeable = ceTypeable ||
+                     ((n._tag === 'input' || n._tag === 'textarea') &&
+                      !(n._attrs.readonly != null || n._attrs.disabled != null));
     if (typeable) { try { n.focus(); } catch (_) {} }
     const startValue = typeable ? (n._attrs.value || '') : null;
     const pressKey = (info, modifiers) => {
@@ -8138,7 +8140,26 @@
          n._selectionEnd   = next;
        }
       if (!blocked && wouldType) {
-        if (info.char != null) {
+        if (ceTypeable) {
+          // Contenteditable target: route through the same selection-
+          // aware insert path the `set()` per-character loop uses
+          // (Tagify, ProseMirror, etc. expect the cursor-tracking
+          // mutation pattern rather than `<input>.value = x`).
+          if (info.char != null) {
+            __csimInsertTextAtSelection(info.char);
+          } else if (info.inputType === 'deleteContentBackward') {
+            // Backspace at the current selection — splice one char
+            // before the caret in the active text node.
+            const sel = globalThis.getSelection && globalThis.getSelection();
+            const r = sel && sel._ranges[0];
+            const sc = r && r.startContainer;
+            if (sc && sc.nodeType === NODE_TEXT && r.startOffset > 0) {
+              const pos = r.startOffset;
+              sc.data = sc._data.slice(0, pos - 1) + sc._data.slice(pos);
+              r.startOffset = pos - 1; r.endOffset = pos - 1;
+            }
+          }
+        } else if (info.char != null) {
           __appendValue(n, info.char);
         } else if (info.inputType === 'deleteContentBackward') {
           // Backspace: drop the char before the caret.
