@@ -447,9 +447,13 @@ module Capybara
           # false and it bails before its own consume_pending_*
           # drains.)
           if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
+            # Most clicks don't queue any timers; bail as soon as a
+            # round drains nothing rather than burning the full 8 mini_racer
+            # round-trips. Profile (Avo actions_spec / V8): the
+            # unconditional loop cost ~7.7 % of wall time.
             8.times do
               @runtime.drain_microtasks(4)
-              @runtime.drain_timers(50)
+              break if @runtime.drain_timers(50).to_i.zero?
             end
           end
           consume_pending_download
