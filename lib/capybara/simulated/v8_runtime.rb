@@ -3,6 +3,11 @@
 # mini_racer Context wrapper. The DOM lives in JS; this class owns the
 # V8 context, the warm snapshot, the host-fn callbacks the bridge reaches
 # back through, and the per-visit `rebuild_ctx` dance.
+#
+# `QuickJSRuntime` is the alternate implementation; both expose the same
+# surface (`eval` / `call` / `drain_timers` / `drain_microtasks` /
+# `settle_gen` / `has_ready_timer?` / `reset_timers` / `rebuild_ctx` /
+# `reset_page`). Browser picks one at construction.
 
 require 'mini_racer'
 require 'base64'
@@ -34,7 +39,7 @@ end
 
 module Capybara
   module Simulated
-    class Runtime
+    class V8Runtime
       BRIDGE_JS  = File.expand_path('../../../vendor/js/bridge.js',  __dir__).freeze
       WGXPATH_JS = File.expand_path('../../../vendor/js/wgxpath.js', __dir__).freeze
 

@@ -26,8 +26,17 @@ Gem::Specification.new do |spec|
   ]
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'capybara',   '>= 3.37'
-  spec.add_dependency 'mini_racer', '>= 0.18'
-  spec.add_dependency 'nokogiri',   '>= 1.18'
-  spec.add_dependency 'rack',       '>= 2.2'
+  spec.add_dependency 'capybara', '>= 3.37'
+  spec.add_dependency 'nokogiri', '>= 1.18'
+  spec.add_dependency 'rack',     '>= 2.2'
+
+  # JS engine is a soft dependency — add exactly one to your Gemfile.
+  # The engine is auto-selected based on which is loadable; `mini_racer`
+  # wins when both are present. Override explicitly with
+  # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
+  #
+  #   gem 'mini_racer', '>= 0.18'      # V8 (JIT, fastest per-spec)
+  #   gem 'quickjs',    '>= 0.17.0.pre' # QuickJS (interpreter, smaller
+  #                                     # per-VM footprint, wins on
+  #                                     # parallelism)
 end

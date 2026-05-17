@@ -21,9 +21,9 @@ module Capybara
         end
       end
 
-      def initialize(app)
+      def initialize(app, js_engine: nil)
         @app             = app
-        @browser         = Browser.new(app, driver: self)
+        @browser         = Browser.new(app, driver: self, js_engine: js_engine)
         @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
         @active_handle   = nil
         @next_window_seq = 0

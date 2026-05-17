@@ -10,7 +10,6 @@ require 'time'
 require 'uri'
 require_relative 'errors'
 require_relative 'esm_rewriter'
-require_relative 'runtime'
 require_relative 'trace'
 
 module Capybara
@@ -58,10 +57,10 @@ module Capybara
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated (V8-resident DOM)'
       REMOTE_ADDR = '127.0.0.1'
 
-      def initialize(app, driver: nil)
+      def initialize(app, driver: nil, js_engine: nil)
         @app                          = app
         @driver                       = driver
-        @runtime                      = Runtime.new(self)
+        @runtime                      = build_runtime(js_engine)
         @current_url                  = nil
         @cookies                      = {}
         @local_storage                = {}
@@ -105,6 +104,37 @@ module Capybara
         @pending_trace    = nil
         @recording_action = false
         @trace_mode       = parse_trace_mode(ENV['CSIM_TRACE'])
+      end
+
+      # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
+      # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
+      # wins on parallelism). Both gems are soft dependencies; pass nil
+      # to auto-select whichever is installed (mini_racer wins ties).
+      def build_runtime(engine)
+        engine ||= detect_js_engine
+        case engine
+        when :v8
+          require_relative 'v8_runtime'
+          V8Runtime.new(self)
+        when :quickjs
+          require_relative 'quickjs_runtime'
+          QuickJSRuntime.new(self)
+        else
+          raise ArgumentError, "unknown CSIM_JS_ENGINE #{engine.inspect}; expected :v8 or :quickjs"
+        end
+      end
+
+      private def detect_js_engine
+        return :v8      if gem_installed?('mini_racer')
+        return :quickjs if gem_installed?('quickjs')
+        raise LoadError, "capybara-simulated needs a JS engine: add `gem 'mini_racer'` or `gem 'quickjs'` to your Gemfile"
+      end
+
+      private def gem_installed?(name)
+        Gem::Specification.find_by_name(name)
+        true
+      rescue Gem::MissingSpecError
+        false
       end
 
       # `console.*` short-circuits to a property read when this flag

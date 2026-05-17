@@ -29,11 +29,26 @@ escapes via screenshots and we don't try to simulate.
 
 ```ruby
 gem 'capybara-simulated', group: :test
-gem 'mini_racer',         group: :test
+gem 'mini_racer',         group: :test  # JS engine — pick one
 ```
 
 `bundle install`. The gem ships its JS bridge under `vendor/js/`, so
 there's no Node toolchain at consume time.
+
+### JS engine
+
+The gem treats the JS engine as a soft dependency. Pick one of:
+
+```ruby
+gem 'mini_racer'                # V8 (JIT, fastest per spec) — default
+gem 'quickjs', '>= 0.17.0.pre'  # QuickJS (interpreter, smaller per-VM
+                                # RAM — wins when scaling parallel
+                                # workers under a fixed memory budget)
+```
+
+The engine is auto-detected at boot when both gems are present
+mini_racer wins ties. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`
+or `Capybara::Simulated::Driver.new(app, js_engine: :quickjs)`.
 
 ## Use
 
