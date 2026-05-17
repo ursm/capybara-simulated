@@ -125,7 +125,7 @@ fires on action error.
 | value | recording | DOM snapshot |
 |---|---|---|
 | (unset) / `on-failure` | yes (default) | per step on action error only |
-| `full` | yes | after every action — v2-equivalent, debug-heavy |
+| `full` | yes | after every action — debug-heavy |
 | `off` | nothing recorded, `record_action` early-exits | — |
 
 ### Inspecting traces
