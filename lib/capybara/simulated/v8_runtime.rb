@@ -10,12 +10,9 @@
 # `reset_page`). Browser picks one at construction.
 
 require 'mini_racer'
-require 'base64'
-require 'json'
-require 'securerandom'
 require 'set'
 
-require_relative 'url_shape'
+require_relative 'runtime_shared'
 
 
 begin
@@ -40,50 +37,6 @@ end
 module Capybara
   module Simulated
     class V8Runtime
-      BRIDGE_JS  = File.expand_path('../../../vendor/js/bridge.js',  __dir__).freeze
-      WGXPATH_JS = File.expand_path('../../../vendor/js/wgxpath.js', __dir__).freeze
-
-      # Stub host fns so the bridge can be baked into a Snapshot. Only
-      # the host fns bridge.js actually invokes appear here.
-      SNAPSHOT_HOST_STUBS = <<~JS.freeze
-        Object.defineProperty(globalThis, Symbol.toStringTag, { value: 'Window' });
-        globalThis.__csim_parseUrl = function (input, base) {
-          return {
-            href: 'http://placeholder/', protocol: 'http:',
-            username: '', password: '', host: 'placeholder',
-            hostname: 'placeholder', port: '', pathname: '/',
-            search: '', hash: '', origin: 'http://placeholder'
-          };
-        };
-        globalThis.__csim_randomUUID  = function () { return '00000000-0000-0000-0000-000000000000'; };
-        globalThis.__csim_randomBytes = function (n) { return new Array(n).fill(0); };
-        globalThis.__csim_atob        = function (s) { return ''; };
-        globalThis.__csim_btoa        = function (s) { return ''; };
-        globalThis.__csim_utf8Encode  = function (s) { return []; };
-        globalThis.__csim_utf8Decode  = function (a) { return ''; };
-        globalThis.__rackFetch              = function () { return null; };
-        globalThis.__locationAssign         = function () { return null; };
-        globalThis.__locationReload         = function () { return null; };
-        globalThis.__setTimersActive        = function () { return null; };
-        globalThis.__setCurrentUrl          = function () { return null; };
-        globalThis.__pushHistoryEntry       = function () { return null; };
-        globalThis.__csimReadFilePick       = function () { return null; };
-        globalThis.__getDocumentCookie      = function () { return ''; };
-        globalThis.__setDocumentCookie      = function () { return null; };
-        globalThis.__csim_storageGet        = function () { return null; };
-        globalThis.__csim_storageSet        = function () { return null; };
-        globalThis.__csim_storageRemove     = function () { return null; };
-        globalThis.__csim_storageClear      = function () { return null; };
-        globalThis.__csim_storageKey        = function () { return null; };
-        globalThis.__csim_storageLength     = function () { return 0; };
-        globalThis.__modalDialog            = function () { return null; };
-        // ESM loader callback — overridden by Ruby host fn at boot.
-        // Has to exist on the snapshot so `__csim_require` can
-        // reference it inside the bridge's IIFE.
-        globalThis.__csim_fetchModuleSource = function () { return null; };
-        globalThis.__csim_pushImportmap     = function () { return null; };
-        globalThis.__csim_logConsole        = function () { return null; };
-      JS
 
       @@snapshot_lock = Mutex.new
       @@snapshot      = nil
@@ -142,15 +95,7 @@ module Capybara
       JS
 
       def self.build_snapshot
-        # Order matters: bridge.js installs `globalThis.Document` (etc.)
-        # first, then wgxpath patches `Document.prototype.evaluate` on
-        # top, then the install-on-current-document line ties it to the
-        # live `document` instance the bridge created.
-        src = SNAPSHOT_HOST_STUBS +
-              File.read(BRIDGE_JS) +
-              File.read(WGXPATH_JS) + ";\n" +
-              "wgxpath.install(globalThis);\n"
-        snap = MiniRacer::Snapshot.new(src)
+        snap = MiniRacer::Snapshot.new(RuntimeShared.snapshot_src)
         # `warmup!` runs `SNAPSHOT_WARMUP` against the snapshot once
         # and rolls the resulting V8 bytecode-cache state back in, so
         # Contexts created from this snapshot inherit JIT-primed
@@ -303,49 +248,15 @@ module Capybara
         end
       end
 
-      def safe_call
-        yield
-      rescue StandardError => e
-        warn "[capybara-simulated] host fn error: #{e.class}: #{e.message[0, 200]}"
-        nil
-      end
-
       def attach_host_fns(c)
         browser = @browser
-        sc      = method(:safe_call)
-        c.attach('__rackFetch',                     ->(*a) { sc.() { browser.rack_fetch(a[0], a[1], a[2], a[3], a[4]) } })
-        c.attach('__locationAssign',                ->(*a) { sc.() { browser.location_assign(a[0]); nil } })
-        c.attach('__locationReload',                ->(*a) { sc.() { browser.location_reload; nil } })
-        c.attach('__setTimersActive',               ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
-        c.attach('__setCurrentUrl',                 ->(*a) { sc.() { browser.history_state(a[0]); nil } })
-        c.attach('__pushHistoryEntry',              ->(*a) { sc.() { browser.history_push(a[0]); nil } })
-        c.attach('__csimReadFilePick',              ->(*a) { sc.() { browser.read_file_pick(a[0], a[1], a[2], a[3]) } })
-        c.attach('__getDocumentCookie',             ->(*a) { sc.() { browser.document_cookie } })
-        c.attach('__setDocumentCookie',             ->(*a) { sc.() { browser.write_document_cookie(a[0].to_s); nil } })
-        c.attach('__csim_storageGet',               ->(*a) { sc.() { browser.storage_get(a[0], a[1]) } })
-        c.attach('__csim_storageSet',               ->(*a) { sc.() { browser.storage_set(a[0], a[1], a[2]); nil } })
-        c.attach('__csim_storageRemove',            ->(*a) { sc.() { browser.storage_remove(a[0], a[1]); nil } })
-        c.attach('__csim_storageClear',             ->(*a) { sc.() { browser.storage_clear(a[0]); nil } })
-        c.attach('__csim_storageKey',               ->(*a) { sc.() { browser.storage_key(a[0], a[1]) } })
-        c.attach('__csim_storageLength',            ->(*a) { sc.() { browser.storage_length(a[0]) } })
-        c.attach('__modalDialog',                   ->(*a) { sc.() { browser.handle_modal(a[0], a[1], a[2]) } })
-        c.attach('__csim_randomUUID',  ->(*a) { SecureRandom.uuid })
-        c.attach('__csim_randomBytes', ->(*a) { SecureRandom.bytes(a[0].to_i).bytes })
-        c.attach('__csim_atob',        ->(*a) { Base64.decode64(a[0].to_s) })
-        c.attach('__csim_btoa',        ->(*a) { Base64.strict_encode64(a[0].to_s) })
-        c.attach('__csim_utf8Encode',  ->(*a) { a[0].to_s.b.bytes })
-        c.attach('__csim_utf8Decode',  ->(*a) { a[0].pack('C*').force_encoding('UTF-8') })
-        c.attach('__csim_parseUrl',    ->(*a) { UrlShape.parse_for_js(a[0], a[1]) })
-        c.attach('__csim_fetchModuleSource', ->(*a) { sc.() { fetch_module_source(browser, a[0]) } })
-        c.attach('__csim_pushImportmap',     ->(*a) { sc.() { browser.set_importmap(a[0]); nil } })
-        c.attach('__csim_logConsole',        ->(*a) { sc.() { browser.log_console(a[0], a[1]); nil } })
+        RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
+          c.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
+        }
+        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
+          c.attach(name, body)
+        }
       end
-
-      # Bridges Ruby-side `Browser#load_module` (Rack fetch +
-      # rewrite_module_imports + EsmRewriter) into the JS-side loader's
-      # `__csim_fetchModuleSource(url)` hook. Caching lives on Browser
-      # so it survives Context rebuilds.
-      def fetch_module_source(browser, url) = browser.load_module(url)
     end
   end
 end

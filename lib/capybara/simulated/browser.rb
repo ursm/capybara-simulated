@@ -109,7 +109,10 @@ module Capybara
       # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
       # wins on parallelism). Both gems are soft dependencies; pass nil
-      # to auto-select whichever is installed (mini_racer wins ties).
+      # to auto-select whichever is installed.
+      ENGINE_GEM = {v8: 'mini_racer', quickjs: 'quickjs'}.freeze
+      private_constant :ENGINE_GEM
+
       def build_runtime(engine)
         engine ||= detect_js_engine
         case engine
@@ -120,21 +123,16 @@ module Capybara
           require_relative 'quickjs_runtime'
           QuickJSRuntime.new(self)
         else
-          raise ArgumentError, "unknown CSIM_JS_ENGINE #{engine.inspect}; expected :v8 or :quickjs"
+          raise ArgumentError, "unknown CSIM_JS_ENGINE #{engine.inspect}; expected one of #{JS_ENGINES.inspect}"
         end
       end
 
+      # Iterate `JS_ENGINES` in preference order — V8 first because
+      # JIT wins per-spec wall time, QuickJS second when only the
+      # smaller-footprint engine is installed.
       private def detect_js_engine
-        return :v8      if gem_installed?('mini_racer')
-        return :quickjs if gem_installed?('quickjs')
-        raise LoadError, "capybara-simulated needs a JS engine: add `gem 'mini_racer'` or `gem 'quickjs'` to your Gemfile"
-      end
-
-      private def gem_installed?(name)
-        Gem::Specification.find_by_name(name)
-        true
-      rescue Gem::MissingSpecError
-        false
+        JS_ENGINES.find {|e| Gem.loaded_specs.key?(ENGINE_GEM.fetch(e)) } ||
+          raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|g| "`gem '#{g}'`" }.join(' / ')} to your Gemfile")
       end
 
       # `console.*` short-circuits to a property read when this flag
