@@ -124,11 +124,15 @@ module Capybara
       end
 
       # `eval` and `call` already pump after every invocation, so the
-      # queue is empty on entry; this is a no-op for QuickJS. Kept on
-      # the public surface for parity with V8Runtime where the
-      # `settle` loop relies on per-iter microtask peeling.
-      def drain_microtasks(_iters = 4)
-        nil
+      # queue is normally empty on entry. Kept callable for parity with
+      # V8Runtime: in `settle`, JS that runs *between* our `call`s
+      # (timer callbacks that queue further microtasks) might leave
+      # work pending that this drain finishes before the next call.
+      def drain_microtasks(iters = 4)
+        i = iters.to_i
+        return if i <= 0
+        v = vm
+        i.times { v.drain_microtasks! }
       end
 
       def settle_gen
