@@ -30,10 +30,64 @@ module Capybara
         @@bridge_lock.synchronize { @@bridge_runnable ||= Quickjs::VM.new.compile(RuntimeShared.snapshot_src, filename: 'csim_bridge.js') }
       end
 
+      # Pre-warmed pool of bare `Quickjs::VM` instances. `Quickjs::VM.new`
+      # with `POLYFILL_INTL` is ~140 ms (FormatJS locale tables + IANA TZ
+      # bytecode); quickjs.rb #36 released the GVL during construction,
+      # so warmer threads build in parallel with the main thread.
+      # `build_vm` pops a pre-built VM and only pays for bridge replay +
+      # host-fn attach (~30 ms) on the hot path.
+      class VmPool
+        # 4 warmers × ~140 ms ≈ 28 VMs/sec — covers sustained demand for
+        # shared-spec-shaped runs. CAPACITY buffers short bursts before
+        # warmers backfill.
+        WARMER_COUNT = 4
+        CAPACITY     = 6
+
+        def initialize(vm_options)
+          @vm_options = vm_options
+          @queue      = SizedQueue.new(CAPACITY)
+          @threads    = WARMER_COUNT.times.map {|i|
+            Thread.new { warmer_loop }.tap {|t| t.name = "csim-qjs-warmer-#{i}" }
+          }
+        end
+
+        def checkout = @queue.pop
+
+        # SizedQueue#close unblocks pushers + makes future pops return
+        # nil — necessary at process exit because a warmer mid-`VM.new`
+        # has the GVL released and would SEGV on interpreter teardown.
+        def shutdown
+          @queue.close
+          @threads.each {|t| t.join(2) }
+        end
+
+        private
+
+        def warmer_loop
+          loop { @queue.push(Quickjs::VM.new(**@vm_options)) }
+        rescue ClosedQueueError
+          # process exit
+        end
+      end
+
+      @@pool_lock = Mutex.new
+      @@pool      = nil
+
+      def self.pool
+        @@pool_lock.synchronize { @@pool ||= VmPool.new(VM_OPTIONS) }
+      end
+
+      at_exit do
+        @@pool_lock.synchronize { @@pool&.shutdown }
+      rescue StandardError
+        # Best-effort at process exit.
+      end
+
       def initialize(browser)
         @browser  = browser
         @vm       = nil
         @runnable = self.class.bridge_runnable
+        self.class.pool # eager-start the warmers on first Browser
       end
 
       def eval(code)
@@ -107,37 +161,39 @@ module Capybara
       # already the inter-test reset point.
       def reset_page = rebuild_ctx
 
+      # bridge.js patches `Intl.DateTimeFormat`; mini_racer ships ICU
+      # built-in but QuickJS gates it behind a polyfill flag. Other JS
+      # surfaces bridge.js touches (URL / TextEncoder / atob/btoa /
+      # crypto) are already routed through Ruby-side host fns, so
+      # POLYFILL_INTL is the only one we strictly need.
+      #
+      # `max_stack_size: 0` — `JS_SetMaxStackSize` measures C stack
+      # delta from runtime construction; Ruby callers reach QuickJS
+      # through deep stacks (Capybara `synchronize` + RSpec matchers +
+      # bridge.js's class init closures), so the default 4 MB trips on
+      # routine `check_stale → __csimAlive` calls. `0` disables the
+      # check; OS thread stack is the real ceiling.
+      #
+      # `timeout_msec: (2**31)-1` — quickjs.rb default eval timeout is
+      # 100 ms; bridge.js's `__csimEvaluateXPath` / `__csimDispatchEvent`
+      # chains routinely exceed that on Avo-scale documents under
+      # QuickJS's interpreter. 0 means "interrupt immediately" (the
+      # handler returns `elapsed >= limit_ms`, so 0 fires on the first
+      # check), so practical no-limit.
+      VM_OPTIONS = {
+        features:       [Quickjs::POLYFILL_INTL].freeze,
+        max_stack_size: 0,
+        timeout_msec:   (2**31) - 1
+      }.freeze
+
       private
 
       def vm
         @vm ||= build_vm
       end
 
-      # bridge.js patches `Intl.DateTimeFormat`; mini_racer ships ICU
-      # built-in but QuickJS gates it behind a polyfill flag. Other JS
-      # surfaces bridge.js touches (URL / TextEncoder / atob/btoa /
-      # crypto) are already routed through Ruby-side host fns, so
-      # POLYFILL_INTL is the only one we strictly need.
-      VM_FEATURES = [Quickjs::POLYFILL_INTL].freeze
-
-      # `JS_SetMaxStackSize` measures C stack delta from runtime
-      # construction; Ruby callers reach QuickJS through deep stacks
-      # (Capybara `synchronize` + RSpec matchers + bridge.js's class
-      # init closures), so the default 4 MB trips on routine
-      # check_stale → __csimAlive calls. `0` disables the check; we
-      # let the OS thread stack be the real ceiling.
-      VM_MAX_STACK = 0
-
-      # quickjs.rb default eval timeout is 100 ms; bridge.js's
-      # `__csimEvaluateXPath` / `__csimDispatchEvent` chains routinely
-      # exceed that on Avo-scale documents under QuickJS's interpreter.
-      # 0 means "interrupt immediately" (the handler returns `elapsed
-      # >= limit_ms`, so 0 fires on the first check), so bump to a
-      # practical no-limit.
-      VM_TIMEOUT_MS = (2**31) - 1
-
       def build_vm
-        v = Quickjs::VM.new(features: VM_FEATURES, max_stack_size: VM_MAX_STACK, timeout_msec: VM_TIMEOUT_MS)
+        v = self.class.pool.checkout
         @runnable.run(on: v)
         attach_host_fns(v)
         v
