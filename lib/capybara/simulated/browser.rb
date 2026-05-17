@@ -25,7 +25,6 @@ module Capybara
       # selenium). Honors `Cache-Control` / `Expires` / `ETag` /
       # `Last-Modified` per RFC 9111.
       @@asset_cache = AssetCache.new
-      def self.asset_cache = @@asset_cache
 
       attr_writer :timers_active
 
@@ -1495,31 +1494,12 @@ module Capybara
           cache_entry = method == 'GET' ? @@asset_cache.lookup(target) : nil
           if cache_entry&.fresh?
             log_network(method, target, cache_entry.status)
-            return cached_response(cache_entry, target, redirected)
+            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
 
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
-          (headers || {}).each {|k, v|
-            name = k.to_s.upcase.tr('-', '_')
-            # CGI convention: `Content-Type` and `Content-Length` land in
-            # the env *without* the HTTP_ prefix. Rails / Rack params
-            # parsing reads `CONTENT_TYPE` and dispatches JSON / multipart
-            # parsers off it; sending it as `HTTP_CONTENT_TYPE` lets the
-            # request through but with the default `text/plain`, so JSON
-            # bodies from `@rails/request.js` never deserialise and the
-            # server reads an empty params hash.
-            if name == 'CONTENT_TYPE' || name == 'CONTENT_LENGTH'
-              env[name] = v.to_s
-            else
-              env["HTTP_#{name}"] = v.to_s
-            end
-          }
-          # Conditional revalidation headers — only for stale-cached GETs.
-          # The server then has the option to return 304 to skip a fresh
-          # body transfer.
-          if cache_entry && (rh = @@asset_cache.revalidation_headers(cache_entry))
-            rh.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
-          end
+          apply_request_headers(env, headers) if headers
+          apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
           status, resp_headers, resp_body = @app.call(env)
           merge_set_cookie(resp_headers)
@@ -1527,7 +1507,7 @@ module Capybara
           if status == 304 && cache_entry
             resp_body.close if resp_body.respond_to?(:close)
             @@asset_cache.refresh(cache_entry, resp_headers)
-            return cached_response(cache_entry, target, redirected)
+            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
           if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
             raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
@@ -1542,14 +1522,7 @@ module Capybara
           end
           body_str = read_rack_body(resp_body)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
-          return {
-            'status' => status,
-            'headers' => stringify(resp_headers),
-            'body' => body_str,
-            'url' => target,
-            'redirected' => redirected,
-            'type' => 'basic'
-          }
+          return response_hash(status, resp_headers, body_str, target, redirected)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -1557,14 +1530,31 @@ module Capybara
         nil
       end
 
-      def cached_response(entry, url, redirected)
+      # CGI convention: `Content-Type` and `Content-Length` land in env
+      # *without* the HTTP_ prefix. Rails / Rack params parsing reads
+      # `CONTENT_TYPE` and dispatches JSON / multipart parsers off it;
+      # sending it as `HTTP_CONTENT_TYPE` lets the request through but
+      # with the default `text/plain`, so JSON bodies from
+      # `@rails/request.js` never deserialise and the server reads an
+      # empty params hash.
+      def apply_request_headers(env, headers)
+        headers.each {|k, v|
+          name = k.to_s.upcase.tr('-', '_')
+          case name
+          when 'CONTENT_TYPE', 'CONTENT_LENGTH' then env[name] = v.to_s
+          else env["HTTP_#{name}"] = v.to_s
+          end
+        }
+      end
+
+      def response_hash(status, headers, body, url, redirected)
         {
-          'status' => entry.status,
-          'headers' => stringify(entry.headers),
-          'body' => entry.body,
-          'url' => url,
+          'status'     => status,
+          'headers'    => stringify(headers),
+          'body'       => body,
+          'url'        => url,
           'redirected' => redirected,
-          'type' => 'basic'
+          'type'       => 'basic'
         }
       end
 
