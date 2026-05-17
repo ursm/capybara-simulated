@@ -51,7 +51,7 @@ module Capybara
       # during `set_user`/sign-in, and an empty string trips
       # `IPAddr::AddressFamilyError`.
       # Keep `USER_AGENT` in sync with `navigator.userAgent` in
-      # `vendor/js/bridge.js` — the JS side ships in the V8
+      # `lib/capybara/simulated/js/bridge.js` — the JS side ships in the V8
       # snapshot, so injecting from Ruby at boot would defeat snapshot
       # warmth.
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated (V8-resident DOM)'
@@ -136,7 +136,7 @@ module Capybara
       end
 
       # `console.*` short-circuits to a property read when this flag
-      # is false (see `vendor/js/bridge.js`). The flag is a JS-side
+      # is false (see `lib/capybara/simulated/js/bridge.js`). The flag is a JS-side
       # global, so it has to be re-applied after every `rebuild_ctx`
       # while a trace is live — without this, page scripts that run
       # during the per-visit `__csimLoadDocument` log to a stale

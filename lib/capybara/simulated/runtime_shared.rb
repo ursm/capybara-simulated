@@ -13,9 +13,9 @@ module Capybara
     # own attach API (mini_racer's `Context#attach` vs quickjs.rb's
     # `Quickjs::VM#define_function`).
     module RuntimeShared
-      BRIDGE_JS    = File.expand_path('../../../vendor/js/bridge.js',          __dir__).freeze
-      WGXPATH_JS   = File.expand_path('../../../vendor/js/wgxpath.js',         __dir__).freeze
-      SNAPSHOT_STUBS_JS = File.expand_path('../../../vendor/js/snapshot_stubs.js', __dir__).freeze
+      BRIDGE_JS         = File.expand_path('js/bridge.js',                 __dir__).freeze
+      SNAPSHOT_STUBS_JS = File.expand_path('js/snapshot_stubs.js',         __dir__).freeze
+      WGXPATH_JS        = File.expand_path('../../../vendor/js/wgxpath.js', __dir__).freeze
 
       def self.snapshot_stubs_src = File.read(SNAPSHOT_STUBS_JS)
       def self.bridge_src         = File.read(BRIDGE_JS)

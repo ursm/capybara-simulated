@@ -32,7 +32,8 @@ gem 'capybara-simulated', group: :test
 gem 'mini_racer',         group: :test  # JS engine — pick one
 ```
 
-`bundle install`. The gem ships its JS bridge under `vendor/js/`, so
+`bundle install`. The gem ships its JS bridge under
+`lib/capybara/simulated/js/`, with wgxpath under `vendor/js/`, so
 there's no Node toolchain at consume time.
 
 ### JS engine
@@ -312,25 +313,26 @@ run-to-run measurement noise.
 
 ## Architecture
 
-- `vendor/js/bridge.js` — the entire DOM lives here. `Document` /
-  `Element` / `Text` / `DocumentFragment` / `ShadowRoot` classes;
-  CSS selector tokeniser + matcher; event dispatch (capture / target
-  / bubble phases with `dispatchEvent(target, event)`); virtual
-  `setTimeout` / `setInterval` / `requestAnimationFrame` clock;
-  MutationObserver; custom-element registry; `Range` /
-  `getSelection`; cascade resolver for `display` / `visibility` /
-  `text-transform` / layout primitives. wgxpath sits on top for
-  XPath. Approx 7000 lines.
+- `lib/capybara/simulated/js/bridge.js` — the entire DOM lives here.
+  `Document` / `Element` / `Text` / `DocumentFragment` / `ShadowRoot`
+  classes; CSS selector tokeniser + matcher; event dispatch
+  (capture / target / bubble phases with `dispatchEvent(target,
+  event)`); virtual `setTimeout` / `setInterval` /
+  `requestAnimationFrame` clock; MutationObserver; custom-element
+  registry; `Range` / `getSelection`; cascade resolver for `display`
+  / `visibility` / `text-transform` / layout primitives. wgxpath
+  (true third-party, under `vendor/js/`) sits on top for XPath.
+  Approx 7000 lines.
 - `lib/capybara/simulated/browser.rb` — Rack client, history stack,
   modal handler queue, virtual-clock anchor, trace recorder. Owns
-  the V8 runtime via `Runtime`. The hot operations (`find_css` /
-  `find_xpath` / DOM ops / event dispatch) are single-`Context#call`
-  round-trips returning handle id arrays; per-result iteration stays
-  Ruby-side.
-- `lib/capybara/simulated/runtime.rb` — V8 base-snapshot build +
-  per-Context pool. The base snapshot caches bridge.js + wgxpath
-  bytecode so each Context spawn is sub-millisecond. Pool refills
-  in a background thread.
+  the JS runtime via `V8Runtime` or `QuickJSRuntime`. The hot
+  operations (`find_css` / `find_xpath` / DOM ops / event dispatch)
+  are single-`Context#call` round-trips returning handle id arrays;
+  per-result iteration stays Ruby-side.
+- `lib/capybara/simulated/v8_runtime.rb` / `quickjs_runtime.rb` —
+  per-engine wrappers, common bits in `runtime_shared.rb`. The V8
+  base-snapshot (and the QuickJS bytecode equivalent) caches
+  bridge.js + wgxpath so each Context spawn is sub-millisecond.
 - `lib/capybara/simulated/driver.rb` — Capybara `Driver::Base`
   surface (visit / find / execute_script / window handling / modal /
   tracing API).

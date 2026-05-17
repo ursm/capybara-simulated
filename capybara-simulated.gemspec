@@ -20,6 +20,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     'lib/**/*.rb',
+    'lib/**/*.js',
     'vendor/js/*.js',
     'README.md',
     'LICENSE'
