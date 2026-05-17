@@ -89,17 +89,15 @@ module Capybara
       # aux window {handle, url} pair. Aux windows have no JS VM and no
       # DOM — `page.current_url` works inside `within_window`, but DOM
       # queries don't. Sufficient for "PDF opens in new tab" assertions
-      # (Avo's `open_field_attachment` test). Full per-window VMs were
-      # in v2 (`Driver#open_aux_window`); v3 defers them until a real
-      # test needs more than URL tracking.
-      PRIMARY_HANDLE = 'csim-v3-window-0'
+      # (Avo's `open_field_attachment` test).
+      PRIMARY_HANDLE = 'csim-window-0'
       def current_window_handle    = @active_handle || PRIMARY_HANDLE
       def window_handles
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
       def open_aux_window(url)
         @next_window_seq += 1
-        handle = "csim-v3-window-#{@next_window_seq}"
+        handle = "csim-window-#{@next_window_seq}"
         @aux_windows << {handle: handle, url: url}
         handle
       end
@@ -120,8 +118,7 @@ module Capybara
       end
       def resize_window_to(_, w, h) = browser.set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly
-      # rather than through `current_window.resize_to`; mirror v2 by
-      # exposing the same shortcut.
+      # rather than through `current_window.resize_to`.
       def resize(w, h) = browser.set_viewport(w, h)
       def maximize_window(_)       ; nil ; end
 
@@ -154,7 +151,6 @@ module Capybara
         else value
         end
       end
-      public
 
       def invalid_element_errors = [Capybara::Simulated::StaleElement]
       def no_such_window_error   = Capybara::WindowError
@@ -212,7 +208,6 @@ module Capybara
       private def modal_text_matches?(matcher, message)
         matcher.is_a?(Regexp) ? matcher.match?(message) : message.include?(matcher.to_s)
       end
-      public
     end
   end
 end

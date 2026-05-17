@@ -1,11 +1,7 @@
-// v3 bridge: DOM lives entirely in V8. No __dom callbacks. Capybara's
-// Ruby side dispatches via `Context#call('__csim<Op>', args)` at the
+// The DOM lives entirely in V8. No __dom callbacks. Capybara's Ruby
+// side dispatches via `Context#call('__csim<Op>', args)` at the
 // granularity of Capybara actions (visit / click / find / has_? / …),
 // not per DOM op.
-//
-// PoC milestone 1 surface: just enough to verify a Browser instance
-// can `visit` a static-body app and `find('#x').text` round-trips.
-// Each milestone adds more.
 
 (function () {
   'use strict';
@@ -217,8 +213,8 @@
     get clientWidth()  { return __isVisibleNode(this) ? 1 : 0; }
     get clientHeight() { return __isVisibleNode(this) ? 1 : 0; }
     get scrollWidth()  { return __isVisibleNode(this) ? 1 : 0; }
-    // Approximate scrollHeight as 20px/line over 80 chars/line (v2's
-    // heuristic) so content-length gates fire. Avo's Trix body checks
+    // Approximate scrollHeight as 20px/line over 80 chars/line so
+    // content-length gates fire. Avo's Trix body checks
     // `scrollHeight > some-threshold` to decide whether to inject the
     // "More content" expander; a flat `1` keeps it from ever rendering.
     // Counts element children only (whitespace text nodes between
@@ -968,9 +964,10 @@
       });
       return this._datasetProxy;
     }
-    // querySelector / matches: PoC supports the small subset Capybara
-    // emits internally (tag, #id, .class, [attr=value], descendant
-    // combinator). Full CSS3 deferred to a proper port.
+    // querySelector / matches: supports the subset Capybara emits
+    // internally (tag, #id, .class, [attr=value], descendant combinator).
+    // Compound queries fall back to Nokogiri's CSS-to-XPath on the
+    // Ruby side via find_css.
     querySelector(sel)        { return findFirst(this, parseSelector(__normaliseScopedSelector(sel))); }
     querySelectorAll(sel)     { return findAll(this, parseSelector(__normaliseScopedSelector(sel))); }
     matches(sel)              { return matchOne(this, parseSelector(sel)); }
@@ -1072,10 +1069,9 @@
       const form = formForControl(this);
       return form ? __formNamedAccess(form) : null;
     }
-    // Form-control IDL attributes. v2 leans on Nokogiri attribute
-    // mirroring; here we expose the same pair-of-attr-and-IDL shape
-    // so JS like `input.value = 'x'` / `input.checked = true` works
-    // and reads back via `__csimValue` / serialised attrs alike.
+    // Form-control IDL attributes — expose the pair-of-attr-and-IDL
+    // shape so JS like `input.value = 'x'` / `input.checked = true`
+    // works and reads back via `__csimValue` / serialised attrs alike.
     get value() {
       // `<select>.value` is the value of the first selected option, or
       // (per HTML spec) the value of the first non-disabled option as
@@ -1269,10 +1265,10 @@
     set readOnly(v){ if (v) this._attrs.readonly = ''; else delete this._attrs.readonly; }
     get required() { return this._attrs.required != null; }
     set required(v){ if (v) this._attrs.required = ''; else delete this._attrs.required; }
-    // Constraint validation API — PoC stubs. We don't actually run
-    // the validation algorithm, so `valid` is always true and the
-    // message is empty. Frameworks (Stimulus form controllers,
-    // Capybara's `:valid` filter) probe these without crashing.
+    // Constraint validation API — partial. We compute a subset of the
+    // validity flags below (enough for `:valid` / `:invalid` selectors
+    // and the common Stimulus form-controller probes); the full
+    // algorithm including custom validators isn't run.
     get validity() {
       // Compute the subset of HTML5 validity flags Capybara's specs
       // gate on: `valueMissing` (required + empty), `patternMismatch`
@@ -1520,10 +1516,10 @@
   // from Node. nodeType=11 per spec. The unique twist: when a
   // DocumentFragment is appended to a real parent, its children move
   // and the fragment is left empty — Node.appendChild has to detect
-  // this and splice. v3 PoC keeps the simple form (a fragment can
-  // hold children; users typically iterate `.childNodes` themselves
-  // before splicing) so jQuery's "build then splice via firstChild"
-  // pattern works.
+  // this and splice. We keep the simple form (a fragment can hold
+  // children; users typically iterate `.childNodes` themselves before
+  // splicing) so jQuery's "build then splice via firstChild" pattern
+  // works.
   const NODE_FRAGMENT = 11;
   class DocumentFragment extends Node {
     constructor() {
@@ -1802,7 +1798,7 @@
       return ev;
     }
     // `Document.importNode(node, deep)` — clone of `node` adopted into
-    // this document. v3 only has one document at a time, so this is
+    // this document. We only have one document at a time, so this is
     // an alias for `cloneNode(deep)`. Turbo Drive's
     // `importStreamElements` uses `document.importNode(streamElement,
     // true)` to graft turbo-stream fragments into the live tree.
@@ -2174,7 +2170,7 @@
     return false;
   }
   // Clone the content covered by `range` into a DocumentFragment.
-  // Spec-compliant; ported from v2's `clone_range_into` (Nokogiri).
+  // Spec-compliant.
   //
   // The recursive shape: each call to __cloneSlice clones one subtree
   // bounded by two optional cuts. A null cut means "no boundary on
@@ -2562,10 +2558,7 @@
 
   // ── Event class + dispatch walk ─────────────────────────────────
   //
-  // Capture / target / bubble per DOM4. PoC ignores listener `once` /
-  // `passive` and event-subclass IDL (KeyboardEvent / MouseEvent /
-  // InputEvent specifics) — enough to drive smoke-spec scenarios; v2's
-  // bridge.js has the full set when we need parity.
+  // Capture / target / bubble per DOM4.
 
   class Event {
     constructor(type, init) {
@@ -2693,7 +2686,7 @@
       // FormSubmitObserver / LinkClickObserver attach to `window`
       // with `{capture: true}` and call `event.preventDefault()` to
       // take over the navigation / submission; skipping the window
-      // hop means every form falls through to v3's Ruby-side
+      // hop means every form falls through to the Ruby-side
       // submit_form_handle without Turbo's turbo-stream Accept
       // header, and the receiving controller (e.g. Avo actions)
       // raises `ActionController::UnknownFormat`.
@@ -2770,7 +2763,7 @@
       if (!!cap !== !!capture) continue;
       if (event._propagationStopped) return;
       try { handler.call(globalThis, event); }
-      catch (e) { try { console.error('[csim v3] window listener threw:', e && e.message); } catch (_) {} }
+      catch (e) { try { console.error('[csim] window listener threw:', e && e.message); } catch (_) {} }
     }
   }
   function fireListeners(node, event, capture) {
@@ -2810,7 +2803,7 @@
           // own behaviour for event handlers).
           if (ret === false && event.cancelable) event.defaultPrevented = true;
         } catch (e) {
-          try { console.error('[csim v3] on-attribute handler threw:', e && e.message); } catch (_) {}
+          try { console.error('[csim] on-attribute handler threw:', e && e.message); } catch (_) {}
         }
       }
     }
@@ -2821,7 +2814,7 @@
       if (entry.capture !== capture) continue;
       if (event._immediatePropagationStopped) return;
       try { entry.handler.call(node, event); } catch (e) {
-        try { console.error('[csim v3] listener threw:', e && e.message); } catch (_) {}
+        try { console.error('[csim] listener threw:', e && e.message); } catch (_) {}
       }
     }
   }
@@ -3030,7 +3023,7 @@
         obs._records = [];
         try { obs._cb(mine, obs); }
         catch (e) {
-          try { console.error('[csim v3] MO callback threw:', e && e.message); } catch (_) {}
+          try { console.error('[csim] MO callback threw:', e && e.message); } catch (_) {}
         }
       }
       // Visibility-tracking IOs piggyback on the same drain so that a
@@ -3101,7 +3094,7 @@
     try {
       Reflect.construct(ctor, [], ctor);
     } catch (e) {
-      try { console.error('[csim v3] custom element constructor threw:', e && e.message); } catch (_) {}
+      try { console.error('[csim] custom element constructor threw:', e && e.message); } catch (_) {}
       try { Object.setPrototypeOf(el, ctor.prototype); } catch (_) {}
     } finally {
       __pendingUpgrade = null;
@@ -3117,7 +3110,7 @@
       for (const name of observed) {
         if (Object.prototype.hasOwnProperty.call(el._attrs, name)) {
           try { fn.call(el, name, null, el._attrs[name], null); }
-          catch (e) { try { console.error('[csim v3] attributeChangedCallback (upgrade) threw:', e && e.message); } catch (_) {} }
+          catch (e) { try { console.error('[csim] attributeChangedCallback (upgrade) threw:', e && e.message); } catch (_) {} }
         }
       }
     }
@@ -3127,7 +3120,7 @@
       const fn = el[hookName];
       if (typeof fn === 'function') fn.call(el);
     } catch (e) {
-      try { console.error('[csim v3] custom element ' + hookName + ' threw:', e && e.message); } catch (_) {}
+      try { console.error('[csim] custom element ' + hookName + ' threw:', e && e.message); } catch (_) {}
     }
   }
   // `attributeChangedCallback(name, oldValue, newValue, namespace)`
@@ -3146,7 +3139,7 @@
     const fn = el.attributeChangedCallback;
     if (typeof fn !== 'function') return;
     try { fn.call(el, name, oldValue, newValue, null); }
-    catch (e) { try { console.error('[csim v3] attributeChangedCallback threw:', e && e.message); } catch (_) {} }
+    catch (e) { try { console.error('[csim] attributeChangedCallback threw:', e && e.message); } catch (_) {} }
   }
   function isConnected(node) {
     let cur = node;
@@ -3252,7 +3245,7 @@
     if (!body) return;
     try { (0, eval)(body); }
     catch (e) {
-      try { console.error('[csim v3] dynamic script threw:', e && e.message); } catch (_) {}
+      try { console.error('[csim] dynamic script threw:', e && e.message); } catch (_) {}
     }
   }
   function fireCEDisconnect(subtree) {
@@ -3282,8 +3275,7 @@
   // Each parsed unit is a `compound` plus the combinator that connects
   // it to the previous compound in the same complex selector.
   //
-  // Compound shape (kept compatible with the old PoC matcher so
-  // querySelector / closest / matches just keep working):
+  // Compound shape:
   //   { tag: string|null, id: string|null, classes: string[],
   //     attrs: [{name, op?, value?}], pseudos: [{name, args?}],
   //     combinator: 'descendant'|'child'|'adjacent'|'sibling'|null }
@@ -3350,13 +3342,13 @@
       if (c === '*') { tokens.push({ kind: 'star' }); i++; continue; }
       if (c === '#') {
         const [name, j] = readIdent(s, i + 1);
-        if (j === i + 1) throw new SyntaxError('csim v3: bad #id at ' + i);
+        if (j === i + 1) throw new SyntaxError('csim: bad #id at ' + i);
         tokens.push({ kind: 'hash', value: name });
         i = j; continue;
       }
       if (c === '.') {
         const [name, j] = readIdent(s, i + 1);
-        if (j === i + 1) throw new SyntaxError('csim v3: bad .class at ' + i);
+        if (j === i + 1) throw new SyntaxError('csim: bad .class at ' + i);
         tokens.push({ kind: 'class', value: name });
         i = j; continue;
       }
@@ -3367,7 +3359,7 @@
           else if (s[j] === ']') depth--;
           if (depth > 0) j++;
         }
-        if (j >= len) throw new SyntaxError('csim v3: unterminated [attr] at ' + i);
+        if (j >= len) throw new SyntaxError('csim: unterminated [attr] at ' + i);
         tokens.push({ kind: 'attr', value: s.slice(i + 1, j) });
         i = j + 1; continue;
       }
@@ -3381,7 +3373,7 @@
         const nameStart = j;
         while (j < len && /[\w-]/.test(s[j])) j++;
         const name = s.slice(nameStart, j);
-        if (!name) throw new SyntaxError('csim v3: bad pseudo at ' + i);
+        if (!name) throw new SyntaxError('csim: bad pseudo at ' + i);
         let args = null;
         if (s[j] === '(') {
           let depth = 1, k = j + 1;
@@ -3390,7 +3382,7 @@
             else if (s[k] === ')') depth--;
             if (depth > 0) k++;
           }
-          if (k >= len) throw new SyntaxError('csim v3: unterminated pseudo args at ' + i);
+          if (k >= len) throw new SyntaxError('csim: unterminated pseudo args at ' + i);
           args = s.slice(j + 1, k);
           j = k + 1;
         }
@@ -3408,9 +3400,9 @@
         // flattening; in stand-alone selectors we treat it as a sentinel
         // the flattener will substitute before parsing. Reaching it here
         // is a programming error.
-        throw new SyntaxError('csim v3: stray & in selector');
+        throw new SyntaxError('csim: stray & in selector');
       }
-      throw new SyntaxError('csim v3: unexpected selector char: ' + JSON.stringify(c) + ' at ' + i);
+      throw new SyntaxError('csim: unexpected selector char: ' + JSON.stringify(c) + ' at ' + i);
     }
     return tokens;
   }
@@ -3439,7 +3431,7 @@
     // accept `(?:\\.|[\w-])+` in the name and strip the backslashes
     // before lower-casing.
     const m = /^\s*((?:\\.|[\w-])+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+)))?\s*([isIS])?\s*$/.exec(s);
-    if (!m) throw new SyntaxError('csim v3: bad attr selector: ' + s);
+    if (!m) throw new SyntaxError('csim: bad attr selector: ' + s);
     const flag = m[6];
     return {
       name: m[1].replace(/\\(.)/g, '$1').toLowerCase(),
@@ -3468,11 +3460,11 @@
   function parsePseudoToken(name, args) {
     const n = name.toLowerCase();
     if (n === 'not' || n === 'is' || n === 'where') {
-      if (args == null) throw new SyntaxError('csim v3: ' + n + ' needs args');
+      if (args == null) throw new SyntaxError('csim: ' + n + ' needs args');
       return { name: n, list: parseSelector(args) };
     }
     if (PSEUDO_NTH.has(n)) {
-      if (args == null) throw new SyntaxError('csim v3: ' + n + ' needs args');
+      if (args == null) throw new SyntaxError('csim: ' + n + ' needs args');
       return { name: n, nth: parseNth(args) };
     }
     if (PSEUDO_NO_ARG.has(n)) return { name: n };
@@ -3482,7 +3474,7 @@
         n === 'placeholder' || n === 'selection' || n === 'marker' || n === 'backdrop') {
       return { name: '__never_match__' };
     }
-    throw new SyntaxError('csim v3: unsupported pseudo :' + n);
+    throw new SyntaxError('csim: unsupported pseudo :' + n);
   }
 
   function parseNth(s) {
@@ -3499,7 +3491,7 @@
     }
     const mb = /^([+-]?\d+)$/.exec(t);
     if (mb) return { a: 0, b: parseInt(mb[1], 10) };
-    throw new SyntaxError('csim v3: bad nth expression: ' + s);
+    throw new SyntaxError('csim: bad nth expression: ' + s);
   }
 
   function parseSelector(sel) {
@@ -3560,7 +3552,7 @@
       if (t.kind === 'pseudo'){ c.pseudos.push(parsePseudoToken(t.value, t.args)); consumed = true; i++; continue; }
       break;
     }
-    if (!consumed) throw new SyntaxError('csim v3: empty compound selector');
+    if (!consumed) throw new SyntaxError('csim: empty compound selector');
     return { compound: c, next: i };
   }
 
@@ -3857,12 +3849,11 @@
     return hit;
   }
 
-  // ── HTML parser (tag-soup, just enough for smoke) ───────────────
+  // ── HTML parser (tag-soup) ──────────────────────────────────────
   //
-  // PoC: handles void elements, attribute syntax, text nodes,
-  // simple <script>/<style> raw-text. Ignores DOCTYPE / comments.
-  // No table-body insertion mode, no SVG. Replace with parse5 or a
-  // proper port once milestone 2 is solid.
+  // Handles void elements, attribute syntax, text nodes, and simple
+  // <script>/<style> raw-text. Ignores DOCTYPE / comments. No
+  // table-body insertion mode, no SVG.
 
   const VOID = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
   const RAWTEXT = new Set(['script','style']);
@@ -4194,7 +4185,7 @@
     if (!list || !list.length) return true;
     for (const { handler } of list.slice()) {
       try { handler.call(globalThis, event); }
-      catch (e) { try { console.error('[csim v3] window listener threw:', e && e.message); } catch (_) {} }
+      catch (e) { try { console.error('[csim] window listener threw:', e && e.message); } catch (_) {} }
     }
     return !event.defaultPrevented;
   };
@@ -4598,9 +4589,9 @@
     takeRecords ()           { return []; }
   }
   // Eager `IntersectionObserver` — fires `isIntersecting: true` for any
-  // observed element that v3's visibility check ("true unless something
-  // says hidden") accepts. v3 has no layout, so we treat anything not
-  // explicitly hidden as in-viewport. Turbo's lazy `<turbo-frame>`s and
+  // observed element the visibility check ("true unless something says
+  // hidden") accepts. No layout engine means anything not explicitly
+  // hidden is treated as in-viewport. Turbo's lazy `<turbo-frame>`s and
   // Stimulus's lazy-load patterns rely on the observer firing to start
   // their fetches — with a no-op stub, lazy turbo-frames never load
   // their `src` and `has_many`/`has_and_belongs_to_many`/`comments_frame`
@@ -4650,7 +4641,7 @@
           time:               0
         }], this);
       } catch (e) {
-        try { console.error('[csim v3] IntersectionObserver cb threw:', e && e.message); } catch (_) {}
+        try { console.error('[csim] IntersectionObserver cb threw:', e && e.message); } catch (_) {}
       }
     }
   };
@@ -4712,7 +4703,7 @@
           if (typeof h === 'function') h.call(this, event);
           else                          h.handleEvent.call(h, event);
         } catch (e) {
-          try { console.error('[csim v3] EventTarget listener threw:', e && e.message); } catch (_) {}
+          try { console.error('[csim] EventTarget listener threw:', e && e.message); } catch (_) {}
         }
       }
       return !event.defaultPrevented;
@@ -5254,8 +5245,8 @@
   // ── Fetch / URL / Headers / FormData / URLSearchParams ──────────
   //
   // Modern Stimulus controllers + `@rails/request.js` lean on
-  // `window.fetch(url, opts)` + `URL` / `Headers` / `FormData`. The
-  // PoC implementation is synchronous-under-the-hood — `__rackFetch`
+  // `window.fetch(url, opts)` + `URL` / `Headers` / `FormData`. Our
+  // implementation is synchronous under the hood — `__rackFetch`
   // resolves the Rack app inline — but the public surface looks like
   // the real async fetch (returns a Promise; `Response#text/json`
   // also return Promises). V8 microtasks drain after each Context#eval
@@ -5832,11 +5823,16 @@
     };
   }
   globalThis.__csimTakePendingFormSubmit = __takePendingFormSubmit;
-  // Toggle the ESM-script-execution flag. Ruby-side `apply_esm_flag`
-  // calls this after each per-visit Context rebuild so the snapshot's
-  // (uninitialised) state gets the current setting without paying a
-  // `Context#eval` string compile per visit.
-  globalThis.__csimSetEsmEnabled = function (v) { globalThis.__csim_esm_enabled = !!v; };
+  globalThis.__csimTakePendingNavigation = function () {
+    const p = globalThis.__csimPendingNavigation;
+    globalThis.__csimPendingNavigation = null;
+    return p;
+  };
+  globalThis.__csimTakePendingDownload = function () {
+    const p = globalThis.__csimPendingDownload;
+    globalThis.__csimPendingDownload = null;
+    return p;
+  };
   // Mutation hooks (called from Node.prototype.{appendChild, insertBefore,
   // replaceChild, removeChild} and `innerHTML` setter). Keeps the
   // handle registry in sync so Capybara's `find` results stay live
@@ -5854,10 +5850,8 @@
 
   // Replace the document with a freshly-parsed one. Capybara's `visit`
   // ends up here. After parse, walk top-level `<script>` elements and
-  // eval their text — that's enough to drive inline scripts that
-  // populate globals tests then read via evaluate_script. External
-  // `<script src>` / `defer` / `async` ordering lifts in once
-  // resource fetching ports to v3.
+  // eval their bodies (inline) or route through the Rack-backed loader
+  // (`<script src>` and `<script type=module>`).
   globalThis.__csimLoadDocument = function (html) {
     // Each Capybara visit lands here on a freshly-checked-out Context
     // from the snapshot pool. The Context is either:
@@ -5982,18 +5976,14 @@
   function runInlineScripts(doc) {
     if (!doc || !doc.documentElement) return;
     // Importmaps land first so `<script type="module">` can resolve
-    // bare specifiers against them. The module-execution path is
-    // gated by a Ruby-side env-var feature flag because activating
-    // Stimulus / Hotwire here surfaces a regression on Redmine where
-    // legacy jQuery handlers fire twice and intercept the form
-    // submit. Once that's untangled the default flips on.
+    // bare specifiers against them.
     ingestImportmaps(doc);
     const scripts = doc.documentElement.querySelectorAll('script');
     for (const s of scripts) {
       const type = (s._attrs.type || '').toLowerCase();
       if (type === 'importmap') continue;  // already consumed
       if (type === 'module') {
-        if (globalThis.__csim_esm_enabled) runModuleScript(s);
+        runModuleScript(s);
         continue;
       }
       if (type && !SCRIPT_TYPES_CLASSIC.has(type)) continue;
@@ -6016,7 +6006,7 @@
       try { (0, eval)(body); } catch (e) {
         try {
           const where = s._attrs.src || ('(inline) ' + body.slice(0, 120).replace(/\s+/g, ' '));
-          console.error('[csim v3] script threw in', where, ':', e && (e.stack || e.message));
+          console.error('[csim] script threw in', where, ':', e && (e.stack || e.message));
         } catch (_) {}
       }
     }
@@ -6038,7 +6028,7 @@
       const url = resolveAgainst(s._attrs.src, baseUrl);
       try { __csim_require(url); }
       catch (e) {
-        try { console.error('[csim v3] module', url, 'failed:', e && e.message); } catch (_) {}
+        try { console.error('[csim] module', url, 'failed:', e && e.message); } catch (_) {}
       }
     } else {
       const body = scriptText(s);
@@ -6050,7 +6040,7 @@
       globalThis.__csim_inlineSources[url] = body;
       try { __csim_require(url); }
       catch (e) {
-        try { console.error('[csim v3] inline module failed:', e && e.message); } catch (_) {}
+        try { console.error('[csim] inline module failed:', e && e.message); } catch (_) {}
       }
     }
   }
@@ -6091,8 +6081,8 @@
   const __csim_importmap  = globalThis.__csim_importmap;
 
   // EsmRewriter collapses `import(spec)` into a regular call site —
-  // this is the function it points at. Synchronous Promise wrapper
-  // matches what v2's V8 path does.
+  // this is the function it points at. Returns a synchronously-
+  // resolved Promise so user code awaiting it doesn't block.
   globalThis.__csim_dynamicImport = function (spec) {
     try {
       // Dynamic specifiers are computed at runtime; resolve via the
@@ -6190,11 +6180,10 @@
 
   // Capybara's `Session#evaluate_script` reaches here. Wrap the code
   // in a function so it sees `arguments[N]` and an implicit return
-  // hands back the last expression. Mirrors v2's `__evalScript`
-  // contract closely enough for the smoke tests. Args coming over
-  // the wire may include `{__elementHandle: id}` sentinels (Capybara
-  // passing Node instances); rehydrate them to live Element refs so
-  // user scripts can call methods on them.
+  // hands back the last expression. Args coming over the wire may
+  // include `{__elementHandle: id}` sentinels (Capybara passing Node
+  // instances); rehydrate them to live Element refs so user scripts
+  // can call methods on them.
   // `eval(code)` inside the function body sees that function's
   // `arguments`, so user scripts referencing `arguments[i]` work the
   // same way as selenium / chrome. eval also handles statements vs
@@ -6274,7 +6263,7 @@
       // Match Capybara's selenium driver: throw `Capybara::ElementNotFound`
       // for bad XPath. Surface to Ruby as a sentinel so the caller can
       // raise; for now we just return an empty result and log.
-      try { console.error('[csim v3] XPath threw:', e && e.message, 'for', xpath); } catch (_) {}
+      try { console.error('[csim] XPath threw:', e && e.message, 'for', xpath); } catch (_) {}
       return [];
     }
     const out = [];
@@ -6335,7 +6324,7 @@
     return n.getAttribute ? n.getAttribute(name) : null;
   };
   globalThis.__csimHasAttr   = function (h, name) { const n = lookup(h); return !!(n && n.hasAttribute && n.hasAttribute(name)); };
-  // Visibility walk mirroring v2's `self_hidden?` + ancestor chain:
+  // Visibility walk — `self_hidden?` + ancestor chain:
   // INVISIBLE_TAGS (head/script/style/template/noscript/title),
   // `<input type=hidden>`, `hidden` attribute, inline `style=`
   // `display:none` / `visibility:hidden`. Cascade-derived rules
@@ -6817,7 +6806,7 @@
   }
 
   // Walk every `<style>` and `<link rel=stylesheet>` once and pull
-  // out the two slices of cascade state v3 cares about — hide rules
+  // out the two slices of cascade state we care about — hide rules
   // (display / visibility, for `visible?`) and layout rules
   // (`top/left/width/height` + `text-transform`, for click-offset
   // resolution and visible-text upper-casing). One Rack fetch per
@@ -6942,7 +6931,7 @@
     if (idx.universal.length) for (const r of idx.universal) cb(r);
   }
   // Tokenise `element.class` with a per-element cache. `\s+`-splitting
-  // is the single hottest regex in v3's JS profile because every
+  // is the single hottest regex in the JS profile because every
   // cascade lookup, `tailwindTextTransform` probe, and `[class~=…]`
   // selector match re-splits the same string. The cache key is the
   // raw class string — V8 interns string literals so the equality
@@ -7172,8 +7161,7 @@
   // skip the full cascade walk — the matching rule's value is
   // determined by the class name. Falls back to the cascade for
   // anything more elaborate (inline style with `!important`, a
-  // higher-specificity stylesheet rule). Mirrors v2's
-  // `CLASS_TEXT_TRANSFORM` shortcut in `Browser#node_transform`.
+  // higher-specificity stylesheet rule).
   const TAILWIND_TEXT_TRANSFORM = Object.assign(Object.create(null), {
     uppercase:    'uppercase',
     lowercase:    'lowercase',
@@ -7311,9 +7299,9 @@
     return n === firstEnabled;
   };
 
-  // `disabled?` mirrors v2's logic: only form controls (+ fieldset)
-  // can be disabled; an `<option>` inherits disabled from an ancestor
-  // `<select>` / `<optgroup>`; form controls inherit from an ancestor
+  // `disabled?` — only form controls (+ fieldset) can be disabled;
+  // an `<option>` inherits disabled from an ancestor `<select>` /
+  // `<optgroup>`; form controls inherit from an ancestor
   // `<fieldset disabled>` unless they sit inside its first `<legend>`.
   const FORM_CONTROLS = new Set(['input','select','textarea','button','optgroup','option']);
   globalThis.__csimDisabled = function (h) {
@@ -7353,9 +7341,6 @@
     const n = lookup(h);
     return n && n._attrs ? Object.assign({}, n._attrs) : {};
   };
-  // Lifetime / stale check. v2 pins a Nokogiri node; here the handle is
-  // alive iff it's still in `__handles`. Detaches drop on the next
-  // GC walk; for now we treat "in map" as "alive".
   // "Alive" = the node behind this handle is still attached to the
   // document tree. Handles outlive their nodes (the handle map keeps
   // a strong ref so JS-side ops on detached fragments stay coherent),
@@ -7566,8 +7551,7 @@
   // Form-field value reader. Mirrors what Capybara reads via
   // Node#value: input/textarea use `.value`, select returns its
   // selected option value, checkbox / radio surface their `.value` only
-  // when checked (rack-test parity). PoC: read `.value` attr / first
-  // option for select; refined as milestone-3 forms work lands.
+  // when checked (rack-test parity).
   globalThis.__csimValue = function (h) {
     const n = lookup(h);
     if (!n || n.nodeType !== NODE_ELEMENT) return null;
@@ -7617,8 +7601,8 @@
   // `__csimSerialize(h)` — outerHTML of the subtree, with each Element's
   // handle id baked into a `data-csim-handle` attribute so the Ruby
   // side can run libxml2-XPath against the serialised doc and recover
-  // node identities. One serialisation per `find_xpath` call; cheap
-  // compared to v2's per-element __dom callbacks.
+  // node identities. Used only by the `CSIM_XPATH=nokogiri` fallback;
+  // the default wgxpath path stays inside V8.
   globalThis.__csimSerialize = function (h) {
     const root = h ? lookup(h) : globalThis.document;
     if (!root) return '';
@@ -7651,14 +7635,13 @@
       : '';
   };
 
-  // Click resolver. PoC: maps an element click to one of three
-  // outcomes the Ruby side knows how to drive:
+  // Click resolver: maps an element click to one of three outcomes
+  // the Ruby side knows how to drive:
   //   - {kind:'navigate', url}  — <a href>
   //   - {kind:'submit',   formHandle}  — submit-button inside <form>
-  //   - null                    — everything else (checkbox/radio
+  //   - null                    — everything else; checkbox/radio
   //     toggling happens inline so Ruby sees the new state on the
-  //     follow-up read, and other clicks are no-ops until milestone 4
-  //     lands event dispatch).
+  //     follow-up read.
   // Minimal "is element focusable by a mouse click?" — used by
   // `__csimClickResolve` to mirror the HTML/UIEvents spec
   // mousedown-default-action focus transfer. Conservative whitelist:
@@ -8446,8 +8429,7 @@
         // IDL assignment. Only `<input type="range">` snaps to the
         // nearest valid step. flatpickr's minute/second inputs are
         // `type="number"` with `step="5"`; snapping at `.set(17)`
-        // turns it into 15 and the picker silently saves the wrong
-        // time. Mirrors v2's `clamp_numeric_input` distinction.
+        // turns it into 15 and the picker silently saves the wrong time.
         const num    = parseFloat(v);
         const min    = parseFloat(n._attrs.min);
         const max    = parseFloat(n._attrs.max);
@@ -8698,7 +8680,8 @@
   //   - inputs without `name`
   //   - disabled controls
   //   - unchecked checkbox / radio
-  //   - file inputs (PoC: no multipart yet)
+  //   - file inputs (reported separately as `fileInputs` for the
+  //     multipart submit path)
   //   - submit buttons other than the submitter
   globalThis.__csimFormSerialize = function (formHandle, submitterHandle) {
     const form = lookup(formHandle);
@@ -8801,12 +8784,11 @@
 
   // ── Virtual clock + timer queue ─────────────────────────────────
   //
-  // Lifted from v2 bridge.js. Tests don't sleep; Ruby calls
-  // `__drainTimers(N)` (`tick_real_time`) before each find / has_? so
-  // the virtual clock advances by however much wall-clock has actually
-  // elapsed between Capybara polls. `__setTimersActive` flips the
-  // Ruby-side `timers_active` flag so `Driver#wait?` returns true
-  // while work is pending.
+  // Tests don't sleep; Ruby calls `__drainTimers(N)` (`tick_real_time`)
+  // before each find / has_? so the virtual clock advances by however
+  // much wall-clock has actually elapsed between Capybara polls.
+  // `__setTimersActive` flips the Ruby-side `timers_active` flag so
+  // `Driver#wait?` returns true while work is pending.
 
   const __timers = new Map();        // id → {handler, args, due, period?}
   let   __nextTimerId = 1;
@@ -8851,7 +8833,7 @@
     Promise.resolve().then(() => {
       if (__rafCancelled.has(id)) { __rafCancelled.delete(id); return; }
       try { cb(__virtualNow); } catch (e) {
-        try { console.error('[csim v3] requestAnimationFrame cb threw:', e && (e.message || e)); } catch (_) {}
+        try { console.error('[csim] requestAnimationFrame cb threw:', e && (e.message || e)); } catch (_) {}
       }
     });
     return id;
@@ -9097,7 +9079,7 @@
       catch (e) {
         try {
           const where = (t.handler && t.handler.toString && t.handler.toString().slice(0, 200)) || '(no source)';
-          console.error('[csim v3] timer threw:', e && (e.stack || e.message), '\n  handler:', where);
+          console.error('[csim] timer threw:', e && (e.stack || e.message), '\n  handler:', where);
         } catch (_) {}
       }
       if (__observers.size && __hasQueuedRecords()) deliverMutations();

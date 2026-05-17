@@ -24,7 +24,7 @@ begin
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
   # (Standard Node distribution ships the post-processor; no extra
-  # install needed.) The log is per-isolate, so v3's per-visit
+  # install needed.) The log is per-isolate, so per-visit
   # `rebuild_ctx` produces one file per Context.
   if ENV['CSIM_V8_PROF'] == '1'
     MiniRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
@@ -59,9 +59,7 @@ module Capybara
         globalThis.__rackFetch              = function () { return null; };
         globalThis.__locationAssign         = function () { return null; };
         globalThis.__locationReload         = function () { return null; };
-        globalThis.__setListenedType        = function () { return null; };
         globalThis.__setTimersActive        = function () { return null; };
-        globalThis.__setIntersectionObserverActive = function () { return null; };
         globalThis.__setCurrentUrl          = function () { return null; };
         globalThis.__pushHistoryEntry       = function () { return null; };
         globalThis.__csimReadFilePick       = function () { return null; };
@@ -175,18 +173,12 @@ module Capybara
         # Every Context is built from the base snapshot (bridge +
         # wgxpath). Library scripts (`<script src>`) get evaluated
         # per-visit just like a real browser does on page navigation.
-        # Earlier app-warm snapshot machinery pre-evaluated the
-        # libraries into the snapshot heap so subsequent visits could
-        # skip them — but that also baked the libraries' page-specific
-        # side effects (jQuery's `readyList` Callbacks queue, with
-        # `$(handler)` callbacks from per-page scripts queued behind
-        # `DOMContentLoaded`) into every Context. A page-A callback
-        # that touched A-only DOM (`document.querySelector('#shadow')
-        # .attachShadow(...)`) would then throw when re-fired against
-        # page B, and jQuery's Callbacks aborts iteration mid-fire
-        # on a throw — dropping later callbacks (including the
-        # page-B script's own) on the floor. Per-visit eval matches
-        # real-browser SPA navigation semantics.
+        # Pre-evaluating libraries into the snapshot heap is not safe:
+        # jQuery's `readyList` Callbacks queue would carry `$(handler)`
+        # registrations from a prior page's scripts, and a single
+        # throwing handler (e.g. touching a DOM node that only existed
+        # on the prior page) aborts iteration mid-fire and silently
+        # drops every later callback — including the current page's.
         @snapshot = self.class.snapshot
         refill_pool_async
       end
@@ -214,7 +206,7 @@ module Capybara
       end
 
       def settle_gen
-        ctx.eval('__settleGenGet()').to_i
+        ctx.call('__settleGenGet').to_i
       end
 
       def has_ready_timer?
@@ -228,14 +220,11 @@ module Capybara
       end
 
       # Tears down the current Context and brings up a fresh one from
-      # the warm snapshot. Mirrors v2's "checkout fresh VM per visit"
-      # model: per CLAUDE.md / feedback_visit_always_rebuilds memory,
-      # partial in-Context state resets (the previous `__resetPage`
-      # approach) drift out of sync — library init guards stick,
-      # delegate registrations leak between visits. Rebuilding the
-      # Context is predictable and the snapshot warmup keeps the
-      # per-rebuild cost low (~3 ms baseline; jQuery / app bundle
-      # re-evaluation dominates).
+      # the warm snapshot. Partial in-Context resets are not safe (see
+      # feedback_visit_always_rebuilds memory): library init guards
+      # stick, delegate registrations leak between visits. The snapshot
+      # warmup keeps the per-rebuild cost ~3 ms; jQuery / app-bundle
+      # re-eval dominates after that.
       def rebuild_ctx
         old = @ctx
         @ctx = nil
@@ -312,7 +301,7 @@ module Capybara
       def safe_call
         yield
       rescue StandardError => e
-        warn "[capybara-simulated v3] host fn error: #{e.class}: #{e.message[0, 200]}"
+        warn "[capybara-simulated] host fn error: #{e.class}: #{e.message[0, 200]}"
         nil
       end
 
@@ -322,9 +311,7 @@ module Capybara
         c.attach('__rackFetch',                     ->(*a) { sc.() { browser.rack_fetch(a[0], a[1], a[2], a[3], a[4]) } })
         c.attach('__locationAssign',                ->(*a) { sc.() { browser.location_assign(a[0]); nil } })
         c.attach('__locationReload',                ->(*a) { sc.() { browser.location_reload; nil } })
-        c.attach('__setListenedType',               ->(*a) { sc.() { browser.set_listened_type(a[0], !!a[1]); nil } })
         c.attach('__setTimersActive',               ->(*a) { sc.() { browser.timers_active = !!a[0]; nil } })
-        c.attach('__setIntersectionObserverActive', ->(*a) { sc.() { browser.intersection_observer_active = !!a[0]; nil } })
         c.attach('__setCurrentUrl',                 ->(*a) { sc.() { browser.history_state(a[0]); nil } })
         c.attach('__pushHistoryEntry',              ->(*a) { sc.() { browser.history_push(a[0]); nil } })
         c.attach('__csimReadFilePick',              ->(*a) { sc.() { browser.read_file_pick(a[0], a[1], a[2], a[3]) } })

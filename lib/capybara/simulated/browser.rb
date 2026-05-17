@@ -18,8 +18,7 @@ module Capybara
     class Browser
       DEFAULT_HOST = 'http://www.example.com'
 
-      attr_reader :app, :runtime
-      attr_accessor :timers_active, :intersection_observer_active
+      attr_writer :timers_active
 
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
@@ -59,8 +58,6 @@ module Capybara
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated (V8-resident DOM)'
       REMOTE_ADDR = '127.0.0.1'
 
-      attr_accessor :driver
-
       def initialize(app, driver: nil)
         @app                          = app
         @driver                       = driver
@@ -71,7 +68,6 @@ module Capybara
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
-        @intersection_observer_active = false
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -101,7 +97,7 @@ module Capybara
         # - `on-failure` — record kind/url/console/network in-memory;
         #                  snapshot `dom_after` only on action error.
         # - `full`      — record + snapshot DOM after every action
-        #                 (v2-equivalent; debug-heavy).
+        #                 (debug-heavy).
         # File output is orthogonal — `CSIM_TRACE_DIR=path` makes the
         # test-runner hook persist the trace JSON there; unset means
         # in-memory only (no files written without explicit opt-in).
@@ -109,24 +105,6 @@ module Capybara
         @pending_trace    = nil
         @recording_action = false
         @trace_mode       = parse_trace_mode(ENV['CSIM_TRACE'])
-        # ESM loading is on by default — Stimulus boots end-to-end with
-        # the EventListener-object branch in `addEventListener`, and
-        # `CSIM_ESM=1`'s previous gating on a
-        # `addFormObserversForDoubleSubmit` double-register no longer
-        # reproduces (the snapshot path runs each library body once, so
-        # the legacy ready chain only registers once). Set
-        # `CSIM_ESM=0` to opt out for diagnostic comparison.
-        @esm_enabled = ENV['CSIM_ESM'] != '0'
-        apply_esm_flag
-      end
-
-      # Re-apply the `__csim_esm_enabled` global after a per-visit
-      # context rebuild — the warm snapshot doesn't carry it and the
-      # module-script branch in `runInlineScripts` reads it during
-      # `__csimLoadDocument`, so the flag has to land before the doc
-      # parse runs.
-      def apply_esm_flag
-        @runtime.call('__csimSetEsmEnabled', @esm_enabled)
       end
 
       # `console.*` short-circuits to a property read when this flag
@@ -164,7 +142,7 @@ module Capybara
         @runtime.call('__csimSetTimezone', ENV['TZ'].to_s)
       end
 
-      # ── Capybara DSL surface (just enough for milestone 2) ──────
+      # ── Capybara DSL surface ────────────────────────────────────
 
       # Address-bar navigation: no Referer, and relative paths resolve
       # against the host root (not the current page's directory).
@@ -175,7 +153,6 @@ module Capybara
       def resolve_visit_url(url)
         s = url.to_s
         return s if s =~ %r{\A[a-z]+://}i
-        require 'uri'
         host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || DEFAULT_HOST
         host_root = host_root.sub(/\/+$/, '')
         s = "/#{s}" unless s.start_with?('/')
@@ -189,7 +166,7 @@ module Capybara
 
       # Capybara routes plenty of compound CSS — `[type='submit']` /
       # pseudo classes / sibling combinators — through `find_css` even
-      # when the resolved locator is XPath. The v3 JS selector parser
+      # when the resolved locator is XPath. The JS-side selector parser
       # is intentionally minimal (tag / id / class / attr / descendant
       # / grouping). To get full Capybara coverage without growing
       # the JS parser, route through Nokogiri's CSS → XPath translator
@@ -408,10 +385,6 @@ module Capybara
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
-      # PoC click: anchors with href navigate; submit buttons trigger a
-      # form submission through the Rack app. Checkbox / radio toggle
-      # inline on the JS side (no Ruby trip). Everything else is a
-      # no-op until milestone 4 lands event dispatch.
       def click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
@@ -459,7 +432,7 @@ module Capybara
           url = action['url'].to_s
           target = action['target'].to_s
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
-          # in a new browsing context. v3's URL-only multi-window mode
+          # in a new browsing context. URL-only multi-window mode
           # records the URL against a fresh aux handle; the primary
           # stays put (per HTML spec — original window is unaffected).
           if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
@@ -530,12 +503,8 @@ module Capybara
         invalidate_find_cache
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # mini_racer rejects non-primitive types. Coerce to a path-list
-        # form V8 can hold. File-input handling stops here for v3 — the
-        # form-submit multipart path is a follow-up (v2 stores these in
-        # `@file_picks` and reads them back during build_multipart). Most
-        # tests that reach this codepath assert the picker UI state
-        # after attaching, not the actual upload, so the coerce alone
-        # unblocks them.
+        # form V8 can hold — the actual multipart upload happens later
+        # in `build_multipart_body` during form submission.
         coerced = coerce_set_value(value)
         # For date/time-shaped inputs we need the type-specific
         # string. Probe the handle's `type` and re-format Date / Time
@@ -578,9 +547,7 @@ module Capybara
         else
           @runtime.call('__csimSetValue', handle, coerced)
         end
-        consume_pending_form_submit
-        consume_pending_navigation
-        settle
+        drain_after_user_action
       end
 
       def coerce_set_value(v)
@@ -769,9 +736,7 @@ module Capybara
           end
         }.compact
         @runtime.call('__csimSendKeys', handle, atoms)
-        consume_pending_form_submit
-        consume_pending_navigation
-        settle
+        drain_after_user_action
       end
 
       def select_option(handle)
@@ -779,9 +744,7 @@ module Capybara
         invalidate_find_cache
         @runtime.call('__csimSelectOption', handle)
         tick_real_time
-        consume_pending_form_submit
-        consume_pending_navigation
-        settle
+        drain_after_user_action
       end
 
       def unselect_option(handle)
@@ -798,9 +761,7 @@ module Capybara
         end
         @runtime.call('__csimUnselectOption', handle)
         tick_real_time
-        consume_pending_form_submit
-        consume_pending_navigation
-        settle
+        drain_after_user_action
       end
 
       # Read the form-submit pending intent set by JS-side
@@ -813,6 +774,17 @@ module Capybara
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
+      end
+
+      # Every user-action entry point (set / send_keys / select / unselect)
+      # ends in this trio: drain any pending form submit, drain any
+      # pending Element.click anchor activation, then settle the page.
+      # Missing one site silently breaks the Stimulus filter pattern that
+      # wires `link.click()` into input/change/keypress listeners.
+      def drain_after_user_action
+        consume_pending_form_submit
+        consume_pending_navigation
+        settle
       end
 
       # Yield on the first observable change. Each iter (a) drains
@@ -830,29 +802,22 @@ module Capybara
       # the redirect_to Visit's render rebuilds it" — exactly the
       # window real browsers paint at.
       def settle
-        gen_tracked = @runtime.respond_to?(:settle_gen)
-        start_gen   = gen_tracked ? @runtime.settle_gen : 0
-        prev_gen    = start_gen
+        start_gen = @runtime.settle_gen
+        prev_gen  = start_gen
         SETTLE_MAX_ITER.times do
-          if @runtime.respond_to?(:drain_microtasks)
-            @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
-          end
-          break if gen_tracked && @runtime.settle_gen > start_gen
+          @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
+          break if @runtime.settle_gen > start_gen
           break unless @timers_active
           @runtime.drain_timers(SETTLE_DRAIN_MS)
-          break if gen_tracked && @runtime.settle_gen > start_gen
+          break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. Without this guard we'd burn the
           # full SETTLE_MAX_ITER × per-iter budget every find whenever
           # an idle `setInterval` is registered.
-          if gen_tracked
-            break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer?
-            prev_gen = @runtime.settle_gen
-          else
-            break unless @runtime.has_ready_timer?
-          end
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer?
+          prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
       end
@@ -866,7 +831,7 @@ module Capybara
       # `click`, so without a parallel drain here the navigation stays
       # queued and the page never reloads.
       def consume_pending_navigation
-        pending = @runtime.eval('(function(){var p = globalThis.__csimPendingNavigation; globalThis.__csimPendingNavigation = null; return p;})()')
+        pending = @runtime.call('__csimTakePendingNavigation')
         return unless pending.is_a?(Hash) && pending['url']
         url = pending['url'].to_s
         if pure_fragment_navigation?(url)
@@ -884,7 +849,7 @@ module Capybara
       # here at every tick so the file lands in `downloads_directory`
       # before Capybara's `wait_for_download` polls.
       def consume_pending_download
-        pending = @runtime.eval('(function(){var p = globalThis.__csimPendingDownload; globalThis.__csimPendingDownload = null; return p;})()')
+        pending = @runtime.call('__csimTakePendingDownload')
         return unless pending.is_a?(Hash) && pending['url']
         url = pending['url'].to_s
         filename = pending['filename'].to_s
@@ -933,7 +898,6 @@ module Capybara
         @last_response_headers = headers.to_h
       end
 
-      # Driver surface bits that v2 Browser exposes; stubbed for v3 PoC.
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
       # Capybara's `current_window.resize_to(w, h)` lands here; the
       # ahoy hamburger test (mobile breakpoint at 425×694) and any
@@ -990,11 +954,9 @@ module Capybara
         h = @runtime.call('__csimActiveElement').to_i
         h.zero? ? nil : h
       end
-      def session_send_keys(_)            ; nil ; end
-
       # Session-level keystroke. Tab / shift-tab cycle focus; everything
-       # else is routed to the currently focused element (if any) as a
-       # plain keydown/keyup pair.
+      # else is routed to the currently focused element (if any) as a
+      # plain keydown/keyup pair.
       def send_session_key(key)
         sym = key.is_a?(Symbol) ? key : (key.respond_to?(:to_sym) ? key.to_sym : nil)
         case sym
@@ -1005,7 +967,6 @@ module Capybara
           send_keys(handle, [key]) if handle
         end
       end
-      def with_modal(_)                   ; yield ; end
       attr_reader :trace, :pending_trace, :trace_mode
 
       TRACE_MODES = {'off' => :off, 'on-failure' => :on_failure, 'full' => :full}.freeze
@@ -1238,9 +1199,7 @@ module Capybara
       attr_reader :context_gen
 
       # Pulls the serialised form-state out of JS, encodes it, and
-      # drives the Rack app via `navigate` (for GET) or a POST. Mirrors
-      # the slice of <form> semantics rack-test supports — multipart
-      # uploads lift in with milestone 4+ once <input type=file> matters.
+      # drives the Rack app via `navigate` (for GET) or a POST.
       def submit_form_handle(form_handle, submitter_handle)
         invalidate_find_cache
         spec = @runtime.call('__csimFormSerialize', form_handle, submitter_handle || 0)
@@ -1342,15 +1301,7 @@ module Capybara
         # data-remote replies) replace the page; we follow real-browser
         # semantics and bring up a fresh VM rather than papering over
         # the previous one's state.
-        @runtime.rebuild_ctx
-        reset_timer_state
-        apply_esm_flag
-        apply_trace_flag
-        apply_viewport
-        apply_timezone
-        @runtime.call('__csimUpdateLocation', @current_url.to_s)
-        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
-        @polling_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + POST_NAV_POLL_GRACE_S
+        boot_response_into_ctx(html)
       end
 
       def reset!
@@ -1382,7 +1333,7 @@ module Capybara
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
-        # next visit (apply_esm_flag pattern).
+        # next visit.
         @runtime.call('__csimSetTraceActive', false)
         reset_timer_state
         invalidate_find_cache
@@ -1478,16 +1429,9 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        require 'uri'
         URI.join(base || @current_url || DEFAULT_HOST, url).to_s
       rescue URI::InvalidURIError
         url
-      end
-
-      def rack_fetch_body(url)
-        result = rack_fetch('GET', url, '', {}, 'follow')
-        return nil unless result && result['status'].to_i < 400
-        result['body'].to_s
       end
 
       MAX_FETCH_REDIRECTS = 20
@@ -1524,7 +1468,7 @@ module Capybara
           merge_set_cookie(resp_headers)
           log_network(method, target, status)
           if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
-            raise StandardError, '[capybara-simulated v3] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
             redirected = true
             preserve = [307, 308].include?(status)
             next_url = resolve_against(loc, target)
@@ -1544,9 +1488,9 @@ module Capybara
             'type' => 'basic'
           }
         end
-        raise StandardError, "[capybara-simulated v3] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
+        raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
-        warn "[capybara-simulated v3] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
+        warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
       end
 
@@ -1606,7 +1550,6 @@ module Capybara
         @current_url = resolved
         record_history({method: :get, url: resolved})
       end
-      def set_listened_type(*) ; end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
       def write_document_cookie(s)
         return if s.nil? || s.empty?
@@ -1655,7 +1598,7 @@ module Capybara
       end
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops
-      # in case the dialog never fired. Mirrors v2's `with_modal`.
+      # in case the dialog never fired.
       def with_modal(handler)
         @modal_handlers.push(handler)
         yield if block_given?
@@ -1683,8 +1626,8 @@ module Capybara
 
       private
 
-      # PoC navigate: fetch via the Rack app, hand the body to V8 for
-      # parsing. Only follows 3xx redirects up to a small depth.
+      # Fetch via the Rack app and hand the body to V8 for parsing.
+      # Only follows 3xx redirects up to a small depth.
       def navigate(url, depth: 0, referer: @current_url, from_history: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
@@ -1713,36 +1656,33 @@ module Capybara
         # set_importmap flushes the cache only when the new page
         # ships a different importmap (handles cross-app navigation).
         # Full-reload navigation rebuilds the JS Context from the warm
-        # snapshot. Mirrors v2's pool-checkout model: per-visit fresh VM
-        # avoids the partial-reset drift (jQuery `.ready`, rails-ujs
-        # `_rails_loaded`, accumulated `$(document).on(...)` delegates)
-        # that bit us when state leaked between visits. Snapshot warmup
-        # keeps the rebuild cost at a few ms; the cost dominator is
-        # re-evaluating app bundles, which is what we want.
+        # snapshot. Per-visit fresh VM avoids partial-reset drift
+        # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
+        # `$(document).on(...)` delegates) — snapshot warmup keeps the
+        # rebuild itself cheap; app-bundle re-eval dominates.
+        boot_response_into_ctx(html)
+      end
+
+      # Rebuild the JS Context and load `html` into it. Called from
+      # every code path that handles a full-page Rack response (`navigate`
+      # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
+      # importmaps + module scripts during `runInlineScripts`; the bridge
+      # pushes the importmap back via `__csim_pushImportmap` before any
+      # module loads, so `load_module` sees the fully-merged map.
+      #
+      # The post-nav grace bridges Capybara's outer-synchronize gap when
+      # the new page has no scripts of its own to flip `@timers_active`
+      # (e.g. Avo's `redirect_to main_app.hey_path` → static view). Kept
+      # small (~10 retry intervals) so failing-assertion paths don't pay
+      # for the wait.
+      def boot_response_into_ctx(html)
         @runtime.rebuild_ctx
         reset_timer_state
-        apply_esm_flag
         apply_trace_flag
         apply_viewport
         apply_timezone
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
-        # `__csimLoadDocument` walks importmaps + module scripts during
-        # `runInlineScripts`. The JS bridge pushes the importmap back
-        # to Ruby via `__csim_pushImportmap` before any module loads,
-        # so `load_module` sees the fully-merged map.
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
-        # The Ruby-side context_gen just bumped; Capybara's outer
-        # synchronize on `Capybara::Document` (whose `reload` is a
-        # no-op) needs `Driver#wait?` to be true at least once more
-        # so it retries the block — re-finding `/html` against the
-        # new context — instead of giving up on the StaleElement
-        # raised by visible_text's check_stale. A short post-nav
-        # grace bridges the gap when the new page has no scripts of
-        # its own (e.g. Avo's `redirect_to main_app.hey_path` →
-        # static `hey <%= I18n.locale %>` view); if scripts DO
-        # register timers, `@timers_active` flips this true via the
-        # normal path. Kept small (0.1s = ~10 Capybara retry intervals)
-        # to avoid dragging failing-assertion paths through extra wait.
         @polling_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + POST_NAV_POLL_GRACE_S
       end
 
@@ -1802,11 +1742,7 @@ module Capybara
         # `ActionController::UnknownFormat`. Send the same
         # wildcard-trailing Accept Chromium / Firefox use so the
         # server can negotiate — HTML-only routes still pick html,
-        # both-available pick the first registered. (Turbo-stream-
-        # only routes will respond with turbo-stream HTML which v3
-        # still loads as a page; those tests stay broken until v3
-        # can apply turbo-stream actions, but at least the controller
-        # doesn't raise UnknownFormat for them.)
+        # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
         env['HTTP_REFERER'] = referer         unless referer.nil? || referer.empty?
         env['HTTP_COOKIE']  = document_cookie unless @cookies.empty?
@@ -1867,7 +1803,6 @@ module Capybara
 
       def resolve_against_current(url, use_base: false)
         return url if url =~ %r{\A[a-z]+://}i
-        require 'uri'
         base =
           if use_base && (bh = base_href) && !bh.empty?
             # The document's `<base href>` takes precedence over the
