@@ -95,7 +95,7 @@ module Capybara
       def eval(code)
         v = vm
         result = v.eval_code(code.to_s)
-        pump_microtasks(v)
+        v.drain_microtasks!
         normalize(result)
       end
 
@@ -106,22 +106,15 @@ module Capybara
       # are plain values. Without a manual pump after every call,
       # Promise.then chains queued during a host-fn body (Turbo's
       # await fetch / Stimulus controllers, `evaluate_async_script`
-      # test scripts) stall until the next async boundary. The
-      # `await Promise.resolve(0)` post-pump routes through
-      # `js_std_await`'s pending-job loop, draining everything queued
-      # in the call.
+      # test scripts) stall until the next async boundary.
+      # `drain_microtasks!` (quickjs.rb 0.18+) wraps
+      # `JS_ExecutePendingJob` in a loop to empty the queue, bounded
+      # by the VM's `timeout_msec`.
       def call(name, *args)
         v = vm
         result = v.call(name.to_s, *args)
-        pump_microtasks(v)
+        v.drain_microtasks!
         normalize(result)
-      end
-
-      MICROTASK_PUMP_JS = 'await Promise.resolve(0)'.freeze
-      private_constant :MICROTASK_PUMP_JS
-
-      private def pump_microtasks(v)
-        v.eval_code(MICROTASK_PUMP_JS)
       end
 
       # bridge.js owns the virtual clock; we drive it from Ruby because
@@ -130,15 +123,12 @@ module Capybara
         max_ms.nil? ? vm.call('__drainTimers') : vm.call('__drainTimers', max_ms.to_i)
       end
 
-      # `eval` and `call` already pump after every invocation, so this
-      # explicit `drain_microtasks` is a no-op-shaped trigger that just
-      # rolls the pump `iters` more times — useful for `settle` when a
-      # `.then` chain has multiple promise hops to peel off per iter.
-      def drain_microtasks(iters = 4)
-        i = iters.to_i
-        return if i <= 0
-        v = vm
-        i.times { pump_microtasks(v) }
+      # `eval` and `call` already pump after every invocation, so the
+      # queue is empty on entry; this is a no-op for QuickJS. Kept on
+      # the public surface for parity with V8Runtime where the
+      # `settle` loop relies on per-iter microtask peeling.
+      def drain_microtasks(_iters = 4)
+        nil
       end
 
       def settle_gen
