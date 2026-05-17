@@ -11,6 +11,7 @@
 # `reset_timers` / `rebuild_ctx` / `reset_page`. Browser code is
 # engine-agnostic.
 
+require 'digest'
 require 'quickjs'
 
 require_relative 'runtime_shared'
@@ -28,6 +29,40 @@ module Capybara
 
       def self.bridge_runnable
         @@bridge_lock.synchronize { @@bridge_runnable ||= Quickjs::VM.new.compile(RuntimeShared.snapshot_src, filename: 'csim_bridge.js') }
+      end
+
+      # Process-wide cache of compiled `<script>` bodies (classic + ESM
+      # factory wrappers). Bridge.js routes each body through
+      # `__csim_runScript`; first encounter compiles into bytecode, every
+      # subsequent visit replays the cached `Runnable` against the
+      # current VM. The compile (PR 31 microbench: 504 KB → ~4 ms; Avo's
+      # bundle is ~10×) is the cost we're skipping.
+      #
+      # No size cap: typical app surface is a few hundred unique bodies
+      # (jQuery, Stimulus, Turbo, app bundle, per-page inlines). If a
+      # test suite generates pathological cardinality we can add LRU
+      # later — for now the parser-overhead saving dwarfs the cache RSS.
+      @@runnable_cache_lock = Mutex.new
+      @@runnable_cache      = {}
+
+      # Sharing one compiler VM serialises compile calls, but compilation
+      # is CPU-bound C and parallel workers each have their own
+      # `QuickJSRuntime` class state (Ruby's `@@` is per-class, shared
+      # in-process). One compile-only VM is enough; creating a fresh
+      # `Quickjs::VM.new` per compile (~140 ms each for POLYFILL_INTL)
+      # would dwarf the compile itself.
+      @@compiler_lock = Mutex.new
+      @@compiler_vm   = nil
+
+      def self.runnable_for(body, label)
+        key    = Digest::SHA256.hexdigest(body)
+        cached = @@runnable_cache_lock.synchronize { @@runnable_cache[key] }
+        return cached if cached
+        fresh = @@compiler_lock.synchronize {
+          @@compiler_vm ||= Quickjs::VM.new
+          @@compiler_vm.compile(body, filename: label.to_s)
+        }
+        @@runnable_cache_lock.synchronize { @@runnable_cache[key] ||= fresh }
       end
 
       # Pre-warmed pool of bare `Quickjs::VM` instances. `Quickjs::VM.new`
@@ -206,6 +241,16 @@ module Capybara
         }
         RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
           v.define_function(name, &body)
+        }
+        # Re-enter the same VM to run the body. `Runnable` is portable
+        # bytecode (no scope binding); replaying on `v` evaluates at
+        # globalThis, matching `(0, eval)(body)` semantics that
+        # bridge.js previously used directly. Script-throwing errors
+        # propagate as JS exceptions for bridge.js's caller-side
+        # try/catch.
+        v.define_function('__csim_runScript') {|label, body|
+          self.class.runnable_for(body.to_s, label).run(on: v)
+          nil
         }
       end
 

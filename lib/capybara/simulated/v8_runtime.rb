@@ -256,6 +256,12 @@ module Capybara
         RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
           c.attach(name, body)
         }
+        # `__csim_runScript` stays on the JS-side fallback baked into
+        # `snapshot_stubs.js` until mini_racer exposes
+        # `ScriptCompiler::CachedData`. Routing through Ruby costs a
+        # ~50 µs round-trip per script with no bytecode-cache offset,
+        # which measured at +8 % on Avo's `actions_spec`. Override here
+        # once a cache API is available.
       end
     end
   end
