@@ -128,11 +128,10 @@ module Capybara
       # V8Runtime: in `settle`, JS that runs *between* our `call`s
       # (timer callbacks that queue further microtasks) might leave
       # work pending that this drain finishes before the next call.
-      def drain_microtasks(iters = 4)
-        i = iters.to_i
-        return if i <= 0
-        v = vm
-        i.times { v.drain_microtasks! }
+      # `iters` is ignored because `drain_microtasks!` already loops
+      # until the queue is empty — repeating drains nothing extra.
+      def drain_microtasks(_iters = 4)
+        vm.drain_microtasks!
       end
 
       def settle_gen
