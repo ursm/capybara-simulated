@@ -8,6 +8,7 @@ require 'nokogiri'
 require 'rack/mock'
 require 'time'
 require 'uri'
+require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'esm_rewriter'
 require_relative 'trace'
@@ -16,6 +17,15 @@ module Capybara
   module Simulated
     class Browser
       DEFAULT_HOST = 'http://www.example.com'
+
+      # Process-wide HTTP/1.1 response cache for `rack_fetch`. Real
+      # browsers (cuprite / selenium) reuse fetched assets across the
+      # suite — without this, Simulated re-fetches every <script src>
+      # on every visit (Redmine baseline: ~6× more requests than
+      # selenium). Honors `Cache-Control` / `Expires` / `ETag` /
+      # `Last-Modified` per RFC 9111.
+      @@asset_cache = AssetCache.new
+      def self.asset_cache = @@asset_cache
 
       attr_writer :timers_active
 
@@ -1479,6 +1489,15 @@ module Capybara
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
         MAX_FETCH_REDIRECTS.times do
+          # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
+          # entirely; stale-but-revalidatable → fall through with conditional
+          # headers added so the server can return 304.
+          cache_entry = method == 'GET' ? @@asset_cache.lookup(target) : nil
+          if cache_entry&.fresh?
+            log_network(method, target, cache_entry.status)
+            return cached_response(cache_entry, target, redirected)
+          end
+
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
           (headers || {}).each {|k, v|
             name = k.to_s.upcase.tr('-', '_')
@@ -1495,10 +1514,21 @@ module Capybara
               env["HTTP_#{name}"] = v.to_s
             end
           }
+          # Conditional revalidation headers — only for stale-cached GETs.
+          # The server then has the option to return 304 to skip a fresh
+          # body transfer.
+          if cache_entry && (rh = @@asset_cache.revalidation_headers(cache_entry))
+            rh.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
+          end
           apply_default_request_env(env, referer: @current_url, force: false)
           status, resp_headers, resp_body = @app.call(env)
           merge_set_cookie(resp_headers)
           log_network(method, target, status)
+          if status == 304 && cache_entry
+            resp_body.close if resp_body.respond_to?(:close)
+            @@asset_cache.refresh(cache_entry, resp_headers)
+            return cached_response(cache_entry, target, redirected)
+          end
           if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
             raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
             redirected = true
@@ -1511,6 +1541,7 @@ module Capybara
             next
           end
           body_str = read_rack_body(resp_body)
+          @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
           return {
             'status' => status,
             'headers' => stringify(resp_headers),
@@ -1524,6 +1555,17 @@ module Capybara
       rescue StandardError => e
         warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
+      end
+
+      def cached_response(entry, url, redirected)
+        {
+          'status' => entry.status,
+          'headers' => stringify(entry.headers),
+          'body' => entry.body,
+          'url' => url,
+          'redirected' => redirected,
+          'type' => 'basic'
+        }
       end
 
       # Rack response bodies must respond to `each` (or be an Array of
