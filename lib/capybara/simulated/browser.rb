@@ -1509,12 +1509,12 @@ module Capybara
       # thread ever enters the VM. Background threads only touch the
       # Queue. `reset!` and per-visit context rebuilds kill all open
       # threads — the new VM gets a fresh handle space.
-      def event_source_open(url, with_credentials)
+      def event_source_open(url)
         id     = (@event_source_seq += 1)
         queue  = @event_source_queue
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_event_source_reader(id, url.to_s, with_credentials, queue)
+          run_event_source_reader(id, url.to_s, queue)
         end
         @event_source_threads[id] = thread
         id
@@ -1559,7 +1559,7 @@ module Capybara
       # responses until the body completes — which never happens on a
       # long-lived event stream. TCPSocket is below WebMock's hook
       # surface so this stays a real network read.
-      private def run_event_source_reader(id, url, _with_credentials, queue)
+      private def run_event_source_reader(id, url, queue)
         target = resolve_against_current(url)
         uri    = URI(target)
         unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
@@ -1567,7 +1567,7 @@ module Capybara
           return
         end
         socket = open_event_source_socket(uri)
-        send_event_source_request(socket, uri, target)
+        send_event_source_request(socket, uri)
         status_line = socket.gets
         unless status_line
           queue << {id: id, type: '__error', message: 'empty response'}
@@ -1590,7 +1590,12 @@ module Capybara
       rescue StandardError => e
         queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
       ensure
-        socket.close if socket && !socket.closed? rescue nil
+        begin
+          socket.close if socket && !socket.closed?
+        rescue StandardError
+          # socket might have been closed concurrently (reset! killed
+          # the thread); the leak is harmless.
+        end
       end
 
       private def open_event_source_socket(uri)
@@ -1608,9 +1613,8 @@ module Capybara
         end
       end
 
-      private def send_event_source_request(socket, uri, target)
-        host_header   = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
-        cookie_header = build_cookie_header_for(target)
+      private def send_event_source_request(socket, uri)
+        host_header = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
         lines = [
           "GET #{uri.request_uri} HTTP/1.1",
           "Host: #{host_header}",
@@ -1619,7 +1623,13 @@ module Capybara
           'Cache-Control: no-store',
           'Connection: keep-alive'
         ]
-        lines << "Cookie: #{cookie_header}" unless cookie_header.empty?
+        # Forward the host-cookie jar so the streaming server can
+        # authenticate the user the same way the browser would. The
+        # jar is a flat name=value map (no per-host scoping); reuse
+        # the canonical `document_cookie` serialiser the Rack path
+        # uses, so we don't drift if its format changes.
+        cookies = document_cookie
+        lines << "Cookie: #{cookies}" unless cookies.empty?
         socket.write(lines.join("\r\n") << "\r\n\r\n")
         socket.flush
       end
@@ -1670,25 +1680,6 @@ module Capybara
         end
         return nil if data.empty? && type.nil?
         {type: type || 'message', data: data.join("\n"), lastEventId: last_id}
-      end
-
-      private def build_cookie_header_for(url)
-        host = URI(url).host rescue nil
-        return '' unless host && @cookies.is_a?(Hash)
-        pairs = @cookies.flat_map do |cookie_host, by_name|
-          next [] unless cookie_host_matches?(cookie_host, host)
-          by_name.map {|name, attrs| "#{name}=#{attrs[:value]}" }
-        end
-        pairs.join('; ')
-      end
-
-      private def cookie_host_matches?(jar_host, target_host)
-        return true if jar_host == target_host
-        return true if jar_host.to_s.start_with?('.') && target_host.end_with?(jar_host[1..])
-        # Localhost convenience: cookies set under 127.0.0.1 / www.example.com
-        # (Capybara's app_host) should follow the user to the streaming
-        # server even on a different port — same host string suffices.
-        false
       end
 
       def reset_event_sources

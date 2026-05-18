@@ -58,7 +58,7 @@ module Capybara
         '__csim_fetchModuleSource'   => ->(b, *a) { b.load_module(a[0]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
-        '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0], a[1]) },
+        '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil }
       }.freeze
 
