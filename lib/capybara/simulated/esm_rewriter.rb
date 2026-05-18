@@ -30,30 +30,35 @@ module Capybara
       # everything onto one line and rely on the `;` / `}` cases.
       STMT_LEAD = '(?:\A|(?<=[;}\n]))[ \t]*'
 
+      # Whitespace between `import`/`from` and the surrounding tokens is
+      # optional when the adjacent token starts with a non-word character
+      # (`{`, `*`, `"`, `'`). Vite/Rolldown's minified output omits it:
+      # `import{t as e}from"../foo.js"`. Use `\b` to keep `importx` /
+      # `xfrom` from matching while allowing zero-or-more whitespace.
       IMPORT_NAMED_RE = %r<
-        #{STMT_LEAD}\bimport\s+
+        #{STMT_LEAD}\bimport\b\s*
         (?:
           (?<default>\w+)\s*,\s*\{(?<named>[^}]+)\}
-          | (?<default>\w+)\s*,\s*\*\s+as\s+(?<ns>\w+)
+          | (?<default>\w+)\s*,\s*\*\s*\bas\b\s+(?<ns>\w+)
           | (?<default>\w+)
-          | \*\s+as\s+(?<ns>\w+)
+          | \*\s*\bas\b\s+(?<ns>\w+)
           | \{(?<named>[^}]+)\}
         )
-        \s+from\s+(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
+        \s*\bfrom\b\s*(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
       >mx.freeze
 
       IMPORT_BARE_RE = %r<
-        #{STMT_LEAD}\bimport\s+(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
+        #{STMT_LEAD}\bimport\b\s*(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
       >mx.freeze
 
       EXPORT_STAR_RE = %r<
-        #{STMT_LEAD}\bexport\s+\*
-        (?:\s+as\s+(?<ns>\w+))?
-        \s+from\s+(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
+        #{STMT_LEAD}\bexport\b\s*\*
+        (?:\s*\bas\b\s+(?<ns>\w+))?
+        \s*\bfrom\b\s*(?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
       >mx.freeze
 
       EXPORT_LIST_FROM_RE = %r<
-        #{STMT_LEAD}\bexport\s*\{(?<list>[^}]+)\}\s+from\s+
+        #{STMT_LEAD}\bexport\b\s*\{(?<list>[^}]+)\}\s*\bfrom\b\s*
         (?<q>['"])(?<url>[^'"]+)\k<q>\s*;?
       >mx.freeze
 
@@ -102,15 +107,29 @@ module Capybara
         }
       end
 
+      # `import.meta` is illegal syntax in a `new Function` body (it
+      # requires module-mode parsing, which our `__csim_require` wrapper
+      # can't provide). Replace with a plain object literal carrying the
+      # module URL so common Vite-built call sites like
+      # `__vite__mapDeps([...], import.meta.url)` keep their semantics.
+      # `import.meta.env` is build-time-replaced by Vite, so the runtime
+      # bundle never references it.
+      IMPORT_META_RE = /\bimport\.meta\b/.freeze
+
       # Returns [rewritten_source, dependency_urls]. `dependency_urls` is
       # the de-duped specifier list in appearance order so callers can
-      # pre-warm `__csim_require`'s source cache before evaluating.
-      def self.rewrite(source)
+      # pre-warm `__csim_require`'s source cache before evaluating. Pass
+      # the module's own URL via `url:` to populate the inlined
+      # `import.meta.url`.
+      def self.rewrite(source, url: nil)
         deps = []
         named_appendix = []
         default_appendix = nil
 
         result = source.dup
+        # Always rewrite — an empty url is better than leaving the literal
+        # `import.meta`, which fails to parse outside module mode.
+        result.gsub!(IMPORT_META_RE, "({url:#{(url || '').to_json}})")
 
         result.gsub!(IMPORT_NAMED_RE) do
           m = ::Regexp.last_match

@@ -1406,7 +1406,7 @@ module Capybara
           end
         return @module_cache[url] = nil unless body
         resolved  = rewrite_module_imports(body, url)
-        rewritten = EsmRewriter.rewrite(resolved).first
+        rewritten = EsmRewriter.rewrite(resolved, url: url).first
         @module_cache[url] = rewritten
       end
 
@@ -1420,14 +1420,36 @@ module Capybara
       # an absolute URL so EsmRewriter (and the JS-side loader) can
       # treat them as opaque keys. Bare specifiers go through the
       # importmap; everything else is URL-joined against the importer.
-      MODULE_IMPORT_RE = %r{
+      # Match every quoted URL inside a module-level import / export-from
+      # statement so we can resolve it against the importer's base URL
+      # before EsmRewriter sees it. Two shapes:
+      #
+      #   `import[ …]"url"`     — any of bare / default / named / namespace
+      #   `export {…|*}[ as X] from "url"` — re-export shapes only
+      #
+      # Vite/Rolldown's minified output omits whitespace
+      # (`import{x}from"foo"`), so the binding region is captured as
+      # "non-quote chars OR balanced braces" rather than relying on
+      # `\s+`-separated chunks. The lookahead `(?=[\s'"{*])` after
+      # `\bimport` rejects `import.meta` / `importx` / etc. while
+      # allowing every legitimate import follow-up token. Exports use a
+      # narrower form that *requires* `from` so `export const x = "…"`
+      # doesn't get its string literal mis-resolved as a module URL.
+      MODULE_IMPORT_RE = %r<
         (?<lead>(?:^|[^\w$.]))
-        (?:
-          (?<static>(?:import|export)(?:\s+(?:[\w*${},\s]+)\s+from)?\s*) (?<q1>['"])(?<spec1>[^'"\n]+)\k<q1>
-          |
-          (?<dynamic>import\s*\(\s*) (?<q2>['"])(?<spec2>[^'"\n]+)\k<q2>
-        )
-      }x.freeze
+        (?<static>
+          (?:
+            import\b(?=[\s'"{*])
+            (?:[^'"\n;{}]|\{[^}]*\})*
+            |
+            export\b\s*(?:\*|\{[^}]*\})(?:\s*\bas\b\s+\w+)?\s*\bfrom\b\s*
+          )
+        )(?<q1>['"])(?<spec1>[^'"\n]+)\k<q1>
+        |
+        (?<lead2>[^\w$.])
+        (?<dynamic>import\s*\(\s*)
+        (?<q2>['"])(?<spec2>[^'"\n]+)\k<q2>
+      >x.freeze
       def rewrite_module_imports(source, base_url)
         source.gsub(MODULE_IMPORT_RE) do
           m        = Regexp.last_match
@@ -1435,7 +1457,8 @@ module Capybara
           quote    = m[:q1]    || m[:q2]
           resolved = resolve_module_specifier(spec, base_url)
           prefix   = m[:static] || m[:dynamic]
-          "#{m[:lead]}#{prefix}#{quote}#{resolved}#{quote}"
+          lead     = m[:lead]   || m[:lead2]
+          "#{lead}#{prefix}#{quote}#{resolved}#{quote}"
         end
       end
 
