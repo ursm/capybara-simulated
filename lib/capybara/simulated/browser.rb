@@ -132,11 +132,10 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
-        # Blob URL registry — shared across main + worker isolates.
-        # `URL.createObjectURL(blob)` registers the blob's bytes
-        # (base64) here so worker contexts (which can't see main's
-        # `__csimBlobs` Map) can still resolve `blob:` URLs via the
-        # `__csim_blobResolve` host fn.
+        # Cross-isolate `blob:` URL store. Worker isolates can't see
+        # the main scope's `__csimBlobs` Map, so the main scope mirrors
+        # blob bytes (base64) here and workers resolve them through a
+        # host fn.
         @blob_registry = {}
         @blob_registry_lock = Mutex.new
       end
