@@ -174,7 +174,17 @@ module Capybara
           "__csim_require(#{m[:url].to_json}); "
         end
 
-        result.gsub!(DYNAMIC_IMPORT_RE, '__csim_dynamicImport')
+        # Real ESM resolves `import('./x.js')` against the *importer's*
+        # URL, not the page URL. Our rewriter substitutes the call site
+        # with a per-module helper that closes over `__csim_module_url`
+        # so the runtime has the importer's URL available without us
+        # having to regex-balance parens to inject a second argument.
+        if result.match?(DYNAMIC_IMPORT_RE)
+          result.gsub!(DYNAMIC_IMPORT_RE, '__csim_dynamicImport_here')
+          result = "var __csim_module_url = #{(url || '').to_json}; " \
+            "function __csim_dynamicImport_here(s) { return __csim_dynamicImport(s, __csim_module_url); } " +
+            result
+        end
 
         result.gsub!(EXPORT_STAR_RE) do
           m = ::Regexp.last_match
