@@ -2012,10 +2012,20 @@ module Capybara
       end
 
       def response_hash(status, headers, body, url, redirected)
+        # `body` keeps the legacy UTF-8 transport — fine for the >95%
+        # text/json/css/js path. `body_b64` ships the raw bytes
+        # base64-encoded so the binary consumers (fetch's
+        # `arrayBuffer()` / `blob()`, ActiveStorage Blob loops) get
+        # the original bytes intact through the mini_racer /
+        # quickjs.rb UTF-8 string boundary. Without it, V8 mangles
+        # bytes 0x80-0xFF in binary payloads (Tesseract.js's 10 MB
+        # `eng.traineddata.gz` would round-trip corrupted, OCR
+        # recognises nothing in the image).
         {
           'status'     => status,
           'headers'    => stringify(headers),
           'body'       => body,
+          'body_b64'   => Base64.strict_encode64(body.to_s),
           'url'        => url,
           'redirected' => redirected,
           'type'       => 'basic'
