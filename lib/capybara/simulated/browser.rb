@@ -132,6 +132,13 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
+        # Blob URL registry — shared across main + worker isolates.
+        # `URL.createObjectURL(blob)` registers the blob's bytes
+        # (base64) here so worker contexts (which can't see main's
+        # `__csimBlobs` Map) can still resolve `blob:` URLs via the
+        # `__csim_blobResolve` host fn.
+        @blob_registry = {}
+        @blob_registry_lock = Mutex.new
       end
 
       # Worker thread polling and termination intervals — split so a
@@ -1456,6 +1463,7 @@ module Capybara
         # from after `reset_page`. Same shape for worker threads.
         reset_event_sources
         reset_workers
+        @blob_registry_lock.synchronize { @blob_registry.clear }
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
@@ -1799,6 +1807,20 @@ module Capybara
         end
         @workers.clear
         @worker_outbox.clear
+      end
+
+      def blob_register(url, body_b64)
+        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = body_b64.to_s }
+        nil
+      end
+
+      def blob_resolve(url)
+        @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
+      end
+
+      def blob_unregister(url)
+        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s) }
+        nil
       end
 
       # Worker thread entry. Builds an isolate via the engine class's
