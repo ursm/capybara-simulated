@@ -221,6 +221,26 @@ module Capybara
         timeout_msec:   (2**31) - 1
       }.freeze
 
+      # Evaluates `url` as an ES module. For external `<script
+      # type="module" src="…">`, pass `src=nil` so QuickJS goes through
+      # `module_loader` to fetch — the URL becomes the module's
+      # identity. For inline `<script type="module">{…}</script>`,
+      # pass the body as `src` and let QuickJS compile it inline (the
+      # synthesised `#inline-…` URL becomes the module's identity, but
+      # transitive imports still go through `module_loader`).
+      #
+      # `quickjs.rb` 0.17.0.pre's `vm.import` distinguishes these by
+      # which keyword arg you pass: `filename:` alone → loader fetch;
+      # `from:` alone → inline compile. Passing both makes the gem
+      # ignore the body.
+      def eval_esm_module(url, src = nil)
+        v = vm
+        opts = src ? { from: src.to_s } : { filename: url.to_s }
+        opts[:code_to_expose] = ''
+        v.import("* as __csim_entry_#{rand(1 << 32)}", **opts)
+        v.drain_microtasks!
+      end
+
       private
 
       def vm
@@ -231,6 +251,7 @@ module Capybara
         v = self.class.pool.checkout
         @runnable.run(on: v)
         attach_host_fns(v)
+        attach_module_loader(v)
         v
       end
 
@@ -251,6 +272,40 @@ module Capybara
         v.define_function('__csim_runScript') {|label, body|
           self.class.runnable_for(body.to_s, label).run(on: v)
           nil
+        }
+        # Native-ESM entry. `bridge.js`'s `runModuleScript` calls this
+        # if it's defined; presence is the engine-capability signal.
+        # The V8 runtime doesn't register it, so bridge.js falls back
+        # to its JS-side `__csim_require` + EsmRewriter loader there.
+        v.define_function('__csim_evalEsmEntry') {|url, inline_src|
+          RuntimeShared.safe_call { browser.eval_esm_module(url, inline_src) }
+          nil
+        }
+      end
+
+      # QuickJS's native ESM loader. The Ruby block returns the source
+      # for each module URL; QuickJS handles parsing, live bindings,
+      # `import.meta`, and `import()` natively — no `EsmRewriter`,
+      # no `__csim_liveImport` Proxy approximation, no column drift.
+      # Bare specifiers go through `Browser#resolve_module_specifier`
+      # first so importmap entries (Stimulus / unbundled apps) resolve
+      # correctly. `nil` from `rack_fetch_body` propagates to QuickJS
+      # which raises a ReferenceError mirroring a real-browser 404.
+      def attach_module_loader(v)
+        browser = @browser
+        v.module_loader = ->(url) {
+          resolved = browser.send(:resolve_module_specifier, url, nil)
+          body = browser.rack_fetch_body(resolved)
+          return nil unless body
+          # `.json` (and `?import` JSON) imports come from Vite's
+          # `import.meta.glob` and `import x from './data.json'`
+          # patterns. quickjs.rb's loader passes the source through
+          # `JS_EVAL_TYPE_MODULE` regardless of extension, so we wrap
+          # JSON bodies in `export default …` ourselves. Real
+          # browsers gate on `with { type: 'json' }`; Vite's bundler
+          # output already injected that, but the resulting module
+          # source is just the raw JSON so we need the wrap either way.
+          resolved.to_s.match?(/\.json(?:\?|$)/) ? "export default #{body};" : body
         }
       end
 

@@ -1434,6 +1434,16 @@ module Capybara
         result['body'].to_s
       end
 
+      # Native-ESM entry point — only the QuickJS runtime registers this
+      # path (its `vm.module_loader` handles transitive imports, live
+      # bindings, `import.meta`, and `import()` per the ES spec). V8
+      # stays on bridge.js's JS-side loader + `EsmRewriter` because
+      # mini_racer doesn't yet expose V8's Module API.
+      def eval_esm_module(url, src = nil)
+        return nil unless @runtime.respond_to?(:eval_esm_module)
+        @runtime.eval_esm_module(url, src)
+      end
+
       # Resolve every static / dynamic import specifier in `source` to
       # an absolute URL so EsmRewriter (and the JS-side loader) can
       # treat them as opaque keys. Bare specifiers go through the
