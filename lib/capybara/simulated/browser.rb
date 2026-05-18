@@ -1962,8 +1962,13 @@ module Capybara
       end
 
       MAX_FETCH_REDIRECTS = 20
+      # URLs we won't even try to route through Rack: anything that
+      # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
+      # like V8's `<snapshot>` that sourcemap libraries pull out of
+      # error stacks and feed straight to `fetch()` / `xhr.open()`.
       def rack_fetch(method, url, body, headers, redirect_mode)
         target = resolve_against_current(url.to_s)
+        return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         method = (method || 'GET').to_s.upcase
         redirected = false
         # JS-side base64-encodes Blob/File bodies (raw bytes survive
