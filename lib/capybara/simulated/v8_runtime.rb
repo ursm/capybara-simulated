@@ -13,6 +13,7 @@ require 'mini_racer'
 require 'set'
 
 require_relative 'runtime_shared'
+require_relative 'worker_runtime'
 
 
 begin
@@ -249,19 +250,46 @@ module Capybara
       end
 
       def attach_host_fns(c)
-        browser = @browser
-        RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
-          c.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
-        }
-        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
-          c.attach(name, body)
-        }
+        self.class.attach_host_fns(c, @browser)
         # `__csim_runScript` stays on the JS-side fallback baked into
         # `snapshot_stubs.js` until mini_racer exposes
         # `ScriptCompiler::CachedData`. Routing through Ruby costs a
         # ~50 µs round-trip per script with no bytecode-cache offset,
         # which measured at +8 % on Avo's `actions_spec`. Override here
         # once a cache API is available.
+      end
+
+      # Class-level attach so Worker isolates (Ruby-thread-owned
+      # Contexts that don't have a Runtime instance wrapping them)
+      # reuse the same `BROWSER_HOST_FNS` + `STDLIB_HOST_FNS` table
+      # the main runtime wires up.
+      def self.attach_host_fns(c, browser)
+        RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
+          c.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
+        }
+        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
+          c.attach(name, body)
+        }
+      end
+
+      # Worker-isolate factory: fresh Context from the shared
+      # snapshot, host fns attached, `__csim_isWorker` flag set, +
+      # the per-worker postMessage host fn closed over `post_back`.
+      # Returns a uniform `WorkerRuntime` adapter that
+      # `Browser#run_worker` drives.
+      def self.build_worker(browser, post_back)
+        ctx = MiniRacer::Context.new(snapshot: snapshot)
+        attach_host_fns(ctx, browser)
+        ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        ctx.eval('globalThis.__csim_isWorker = true;')
+        WorkerRuntime.new(
+          eval_fn:           ->(s)     { ctx.eval(s.to_s) },
+          call_fn:           ->(n, *a) { ctx.call(n.to_s, *a) },
+          drain_microtasks:  ->        { ctx.eval('0') },
+          drain_timers:      ->        { ctx.call('__drainTimers', 50) },
+          has_ready_timer:   ->        { !!ctx.call('__hasReadyTimer') },
+          dispose:           ->        { ctx.dispose rescue nil }
+        )
       end
     end
   end

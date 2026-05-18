@@ -132,8 +132,13 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
-        @worker_engine = @runtime.class.name.split('::').last == 'V8Runtime' ? :v8 : :quickjs
       end
+
+      # Worker thread polling and termination intervals — split so a
+      # tuning change to one doesn't accidentally rebind the other.
+      WORKER_POLL_INTERVAL   = 0.05
+      WORKER_TERMINATE_GRACE = 0.05
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_TERMINATE_GRACE
 
       # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
@@ -1544,13 +1549,7 @@ module Capybara
       end
 
       def event_source_poll
-        out = []
-        loop do
-          out << @event_source_queue.pop(true)
-        rescue ThreadError
-          break
-        end
-        out
+        drain_queue(@event_source_queue)
       end
 
       def event_source_pending? = !@event_source_queue.empty?
@@ -1716,14 +1715,14 @@ module Capybara
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
       def worker_spawn(url)
-        handle = (@worker_seq += 1)
-        inbox  = Thread::Queue.new
-        outbox = @worker_outbox
-        engine = @worker_engine
-        target = resolve_against_current(url.to_s)
+        handle       = (@worker_seq += 1)
+        inbox        = Thread::Queue.new
+        outbox       = @worker_outbox
+        engine_class = @runtime.class
+        target       = resolve_against_current(url.to_s)
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_worker(handle, target, inbox, outbox, engine)
+          run_worker(handle, target, inbox, outbox, engine_class)
         end
         @workers[handle] = {thread: thread, inbox: inbox}
         handle
@@ -1739,21 +1738,15 @@ module Capybara
         w = @workers.delete(handle.to_i)
         return unless w
         w[:inbox] << :terminate
-        # Give the worker a grace period to drain ongoing work before
-        # the kill — most clean shutdowns are <10ms; the kill is the
-        # fallback for blocked workers.
-        w[:thread].join(0.05)
+        # Most clean shutdowns are <10 ms; the kill is the fallback
+        # for blocked workers.
+        w[:thread].join(WORKER_TERMINATE_GRACE)
         w[:thread].kill if w[:thread].alive?
       end
 
       def deliver_worker_messages
         return 0 if @workers.empty? && @worker_outbox.empty?
-        events = []
-        loop do
-          events << @worker_outbox.pop(true)
-        rescue ThreadError
-          break
-        end
+        events = drain_queue(@worker_outbox)
         return 0 if events.empty?
         @runtime.call('__csim_deliverWorkerMessages', events)
         events.size
@@ -1802,28 +1795,27 @@ module Capybara
         @worker_outbox.clear
       end
 
-      # Worker thread entry. Builds a runtime tied to the worker's
-      # post-back channel, fetches + evaluates the script, then runs
-      # an event loop until `:terminate` lands in the inbox or an
-      # exception propagates out.
-      private def run_worker(handle, url, inbox, outbox, engine)
-        rt = build_worker_runtime(engine, ->(data) {
-          outbox << {handle: handle, kind: 'message', data: data.to_s}
-        })
-        body = rack_fetch_body(url)
+      # Worker thread entry. Builds an isolate via the engine class's
+      # `build_worker` factory, evaluates the worker script, then
+      # loops draining microtasks + timers + inbox until `:terminate`
+      # lands or an exception propagates.
+      private def run_worker(handle, url, inbox, outbox, engine_class)
+        post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
+        rt        = engine_class.build_worker(self, post_back)
+        body      = rack_fetch_body(url)
         raise "worker script not found: #{url}" unless body
-        rt[:eval].call(body)
+        rt.eval(body)
         loop do
-          msg = pop_with_timeout(inbox, 0.05)
+          msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
           break if msg == :terminate
-          rt[:call].call('__csim_workerOnMessage', msg) if msg
-          rt[:drain_microtasks].call
-          rt[:drain_timers].call if rt[:has_ready_timer].call
+          rt.call('__csim_workerOnMessage', msg) if msg
+          rt.drain_microtasks
+          rt.drain_timers if rt.has_ready_timer?
         end
       rescue StandardError => e
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       ensure
-        rt[:dispose].call if rt
+        rt&.dispose
       end
 
       # `Thread::Queue#pop(timeout:)` blocks releasing the GVL — fine
@@ -1835,66 +1827,17 @@ module Capybara
         nil
       end
 
-      private def build_worker_runtime(engine, post_back)
-        case engine
-        when :v8      then build_worker_runtime_v8(post_back)
-        when :quickjs then build_worker_runtime_quickjs(post_back)
-        else raise "unsupported worker engine: #{engine.inspect}"
+      # Drain everything currently in a Thread::Queue without
+      # blocking. Shared between `event_source_poll` and
+      # `deliver_worker_messages`.
+      private def drain_queue(queue)
+        out = []
+        loop do
+          out << queue.pop(true)
+        rescue ThreadError
+          break
         end
-      end
-
-      private def build_worker_runtime_v8(post_back)
-        ctx = MiniRacer::Context.new(snapshot: V8Runtime.snapshot)
-        attach_worker_host_fns_v8(ctx, post_back)
-        ctx.eval('globalThis.__csim_isWorker = true;')
-        {
-          eval:             ->(s)      { ctx.eval(s.to_s) },
-          call:             ->(n, *a)  { ctx.call(n.to_s, *a) },
-          drain_microtasks: ->         { ctx.eval('0') },
-          drain_timers:     ->         { ctx.call('__drainTimers', 50) },
-          has_ready_timer:  ->         { !!ctx.call('__hasReadyTimer') },
-          dispose:          ->         { ctx.dispose rescue nil }
-        }
-      end
-
-      private def attach_worker_host_fns_v8(ctx, post_back)
-        browser = self
-        RuntimeShared::BROWSER_HOST_FNS.each do |name, body|
-          ctx.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
-        end
-        RuntimeShared::STDLIB_HOST_FNS.each {|name, body| ctx.attach(name, body) }
-        ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
-      end
-
-      private def build_worker_runtime_quickjs(post_back)
-        vm = Quickjs::VM.new(**QuickJSRuntime::VM_OPTIONS)
-        # Order matters: bridge_runnable replays snapshot_stubs.js
-        # which installs no-op stubs for every host fn. Attaching
-        # *after* the replay lets our real implementations win.
-        QuickJSRuntime.bridge_runnable.run(on: vm)
-        attach_worker_host_fns_quickjs(vm, post_back)
-        vm.eval_code('globalThis.__csim_isWorker = true;')
-        vm.drain_microtasks!
-        {
-          eval:             ->(s)      { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
-          call:             ->(n, *a)  { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
-          drain_microtasks: ->         { vm.drain_microtasks! },
-          drain_timers:     ->         { vm.call('__drainTimers', 50) },
-          has_ready_timer:  ->         { !!vm.call('__hasReadyTimer') },
-          # quickjs.rb has no explicit dispose; GC reclaims the VM.
-          dispose:          ->         { nil }
-        }
-      end
-
-      private def attach_worker_host_fns_quickjs(vm, post_back)
-        browser = self
-        RuntimeShared::BROWSER_HOST_FNS.each do |name, body|
-          vm.define_function(name) {|*a| RuntimeShared.safe_call { body.call(browser, *a) } }
-        end
-        RuntimeShared::STDLIB_HOST_FNS.each do |name, body|
-          vm.define_function(name) {|*a| body.call(*a) }
-        end
-        vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
+        out
       end
 
       # Resolve every static / dynamic import specifier in `source` to

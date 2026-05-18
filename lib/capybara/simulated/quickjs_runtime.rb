@@ -15,6 +15,7 @@ require 'digest'
 require 'quickjs'
 
 require_relative 'runtime_shared'
+require_relative 'worker_runtime'
 
 module Capybara
   module Simulated
@@ -257,13 +258,7 @@ module Capybara
       end
 
       def attach_host_fns(v)
-        browser = @browser
-        RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
-          v.define_function(name) {|*a| RuntimeShared.safe_call { body.call(browser, *a) } }
-        }
-        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
-          v.define_function(name, &body)
-        }
+        self.class.attach_host_fns(v, @browser)
         # Re-enter the same VM to run the body. `Runnable` is portable
         # bytecode (no scope binding); replaying on `v` evaluates at
         # globalThis, matching `(0, eval)(body)` semantics that
@@ -278,10 +273,44 @@ module Capybara
         # if it's defined; presence is the engine-capability signal.
         # The V8 runtime doesn't register it, so bridge.js falls back
         # to its JS-side `__csim_require` + EsmRewriter loader there.
+        browser = @browser
         v.define_function('__csim_evalEsmEntry') {|url, inline_src|
           RuntimeShared.safe_call { browser.eval_esm_module(url, inline_src) }
           nil
         }
+      end
+
+      # Class-level attach so Worker isolates (per-thread VMs that
+      # don't have a Runtime instance) reuse the same host-fn table.
+      def self.attach_host_fns(v, browser)
+        RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
+          v.define_function(name) {|*a| RuntimeShared.safe_call { body.call(browser, *a) } }
+        }
+        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
+          v.define_function(name, &body)
+        }
+      end
+
+      # Worker-isolate factory: fresh VM, bridge bytecode replayed,
+      # host fns attached *after* the replay (so snapshot_stubs.js's
+      # no-ops don't overwrite real ones), `__csim_isWorker` set, +
+      # the per-worker postMessage routed through `post_back`.
+      def self.build_worker(browser, post_back)
+        vm = Quickjs::VM.new(**VM_OPTIONS)
+        bridge_runnable.run(on: vm)
+        attach_host_fns(vm, browser)
+        vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
+        vm.eval_code('globalThis.__csim_isWorker = true;')
+        vm.drain_microtasks!
+        WorkerRuntime.new(
+          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
+          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
+          drain_microtasks:  ->        { vm.drain_microtasks! },
+          drain_timers:      ->        { vm.call('__drainTimers', 50) },
+          has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
+          # quickjs.rb has no explicit dispose; GC reclaims the VM.
+          dispose:           ->        { nil }
+        )
       end
 
       # QuickJS's native ESM loader. The Ruby block returns the source
