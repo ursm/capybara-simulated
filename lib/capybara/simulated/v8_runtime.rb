@@ -281,7 +281,7 @@ module Capybara
         ctx = MiniRacer::Context.new(snapshot: snapshot)
         attach_host_fns(ctx, browser)
         ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
-        ctx.eval('globalThis.__csim_isWorker = true;')
+        ctx.eval('__csim_installWorkerScope();')
         WorkerRuntime.new(
           eval_fn:           ->(s)     { ctx.eval(s.to_s) },
           call_fn:           ->(n, *a) { ctx.call(n.to_s, *a) },

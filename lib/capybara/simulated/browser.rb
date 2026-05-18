@@ -1802,7 +1802,7 @@ module Capybara
       private def run_worker(handle, url, inbox, outbox, engine_class)
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         rt        = engine_class.build_worker(self, post_back)
-        body      = rack_fetch_body(url)
+        body      = fetch_worker_script(url)
         raise "worker script not found: #{url}" unless body
         rt.eval(body)
         loop do
@@ -1816,6 +1816,18 @@ module Capybara
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       ensure
         rt&.dispose
+      end
+
+      # Bundlers that ship a worker inline as a Blob (Tesseract,
+      # Webpack `?worker` imports, Vite worker chunks) construct
+      # `new Worker(blobURL)`. Rack can't parse `blob:` so short-
+      # circuit to the JS-side blob registry instead. Http(s) URLs
+      # fall through to the regular Rack path.
+      private def fetch_worker_script(url)
+        return rack_fetch_body(url) unless url.to_s.start_with?('blob:')
+        b64 = @runtime.call('__csimReadBlobBase64', url)
+        return nil unless b64
+        Base64.decode64(b64.to_s)
       end
 
       # `Thread::Queue#pop(timeout:)` blocks releasing the GVL — fine

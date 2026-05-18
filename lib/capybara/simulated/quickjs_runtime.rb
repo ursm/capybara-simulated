@@ -300,7 +300,7 @@ module Capybara
         bridge_runnable.run(on: vm)
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
-        vm.eval_code('globalThis.__csim_isWorker = true;')
+        vm.eval_code('__csim_installWorkerScope();')
         vm.drain_microtasks!
         WorkerRuntime.new(
           eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
