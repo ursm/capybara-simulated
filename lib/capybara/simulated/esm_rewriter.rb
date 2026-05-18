@@ -131,17 +131,26 @@ module Capybara
         # `import.meta`, which fails to parse outside module mode.
         result.gsub!(IMPORT_META_RE, "({url:#{(url || '').to_json}})")
 
+        # Per-source counter for module-namespace tmp vars. Each import
+        # statement gets its own `__csim_m_N` so `__csim_liveImport` can
+        # close over the namespace object and re-read on each access.
+        mod_seq = 0
+        next_mod = ->(url) {
+          deps << url
+          mod_seq += 1
+          "__csim_m_#{mod_seq}"
+        }
+
         result.gsub!(IMPORT_NAMED_RE) do
           m = ::Regexp.last_match
-          deps << m[:url]
-          parts = []
-          parts << "const #{m[:default]} = __csim_require(#{m[:url].to_json}).default;" if m[:default]
-          parts << "const #{m[:ns]} = __csim_require(#{m[:url].to_json});"               if m[:ns]
+          tmp = next_mod.call(m[:url])
+          parts = ["const #{tmp} = __csim_require(#{m[:url].to_json});"]
+          parts << "const #{m[:default]} = __csim_liveImport(#{tmp}, 'default');" if m[:default]
+          parts << "const #{m[:ns]} = #{tmp};"                                    if m[:ns]
           if m[:named]
-            mapped = parse_binding_list(m[:named]).map {|orig, local|
-              orig == local ? local : "#{orig}: #{local}"
-            }.join(', ')
-            parts << "const { #{mapped} } = __csim_require(#{m[:url].to_json});"
+            parse_binding_list(m[:named]).each {|orig, local|
+              parts << "const #{local} = __csim_liveImport(#{tmp}, #{orig.to_json});"
+            }
           end
           parts.join("\n") + "\n"
         end
@@ -156,22 +165,23 @@ module Capybara
 
         result.gsub!(EXPORT_STAR_RE) do
           m = ::Regexp.last_match
-          deps << m[:url]
+          tmp = next_mod.call(m[:url])
           if m[:ns]
-            "__exports.#{m[:ns]} = __csim_require(#{m[:url].to_json});\n"
-          else
-            tmp = "__csim_ns_#{deps.length}"
             "var #{tmp} = __csim_require(#{m[:url].to_json}); " \
-              "for (var __k in #{tmp}) { if (__k !== 'default') __exports[__k] = #{tmp}[__k]; }\n"
+              "__csim_defineExport(__exports, #{m[:ns].to_json}, function () { return #{tmp}; });\n"
+          else
+            "var #{tmp} = __csim_require(#{m[:url].to_json}); " \
+              "for (var __k in #{tmp}) (function (k) { " \
+              "if (k !== 'default') __csim_defineExport(__exports, k, function () { return #{tmp}[k]; }); " \
+              "})(__k);\n"
           end
         end
 
         result.gsub!(EXPORT_LIST_FROM_RE) do
           m = ::Regexp.last_match
-          deps << m[:url]
-          tmp = "__csim_ns_#{deps.length}"
+          tmp = next_mod.call(m[:url])
           assignments = parse_binding_list(m[:list]).map {|orig, local|
-            "__exports.#{local} = #{tmp}.#{orig};"
+            "__csim_defineExport(__exports, #{local.to_json}, function () { return #{tmp}.#{orig}; });"
           }.join(' ')
           "var #{tmp} = __csim_require(#{m[:url].to_json}); #{assignments}\n"
         end
@@ -179,30 +189,34 @@ module Capybara
         result.gsub!(EXPORT_LIST_RE) do
           m = ::Regexp.last_match
           parse_binding_list(m[:list]).map {|orig, local|
-            "__exports.#{local} = #{orig};"
+            "__csim_defineExport(__exports, #{local.to_json}, function () { return #{orig}; });"
           }.join(' ') + "\n"
         end
 
         # `export default class Foo {…}` / `export default function Foo(…)` —
-        # rewrite to a plain declaration and queue `__exports.default = Foo`
-        # to fire after the rest of the body runs. Anonymous variants get
-        # a synthetic local so the appendix can refer to them.
+        # rewrite to a plain declaration and queue a live-binding export
+        # for `default` to fire after the rest of the body runs.
+        # Anonymous variants get a synthetic local so the appendix can
+        # refer to them.
         result.gsub!(EXPORT_DEFAULT_DECL_RE) do
           m = ::Regexp.last_match
           name = m[:name] || (m[:kind].include?('function') ? '__csim_default_fn' : '__csim_default_class')
-          default_appendix = "__exports.default = #{name};"
+          default_appendix = "__csim_defineExport(__exports, 'default', function () { return #{name}; });"
           named = m[:name] ? '' : " #{name}"
           "#{m[:kind]}#{named}"
         end
 
+        # `export default <expr>` — assign the value eagerly to a local
+        # so we can live-bind to it.
         result.gsub!(EXPORT_DEFAULT_EXPR_RE) do
-          '__exports.default = '
+          default_appendix = "__csim_defineExport(__exports, 'default', function () { return __csim_default; });"
+          'var __csim_default = '
         end
 
         # `export const X = …` / `export class X …` / `export function X …`:
-        # strip the leading `export` and queue `__exports.X = X` for the
-        # appendix. The appendix runs at the end of the module body, by
-        # which point class / function declarations are bound.
+        # strip the leading `export` and queue a live-binding export for
+        # X. The appendix runs at the end of the module body, by which
+        # point class / function declarations are bound.
         result.gsub!(EXPORT_DECL_RE) do
           m = ::Regexp.last_match
           named_appendix << m[:name]
@@ -210,7 +224,9 @@ module Capybara
         end
 
         appendix = []
-        named_appendix.uniq.each {|n| appendix << "__exports.#{n} = #{n};" }
+        named_appendix.uniq.each {|n|
+          appendix << "__csim_defineExport(__exports, #{n.to_json}, function () { return #{n}; });"
+        }
         appendix << default_appendix if default_appendix
 
         result += "\n#{appendix.join("\n")}\n" unless appendix.empty?
