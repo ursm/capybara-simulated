@@ -497,7 +497,34 @@ module Capybara
             navigate(resolve_against_current(url, use_base: true))
           end
         when 'submit'
-          submit_form_handle(action['formHandle'], action['submitter'])
+          # Drain any work the click handler queued before the form
+          # submission. Mastodon's logout flow: submit-button click
+          # fires the form handler, which kicks off an axios DELETE for
+          # `/auth/sign_out`; the response sets
+          # `window.location.href = '/auth/sign_in'`. Without the
+          # drain, we'd submit the form (no `action` attr → current
+          # URL, e.g. `/start`) before the XHR resolves, landing on
+          # the wrong page. Loop matches the navigate branch — bail
+          # as soon as a drain round fires nothing.
+          submit_baseline_url = @current_url
+          if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
+            8.times do
+              @runtime.drain_microtasks(4)
+              break if @runtime.drain_timers(50).to_i.zero?
+            end
+          end
+          # If the drain queued or consumed a `location.assign`, that
+          # navigation supersedes the form's default submit. Honour
+          # pending; if `@current_url` already changed mid-drain (the
+          # navigate landed during a timer fire), skip the form submit
+          # entirely — its form handle is in a stale VM by now.
+          if @pending_location
+            consume_pending_location
+          elsif @current_url != submit_baseline_url
+            # Already navigated; nothing more to do.
+          else
+            submit_form_handle(action['formHandle'], action['submitter'])
+          end
         when 'download'
           download_link(resolve_against_current(action['url'].to_s), action['filename'].to_s)
         end
