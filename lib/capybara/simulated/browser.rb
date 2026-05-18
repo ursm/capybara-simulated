@@ -124,6 +124,15 @@ module Capybara
         @event_source_seq     = 0
         @event_source_threads = {}
         @event_source_queue   = Thread::Queue.new
+        # Web Workers — per-Browser handle counter, per-worker
+        # {thread, inbox} pair, and a shared outbox the main settle
+        # drains via `__csim_deliverWorkerMessages`. Each worker
+        # thread owns its own V8 Context / QuickJS VM (real isolate);
+        # cross-isolate messaging is JSON-marshalled.
+        @worker_seq    = 0
+        @workers       = {}
+        @worker_outbox = Thread::Queue.new
+        @worker_engine = @runtime.class.name.split('::').last == 'V8Runtime' ? :v8 : :quickjs
       end
 
       # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
@@ -886,19 +895,19 @@ module Capybara
         SETTLE_MAX_ITER.times do
           @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
           deliver_event_source_events
+          deliver_worker_messages
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending?
+          break unless @timers_active || event_source_pending? || worker_pending?
           @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
           deliver_event_source_events
+          deliver_worker_messages
           break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
-          # via `tick_real_time`. Without this guard we'd burn the
-          # full SETTLE_MAX_ITER × per-iter budget every find whenever
-          # an idle `setInterval` is registered. SSE keeps us in the
-          # loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending?
+          # via `tick_real_time`. SSE / Worker channels keep us in
+          # the loop as long as background threads have data queued.
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -1237,7 +1246,7 @@ module Capybara
       # due. Each find / has_? path goes through here, so Capybara's
       # polling cadence is what drives `setTimeout(N)` forward.
       def tick_real_time
-        return unless @timers_active
+        return unless @timers_active || worker_pending? || event_source_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -1249,10 +1258,17 @@ module Capybara
           elapsed  = ((now - @last_tick_ts) * 1000).to_i
           @last_tick_ts = now
           step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
-          if step > 0
+          if step > 0 && @timers_active
             fired = @runtime.drain_timers(step).to_i
             @find_cache_dirty = true if fired > 0
           end
+          # Pull any pending Worker / EventSource messages into JS
+          # state. Without this, `evaluate_script` after kicking off
+          # a worker round-trip would see stale state — the inbox
+          # outbox only drains during `settle`, which doesn't run
+          # for direct `execute_script` / `evaluate_script` calls.
+          @find_cache_dirty = true if deliver_worker_messages > 0
+          @find_cache_dirty = true if deliver_event_source_events > 0
         ensure
           @ticking = false
         end
@@ -1432,8 +1448,9 @@ module Capybara
         # Kill any open SSE reader threads — the new VM has no JS-side
         # EventSource instances to dispatch into, and the old handles
         # would collide on the fresh handle counter the bridge starts
-        # from after `reset_page`.
+        # from after `reset_page`. Same shape for worker threads.
         reset_event_sources
+        reset_workers
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
@@ -1686,6 +1703,166 @@ module Capybara
         @event_source_threads.each_value(&:kill)
         @event_source_threads.clear
         @event_source_queue.clear
+      end
+
+      # ── Web Workers ────────────────────────────────────────────────
+      #
+      # `new Worker(url)` in JS lands in `worker_spawn`. The Ruby
+      # thread it spawns owns a fresh V8 Context / QuickJS VM (true
+      # isolate, separate microtask queue and timer table), evals the
+      # worker script there, and runs an event loop draining timers,
+      # microtasks, and the inbox queue from the main thread. Each
+      # worker's `__csim_workerPostMessage` host fn closes over its
+      # handle and routes outgoing messages onto a shared outbox the
+      # main settle drains.
+      def worker_spawn(url)
+        handle = (@worker_seq += 1)
+        inbox  = Thread::Queue.new
+        outbox = @worker_outbox
+        engine = @worker_engine
+        target = resolve_against_current(url.to_s)
+        thread = Thread.new do
+          Thread.current.report_on_exception = false
+          run_worker(handle, target, inbox, outbox, engine)
+        end
+        @workers[handle] = {thread: thread, inbox: inbox}
+        handle
+      end
+
+      def worker_post_to_worker(handle, data)
+        w = @workers[handle.to_i]
+        return unless w
+        w[:inbox] << data.to_s
+      end
+
+      def worker_terminate(handle)
+        w = @workers.delete(handle.to_i)
+        return unless w
+        w[:inbox] << :terminate
+        # Give the worker a grace period to drain ongoing work before
+        # the kill — most clean shutdowns are <10ms; the kill is the
+        # fallback for blocked workers.
+        w[:thread].join(0.05)
+        w[:thread].kill if w[:thread].alive?
+      end
+
+      def deliver_worker_messages
+        return 0 if @workers.empty? && @worker_outbox.empty?
+        events = []
+        loop do
+          events << @worker_outbox.pop(true)
+        rescue ThreadError
+          break
+        end
+        return 0 if events.empty?
+        @runtime.call('__csim_deliverWorkerMessages', events)
+        events.size
+      end
+
+      def worker_pending? = !@worker_outbox.empty?
+
+      def reset_workers
+        @workers.each_value do |w|
+          w[:inbox] << :terminate
+          w[:thread].kill
+        end
+        @workers.clear
+        @worker_outbox.clear
+      end
+
+      # Worker thread entry. Builds a runtime tied to the worker's
+      # post-back channel, fetches + evaluates the script, then runs
+      # an event loop until `:terminate` lands in the inbox or an
+      # exception propagates out.
+      private def run_worker(handle, url, inbox, outbox, engine)
+        rt = build_worker_runtime(engine, ->(data) {
+          outbox << {handle: handle, kind: 'message', data: data.to_s}
+        })
+        body = rack_fetch_body(url)
+        raise "worker script not found: #{url}" unless body
+        rt[:eval].call(body)
+        loop do
+          msg = pop_with_timeout(inbox, 0.05)
+          break if msg == :terminate
+          rt[:call].call('__csim_workerOnMessage', msg) if msg
+          rt[:drain_microtasks].call
+          rt[:drain_timers].call if rt[:has_ready_timer].call
+        end
+      rescue StandardError => e
+        outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
+      ensure
+        rt[:dispose].call if rt
+      end
+
+      # `Thread::Queue#pop(timeout:)` blocks releasing the GVL — fine
+      # because the worker thread has nothing else to do while idle,
+      # and `worker_post_to_worker` wakes the wait immediately.
+      private def pop_with_timeout(queue, seconds)
+        queue.pop(timeout: seconds)
+      rescue ThreadError
+        nil
+      end
+
+      private def build_worker_runtime(engine, post_back)
+        case engine
+        when :v8      then build_worker_runtime_v8(post_back)
+        when :quickjs then build_worker_runtime_quickjs(post_back)
+        else raise "unsupported worker engine: #{engine.inspect}"
+        end
+      end
+
+      private def build_worker_runtime_v8(post_back)
+        ctx = MiniRacer::Context.new(snapshot: V8Runtime.snapshot)
+        attach_worker_host_fns_v8(ctx, post_back)
+        ctx.eval('globalThis.__csim_isWorker = true;')
+        {
+          eval:             ->(s)      { ctx.eval(s.to_s) },
+          call:             ->(n, *a)  { ctx.call(n.to_s, *a) },
+          drain_microtasks: ->         { ctx.eval('0') },
+          drain_timers:     ->         { ctx.call('__drainTimers', 50) },
+          has_ready_timer:  ->         { !!ctx.call('__hasReadyTimer') },
+          dispose:          ->         { ctx.dispose rescue nil }
+        }
+      end
+
+      private def attach_worker_host_fns_v8(ctx, post_back)
+        browser = self
+        RuntimeShared::BROWSER_HOST_FNS.each do |name, body|
+          ctx.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
+        end
+        RuntimeShared::STDLIB_HOST_FNS.each {|name, body| ctx.attach(name, body) }
+        ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+      end
+
+      private def build_worker_runtime_quickjs(post_back)
+        vm = Quickjs::VM.new(**QuickJSRuntime::VM_OPTIONS)
+        # Order matters: bridge_runnable replays snapshot_stubs.js
+        # which installs no-op stubs for every host fn. Attaching
+        # *after* the replay lets our real implementations win.
+        QuickJSRuntime.bridge_runnable.run(on: vm)
+        attach_worker_host_fns_quickjs(vm, post_back)
+        vm.eval_code('globalThis.__csim_isWorker = true;')
+        vm.drain_microtasks!
+        {
+          eval:             ->(s)      { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
+          call:             ->(n, *a)  { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
+          drain_microtasks: ->         { vm.drain_microtasks! },
+          drain_timers:     ->         { vm.call('__drainTimers', 50) },
+          has_ready_timer:  ->         { !!vm.call('__hasReadyTimer') },
+          # quickjs.rb has no explicit dispose; GC reclaims the VM.
+          dispose:          ->         { nil }
+        }
+      end
+
+      private def attach_worker_host_fns_quickjs(vm, post_back)
+        browser = self
+        RuntimeShared::BROWSER_HOST_FNS.each do |name, body|
+          vm.define_function(name) {|*a| RuntimeShared.safe_call { body.call(browser, *a) } }
+        end
+        RuntimeShared::STDLIB_HOST_FNS.each do |name, body|
+          vm.define_function(name) {|*a| body.call(*a) }
+        end
+        vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
       end
 
       # Resolve every static / dynamic import specifier in `source` to
