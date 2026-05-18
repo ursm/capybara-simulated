@@ -15,6 +15,7 @@ group :development, :test do
   gem 'rack-test'
   gem 'rake',              require: false
   gem 'rspec',             '~> 3.13'
+  gem 'ruby-vips'          # canvas/image-decode backend; soft-required at runtime
   gem 'selenium-webdriver' # bench/run.rb under :selenium
   gem 'sinatra',           '>= 4.0'
 end

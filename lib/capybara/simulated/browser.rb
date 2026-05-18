@@ -1761,6 +1761,38 @@ module Capybara
 
       def worker_pending? = !@worker_outbox.empty?
 
+      # ── Image decode (libvips) ─────────────────────────────────────
+      #
+      # Called by the JS bridge whenever a Canvas / OffscreenCanvas
+      # path needs raw RGBA pixels — `drawImage(image, …)` whose
+      # source is an HTMLImageElement / Blob / ImageBitmap with
+      # encoded bytes still on the wire. ruby-vips decodes any format
+      # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
+      # row-major RGBA buffer. Returned as base64 because mini_racer /
+      # quickjs.rb string transport reinterprets binary as UTF-8;
+      # JS-side `atob` + `Uint8ClampedArray` rebuilds the pixel buffer
+      # exactly. Optional `max_w`/`max_h` lets the caller pre-shrink
+      # for cheap OCR-style "downscale before pixel-touch" flows.
+      def decode_image(b64_bytes, max_w = nil, max_h = nil)
+        require 'vips' unless defined?(Vips)
+        bytes = Base64.decode64(b64_bytes.to_s)
+        img   = Vips::Image.new_from_buffer(bytes, '')
+        img   = img.colourspace('srgb')
+        img   = img.bandjoin(255) if img.bands < 4
+        if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
+           (img.width > max_w.to_i || img.height > max_h.to_i)
+          shrink_x = img.width.to_f  / max_w.to_i
+          shrink_y = img.height.to_f / max_h.to_i
+          shrink  = [shrink_x, shrink_y].max
+          img     = img.resize(1.0 / shrink) if shrink > 1
+        end
+        raw = img.write_to_memory
+        {'width' => img.width, 'height' => img.height, 'pixels' => Base64.strict_encode64(raw)}
+      rescue StandardError => e
+        warn "[capybara-simulated] decode_image failed: #{e.class}: #{e.message[0, 200]}"
+        nil
+      end
+
       def reset_workers
         @workers.each_value do |w|
           w[:inbox] << :terminate

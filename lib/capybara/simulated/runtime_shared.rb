@@ -62,7 +62,8 @@ module Capybara
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
-        '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil }
+        '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
+        '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) }
       }.freeze
 
       # Host fns that route to pure stdlib — no Browser surface,
