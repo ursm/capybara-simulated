@@ -1720,9 +1720,15 @@ module Capybara
         outbox       = @worker_outbox
         engine_class = @runtime.class
         target       = resolve_against_current(url.to_s)
+        # Resolve the worker script body on the main thread before
+        # handing off to the worker. `blob:` URLs need the main VM's
+        # blob registry; calling into the main runtime from a
+        # non-owning thread SEGVs (mini_racer is V8-isolate-thread-
+        # bound; quickjs.rb's VM is similarly per-thread).
+        body = fetch_worker_script(target)
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_worker(handle, target, inbox, outbox, engine_class)
+          run_worker(handle, target, body, inbox, outbox, engine_class)
         end
         @workers[handle] = {thread: thread, inbox: inbox}
         handle
@@ -1799,11 +1805,10 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, inbox, outbox, engine_class)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class)
+        raise "worker script not found: #{url}" unless body
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         rt        = engine_class.build_worker(self, post_back)
-        body      = fetch_worker_script(url)
-        raise "worker script not found: #{url}" unless body
         rt.eval(body)
         loop do
           msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)

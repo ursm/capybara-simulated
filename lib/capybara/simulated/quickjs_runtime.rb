@@ -254,6 +254,7 @@ module Capybara
         attach_host_fns(v)
         attach_module_loader(v)
         attach_rejection_tracker(v)
+        v.eval_code('__csim_installWorker();')
         v
       end
 

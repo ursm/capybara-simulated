@@ -224,6 +224,7 @@ module Capybara
       def build_ctx
         c = MiniRacer::Context.new(snapshot: @snapshot || self.class.snapshot)
         attach_host_fns(c)
+        c.eval('__csim_installWorker();')
         c
       end
 
