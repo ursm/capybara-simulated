@@ -57,7 +57,9 @@ module Capybara
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_fetchModuleSource'   => ->(b, *a) { b.load_module(a[0]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },
-        '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil }
+        '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
+        '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0], a[1]) },
+        '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil }
       }.freeze
 
       # Host fns that route to pure stdlib — no Browser surface,

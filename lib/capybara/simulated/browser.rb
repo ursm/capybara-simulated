@@ -6,6 +6,8 @@ require 'fileutils'
 require 'json'
 require 'nokogiri'
 require 'rack/mock'
+require 'socket'
+require 'thread'
 require 'time'
 require 'uri'
 require_relative 'asset_cache'
@@ -114,6 +116,14 @@ module Capybara
         @pending_trace    = nil
         @recording_action = false
         @trace_mode       = parse_trace_mode(ENV['CSIM_TRACE'])
+        # EventSource (SSE) — per-Browser handle counter, background
+        # reader threads, and a thread-safe Queue of parsed events
+        # awaiting delivery into the VM. Threads do the long-lived
+        # HTTP read; the main thread polls the Queue in `settle` and
+        # dispatches via `__csim_deliverEventSourceEvents`.
+        @event_source_seq     = 0
+        @event_source_threads = {}
+        @event_source_queue   = Thread::Queue.new
       end
 
       # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
@@ -875,17 +885,20 @@ module Capybara
         prev_gen  = start_gen
         SETTLE_MAX_ITER.times do
           @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
+          deliver_event_source_events
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active
-          @runtime.drain_timers(SETTLE_DRAIN_MS)
+          break unless @timers_active || event_source_pending?
+          @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
+          deliver_event_source_events
           break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. Without this guard we'd burn the
           # full SETTLE_MAX_ITER × per-iter budget every find whenever
-          # an idle `setInterval` is registered.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer?
+          # an idle `setInterval` is registered. SSE keeps us in the
+          # loop as long as background threads have data queued.
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -1416,6 +1429,11 @@ module Capybara
         @pending_trace    = @trace
         @trace            = nil
         @recording_action = false
+        # Kill any open SSE reader threads — the new VM has no JS-side
+        # EventSource instances to dispatch into, and the old handles
+        # would collide on the fresh handle counter the bridge starts
+        # from after `reset_page`.
+        reset_event_sources
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
@@ -1469,6 +1487,214 @@ module Capybara
       def eval_esm_module(url, src = nil)
         return nil unless @runtime.respond_to?(:eval_esm_module)
         @runtime.eval_esm_module(url, src)
+      end
+
+      # ── EventSource (SSE) ──────────────────────────────────────────
+      #
+      # Mastodon (and any app using Server-Sent Events) opens an
+      # `EventSource` to a streaming endpoint and expects pushed events
+      # to fire `message`/typed listeners on the live instance. Our
+      # implementation:
+      #   1. JS-side `new EventSource(url)` calls `__csim_eventSourceOpen`
+      #      which returns an integer handle and spawns a Ruby thread.
+      #   2. The thread holds a chunked-read HTTP connection open and
+      #      parses the SSE event-stream wire format, pushing each
+      #      `{id:, type:, data:, lastEventId:}` (or `{type: '__open'}`
+      #      / `{type: '__error', message:}` sentinel) onto a
+      #      thread-safe queue.
+      #   3. Settle's drain loop calls `deliver_event_source_events`
+      #      which polls the queue and hands the batch to
+      #      `__csim_deliverEventSourceEvents` for dispatch.
+      # mini_racer / quickjs.rb VMs are single-threaded; only the main
+      # thread ever enters the VM. Background threads only touch the
+      # Queue. `reset!` and per-visit context rebuilds kill all open
+      # threads — the new VM gets a fresh handle space.
+      def event_source_open(url, with_credentials)
+        id     = (@event_source_seq += 1)
+        queue  = @event_source_queue
+        thread = Thread.new do
+          Thread.current.report_on_exception = false
+          run_event_source_reader(id, url.to_s, with_credentials, queue)
+        end
+        @event_source_threads[id] = thread
+        id
+      end
+
+      def event_source_close(id)
+        thread = @event_source_threads.delete(id.to_i)
+        thread&.kill
+        nil
+      end
+
+      def event_source_poll
+        out = []
+        loop do
+          out << @event_source_queue.pop(true)
+        rescue ThreadError
+          break
+        end
+        out
+      end
+
+      def event_source_pending? = !@event_source_queue.empty?
+
+      # Drain any queued events into the VM. Cheap when no SSE
+      # connection is active (no threads → no queue items → empty
+      # return). Returns the number of events delivered so settle can
+      # tell whether progress was made.
+      def deliver_event_source_events
+        return 0 if @event_source_threads.empty? && @event_source_queue.empty?
+        events = event_source_poll
+        return 0 if events.empty?
+        @runtime.call('__csim_deliverEventSourceEvents', events)
+        events.size
+      end
+
+      # Background-thread entry point. Resolves the URL (relative
+      # paths against current page), opens a raw TCP / TLS socket,
+      # speaks just enough HTTP/1.1 to make the request, and reads
+      # chunked SSE bodies. Net::HTTP would be more natural but
+      # WebMock's `disable_net_connect!(allow_localhost: true)`
+      # routes Net::HTTP through an adapter that buffers chunked
+      # responses until the body completes — which never happens on a
+      # long-lived event stream. TCPSocket is below WebMock's hook
+      # surface so this stays a real network read.
+      private def run_event_source_reader(id, url, _with_credentials, queue)
+        target = resolve_against_current(url)
+        uri    = URI(target)
+        unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+          queue << {id: id, type: '__error', message: "unsupported scheme: #{uri.scheme.inspect}"}
+          return
+        end
+        socket = open_event_source_socket(uri)
+        send_event_source_request(socket, uri, target)
+        status_line = socket.gets
+        unless status_line
+          queue << {id: id, type: '__error', message: 'empty response'}
+          return
+        end
+        code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
+        chunked = false
+        while (line = socket.gets) && line.strip != ''
+          chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
+        end
+        if code >= 400
+          queue << {id: id, type: '__error', message: "HTTP #{code}"}
+          return
+        end
+        queue << {id: id, type: '__open'}
+        read_event_source_body(socket, id, queue, chunked: chunked)
+      rescue EOFError, Errno::ECONNRESET
+        # Server closed mid-stream — normal lifecycle, not an error
+        # worth surfacing.
+      rescue StandardError => e
+        queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
+      ensure
+        socket.close if socket && !socket.closed? rescue nil
+      end
+
+      private def open_event_source_socket(uri)
+        if uri.is_a?(URI::HTTPS)
+          require 'openssl'
+          tcp  = TCPSocket.new(uri.host, uri.port)
+          ctx  = OpenSSL::SSL::SSLContext.new
+          ssl  = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
+          ssl.sync_close = true
+          ssl.hostname   = uri.host
+          ssl.connect
+          ssl
+        else
+          TCPSocket.new(uri.host, uri.port)
+        end
+      end
+
+      private def send_event_source_request(socket, uri, target)
+        host_header   = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
+        cookie_header = build_cookie_header_for(target)
+        lines = [
+          "GET #{uri.request_uri} HTTP/1.1",
+          "Host: #{host_header}",
+          'Accept: text/event-stream',
+          'Accept-Encoding: identity',
+          'Cache-Control: no-store',
+          'Connection: keep-alive'
+        ]
+        lines << "Cookie: #{cookie_header}" unless cookie_header.empty?
+        socket.write(lines.join("\r\n") << "\r\n\r\n")
+        socket.flush
+      end
+
+      private def read_event_source_body(socket, id, queue, chunked:)
+        buffer = String.new
+        loop do
+          if chunked
+            size_line = socket.gets
+            break unless size_line
+            size = size_line.strip.to_i(16)
+            break if size.zero?
+            buffer << socket.read(size).to_s
+            socket.read(2)  # trailing CRLF
+          else
+            buffer << socket.readpartial(4096)
+          end
+          while (idx = buffer.index("\n\n") || buffer.index("\r\n\r\n"))
+            sep_len   = buffer[idx, 4] == "\r\n\r\n" ? 4 : 2
+            raw_event = buffer[0...idx]
+            buffer    = buffer[(idx + sep_len)..]
+            event     = parse_sse_event(raw_event)
+            queue << {id: id, **event} if event
+          end
+        end
+      end
+
+      private def parse_sse_event(block)
+        type = nil
+        data = []
+        last_id = nil
+        block.each_line do |line|
+          line = line.chomp
+          next if line.empty? || line.start_with?(':')
+          if (idx = line.index(':'))
+            field = line[0...idx]
+            value = line[(idx + 1)..]
+            value = value[1..] if value.start_with?(' ')
+          else
+            field = line
+            value = ''
+          end
+          case field
+          when 'event' then type = value
+          when 'data'  then data << value
+          when 'id'    then last_id = value
+          end
+        end
+        return nil if data.empty? && type.nil?
+        {type: type || 'message', data: data.join("\n"), lastEventId: last_id}
+      end
+
+      private def build_cookie_header_for(url)
+        host = URI(url).host rescue nil
+        return '' unless host && @cookies.is_a?(Hash)
+        pairs = @cookies.flat_map do |cookie_host, by_name|
+          next [] unless cookie_host_matches?(cookie_host, host)
+          by_name.map {|name, attrs| "#{name}=#{attrs[:value]}" }
+        end
+        pairs.join('; ')
+      end
+
+      private def cookie_host_matches?(jar_host, target_host)
+        return true if jar_host == target_host
+        return true if jar_host.to_s.start_with?('.') && target_host.end_with?(jar_host[1..])
+        # Localhost convenience: cookies set under 127.0.0.1 / www.example.com
+        # (Capybara's app_host) should follow the user to the streaming
+        # server even on a different port — same host string suffices.
+        false
+      end
+
+      def reset_event_sources
+        @event_source_threads.each_value(&:kill)
+        @event_source_threads.clear
+        @event_source_queue.clear
       end
 
       # Resolve every static / dynamic import specifier in `source` to
