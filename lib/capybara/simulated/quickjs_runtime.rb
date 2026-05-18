@@ -252,6 +252,7 @@ module Capybara
         @runnable.run(on: v)
         attach_host_fns(v)
         attach_module_loader(v)
+        attach_rejection_tracker(v)
         v
       end
 
@@ -307,6 +308,33 @@ module Capybara
           # source is just the raw JSON so we need the wrap either way.
           resolved.to_s.match?(/\.json(?:\?|$)/) ? "export default #{body};" : body
         }
+      end
+
+      # QuickJS surfaces every unhandled Promise rejection through this
+      # callback (quickjs.rb PR #42). Funnel them into `console.error`
+      # so the trace + any user-installed `log_console` override picks
+      # them up. Without this, an async chain that rejects without a
+      # `.catch` would disappear silently — the same class of bug that
+      # cost us half a session debugging `Intl.Collator` (the throw
+      # happened inside a module body that we couldn't see at the
+      # time). Now any future "module loads but nothing renders"
+      # symptom comes with a stack trace.
+      def attach_rejection_tracker(v)
+        browser = @browser
+        v.on_unhandled_rejection do |reason|
+          msg = reason.respond_to?(:message) ? "#{reason.class}: #{reason.message}" : reason.to_s
+          # QuickJS-side throw → reason.backtrace is the JS stack
+          # (frame strings like "at fn (file:L:C)"). Ruby exceptions
+          # raised from host callbacks land here with Ruby backtraces;
+          # both formats are useful.
+          stack =
+            if reason.respond_to?(:backtrace) && reason.backtrace && !reason.backtrace.empty?
+              "\n" + reason.backtrace.first(20).join("\n")
+            else
+              ''
+            end
+          browser.log_console('error', "unhandled rejection: #{msg}#{stack}")
+        end
       end
 
       # QuickJS marshals JS `undefined` as the symbol
