@@ -8,7 +8,8 @@ module Capybara
     # eval inside `new Function('__exports', source)`. mini_racer doesn't
     # expose V8's module loader, so we synthesise the missing pieces in
     # JS land: imports become `__csim_require(url)` calls, exports become
-    # property assignments on the `__exports` parameter.
+    # `__csim_defineExport(...)` getter registrations on the `__exports`
+    # parameter.
     #
     # The rewrite is intentionally lexical — Browser#rewrite_module_imports
     # has already pre-resolved every specifier to an absolute URL, so
@@ -18,9 +19,16 @@ module Capybara
     # Coverage: every static import form, named/default/namespace exports
     # for variable/class/function declarations, re-exports, and
     # `export * from`. Dynamic `import()` and `import.meta` aren't handled
-    # — Stimulus / Turbo bundles don't use them at module top-level (the
-    # one place we'd see them is stimulus-loading's eager loader, which
-    # passes literal specifiers Browser#load_module already resolves).
+    # at module top-level via this rewriter — `import()` is folded into a
+    # synchronous `__csim_dynamicImport(...)`, and `import.meta` is
+    # replaced by an inlined `{url:"..."}` literal.
+    #
+    # Line-preserving: every rewrite stays on the original source line so
+    # that bundler-emitted `.map` files keep working unchanged.
+    # `__csim_defineExport(...)` calls land inline directly adjacent to
+    # the originating declaration — there is no end-of-file appendix —
+    # which means even the bundle's last line stays within the source
+    # map's coverage and the `StackResolver` can decode every frame.
     module EsmRewriter
       # Statement-position lead. Top-level ES-module declarations sit
       # at the start of the file, or after a previous statement
@@ -123,13 +131,18 @@ module Capybara
       # `import.meta.url`.
       def self.rewrite(source, url: nil)
         deps = []
-        named_appendix = []
-        default_appendix = nil
 
         result = source.dup
-        # Always rewrite — an empty url is better than leaving the literal
-        # `import.meta`, which fails to parse outside module mode.
-        result.gsub!(IMPORT_META_RE, "({url:#{(url || '').to_json}})")
+        # Skip the regex pass when the literal isn't present —
+        # `String#include?` is C-level on the full bundle string. Most
+        # modules don't reference `import.meta`, so this is the common
+        # path. When present, rewrite to a `{url:"..."}` literal so
+        # `Vite/Rolldown`'s `import.meta.url` call sites keep working
+        # inside our `new Function` wrapper (where module-mode parsing
+        # isn't available).
+        if result.include?('import.meta')
+          result.gsub!(IMPORT_META_RE, "({url:#{(url || '').to_json}})")
+        end
 
         # Per-source counter for module-namespace tmp vars. Each import
         # statement gets its own `__csim_m_N` so `__csim_liveImport` can
@@ -152,13 +165,13 @@ module Capybara
               parts << "const #{local} = __csim_liveImport(#{tmp}, #{orig.to_json});"
             }
           end
-          parts.join("\n") + "\n"
+          parts.join(' ') + ' '
         end
 
         result.gsub!(IMPORT_BARE_RE) do
           m = ::Regexp.last_match
           deps << m[:url]
-          "__csim_require(#{m[:url].to_json});\n"
+          "__csim_require(#{m[:url].to_json}); "
         end
 
         result.gsub!(DYNAMIC_IMPORT_RE, '__csim_dynamicImport')
@@ -168,12 +181,12 @@ module Capybara
           tmp = next_mod.call(m[:url])
           if m[:ns]
             "var #{tmp} = __csim_require(#{m[:url].to_json}); " \
-              "__csim_defineExport(__exports, #{m[:ns].to_json}, function () { return #{tmp}; });\n"
+              "__csim_defineExport(__exports, #{m[:ns].to_json}, function () { return #{tmp}; }); "
           else
             "var #{tmp} = __csim_require(#{m[:url].to_json}); " \
               "for (var __k in #{tmp}) (function (k) { " \
               "if (k !== 'default') __csim_defineExport(__exports, k, function () { return #{tmp}[k]; }); " \
-              "})(__k);\n"
+              "})(__k); "
           end
         end
 
@@ -183,53 +196,45 @@ module Capybara
           assignments = parse_binding_list(m[:list]).map {|orig, local|
             "__csim_defineExport(__exports, #{local.to_json}, function () { return #{tmp}.#{orig}; });"
           }.join(' ')
-          "var #{tmp} = __csim_require(#{m[:url].to_json}); #{assignments}\n"
+          "var #{tmp} = __csim_require(#{m[:url].to_json}); #{assignments} "
         end
 
         result.gsub!(EXPORT_LIST_RE) do
           m = ::Regexp.last_match
           parse_binding_list(m[:list]).map {|orig, local|
             "__csim_defineExport(__exports, #{local.to_json}, function () { return #{orig}; });"
-          }.join(' ') + "\n"
+          }.join(' ') + ' '
         end
 
-        # `export default class Foo {…}` / `export default function Foo(…)` —
-        # rewrite to a plain declaration and queue a live-binding export
-        # for `default` to fire after the rest of the body runs.
-        # Anonymous variants get a synthetic local so the appendix can
-        # refer to them.
+        # `export default class Foo {...}` / `export default function Foo(...)`:
+        # register the export *before* the declaration on the same line.
+        # The getter closes over `Foo` and only reads it when an
+        # importer touches the export — by then the declaration has
+        # executed. Anonymous variants get a synthetic name.
         result.gsub!(EXPORT_DEFAULT_DECL_RE) do
           m = ::Regexp.last_match
           name = m[:name] || (m[:kind].include?('function') ? '__csim_default_fn' : '__csim_default_class')
-          default_appendix = "__csim_defineExport(__exports, 'default', function () { return #{name}; });"
-          named = m[:name] ? '' : " #{name}"
-          "#{m[:kind]}#{named}"
+          "__csim_defineExport(__exports, 'default', function () { return #{name}; }); #{m[:kind]} #{name}"
         end
 
-        # `export default <expr>` — assign the value eagerly to a local
-        # so we can live-bind to it.
+        # `export default <expr>` — register first, then assign. `var`
+        # is hoisted (declaration only); a cyclic import that reads the
+        # export before initialisation lands sees `undefined`, matching
+        # real-ESM's TDZ-ish behaviour for `var`-shaped compatibility.
         result.gsub!(EXPORT_DEFAULT_EXPR_RE) do
-          default_appendix = "__csim_defineExport(__exports, 'default', function () { return __csim_default; });"
-          'var __csim_default = '
+          "__csim_defineExport(__exports, 'default', function () { return __csim_default; }); var __csim_default = "
         end
 
-        # `export const X = …` / `export class X …` / `export function X …`:
-        # strip the leading `export` and queue a live-binding export for
-        # X. The appendix runs at the end of the module body, by which
-        # point class / function declarations are bound.
+        # `export const X = ...` / `export class X ...` /
+        # `export function X ...`: register before the declaration.
+        # Same closure-defers-the-read logic — `const`/`let` work
+        # because the getter only fires when an importer accesses the
+        # export, and by then the initialiser has run.
         result.gsub!(EXPORT_DECL_RE) do
           m = ::Regexp.last_match
-          named_appendix << m[:name]
-          "#{m[:kind]} #{m[:name]}"
+          "__csim_defineExport(__exports, #{m[:name].to_json}, function () { return #{m[:name]}; }); #{m[:kind]} #{m[:name]}"
         end
 
-        appendix = []
-        named_appendix.uniq.each {|n|
-          appendix << "__csim_defineExport(__exports, #{n.to_json}, function () { return #{n}; });"
-        }
-        appendix << default_appendix if default_appendix
-
-        result += "\n#{appendix.join("\n")}\n" unless appendix.empty?
         [result, deps.uniq]
       end
     end

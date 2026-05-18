@@ -11,6 +11,7 @@ require 'uri'
 require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'esm_rewriter'
+require_relative 'stack_resolver'
 require_relative 'trace'
 
 module Capybara
@@ -1077,7 +1078,24 @@ module Capybara
         end
       end
 
-      def log_console(severity, message) = @trace&.log_console(severity, message)
+      def log_console(severity, message)
+        return unless @trace
+        @trace.log_console(severity, annotate_console_message(severity, message))
+      end
+
+      # info/debug/log lines almost never carry stack traces — keep them
+      # out of the regex pass so per-call cost stays at the severity gate.
+      ANNOTATABLE_SEVERITIES = %w[error warning warn].freeze
+      def annotate_console_message(severity, message)
+        return message unless ANNOTATABLE_SEVERITIES.include?(severity.to_s)
+        return message unless message.is_a?(String) && message.include?('://')
+        stack_resolver.annotate(message)
+      end
+
+      def stack_resolver
+        @stack_resolver ||= StackResolver.new(self)
+      end
+
       def log_network(method, url, status) = @trace&.log_network(method, url, status)
 
       # `tag#id.class` short description of the handle, for trace
