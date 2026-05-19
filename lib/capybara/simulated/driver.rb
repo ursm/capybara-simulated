@@ -23,17 +23,21 @@ module Capybara
         return super if seconds.nil?
         n = super
         if seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
-          # Advance every live driver. Multiple sessions can coexist
-          # within a suite (e.g. `let(:session)` makes a new one per
-          # example, while the shared-spec session is module-level),
-          # and a single thread-local "current" slot races: whichever
-          # Driver was constructed last wins the slot even when a
-          # different one is actually driving the spec right now.
+          # Advance every Driver owned by the calling thread. Multiple
+          # sessions can coexist within a suite (e.g. `let(:session)`
+          # makes a new one per example, while the shared-spec session
+          # is module-level), and the previous thread-local "current"
+          # slot raced: whichever Driver was constructed last won the
+          # slot even when a different one was actually driving the
+          # spec. The thread filter is essential — background threads
+          # (`MessageBus::TimerThread`, etc.) call `sleep` from outside
+          # the test, and mini_racer / quickjs.rb VMs aren't thread-safe.
           # Idle drivers no-op (`tick_real_time` short-circuits when
-          # `@timers_active` is false), so a blanket advance is
-          # correct AND cheap.
+          # `@timers_active` is false), so a blanket advance is cheap.
           ms = (seconds.to_f * 1000).to_i
-          Capybara::Simulated::Driver.each_live {|d| d.browser.advance_virtual_clock_ms(ms) }
+          Capybara::Simulated::Driver.each_live_on_thread(Thread.current) {|d|
+            d.browser.advance_virtual_clock_ms(ms)
+          }
         end
         n
       end
@@ -46,15 +50,17 @@ module Capybara
       @@live_lock = Mutex.new
       @@live      = []  # [WeakRef<Driver>] — dead refs filtered on read.
 
-      def self.each_live
+      def self.each_live_on_thread(thread)
         @@live_lock.synchronize {
           @@live.reject! {|ref| !ref.weakref_alive? }
           @@live.dup
         }.each {|ref|
           d = ref.__getobj__ rescue nil
-          yield d if d
+          yield d if d && d.owner_thread == thread
         }
       end
+
+      attr_reader :owner_thread
 
       def initialize(app, js_engine: nil)
         @app             = app
@@ -62,6 +68,7 @@ module Capybara
         @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
         @active_handle   = nil
         @next_window_seq = 0
+        @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
       end
 
