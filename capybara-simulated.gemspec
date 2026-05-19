@@ -20,7 +20,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     'lib/**/*.rb',
-    'lib/**/*.js',
+    'lib/capybara/simulated/js/*.js',  # bridge.bundle.js + snapshot_stubs.js — NOT src/
     'vendor/js/*.js',
     'README.md',
     'LICENSE'
