@@ -1,0 +1,26 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Group RSpec failure output by error class + first line of message so
+# the largest clusters stand out. Pipe RSpec output in or pass a path:
+#
+#   bin/csim-triage /tmp/some.log
+#   bundle exec rspec spec/system 2>&1 | bin/csim-triage
+
+text = ARGV[0] ? File.read(ARGV[0]) : $stdin.read
+
+# RSpec doc / progress formatters print `Failure/Error:` followed by
+# the offending line, then a blank line, then the error class +
+# message. Grab those.
+errors = text.scan(/Failure\/Error:.*?\n\n\s*([A-Z][\w:]+):\s*([^\n]*)/m)
+
+bins = Hash.new(0)
+errors.each {|klass, msg|
+  key = "#{klass}: #{msg.split(/[\n,]/).first.to_s.strip[0, 80]}"
+  bins[key] += 1
+}
+
+puts "total grouped failures: #{errors.size}"
+bins.sort_by {|_, n| -n }.each {|key, count|
+  puts "#{count.to_s.rjust(4)}  #{key}"
+}
