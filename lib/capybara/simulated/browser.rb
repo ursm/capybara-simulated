@@ -33,19 +33,31 @@ module Capybara
 
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
-      # block before its own `default_max_wait_time` kicks in.
-      POLLING_GRACE_S = 10
+      # block before its own `default_max_wait_time` kicks in. Measured
+      # in *Capybara poll calls* (not wall time) so the grace window's
+      # extent is identical across runs regardless of GC / load pressure.
+      # 1000 polls × Capybara's default 0.01 s retry_interval ≈ 10 s.
+      # Capybara's synchronize loop caps the total at the user's wait
+      # time anyway, so an over-generous grace is harmless.
+      POLLING_GRACE_POLLS = 1000
       # Brief window after a Ruby-side navigate (context rebuild) so
       # Capybara's outer synchronize gets one retry against the new
-      # context. See `navigate` for why. Much smaller than POLLING_GRACE_S
-      # to keep failing-assertion paths cheap.
-      POST_NAV_POLL_GRACE_S = 0.1
-      # Virtual clock advances on every find / has_?. Floor is 10 ms so
-      # tests with `default_retry_interval = 0` still make progress
-      # toward `setTimeout(N>0)` callbacks; cap is 5 s so a runaway
-      # setInterval can't loop indefinitely in a single tick.
-      TICK_MIN_MS = 10
-      TICK_CAP_MS = 5_000
+      # context. 10 polls covers the same 0.1 s the wall-clock variant
+      # of this constant used to allow.
+      POST_NAV_POLL_GRACE_POLLS = 10
+      # Virtual JS clock advances by a fixed `TICK_STEP_MS` per
+      # `tick_real_time` call so test order produces identical JS-time
+      # progressions regardless of wall-clock pressure (GC pauses,
+      # process competing for cores, etc.) — the driver's "deterministic"
+      # contract depends on this.
+      #
+      # Tests that pace via `Kernel#sleep(n)` (Capybara's `reload` shared
+      # spec, etc.) rely on wall-clock passing to fire pending setTimeouts
+      # before the next assertion. `Capybara::Simulated::SleepHook`
+      # intercepts those calls and explicitly advances the active driver's
+      # virtual clock by the sleep duration, so the JS event loop sees the
+      # same effect without the driver needing to observe wall clock.
+      TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
       # Per-iter microtask drain depth. mini_racer drains one round
@@ -91,7 +103,7 @@ module Capybara
         @find_cache_value             = nil
         @document_handle              = 0
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @polling_until                = nil
+        @polling_grace                = nil
         @ticking                      = false
         @history                      = []
         @history_idx                  = -1
@@ -1240,14 +1252,14 @@ module Capybara
       # the last timer fires so a `setTimeout` firing mid-loop doesn't
       # drop us off polling before Capybara's own retry deadline.
       def polling?
-        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if @timers_active
-          @polling_until = now + POLLING_GRACE_S
+          @polling_grace = POLLING_GRACE_POLLS
           true
-        elsif @polling_until && now < @polling_until
+        elsif @polling_grace && @polling_grace > 0
+          @polling_grace -= 1
           true
         else
-          @polling_until = nil
+          @polling_grace = nil
           false
         end
       end
@@ -1265,12 +1277,9 @@ module Capybara
         return if @ticking
         @ticking = true
         begin
-          now      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          elapsed  = ((now - @last_tick_ts) * 1000).to_i
-          @last_tick_ts = now
-          step = [[elapsed, TICK_MIN_MS].max, TICK_CAP_MS].min
-          if step > 0 && @timers_active
-            fired = @runtime.drain_timers(step).to_i
+          @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          if @timers_active
+            fired = @runtime.drain_timers(TICK_STEP_MS).to_i
             @find_cache_dirty = true if fired > 0
           end
           # Pull any pending Worker / EventSource messages into JS
@@ -1304,21 +1313,40 @@ module Capybara
         consume_pending_download
       end
 
+      # `Capybara::Simulated::SleepHook` calls this when user code does
+      # `Kernel#sleep(n)`. The wall-clock pause already happened in the
+      # hook; we just need to advance the JS event loop's virtual clock
+      # by the same amount so any `setTimeout(n')` callbacks the user
+      # was waiting on fire on the next tick.
+      def advance_virtual_clock_ms(ms)
+        return unless @timers_active || worker_pending? || event_source_pending?
+        ms = ms.to_i
+        return if ms <= 0
+        return if @ticking
+        @ticking = true
+        begin
+          @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          fired = @runtime.drain_timers(ms).to_i
+          @find_cache_dirty = true if fired > 0
+        ensure
+          @ticking = false
+        end
+        consume_pending_location if @pending_location
+        consume_pending_reload if @pending_reload
+        consume_pending_form_submit
+        consume_pending_download
+      end
+
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
-      # context. The JS bridge resets `__virtualNow` to 0 and clears
-      # all timers on every context rebuild; if `@last_tick_ts` stayed
-      # at its pre-rebuild value, the next `tick_real_time` would
-      # treat the entire app-boot interval as elapsed wall time and
-      # drain up to 5 s of virtual clock in one step — firing wait-
-      # duration timers prematurely. Also clear `@timers_active` and
-      # the `@polling_until` grace window so the previous page's
-      # pending-timer state doesn't leak into the next test, leaving
-      # `Driver#wait?` true and dragging every failing matcher
-      # through the full `default_max_wait_time` retry loop.
+      # context. Clear `@timers_active` and the `@polling_grace` grace
+      # window so the previous page's pending-timer state doesn't leak
+      # into the next test, leaving `Driver#wait?` true and dragging
+      # every failing matcher through the full `default_max_wait_time`
+      # retry loop.
       def reset_timer_state
         @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @timers_active = false
-        @polling_until = nil
+        @polling_grace = nil
         @context_gen  += 1
       end
 
@@ -2247,7 +2275,7 @@ module Capybara
         apply_timezone
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
-        @polling_until = Process.clock_gettime(Process::CLOCK_MONOTONIC) + POST_NAV_POLL_GRACE_S
+        @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
 
       # `Content-Disposition: attachment` (or any explicit filename

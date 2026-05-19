@@ -6,6 +6,34 @@ require_relative 'node'
 
 module Capybara
   module Simulated
+    # `Kernel#sleep(n)` advances real wall clock; user code in tests
+    # uses this to wait for `setTimeout(n')` callbacks to fire (the
+    # canonical example is Capybara's shared `reload` spec). The
+    # driver's virtual JS clock is *not* wall-clock-driven (that would
+    # make timer firing non-deterministic under GC / process-load
+    # pressure), so we forward "user-intent" sleeps to the active
+    # driver's `advance_virtual_clock_ms` after the real pause completes.
+    #
+    # Threshold guard at `USER_SLEEP_THRESHOLD_S` keeps Capybara's own
+    # internal `sleep(retry_interval)` (typically 10-50 ms) out of the
+    # forwarding path; those don't represent test-author intent and
+    # forwarding them adds significant per-poll overhead via the
+    # driver's pending-action drain. Tests pace via `sleep(0.3)` or
+    # longer, which lands above the threshold.
+    USER_SLEEP_THRESHOLD_S = 0.1
+    module SleepHook
+      def sleep(seconds = nil)
+        return super if seconds.nil?
+        n = super
+        if seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
+          driver = Capybara::Simulated::Driver.current
+          driver.browser.advance_virtual_clock_ms((seconds.to_f * 1000).to_i) if driver
+        end
+        n
+      end
+    end
+    Kernel.prepend(SleepHook)
+
     class Driver < Capybara::Driver::Base
       attr_reader :app
 
