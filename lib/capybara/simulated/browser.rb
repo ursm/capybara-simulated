@@ -285,6 +285,15 @@ module Capybara
         end
         find_with_timer_fallback(:css, s, context_handle) do
           @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
+        rescue StandardError => e
+          # Match `document.querySelectorAll`'s `DOMException(SyntaxError)`
+          # behavior for an invalid selector: real browsers throw, but
+          # Capybara's `has_no_css?` doesn't catch it either — it just
+          # times out the wait and reports "not present". Mirror "not
+          # present" here by returning empty; downstream callers that
+          # genuinely need the error path can probe via `evaluate_script`.
+          raise unless syntax_or_invalid_selector_error?(e)
+          []
         end
       end
 
@@ -293,7 +302,21 @@ module Capybara
         find_with_timer_fallback(:css_first, s, context_handle) do
           h = @runtime.call('__csimQueryOne', context_handle || @document_handle, s).to_i
           h.zero? ? nil : h
+        rescue StandardError => e
+          raise unless syntax_or_invalid_selector_error?(e)
+          nil
         end
+      end
+
+      # JS engine surfaces an invalid-CSS-selector throw as
+      # `Quickjs::SyntaxError` (QuickJS, dynamic class via JS-name mapping)
+      # or `MiniRacer::RuntimeError` (V8). Match by class name suffix so
+      # neither gem becomes a hard dependency here.
+      def syntax_or_invalid_selector_error?(e)
+        name = e.class.name.to_s
+        return true if name.end_with?('::SyntaxError')
+        return true if e.message.to_s.start_with?('csim: unexpected selector', 'csim: bad attr selector', 'csim: stray &')
+        false
       end
 
       def xpath_shaped?(s)

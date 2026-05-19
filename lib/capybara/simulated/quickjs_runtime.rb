@@ -219,6 +219,13 @@ module Capybara
       VM_OPTIONS = {
         features:       [Quickjs::POLYFILL_INTL].freeze,
         max_stack_size: 0,
+        # `memory_limit` default in quickjs.rb is 128 MB. Discourse's
+        # admin chunks + Ember 6's render tree push wgxpath's
+        # `normalize-space` regex against several hundred class
+        # attributes per Capybara poll, and the cumulative QuickJS
+        # heap pressure trips "out of memory in regexp execution"
+        # well before the test wait expires. 512 MB clears that ceiling.
+        memory_limit:   512 * 1024 * 1024,
         timeout_msec:   (2**31) - 1
       }.freeze
 
