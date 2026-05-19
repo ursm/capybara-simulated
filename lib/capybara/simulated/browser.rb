@@ -33,30 +33,18 @@ module Capybara
 
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
-      # block before its own `default_max_wait_time` kicks in. Measured
-      # in *Capybara poll calls* (not wall time) so the grace window's
-      # extent is identical across runs regardless of GC / load pressure.
+      # before its own default_max_wait_time kicks in. Counted in poll
+      # calls (not wall time) for determinism under GC/load pressure.
       # 1000 polls × Capybara's default 0.01 s retry_interval ≈ 10 s.
-      # Capybara's synchronize loop caps the total at the user's wait
-      # time anyway, so an over-generous grace is harmless.
       POLLING_GRACE_POLLS = 1000
       # Brief window after a Ruby-side navigate (context rebuild) so
       # Capybara's outer synchronize gets one retry against the new
-      # context. 10 polls covers the same 0.1 s the wall-clock variant
-      # of this constant used to allow.
+      # context.
       POST_NAV_POLL_GRACE_POLLS = 10
-      # Virtual JS clock advances by a fixed `TICK_STEP_MS` per
-      # `tick_real_time` call so test order produces identical JS-time
-      # progressions regardless of wall-clock pressure (GC pauses,
-      # process competing for cores, etc.) — the driver's "deterministic"
-      # contract depends on this.
-      #
-      # Tests that pace via `Kernel#sleep(n)` (Capybara's `reload` shared
-      # spec, etc.) rely on wall-clock passing to fire pending setTimeouts
-      # before the next assertion. `Capybara::Simulated::SleepHook`
-      # intercepts those calls and explicitly advances the active driver's
-      # virtual clock by the sleep duration, so the JS event loop sees the
-      # same effect without the driver needing to observe wall clock.
+      # Virtual JS clock advances by a fixed step per tick_real_time
+      # call so timer firing order is identical across runs regardless
+      # of wall-clock pressure (GC, core competition). The driver's
+      # "deterministic" contract depends on this.
       TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
@@ -1259,16 +1247,15 @@ module Capybara
           @polling_grace -= 1
           true
         else
-          @polling_grace = nil
           false
         end
       end
 
-      # Advance the virtual JS clock by however much wall-clock has
-      # elapsed since the last tick, then fire any timers that came
-      # due. Each find / has_? path goes through here, so Capybara's
-      # polling cadence is what drives `setTimeout(N)` forward.
-      def tick_real_time
+      # Advance the virtual JS clock by `step_ms` and fire timers that
+      # came due. Each find / has_? path enters here with the default
+      # step; `SleepHook` calls in via `advance_virtual_clock_ms` with
+      # the explicit duration from `Kernel#sleep(n)`.
+      def tick_real_time(step_ms: TICK_STEP_MS)
         return unless @timers_active || worker_pending? || event_source_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
@@ -1278,8 +1265,8 @@ module Capybara
         @ticking = true
         begin
           @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          if @timers_active
-            fired = @runtime.drain_timers(TICK_STEP_MS).to_i
+          if @timers_active && step_ms > 0
+            fired = @runtime.drain_timers(step_ms).to_i
             @find_cache_dirty = true if fired > 0
           end
           # Pull any pending Worker / EventSource messages into JS
@@ -1313,28 +1300,9 @@ module Capybara
         consume_pending_download
       end
 
-      # `Capybara::Simulated::SleepHook` calls this when user code does
-      # `Kernel#sleep(n)`. The wall-clock pause already happened in the
-      # hook; we just need to advance the JS event loop's virtual clock
-      # by the same amount so any `setTimeout(n')` callbacks the user
-      # was waiting on fire on the next tick.
       def advance_virtual_clock_ms(ms)
-        return unless @timers_active || worker_pending? || event_source_pending?
         ms = ms.to_i
-        return if ms <= 0
-        return if @ticking
-        @ticking = true
-        begin
-          @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          fired = @runtime.drain_timers(ms).to_i
-          @find_cache_dirty = true if fired > 0
-        ensure
-          @ticking = false
-        end
-        consume_pending_location if @pending_location
-        consume_pending_reload if @pending_reload
-        consume_pending_form_submit
-        consume_pending_download
+        tick_real_time(step_ms: ms) if ms > 0
       end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
