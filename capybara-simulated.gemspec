@@ -5,8 +5,8 @@ Gem::Specification.new do |spec|
   spec.version     = Capybara::Simulated::VERSION
   spec.authors     = ['Keita Urashima']
   spec.email       = ['ursm@ursm.jp']
-  spec.summary     = 'Lightweight Capybara driver with a V8-resident DOM, in-process and Chrome-free'
-  spec.description = 'A Capybara driver that runs JavaScript against a V8-resident DOM via mini_racer — no Chrome, no Node toolchain. Forms submit through Rack::MockRequest, inline <script> + event handlers run, Hotwire / Stimulus / Turbo work, and Capybara DSL is unchanged. Sits between rack-test and full headless browsers.'
+  spec.summary     = 'Lightweight Capybara driver with an in-process JS-resident DOM, Chrome-free'
+  spec.description = 'A Capybara driver that runs JavaScript against an in-process JS-resident DOM — V8 via mini_racer or QuickJS via quickjs.rb, whichever is installed. No Chrome, no Node toolchain. Forms submit through Rack::MockRequest, inline <script> + event handlers run, Hotwire / Stimulus / Turbo work, and Capybara DSL is unchanged. Sits between rack-test and full headless browsers.'
   spec.homepage    = 'https://github.com/ursm/capybara-simulated'
   spec.license     = 'MIT'
 
