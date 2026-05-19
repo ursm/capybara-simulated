@@ -66,7 +66,14 @@ module Capybara
       # `lib/capybara/simulated/js/bridge.js` — the JS side ships in the V8
       # snapshot, so injecting from Ruby at boot would defeat snapshot
       # warmth.
-      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) capybara-simulated (V8-resident DOM)'
+      # Discourse's `non_crawler_user_agents` adds a "Rails Testing"
+      # bypass in test mode (see lib/crawler_detection.rb); without one
+      # of its bypass tokens here Discourse serves a no-JS crawler-only
+      # HTML view. Putting "Rails Testing" in the UA satisfies that
+      # without claiming a specific real-browser engine (which would
+      # send Turbo / Stimulus down chrome-specific code paths Avo's
+      # tests don't exercise).
+      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; Rails Testing) capybara-simulated (V8-resident DOM)'
       REMOTE_ADDR = '127.0.0.1'
 
       def initialize(app, driver: nil, js_engine: nil)

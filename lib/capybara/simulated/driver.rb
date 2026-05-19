@@ -73,6 +73,14 @@ module Capybara
 
       def needs_server?       = false
       def javascript_enabled? = true
+
+      # Playwright-driver compatibility shim. Discourse's system-spec
+      # `before(:each)` calls `page.driver.with_playwright_page` to
+      # install a JS-console logger and apply a CDP `setTimezoneOverride`;
+      # both are Playwright-specific machinery we don't have an analogue
+      # for. No-op (don't yield) so the surrounding hook is a graceful
+      # skip when the upstream block dereferences the yielded page.
+      def with_playwright_page; end
       # Dynamic wait?: only poll when there's pending timer work that
       # real-time advancement could resolve. With no timers queued,
       # polling can't change anything, so we fail fast via the
