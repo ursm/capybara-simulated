@@ -1,0 +1,15 @@
+{
+  "name": "capybara-simulated-vendor",
+  "private": true,
+  "description": "Build-time bundling for vendored JS dependencies. The gem ships the pre-built bundle (`vendor/js/vendor.bundle.js`); npm is needed only when updating it.",
+  "scripts": {
+    "build": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --global-name=__csimVendor --outfile=vendor/js/vendor.bundle.js"
+  },
+  "dependencies": {
+    "css-select": "^7.0.0",
+    "css-what": "^8.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0"
+  }
+}

@@ -2,6 +2,7 @@
 /.memsearch/
 /.ruby-lsp/
 /Gemfile.lock
+/node_modules/
 /pkg/
 /save_path_tmp/
 /screenshots/
