@@ -21,6 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # `canvas_image_spec` decodes images through ruby-vips, which
+      # `dlopen`s `libvips.so.42` at runtime — install it before the
+      # spec run.
+      - run: sudo apt-get update && sudo apt-get install -y libvips42t64
+
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
