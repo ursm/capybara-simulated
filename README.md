@@ -14,13 +14,13 @@ CSS-selector code running in the same V8 context as the page's JS, so
 
 ## Status
 
-| suite | result | wall time |
-|---|---|---:|
-| Capybara 3.40 shared spec | 1384 / 0 fail / 34 pending | 1m 10s |
-| Redmine system tests (115 tests after the 7 SCM-only skips) | 115 / 0 fail | ~55s |
-| vs Selenium (Chrome 147) on Redmine | **1.53× faster** | (81.6s) |
+Pre-release — the API is unstable and the gem isn't published to
+RubyGems yet. The numbers and benchmarks live in
+[capybara-simulated-vs-world](https://github.com/ursm/capybara-simulated-vs-world)
+where each target app (Redmine / Forem / Avo / Mastodon / Discourse)
+runs its system suite against this driver.
 
-The 34 shared-spec pending tests all need a real layout engine
+The pending shared-spec tests all need a real layout engine
 (`elementFromPoint`, real `getBoundingClientRect`, viewport-clip
 visibility, `display: contents` table edge cases) — same set Selenium
 escapes via screenshots and we don't try to simulate.
@@ -47,8 +47,8 @@ gem 'quickjs', '>= 0.17.0.pre'  # QuickJS (interpreter, smaller per-VM
                                 # workers under a fixed memory budget)
 ```
 
-The engine is auto-detected at boot when both gems are present
-mini_racer wins ties. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`
+The engine is auto-detected at boot; if both gems are present
+mini_racer wins. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`
 or `Capybara::Simulated::Driver.new(app, js_engine: :quickjs)`.
 
 ## Use
@@ -132,9 +132,8 @@ captured too.
 
 Recording is **on by default** — fully in-memory, no files written
 unless you opt in via `CSIM_TRACE_DIR`. Wall-time overhead is
-run-to-run-variance equivalent (~0.4s on a 122-test Redmine suite,
-i.e. zero) because the expensive part — DOM serialization — only
-fires on action error.
+run-to-run-variance equivalent because the expensive part — DOM
+serialization — only fires on action error.
 
 ### Modes (`CSIM_TRACE=…`)
 
@@ -221,9 +220,9 @@ end
 ## Performance characteristics
 
 The driver builds a V8 base snapshot once per process (bridge.js +
-wgxpath, ~330 KB of source) and checks Contexts out of a small
-process-wide pool of pre-warmed clones, so each navigation lands on a
-fresh JS context instantly.
+wgxpath) and checks Contexts out of a small process-wide pool of
+pre-warmed clones, so each navigation lands on a fresh JS context
+instantly.
 
 **Wall time is sensitive to whether the app uses Turbo Drive**,
 because navigation simulates real-browser semantics:
@@ -247,23 +246,14 @@ Per visit, `<script src>`-referenced libraries (jQuery, Stimulus,
 into a per-app snapshot — preserving library state across page
 navigations is what real browsers don't do, and trying to do it
 broke `$.ready` Callbacks queues whose user-app callbacks
-referenced page-specific DOM. Per-visit library re-eval costs ~5 ms
-per library; the lost snapshot speedup turned out to be inside
-run-to-run measurement noise.
+referenced page-specific DOM.
 
 ### Other factors
 
 - **`<script src>` parsing** dominates `visit` on JS-heavy pages.
   Each external script is fetched through the in-process Rack app,
   compiled, and run in V8 with bytecode cache hits from the base
-  snapshot warmup. Order of magnitude per cold visit:
-
-  | page profile | typical cold `visit` |
-  |---|---|
-  | inline scripts only, ~10 KB JS | 30–80 ms |
-  | a Hotwire / Stimulus app, ~200 KB JS | 200–500 ms |
-  | React-on-Rails / Forem, 18+ bundles | 2–4 s |
-
+  snapshot warmup.
 - **CSS cascade resolution**: rules are parsed once on first encounter
   per stylesheet set; subsequent finds on the same page hit the
   cached `__layoutRules` / `__hideRules` arrays in JS-side memory.
@@ -299,17 +289,13 @@ run-to-run measurement noise.
   but there's no real network, no streaming, no `Request#body`
   ReadableStream, and no concurrent requests. XHR is implemented
   with the same Rack pass-through.
-- **ES modules** are loaded via Rack with bare-specifier resolution
-  through importmaps and relative-path resolution against the
-  importer URL, but `import.meta.url` is set from the module
-  specifier (not a fully-spec URL), and template-literal specifiers
-  (`` import `./${name}.js` ``) aren't rewritten.
 - **Multi-window** is URL-tracking only — `target="_blank"` clicks
   open a window-handle and `current_window` / `switch_to_window`
-  work, but each window has its own `Browser` (no cross-window
-  `postMessage`, no `window.opener` reference).
-- **Frames, WebSocket, EventSource, screenshots, and drag pixel
-  coordinates** are out of scope — use Selenium / Cuprite.
+  work, but each aux window only records its URL (no per-window JS
+  context or cross-window `postMessage`).
+- **Frames, WebSocket, screenshots, and drag pixel coordinates** are
+  out of scope — use Selenium / Cuprite. (EventSource and Web Workers
+  *are* implemented.)
 
 ## Architecture
 
@@ -319,10 +305,9 @@ run-to-run measurement noise.
   (capture / target / bubble phases with `dispatchEvent(target,
   event)`); virtual `setTimeout` / `setInterval` /
   `requestAnimationFrame` clock; MutationObserver; custom-element
-  registry; `Range` / `getSelection`; cascade resolver for `display`
-  / `visibility` / `text-transform` / layout primitives. wgxpath
-  (true third-party, under `vendor/js/`) sits on top for XPath.
-  Approx 7000 lines.
+  registry; `Range` / `Selection`; cascade resolver for `display` /
+  `visibility` / `text-transform` / layout primitives. wgxpath (true
+  third-party, under `vendor/js/`) sits on top for XPath.
 - `lib/capybara/simulated/browser.rb` — Rack client, history stack,
   modal handler queue, virtual-clock anchor, trace recorder. Owns
   the JS runtime via `V8Runtime` or `QuickJSRuntime`. The hot
