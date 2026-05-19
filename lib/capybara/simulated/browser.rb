@@ -4,7 +4,6 @@ require 'base64'
 require 'date'
 require 'fileutils'
 require 'json'
-require 'nokogiri'
 require 'rack/mock'
 require 'socket'
 require 'thread'
@@ -239,50 +238,9 @@ module Capybara
         @current_url || ''
       end
 
-      # Capybara routes plenty of compound CSS — `[type='submit']` /
-      # pseudo classes / sibling combinators — through `find_css` even
-      # when the resolved locator is XPath. The JS-side selector parser
-      # is intentionally minimal (tag / id / class / attr / descendant
-      # / grouping). To get full Capybara coverage without growing
-      # the JS parser, route through Nokogiri's CSS → XPath translator
-      # and reuse `find_xpath`; the JS parser stays the fast path
-      # for the simple selectors customElements / framework code
-      # emits internally.
-      # Dynamic pseudo-classes that depend on runtime state (focus,
-      # interaction) instead of static DOM shape. Nokogiri's CSS-to-
-      # XPath emits `nokogiri:focus(...)` for these, which wgxpath
-      # can't evaluate (extension functions aren't registered),
-      # silently returning empty. The JS-side parser DOES handle them,
-      # so we shortcut around the XPath path entirely when we see one.
-      DYNAMIC_PSEUDO_RE = /:(focus|focus-within|focus-visible|hover|active|checked|disabled|enabled|valid|invalid|required|optional|read-only|read-write|placeholder-shown|target)\b/
-
       def find_css(css, context_handle = nil)
         s = css.to_s
-        if xpath_shaped?(s)
-          return find_xpath(s, context_handle)
-        end
-        unless s.match?(DYNAMIC_PSEUDO_RE) || scoped_chain_selector?(s, context_handle)
-          begin
-            # When scoped, emit context-relative XPath (`.//`) so wgxpath
-            # honors the context node. Without the prefix Nokogiri returns
-            # `//` (descendant-of-root) which ignores `context_handle` and
-            # collects matches across the whole document — surfaced as
-            # `Capybara::Ambiguous` whenever a within() block expected one
-            # element (e.g. Redmine's ReactionsSystemTest scoped to a span).
-            prefix = context_handle ? './/' : '//'
-            xpaths = Nokogiri::CSS.xpath_for(s, prefix: prefix)
-            unless xpaths.empty?
-              # Comma groups emit one xpath each — union with ` | `.
-              combined = xpaths.length == 1 ? xpaths.first : xpaths.join(' | ')
-              return find_xpath(combined, context_handle)
-            end
-          rescue Nokogiri::CSS::SyntaxError, StandardError
-            # Fall back to the JS-side parser. Worth trying because
-            # `xpath_for` can choke on Capybara-emitted pseudo selectors
-            # (`:not(...)`, attribute case-insensitive flags) that our
-            # JS path either supports or ignores predictably.
-          end
-        end
+        return find_xpath(s, context_handle) if xpath_shaped?(s)
         find_with_timer_fallback(:css, s, context_handle) do
           @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
         rescue StandardError => e
@@ -323,41 +281,13 @@ module Capybara
         !!(s =~ %r{\A\s*(?:/|\(\s*/|\./|\.\.)})
       end
 
-      # CSS qsa spec: `el.querySelectorAll("a b c")` matches the
-      # selector against the document, then filters to descendants of
-      # `el`. Nokogiri::CSS.xpath_for with the `.//` prefix instead
-      # requires `a`, `b`, `c` to all be inside the context, so a
-      # `find_all("table tbody tr td")` inside a `<tr>` scope returns
-      # zero matches. Falling back to the JS-side qsa (whose
-      # `matchComplex` walks the *document* ancestor chain) is the
-      # correct way to honour CSS semantics; the heuristic catches any
-      # selector with a combinator and a context.
-      COMBINATOR_RE = /[\s>+~]/
-      def scoped_chain_selector?(s, context_handle)
-        return false unless context_handle
-        # Strip the inside of `:not(...)` / `:is(...)` etc. before
-        # probing — a combinator inside a pseudo doesn't add an
-        # outer ancestor step and is safe for the Nokogiri path.
-        stripped = s.gsub(/\([^()]*\)/, '')
-        stripped.match?(COMBINATOR_RE)
-      end
-
       # XPath is evaluated *inside* V8 against the live JS DOM via
       # wgxpath (vendored, installed at snapshot build). One IPC per
-      # `find_xpath` — no serialise + reparse round-trip. Set
-      # `CSIM_XPATH=nokogiri` to fall back to a serialize-and-reparse
-      # path through libxml2 (Element handles travel as
-      # `data-csim-handle` attributes on the serialised subtree) when
-      # wgxpath chokes on a query.
-      XPATH_BACKEND = ENV['CSIM_XPATH'] == 'nokogiri' ? :nokogiri : :wgxpath
+      # `find_xpath` — no serialise + reparse round-trip.
       def find_xpath(xpath, context_handle = nil)
         xpath_str = xpath.to_s
         find_with_timer_fallback(:xpath, xpath_str, context_handle) do
-          if XPATH_BACKEND == :nokogiri
-            find_xpath_via_nokogiri(xpath, context_handle)
-          else
-            @runtime.call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
-          end
+          @runtime.call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
         end
       end
 
@@ -411,20 +341,6 @@ module Capybara
       # callbacks also dirty (see `tick_real_time`).
       def invalidate_find_cache
         @find_cache_dirty = true
-      end
-
-      # Kept as a fallback / debug aid. Same semantics as the wgxpath
-      # path but routes through Nokogiri::HTML5 — useful when wgxpath
-      # rejects a query Capybara emits.
-      def find_xpath_via_nokogiri(xpath, context_handle = nil)
-        html = @runtime.call('__csimSerialize', 0).to_s
-        return [] if html.empty?
-        doc  = Nokogiri::HTML5.parse(html)
-        root = context_handle ? doc.at_xpath("//*[@data-csim-handle='#{context_handle}']") : doc
-        return [] unless root
-        root.xpath(xpath.to_s).filter_map {|n|
-          n.respond_to?(:[]) ? n['data-csim-handle']&.to_i : nil
-        }.reject(&:zero?)
       end
 
       def text(handle)        = @runtime.call('__csimText', handle).to_s
