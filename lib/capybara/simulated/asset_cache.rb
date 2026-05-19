@@ -110,14 +110,23 @@ module Capybara
       end
 
       # Apps may return mixed-case header hashes on Rack 2; Rack 3 ships
-      # lowercase. Normalise once per store/refresh — Rack::Headers's
-      # `[]=` canonicalises keys, so subsequent O(1) lookups work either
-      # way without per-call linear scans.
+      # lowercase. Normalise once per store/refresh so subsequent O(1)
+      # lookups work either way without per-call linear scans. On Rack 3
+      # delegate to `Rack::Headers` (its `[]=` canonicalises keys); Rack
+      # 2 has no such class — downcase keys into a plain Hash ourselves.
+      # The `defined?` check is per-call because Rack loads after the gem
+      # entry point requires this file.
       def ensure_lowercase(headers)
-        return headers if headers.is_a?(Rack::Headers)
-        out = Rack::Headers.new
-        headers.each {|k, v| out[k] = v }
-        out
+        if defined?(::Rack::Headers)
+          return headers if headers.is_a?(::Rack::Headers)
+          out = ::Rack::Headers.new
+          headers.each {|k, v| out[k] = v }
+          out
+        else
+          out = {}
+          headers.each {|k, v| out[k.to_s.downcase] = v }
+          out
+        end
       end
 
       DIRECTIVE_RE = /\A(?<key>[a-zA-Z-]+)(?:=(?<val>.+))?\z/
