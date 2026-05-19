@@ -1,16 +1,18 @@
 # capybara-simulated
 
-A lightweight Capybara driver that runs JavaScript against a V8-resident
-DOM, in-process, with no Chrome. Forms submit through `Rack::MockRequest`,
-inline `<script>` and event handlers run, MutationObserver / custom
-elements / `<template>` / Shadow DOM / Trix / Stimulus / Turbo all work,
-and the Capybara DSL is unchanged.
+A lightweight Capybara driver that runs JavaScript against an
+in-process JS-resident DOM, with no Chrome. Forms submit through
+`Rack::MockRequest`, inline `<script>` and event handlers run,
+MutationObserver / custom elements / `<template>` / Shadow DOM /
+Trix / Stimulus / Turbo all work, and the Capybara DSL is unchanged.
 
-The DOM lives entirely inside [V8 via
-mini_racer](https://github.com/rubyjs/mini_racer) — there is no Nokogiri
-tree on the Ruby side. Capybara finds resolve through wgxpath /
-CSS-selector code running in the same V8 context as the page's JS, so
-`find` / `has_css?` / `within` see exactly the tree the app sees.
+The DOM lives entirely inside the JS engine — V8 via
+[mini_racer](https://github.com/rubyjs/mini_racer) or QuickJS via
+[quickjs.rb](https://github.com/hmsk/quickjs.rb), whichever is
+installed — with no Nokogiri tree on the Ruby side. Capybara finds
+resolve through wgxpath / CSS-selector code running in the same
+context as the page's JS, so `find` / `has_css?` / `within` see
+exactly the tree the app sees.
 
 ## Status
 
@@ -219,17 +221,17 @@ end
 
 ## Performance characteristics
 
-The driver builds a V8 base snapshot once per process (bridge.js +
-wgxpath) and checks Contexts out of a small process-wide pool of
-pre-warmed clones, so each navigation lands on a fresh JS context
-instantly.
+The driver builds a base snapshot once per process (bridge.js +
+wgxpath — a V8 `Snapshot` for mini_racer, bytecode for QuickJS) and
+checks Contexts out of a small process-wide pool of pre-warmed
+clones, so each navigation lands on a fresh JS context instantly.
 
 **Wall time is sensitive to whether the app uses Turbo Drive**,
 because navigation simulates real-browser semantics:
 
 | navigation source | what happens |
 |---|---|
-| `visit(...)`, `refresh`, programmatic `location.assign` | full reload — fresh V8 Context, scripts re-evaluated |
+| `visit(...)`, `refresh`, programmatic `location.assign` | full reload — fresh JS Context, scripts re-evaluated |
 | link click *with Turbo Drive loaded* | Turbo intercepts, body-swap via JS, **JS context preserved** |
 | link click *without Turbo Drive* | full reload (anchor default action) |
 | form submit *with Turbo Drive loaded* | Turbo intercepts (turbo-frame or page-level), body-swap |
@@ -252,15 +254,16 @@ referenced page-specific DOM.
 
 - **`<script src>` parsing** dominates `visit` on JS-heavy pages.
   Each external script is fetched through the in-process Rack app,
-  compiled, and run in V8 with bytecode cache hits from the base
-  snapshot warmup.
+  compiled, and run in the JS engine with bytecode cache hits from
+  the base snapshot warmup.
 - **CSS cascade resolution**: rules are parsed once on first encounter
   per stylesheet set; subsequent finds on the same page hit the
   cached `__layoutRules` / `__hideRules` arrays in JS-side memory.
-- **DOM ops stay inside V8** — find / has_? / event dispatch never
-  cross the Ruby ↔ JS boundary for the actual tree walk; only the
-  resulting handle ids do. Modify-heavy tests (SortableJS dragging
-  thousands of items) run at V8 speed, not at mini_racer-IPC speed.
+- **DOM ops stay inside the JS engine** — find / has_? / event
+  dispatch never cross the Ruby ↔ JS boundary for the actual tree
+  walk; only the resulting handle ids do. Modify-heavy tests
+  (SortableJS dragging thousands of items) run at JS-engine speed,
+  not at host-call-IPC speed.
 - **Polling** (Capybara `default_max_wait_time`) advances a *virtual*
   JS clock — `setTimeout(N)` fires after `N` ms of accumulated wall
   time, not real time. A page that schedules `setTimeout(2000, x)`
