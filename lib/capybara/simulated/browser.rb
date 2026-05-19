@@ -430,6 +430,8 @@ module Capybara
       def text(handle)        = @runtime.call('__csimText', handle).to_s
       def tag(handle)         = @runtime.call('__csimTag', handle).to_s
       def attr(handle, name)  = @runtime.call('__csimAttr', handle, name.to_s)
+      def inner_html(handle)  = @runtime.call('__csimInnerHTML', handle).to_s
+      def outer_html(handle)  = @runtime.call('__csimOuterHTML', handle).to_s
       def file_input?(handle)
         tag(handle) == 'input' && attr(handle, 'type').to_s.downcase == 'file'
       end

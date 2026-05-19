@@ -42,6 +42,20 @@ module Capybara
 
       def tag_name = browser.tag_name(handle_id)
 
+      # Convenience accessors mirroring real browser nodes — Discourse
+      # tests reach for `.native.inner_html` (e.g. reviewables XSS
+      # checks); without this method `.native` (= self) raised
+      # NoMethodError.
+      def inner_html
+        check_stale
+        browser.inner_html(handle_id)
+      end
+
+      def outer_html
+        check_stale
+        browser.outer_html(handle_id)
+      end
+
       def [](name)
         # Tick the virtual clock so Capybara's helpers that poll an
         # attribute in a tight `sleep(0.1) until` loop (e.g. Avo's
