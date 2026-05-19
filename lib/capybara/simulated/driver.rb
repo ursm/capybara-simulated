@@ -23,17 +23,14 @@ module Capybara
         return super if seconds.nil?
         n = super
         if seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
-          # Advance every Driver owned by the calling thread. Multiple
-          # sessions can coexist within a suite (e.g. `let(:session)`
-          # makes a new one per example, while the shared-spec session
-          # is module-level), and the previous thread-local "current"
-          # slot raced: whichever Driver was constructed last won the
-          # slot even when a different one was actually driving the
-          # spec. The thread filter is essential — background threads
-          # (`MessageBus::TimerThread`, etc.) call `sleep` from outside
-          # the test, and mini_racer / quickjs.rb VMs aren't thread-safe.
-          # Idle drivers no-op (`tick_real_time` short-circuits when
-          # `@timers_active` is false), so a blanket advance is cheap.
+          # Broadcast to every Driver constructed on the current
+          # thread. Background threads (`MessageBus::TimerThread`,
+          # etc.) sleep too, but their Drivers — if any — were
+          # registered under a different thread, so they skip; the
+          # filter is load-bearing because mini_racer / quickjs.rb
+          # VMs aren't thread-safe. Idle Drivers no-op
+          # (`tick_real_time` short-circuits when `@timers_active`
+          # is false), so the broadcast is cheap.
           ms = (seconds.to_f * 1000).to_i
           Capybara::Simulated::Driver.each_live_on_thread(Thread.current) {|d|
             d.browser.advance_virtual_clock_ms(ms)
@@ -45,22 +42,18 @@ module Capybara
     Kernel.prepend(SleepHook)
 
     class Driver < Capybara::Driver::Base
-      attr_reader :app
+      attr_reader :app, :owner_thread
 
       @@live_lock = Mutex.new
       @@live      = []  # [WeakRef<Driver>] — dead refs filtered on read.
 
       def self.each_live_on_thread(thread)
-        @@live_lock.synchronize {
-          @@live.reject! {|ref| !ref.weakref_alive? }
-          @@live.dup
-        }.each {|ref|
-          d = ref.__getobj__ rescue nil
-          yield d if d && d.owner_thread == thread
+        drivers = @@live_lock.synchronize {
+          @@live.select!(&:weakref_alive?)
+          @@live.filter_map {|ref| ref.__getobj__ rescue nil }
         }
+        drivers.each {|d| yield d if d.owner_thread == thread }
       end
-
-      attr_reader :owner_thread
 
       def initialize(app, js_engine: nil)
         @app             = app
