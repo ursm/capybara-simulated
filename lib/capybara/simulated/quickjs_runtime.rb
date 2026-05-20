@@ -126,10 +126,28 @@ module Capybara
         self.class.pool # eager-start the warmers on first Browser
       end
 
+      # `drain_microtasks!` is part of the ursm/quickjs.rb
+      # combined-pr-40-and-42 branch; the stock 0.17.0.pre gem doesn't
+      # ship it. Fall back to the older `await Promise.resolve(0)`
+      # shim — it routes through `js_std_await`'s pending-job loop
+      # and clears one round per call. Not as thorough as the bounded
+      # loop drain (chained .then sequences need multiple rounds), but
+      # keeps Redmine / Forem (still pinned to 0.17.0.pre) functional.
+      DRAIN_API_AVAILABLE = Quickjs::VM.instance_methods.include?(:drain_microtasks!)
+      private_constant :DRAIN_API_AVAILABLE
+
+      private def pump_microtasks(v)
+        if DRAIN_API_AVAILABLE
+          v.drain_microtasks!
+        else
+          v.eval_code('await Promise.resolve(0)')
+        end
+      end
+
       def eval(code)
         v = vm
         result = v.eval_code(code.to_s)
-        v.drain_microtasks!
+        pump_microtasks(v)
         normalize(result)
       end
 
@@ -147,7 +165,7 @@ module Capybara
       def call(name, *args)
         v = vm
         result = v.call(name.to_s, *args)
-        v.drain_microtasks!
+        pump_microtasks(v)
         normalize(result)
       end
 
@@ -161,8 +179,13 @@ module Capybara
       # the queue is empty, so repeating drains nothing extra. The
       # arity matches V8Runtime so `Browser#settle` can call either
       # without engine-switching.
-      def drain_microtasks(_iters = 4)
-        vm.drain_microtasks!
+      def drain_microtasks(iters = 4)
+        v = vm
+        if DRAIN_API_AVAILABLE
+          v.drain_microtasks!
+        else
+          iters.to_i.times { pump_microtasks(v) }
+        end
       end
 
       def settle_gen
@@ -245,7 +268,7 @@ module Capybara
         opts = src ? { from: src.to_s } : { filename: url.to_s }
         opts[:code_to_expose] = ''
         v.import("* as __csim_entry_#{rand(1 << 32)}", **opts)
-        v.drain_microtasks!
+        pump_microtasks(v)
       end
 
       private
@@ -308,11 +331,12 @@ module Capybara
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
         vm.eval_code('__csim_installWorkerScope();')
-        vm.drain_microtasks!
+        pump = ->(v) { DRAIN_API_AVAILABLE ? v.drain_microtasks! : v.eval_code('await Promise.resolve(0)') }
+        pump.call(vm)
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
-          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
-          drain_microtasks:  ->        { vm.drain_microtasks! },
+          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); pump.call(vm); v },
+          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); pump.call(vm); v },
+          drain_microtasks:  ->        { pump.call(vm) },
           drain_timers:      ->        { vm.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
           # quickjs.rb has no explicit dispose; GC reclaims the VM.
@@ -356,6 +380,12 @@ module Capybara
       # time). Now any future "module loads but nothing renders"
       # symptom comes with a stack trace.
       def attach_rejection_tracker(v)
+        # `on_unhandled_rejection` is part of the ursm/quickjs.rb
+        # combined-pr-40-and-42 branch; the stock gem (e.g. 0.17.0.pre
+        # pinned by Redmine) doesn't ship it yet. Skip silently so the
+        # rest of the bridge still boots — diagnostic value is lost but
+        # the runtime stays usable.
+        return unless v.respond_to?(:on_unhandled_rejection)
         browser = @browser
         v.on_unhandled_rejection do |reason|
           msg = reason.respond_to?(:message) ? "#{reason.class}: #{reason.message}" : reason.to_s
