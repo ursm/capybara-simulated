@@ -136,13 +136,11 @@ module Capybara
       DRAIN_API_AVAILABLE = Quickjs::VM.instance_methods.include?(:drain_microtasks!)
       private_constant :DRAIN_API_AVAILABLE
 
-      private def pump_microtasks(v)
-        if DRAIN_API_AVAILABLE
-          v.drain_microtasks!
-        else
-          v.eval_code('await Promise.resolve(0)')
-        end
+      def self.pump_microtasks(v)
+        DRAIN_API_AVAILABLE ? v.drain_microtasks! : v.eval_code('await Promise.resolve(0)')
       end
+
+      private def pump_microtasks(v) = self.class.pump_microtasks(v)
 
       def eval(code)
         v = vm
@@ -331,12 +329,11 @@ module Capybara
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
         vm.eval_code('__csim_installWorkerScope();')
-        pump = ->(v) { DRAIN_API_AVAILABLE ? v.drain_microtasks! : v.eval_code('await Promise.resolve(0)') }
-        pump.call(vm)
+        pump_microtasks(vm)
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); pump.call(vm); v },
-          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); pump.call(vm); v },
-          drain_microtasks:  ->        { pump.call(vm) },
+          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); pump_microtasks(vm); v },
+          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); pump_microtasks(vm); v },
+          drain_microtasks:  ->        { pump_microtasks(vm) },
           drain_timers:      ->        { vm.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
           # quickjs.rb has no explicit dispose; GC reclaims the VM.

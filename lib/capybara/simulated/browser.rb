@@ -224,6 +224,9 @@ module Capybara
         navigate(resolve_visit_url(url), referer: nil)
       end
 
+      URL_UNSAFE_CHARS = %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n.freeze
+      private_constant :URL_UNSAFE_CHARS
+
       def resolve_visit_url(url)
         s = url.to_s
         unless s =~ %r{\A[a-z]+://}i
@@ -233,9 +236,9 @@ module Capybara
           s = "#{host_root}#{s}"
         end
         # Real browsers percent-encode characters that aren't legal in their
-        # URL position (spaces, <, >, {}, etc.) before issuing the request.
-        # URI::DEFAULT_PARSER would otherwise reject the unencoded form.
-        URI::DEFAULT_PARSER.escape(s, %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n)
+        # URL position before issuing the request. Skip the escape pass when
+        # the input is already clean (the common case).
+        s.match?(URL_UNSAFE_CHARS) ? URI::DEFAULT_PARSER.escape(s, URL_UNSAFE_CHARS) : s
       end
 
       def current_url
