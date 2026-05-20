@@ -226,11 +226,16 @@ module Capybara
 
       def resolve_visit_url(url)
         s = url.to_s
-        return s if s =~ %r{\A[a-z]+://}i
-        host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || DEFAULT_HOST
-        host_root = host_root.sub(/\/+$/, '')
-        s = "/#{s}" unless s.start_with?('/')
-        "#{host_root}#{s}"
+        unless s =~ %r{\A[a-z]+://}i
+          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || DEFAULT_HOST
+          host_root = host_root.sub(/\/+$/, '')
+          s = "/#{s}" unless s.start_with?('/')
+          s = "#{host_root}#{s}"
+        end
+        # Real browsers percent-encode characters that aren't legal in their
+        # URL position (spaces, <, >, {}, etc.) before issuing the request.
+        # URI::DEFAULT_PARSER would otherwise reject the unencoded form.
+        URI::DEFAULT_PARSER.escape(s, %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n)
       end
 
       def current_url
