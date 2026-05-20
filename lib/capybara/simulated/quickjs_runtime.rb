@@ -129,15 +129,22 @@ module Capybara
       # `drain_microtasks!` is part of the ursm/quickjs.rb
       # combined-pr-40-and-42 branch; the stock 0.17.0.pre gem doesn't
       # ship it. Fall back to the older `await Promise.resolve(0)`
-      # shim — it routes through `js_std_await`'s pending-job loop
-      # and clears one round per call. Not as thorough as the bounded
-      # loop drain (chained .then sequences need multiple rounds), but
-      # keeps Redmine / Forem (still pinned to 0.17.0.pre) functional.
+      # shim, which clears one round of microtasks per call via
+      # `js_std_await`'s pending-job loop. Loop a fixed N times to
+      # cover chained `.then` sequences — Forem's `fetch().then(json)
+      # .then(setItem)` preload populates localStorage 3 levels deep,
+      # and the single-round shim leaves the user cache empty before
+      # the next `visit` rebuilds the VM (onboarding-card init reads
+      # `userData()` synchronously and returns early).
       DRAIN_API_AVAILABLE = Quickjs::VM.instance_methods.include?(:drain_microtasks!)
       private_constant :DRAIN_API_AVAILABLE
 
+      AWAIT_SHIM_ROUNDS = 4
+      private_constant :AWAIT_SHIM_ROUNDS
+
       def self.pump_microtasks(v)
-        DRAIN_API_AVAILABLE ? v.drain_microtasks! : v.eval_code('await Promise.resolve(0)')
+        return v.drain_microtasks! if DRAIN_API_AVAILABLE
+        AWAIT_SHIM_ROUNDS.times { v.eval_code('await Promise.resolve(0)') }
       end
 
       private def pump_microtasks(v) = self.class.pump_microtasks(v)
