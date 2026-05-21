@@ -733,8 +733,17 @@ module Capybara
       def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
+        # Real browsers issue the full mousedown→mouseup→click pair
+        # twice before firing `dblclick`. Jspreadsheet (table-builder's
+        # `.jss_worksheet`) listens for `mousedown` to enter edit mode,
+        # then for the `dblclick` to commit — without the click pair
+        # the cell never switches to its textarea and
+        # `find_cell(…).find("textarea")` raises.
+        @runtime.call('__csimClickResolve', handle, opts)
+        @runtime.call('__csimClickResolve', handle, opts)
         init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
+        settle
       end
 
       MODIFIER_KEYS = {
