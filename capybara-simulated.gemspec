@@ -35,8 +35,14 @@ Gem::Specification.new do |spec|
   # wins when both are present. Override explicitly with
   # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
   #
-  #   gem 'mini_racer', '>= 0.18'      # V8 (JIT, fastest per-spec)
-  #   gem 'quickjs',    '>= 0.17.0.pre' # QuickJS (interpreter, smaller
-  #                                     # per-VM footprint, wins on
-  #                                     # parallelism)
+  #   gem 'mini_racer', '>= 0.18' # V8 (JIT, fastest per-spec)
+  #   gem 'quickjs',    '>= 0.18' # QuickJS (interpreter, smaller per-VM
+  #                               # footprint; wins on parallelism). The
+  #                               # `vm.drain_microtasks!` /
+  #                               # `on_unhandled_rejection` /
+  #                               # `vm.dispose!` API the runtime relies
+  #                               # on is merged on hmsk/quickjs.rb main
+  #                               # but unreleased; pin the
+  #                               # `ursm/quickjs.rb#combined-pr-40-and-47`
+  #                               # branch until 0.18 ships.
 end

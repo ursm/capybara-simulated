@@ -126,33 +126,10 @@ module Capybara
         self.class.pool # eager-start the warmers on first Browser
       end
 
-      # `drain_microtasks!` is part of the ursm/quickjs.rb
-      # combined-pr-40-and-42 branch; the stock 0.17.0.pre gem doesn't
-      # ship it. Fall back to the older `await Promise.resolve(0)`
-      # shim, which clears one round of microtasks per call via
-      # `js_std_await`'s pending-job loop. Loop a fixed N times to
-      # cover chained `.then` sequences — Forem's `fetch().then(json)
-      # .then(setItem)` preload populates localStorage 3 levels deep,
-      # and the single-round shim leaves the user cache empty before
-      # the next `visit` rebuilds the VM (onboarding-card init reads
-      # `userData()` synchronously and returns early).
-      DRAIN_API_AVAILABLE = Quickjs::VM.instance_methods.include?(:drain_microtasks!)
-      private_constant :DRAIN_API_AVAILABLE
-
-      AWAIT_SHIM_ROUNDS = 4
-      private_constant :AWAIT_SHIM_ROUNDS
-
-      def self.pump_microtasks(v)
-        return v.drain_microtasks! if DRAIN_API_AVAILABLE
-        AWAIT_SHIM_ROUNDS.times { v.eval_code('await Promise.resolve(0)') }
-      end
-
-      private def pump_microtasks(v) = self.class.pump_microtasks(v)
-
       def eval(code)
         v = vm
         result = v.eval_code(code.to_s)
-        pump_microtasks(v)
+        v.drain_microtasks!
         normalize(result)
       end
 
@@ -170,7 +147,7 @@ module Capybara
       def call(name, *args)
         v = vm
         result = v.call(name.to_s, *args)
-        pump_microtasks(v)
+        v.drain_microtasks!
         normalize(result)
       end
 
@@ -180,17 +157,12 @@ module Capybara
         max_ms.nil? ? vm.call('__drainTimers') : vm.call('__drainTimers', max_ms.to_i)
       end
 
-      # `iters` is ignored: `drain_microtasks!` already loops until
-      # the queue is empty, so repeating drains nothing extra. The
-      # arity matches V8Runtime so `Browser#settle` can call either
-      # without engine-switching.
-      def drain_microtasks(iters = 4)
-        v = vm
-        if DRAIN_API_AVAILABLE
-          v.drain_microtasks!
-        else
-          iters.to_i.times { pump_microtasks(v) }
-        end
+      # `iters` is ignored — `drain_microtasks!` already loops to
+      # queue-empty, so further rounds drain nothing extra. The arity
+      # matches `V8Runtime#drain_microtasks` so `Browser#settle` can
+      # call either engine's method without branching.
+      def drain_microtasks(_iters = 4)
+        vm.drain_microtasks!
       end
 
       def settle_gen
@@ -211,12 +183,12 @@ module Capybara
       # precompiled bytecode. Partial in-VM resets carry the same
       # library-init-leak hazards V8Runtime documents.
       #
-      # Note: quickjs.rb 0.17.0.pre doesn't expose `VM#dispose`, so
-      # the previous VM's C-side `JSRuntime` is reclaimed only via
-      # Ruby GC (its dfree handler calls `JS_FreeRuntime`). Long
-      # parallel workers see transient C-heap growth proportional to
-      # the rebuild rate; one upstream PR away from V8Runtime's
-      # explicit background-thread teardown.
+      # We don't `@vm&.dispose!` before swapping: per-visit rebuilds
+      # happen on every spec example, and `dispose!` blocks on the
+      # quickjs GC running with the GVL held. Ruby GC will eventually
+      # reach the unreferenced VM and the gem's dfree handler frees
+      # the JSRuntime. The transient C-heap growth between GCs is the
+      # tradeoff for not paying ~hundreds of ms per spec.
       def rebuild_ctx
         @vm = build_vm
       end
@@ -253,7 +225,13 @@ module Capybara
         # allocation). 512 MB clears the ceiling without idle cost —
         # `JS_SetMemoryLimit` is a malloc ceiling, not a reservation.
         memory_limit:   512 * 1024 * 1024,
-        timeout_msec:   (2**31) - 1
+        # `drain_microtasks!` loops `JS_ExecutePendingJob` until the
+        # queue empties — but Forem's article-feed render schedules
+        # new microtasks faster than they drain, so without a timer
+        # the call never returns. Real per-spec eval rarely runs over
+        # a second, and a 30 s ceiling is far below "hung CI worker"
+        # while leaving headroom for the heaviest Mastodon hydrate.
+        timeout_msec:   30_000
       }.freeze
 
       # Evaluates `url` as an ES module. For external `<script
@@ -264,16 +242,15 @@ module Capybara
       # synthesised `#inline-…` URL becomes the module's identity, but
       # transitive imports still go through `module_loader`).
       #
-      # `quickjs.rb` 0.17.0.pre's `vm.import` distinguishes these by
-      # which keyword arg you pass: `filename:` alone → loader fetch;
-      # `from:` alone → inline compile. Passing both makes the gem
-      # ignore the body.
+      # `quickjs.rb`'s `vm.import` distinguishes these by which keyword
+      # arg you pass: `filename:` alone → loader fetch; `from:` alone →
+      # inline compile. Passing both makes the gem ignore the body.
       def eval_esm_module(url, src = nil)
         v = vm
         opts = src ? { from: src.to_s } : { filename: url.to_s }
         opts[:code_to_expose] = ''
         v.import("* as __csim_entry_#{rand(1 << 32)}", **opts)
-        pump_microtasks(v)
+        v.drain_microtasks!
       end
 
       private
@@ -336,11 +313,11 @@ module Capybara
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
         vm.eval_code('__csim_installWorkerScope();')
-        pump_microtasks(vm)
+        vm.drain_microtasks!
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); pump_microtasks(vm); v },
-          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); pump_microtasks(vm); v },
-          drain_microtasks:  ->        { pump_microtasks(vm) },
+          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
+          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
+          drain_microtasks:  ->        { vm.drain_microtasks! },
           drain_timers:      ->        { vm.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
           # quickjs.rb has no explicit dispose; GC reclaims the VM.
@@ -384,12 +361,6 @@ module Capybara
       # time). Now any future "module loads but nothing renders"
       # symptom comes with a stack trace.
       def attach_rejection_tracker(v)
-        # `on_unhandled_rejection` is part of the ursm/quickjs.rb
-        # combined-pr-40-and-42 branch; the stock gem (e.g. 0.17.0.pre
-        # pinned by Redmine) doesn't ship it yet. Skip silently so the
-        # rest of the bridge still boots — diagnostic value is lost but
-        # the runtime stays usable.
-        return unless v.respond_to?(:on_unhandled_rejection)
         browser = @browser
         v.on_unhandled_rejection do |reason|
           msg = reason.respond_to?(:message) ? "#{reason.class}: #{reason.message}" : reason.to_s

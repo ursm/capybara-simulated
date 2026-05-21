@@ -208,7 +208,15 @@ module Capybara
         handle ? Node.new(self, handle) : nil
       end
       def send_keys(*keys)
-        keys.flatten.each {|k| browser.send_session_key(k) }
+        # Selenium contract: a nested Array is a *chord* — modifiers
+        # combined with the final key in one press (`send_keys([
+        # :control, "/"])` = Ctrl-/). Passing through `flatten.each`
+        # iterates each token separately and loses the combo, so the
+        # JS-side handler sees `:control` then `"/"` as two unrelated
+        # presses. Pass top-level items intact; `send_session_key`
+        # forwards Arrays as-is to `Browser#send_keys` which converts
+        # them to `kind=combo` atoms.
+        keys.each {|k| browser.send_session_key(k) }
         nil
       end
 

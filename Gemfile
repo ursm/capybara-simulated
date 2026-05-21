@@ -7,7 +7,7 @@ gemspec
 # they want — neither is a hard dependency of the gem itself.
 gem 'mini_racer'
 gem 'nokogiri'
-gem 'quickjs', github: 'ursm/quickjs.rb', branch: 'combined-pr-40-and-42', submodules: true
+gem 'quickjs', github: 'ursm/quickjs.rb', branch: 'combined-pr-40-and-47', submodules: true
 
 group :development, :test do
   gem 'launchy'            # required by Capybara's shared save_and_open_page spec
