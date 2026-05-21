@@ -28,20 +28,14 @@ module Capybara
       # request-tracker specs assert `event[:url] ==
       # Discourse.base_url_no_prefix + path`, which derives from the
       # same SiteSetting pair. We only consult `server_host` when it
-      # was *explicitly* set: Capybara's getter falls back to
-      # `'127.0.0.1'` when unset, but Rack::Test's hardcoded default
-      # origin is `www.example.com` and capybara's own shared specs
-      # (e.g. `#has_current_path? compare the full url`) assert that
-      # literal — match the legacy default when no host suite-side
-      # configuration is in play.
+      # was *explicitly* set: Capybara's getter returns `'127.0.0.1'`
+      # when unset, but Rack::Test's hardcoded default origin is
+      # `www.example.com` and capybara's own shared specs hard-code
+      # that literal — fall back to it when no suite-side configuration
+      # is in play.
       def self.default_host
         return ::Capybara.app_host if ::Capybara.app_host
         host = ::Capybara.server_host
-        # `Capybara.server_host`'s getter returns '127.0.0.1' when nothing
-        # has been configured; treat that as the unconfigured case and
-        # fall back to Rack::Test's `www.example.com`, which Capybara's
-        # own shared specs (e.g. `#has_current_path? compare the full
-        # url`) hard-code in their assertions.
         return 'http://www.example.com' if host == '127.0.0.1'
         port = ::Capybara.server_port.to_i
         port > 0 ? "http://#{host}:#{port}" : "http://#{host}"
@@ -113,44 +107,8 @@ module Capybara
         bare == 'localhost' ? REMOTE_ADDR_IPV6 : REMOTE_ADDR_IPV4
       end
 
-      # Minimal extension → MIME table for the file types capybara test
-      # fixtures use. Browsers consult their bundled MIME map (and a
-      # tiny header sniff) to decide what to set as `File.type` when a
-      # user picks a file. We don't need the full IANA list — the
-      # capybara / discourse / avo test fixtures only use a couple
-      # dozen extensions.
-      EXT_MIME_TYPES = {
-        '.png'  => 'image/png',
-        '.jpg'  => 'image/jpeg',
-        '.jpeg' => 'image/jpeg',
-        '.gif'  => 'image/gif',
-        '.svg'  => 'image/svg+xml',
-        '.webp' => 'image/webp',
-        '.bmp'  => 'image/bmp',
-        '.ico'  => 'image/x-icon',
-        '.mp4'  => 'video/mp4',
-        '.webm' => 'video/webm',
-        '.mov'  => 'video/quicktime',
-        '.mp3'  => 'audio/mpeg',
-        '.wav'  => 'audio/wav',
-        '.ogg'  => 'audio/ogg',
-        '.pdf'  => 'application/pdf',
-        '.zip'  => 'application/zip',
-        '.tar'  => 'application/x-tar',
-        '.gz'   => 'application/gzip',
-        '.json' => 'application/json',
-        '.xml'  => 'application/xml',
-        '.txt'  => 'text/plain',
-        '.csv'  => 'text/csv',
-        '.html' => 'text/html',
-        '.htm'  => 'text/html',
-        '.css'  => 'text/css',
-        '.js'   => 'application/javascript',
-        '.yml'  => 'application/x-yaml',
-        '.yaml' => 'application/x-yaml'
-      }.freeze
       def mime_type_for_path(path)
-        EXT_MIME_TYPES[File.extname(path.to_s).downcase] || ''
+        Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
       def initialize(app, driver: nil, js_engine: nil)
@@ -163,6 +121,11 @@ module Capybara
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
+        # Capybara config is set once per suite; cache the derived
+        # origin so the per-request fallback path doesn't re-dispatch
+        # `Capybara.app_host` / `server_host` / `server_port` on every
+        # rack call (CLAUDE.md: cache env decisions at construction).
+        @default_host                 = self.class.default_host
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -308,7 +271,7 @@ module Capybara
       def resolve_visit_url(url)
         s = url.to_s
         unless s =~ %r{\A[a-z]+://}i
-          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || self.class.default_host
+          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || @default_host
           host_root = host_root.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
@@ -525,17 +488,12 @@ module Capybara
             end
           end
           consume_pending_download
-          # Discourse's `lib/click-track.js` preventDefaults link clicks
-          # and routes the navigation through `DiscourseURL.redirectTo
-          # → window.location = href`, which our setter parks on
-          # `@pending_location` for the next tick to drain. Without
-          # this consume, the page never navigates / the download
-          # never runs — clicks like `click_link ".zip"` on an
-          # attachment finish "successfully" but the file the test
-          # expects is never written. Drain inside the click action so
-          # the response (which may carry `Content-Disposition:
-          # attachment`) gets handled by `navigate`'s download path
-          # before the test moves on.
+          # Discourse's `lib/click-track.js` preventDefaults link
+          # clicks and routes navigation through `DiscourseURL
+          # .redirectTo → window.location = href`, which our setter
+          # parks on `@pending_location`. Drain it here so attachment
+          # downloads from `click_link` complete inside the click
+          # action.
           consume_pending_location
           return
         end
@@ -782,14 +740,10 @@ module Capybara
       def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
-        # Real browsers issue the full mousedown→mouseup→click pair
-        # twice before firing `dblclick`. Jspreadsheet (table-builder's
-        # `.jss_worksheet`) listens for `mousedown` to enter edit mode,
-        # then for the `dblclick` to commit — without the click pair
-        # the cell never switches to its textarea and
-        # `find_cell(…).find("textarea")` raises.
-        @runtime.call('__csimClickResolve', handle, opts)
-        @runtime.call('__csimClickResolve', handle, opts)
+        # UI Events spec: two full mousedown→mouseup→click chains
+        # before the trailing `dblclick`. Jspreadsheet (table-builder's
+        # `.jss_worksheet`) enters edit mode on the inner mousedown.
+        2.times { @runtime.call('__csimClickResolve', handle, opts) }
         init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
         settle
@@ -1405,7 +1359,7 @@ module Capybara
             end
             URI.encode_www_form(fields)
           end
-        action_url = action.empty? ? (@current_url || self.class.default_host) : resolve_against_current(action)
+        action_url = action.empty? ? (@current_url || @default_host) : resolve_against_current(action)
         if method == 'GET'
           uri = URI.parse(action_url)
           uri.query = body unless body.empty?
@@ -2009,7 +1963,7 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        URI.join(base || @current_url || self.class.default_host, url).to_s
+        URI.join(base || @current_url || @default_host, url).to_s
       rescue URI::InvalidURIError
         url
       end
@@ -2348,14 +2302,13 @@ module Capybara
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
         # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
         # what real Chrome would have done after DNS resolution.
-        remote_addr = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         if force
           env['HTTP_USER_AGENT'] = USER_AGENT
-          env['REMOTE_ADDR']     = remote_addr
+          env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         else
           env['HTTP_USER_AGENT'] ||= USER_AGENT
-          env['REMOTE_ADDR']     ||= remote_addr
+          env['REMOTE_ADDR']     ||= self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
         end
         # Browsers always send an `Accept` header; Rack::MockRequest
@@ -2433,9 +2386,9 @@ module Capybara
             # being resolved — HTML's base-tag semantics. `visit` skips
             # this branch so an address-bar navigation reaches the URL
             # the test typed.
-            URI.join(@current_url || self.class.default_host, bh).to_s
+            URI.join(@current_url || @default_host, bh).to_s
           else
-            @current_url || self.class.default_host
+            @current_url || @default_host
           end
         URI.join(base, url.to_s).to_s
       rescue URI::InvalidURIError, URI::BadURIError
