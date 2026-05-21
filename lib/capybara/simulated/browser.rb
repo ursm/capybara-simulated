@@ -18,7 +18,34 @@ require_relative 'trace'
 module Capybara
   module Simulated
     class Browser
-      DEFAULT_HOST = 'http://www.example.com'
+      # Fallback origin for `visit('/foo')` and friends when no current
+      # page is loaded yet. Track Capybara's idea of the test server
+      # (`app_host` if set, else explicitly-configured `server_host` /
+      # `server_port`) so the host header reaching the Rack app matches
+      # what host-specific helpers expect — Discourse's
+      # `setup_system_test` sets `SiteSetting.force_hostname =
+      # Capybara.server_host` / `port = Capybara.server_port`, and the
+      # request-tracker specs assert `event[:url] ==
+      # Discourse.base_url_no_prefix + path`, which derives from the
+      # same SiteSetting pair. We only consult `server_host` when it
+      # was *explicitly* set: Capybara's getter falls back to
+      # `'127.0.0.1'` when unset, but Rack::Test's hardcoded default
+      # origin is `www.example.com` and capybara's own shared specs
+      # (e.g. `#has_current_path? compare the full url`) assert that
+      # literal — match the legacy default when no host suite-side
+      # configuration is in play.
+      def self.default_host
+        return ::Capybara.app_host if ::Capybara.app_host
+        host = ::Capybara.server_host
+        # `Capybara.server_host`'s getter returns '127.0.0.1' when nothing
+        # has been configured; treat that as the unconfigured case and
+        # fall back to Rack::Test's `www.example.com`, which Capybara's
+        # own shared specs (e.g. `#has_current_path? compare the full
+        # url`) hard-code in their assertions.
+        return 'http://www.example.com' if host == '127.0.0.1'
+        port = ::Capybara.server_port.to_i
+        port > 0 ? "http://#{host}:#{port}" : "http://#{host}"
+      end
 
       # Process-wide HTTP/1.1 response cache for `rack_fetch`. Real
       # browsers (cuprite / selenium) reuse fetched assets across the
@@ -73,7 +100,18 @@ module Capybara
       # send Turbo / Stimulus down chrome-specific code paths Avo's
       # tests don't exercise).
       USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; Rails Testing) capybara-simulated (V8-resident DOM)'
-      REMOTE_ADDR = '127.0.0.1'
+      # Approximate Chrome's resolution: when connecting to `localhost`,
+      # Linux glibc returns IPv6 (::1) first and the server sees the
+      # client at `::1`; for any literal IP (or a non-localhost name),
+      # the server keeps IPv4. Match that so Discourse system specs
+      # (`expect(event[:ip_address]).to eq('::1')`) line up with what
+      # they would see under selenium.
+      REMOTE_ADDR_IPV4 = '127.0.0.1'
+      REMOTE_ADDR_IPV6 = '::1'
+      def self.remote_addr_for(host)
+        bare = host.to_s.downcase.sub(/:\d+\z/, '').sub(/\A\[(.+)\]\z/, '\1')
+        bare == 'localhost' ? REMOTE_ADDR_IPV6 : REMOTE_ADDR_IPV4
+      end
 
       def initialize(app, driver: nil, js_engine: nil)
         @app                          = app
@@ -230,7 +268,7 @@ module Capybara
       def resolve_visit_url(url)
         s = url.to_s
         unless s =~ %r{\A[a-z]+://}i
-          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || DEFAULT_HOST
+          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || self.class.default_host
           host_root = host_root.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
@@ -513,7 +551,7 @@ module Capybara
       def download_link(url, filename_hint = '')
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = USER_AGENT
-        env['REMOTE_ADDR']     = REMOTE_ADDR
+        env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
         env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
         status, headers, body = @app.call(env)
@@ -1297,7 +1335,7 @@ module Capybara
             end
             URI.encode_www_form(fields)
           end
-        action_url = action.empty? ? (@current_url || DEFAULT_HOST) : resolve_against_current(action)
+        action_url = action.empty? ? (@current_url || self.class.default_host) : resolve_against_current(action)
         if method == 'GET'
           uri = URI.parse(action_url)
           uri.query = body unless body.empty?
@@ -1901,7 +1939,7 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        URI.join(base || @current_url || DEFAULT_HOST, url).to_s
+        URI.join(base || @current_url || self.class.default_host, url).to_s
       rescue URI::InvalidURIError
         url
       end
@@ -2236,13 +2274,18 @@ module Capybara
       DEFAULT_HTTP_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'.freeze
 
       def apply_default_request_env(env, referer:, force: true)
+        # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
+        # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
+        # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
+        # what real Chrome would have done after DNS resolution.
+        remote_addr = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         if force
           env['HTTP_USER_AGENT'] = USER_AGENT
-          env['REMOTE_ADDR']     = REMOTE_ADDR
+          env['REMOTE_ADDR']     = remote_addr
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         else
           env['HTTP_USER_AGENT'] ||= USER_AGENT
-          env['REMOTE_ADDR']     ||= REMOTE_ADDR
+          env['REMOTE_ADDR']     ||= remote_addr
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
         end
         # Browsers always send an `Accept` header; Rack::MockRequest
@@ -2320,9 +2363,9 @@ module Capybara
             # being resolved — HTML's base-tag semantics. `visit` skips
             # this branch so an address-bar navigation reaches the URL
             # the test typed.
-            URI.join(@current_url || DEFAULT_HOST, bh).to_s
+            URI.join(@current_url || self.class.default_host, bh).to_s
           else
-            @current_url || DEFAULT_HOST
+            @current_url || self.class.default_host
           end
         URI.join(base, url.to_s).to_s
       rescue URI::InvalidURIError, URI::BadURIError
