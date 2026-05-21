@@ -113,6 +113,46 @@ module Capybara
         bare == 'localhost' ? REMOTE_ADDR_IPV6 : REMOTE_ADDR_IPV4
       end
 
+      # Minimal extension → MIME table for the file types capybara test
+      # fixtures use. Browsers consult their bundled MIME map (and a
+      # tiny header sniff) to decide what to set as `File.type` when a
+      # user picks a file. We don't need the full IANA list — the
+      # capybara / discourse / avo test fixtures only use a couple
+      # dozen extensions.
+      EXT_MIME_TYPES = {
+        '.png'  => 'image/png',
+        '.jpg'  => 'image/jpeg',
+        '.jpeg' => 'image/jpeg',
+        '.gif'  => 'image/gif',
+        '.svg'  => 'image/svg+xml',
+        '.webp' => 'image/webp',
+        '.bmp'  => 'image/bmp',
+        '.ico'  => 'image/x-icon',
+        '.mp4'  => 'video/mp4',
+        '.webm' => 'video/webm',
+        '.mov'  => 'video/quicktime',
+        '.mp3'  => 'audio/mpeg',
+        '.wav'  => 'audio/wav',
+        '.ogg'  => 'audio/ogg',
+        '.pdf'  => 'application/pdf',
+        '.zip'  => 'application/zip',
+        '.tar'  => 'application/x-tar',
+        '.gz'   => 'application/gzip',
+        '.json' => 'application/json',
+        '.xml'  => 'application/xml',
+        '.txt'  => 'text/plain',
+        '.csv'  => 'text/csv',
+        '.html' => 'text/html',
+        '.htm'  => 'text/html',
+        '.css'  => 'text/css',
+        '.js'   => 'application/javascript',
+        '.yml'  => 'application/x-yaml',
+        '.yaml' => 'application/x-yaml'
+      }.freeze
+      def mime_type_for_path(path)
+        EXT_MIME_TYPES[File.extname(path.to_s).downcase] || ''
+      end
+
       def initialize(app, driver: nil, js_engine: nil)
         @app                          = app
         @driver                       = driver
@@ -633,7 +673,16 @@ module Capybara
             {
               'name'         => File.basename(p),
               'size'         => stat ? stat.size : 0,
-              'type'         => '',
+              # Real browsers tag the File with the MIME type they
+              # sniffed from the path / disk header. Uppy's image-type
+              # filter rejects files whose `type` is empty, so without
+              # this even a `logo.png` `attach_file` finishes uploading
+              # 0 bytes through the validator and the composer's
+              # `#file-uploading` flag stays set forever. Use the OS's
+              # extension-based guess (matches what selenium / Chromium
+              # do on these paths) and fall back to empty when the
+              # extension is unknown.
+              'type'         => mime_type_for_path(p),
               'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
             }
           }
