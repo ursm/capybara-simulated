@@ -485,6 +485,18 @@ module Capybara
             end
           end
           consume_pending_download
+          # Discourse's `lib/click-track.js` preventDefaults link clicks
+          # and routes the navigation through `DiscourseURL.redirectTo
+          # → window.location = href`, which our setter parks on
+          # `@pending_location` for the next tick to drain. Without
+          # this consume, the page never navigates / the download
+          # never runs — clicks like `click_link ".zip"` on an
+          # attachment finish "successfully" but the file the test
+          # expects is never written. Drain inside the click action so
+          # the response (which may carry `Content-Disposition:
+          # attachment`) gets handled by `navigate`'s download path
+          # before the test moves on.
+          consume_pending_location
           return
         end
         case action['kind']

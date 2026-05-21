@@ -104,7 +104,19 @@ module Capybara
         def initialize(browser) = (@browser = browser)
         def evaluate(js, *)     = @browser.evaluate_script(js.to_s)
         def respond_to_missing?(*) = true
-        def method_missing(*)    = self
+        # Yield to the block when one is given so Playwright methods
+        # whose semantics live entirely in their block (the canonical
+        # case is `pw_page.expect_download { click_link "…" }` —
+        # `expect_download` arms a download watcher, *then* runs the
+        # block, *then* awaits the watcher). Returning `self` from a
+        # block-taking method-missing would skip the block entirely
+        # and the download never triggers. Pass the receiver in as
+        # the block argument so chained `|d| d.suggested_filename`
+        # readers see a no-op object.
+        def method_missing(*)
+          yield self if block_given?
+          self
+        end
       end
       # Dynamic wait?: only poll when there's pending timer work that
       # real-time advancement could resolve. With no timers queued,
