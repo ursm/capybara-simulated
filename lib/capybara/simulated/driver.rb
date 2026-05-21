@@ -88,11 +88,24 @@ module Capybara
 
       # Playwright-driver compatibility shim. Discourse's system-spec
       # `before(:each)` calls `page.driver.with_playwright_page` to
-      # install a JS-console logger and apply a CDP `setTimezoneOverride`;
-      # both are Playwright-specific machinery we don't have an analogue
-      # for. No-op (don't yield) so the surrounding hook is a graceful
-      # skip when the upstream block dereferences the yielded page.
-      def with_playwright_page; end
+      # install a JS-console logger, apply a CDP `setTimezoneOverride`,
+      # and (in dev_tools_spec) evaluate `window.enableDevTools()`.
+      # Yield a `FakePlaywrightPage` that delegates `evaluate(js)` to
+      # our JS engine and silently no-ops every other Playwright-only
+      # method via `method_missing → self`. Chained accessors like
+      # `pw.context.new_cdp_session(pw).send_message("…")` therefore
+      # propagate as a no-op rather than NoMethodError, while
+      # `pw.evaluate("…")` runs the JS where it matters.
+      def with_playwright_page
+        yield FakePlaywrightPage.new(browser) if block_given?
+      end
+
+      class FakePlaywrightPage
+        def initialize(browser) = (@browser = browser)
+        def evaluate(js, *)     = @browser.evaluate_script(js.to_s)
+        def respond_to_missing?(*) = true
+        def method_missing(*)    = self
+      end
       # Dynamic wait?: only poll when there's pending timer work that
       # real-time advancement could resolve. With no timers queued,
       # polling can't change anything, so we fail fast via the
