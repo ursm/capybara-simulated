@@ -4,6 +4,8 @@ require 'base64'
 require 'date'
 require 'fileutils'
 require 'json'
+require 'net/http'
+require 'openssl'
 require 'rack/mock'
 require 'socket'
 require 'thread'
@@ -1215,7 +1217,9 @@ module Capybara
         # to be active.
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
+        result = @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
+        drain_pending_navigation
+        result
       end
 
       # Fire-and-forget variant: runs the script but never returns
@@ -1226,6 +1230,8 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         @runtime.call('__csimExecScript', code.to_s, marshal_args(args || []))
+        drain_pending_navigation
+        nil
       end
 
       # Capybara passes Node instances directly as script args
@@ -1319,8 +1325,7 @@ module Capybara
         # during the drain (e.g. `setTimeout(() => location.pathname = X)`).
         # Outside the @ticking guard so the navigate's rebuild_ctx is
         # well-clear of the V8 call we just made.
-        consume_pending_location if @pending_location
-        consume_pending_reload if @pending_reload
+        drain_pending_navigation
         # Same shape for `form.submit()` queued by a timer callback —
         # Forem's comment-edit form has an `onsubmit` handler that
         # `preventDefault`s, polls for the CSRF meta tag inside
@@ -1434,7 +1439,7 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: @current_url)
-        status, headers, resp_body = @app.call(env)
+        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
@@ -2023,7 +2028,7 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
-          status, resp_headers, resp_body = @app.call(env)
+          status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
           merge_set_cookie(resp_headers)
           log_network(method, target, status)
           if status == 304 && cache_entry
@@ -2123,6 +2128,10 @@ module Capybara
         return unless @pending_reload
         @pending_reload = false
         refresh
+      end
+      def drain_pending_navigation
+        consume_pending_location
+        consume_pending_reload
       end
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
@@ -2242,7 +2251,7 @@ module Capybara
         record_history({method: :get, url: url}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'GET')
         apply_default_request_env(env, referer: referer)
-        status, headers, body = @app.call(env)
+        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
         merge_set_cookie(headers)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
@@ -2358,6 +2367,80 @@ module Capybara
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
         env['HTTP_REFERER'] = referer         unless referer.nil? || referer.empty?
         env['HTTP_COOKIE']  = document_cookie unless @cookies.empty?
+      end
+
+      # Cross-host hop (e.g. Discourse's `discourse_connect` flow
+      # redirecting to a real WEBrick on `localhost:9100`) must cross
+      # the wire — Rails' router doesn't have routes for the external
+      # server's paths, and the external server's redirect back to the
+      # app host needs to come through @app again. Real-browser drivers
+      # get this for free; we have to detect the boundary.
+      def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
+        if url_is_local?(url)
+          @app.call(env)
+        else
+          net_http_fetch(url, env, method: method, body: body)
+        end
+      end
+
+      # Path-only or fragment-only URLs are always against the current
+      # origin. For absolute URLs, compare host:port to the cached
+      # parsed @current_url (or default_host on first navigate).
+      def url_is_local?(url)
+        s = url.to_s
+        return true if s.empty? || s.start_with?('/', '#', '?')
+        uri = safe_uri(s)
+        return true if uri.nil? || uri.host.nil?
+        ref = current_url_uri || safe_uri(@default_host.to_s)
+        return true unless ref&.host
+        uri.host == ref.host && effective_port(uri) == effective_port(ref)
+      end
+
+      def safe_uri(s)
+        URI.parse(s) rescue nil
+      end
+
+      def current_url_uri
+        return nil if @current_url.nil?
+        return @current_url_uri if @current_url_uri_cached_for.equal?(@current_url)
+        @current_url_uri_cached_for = @current_url
+        @current_url_uri = safe_uri(@current_url)
+      end
+
+      def effective_port(uri)
+        uri.port || (uri.scheme == 'https' ? 443 : 80)
+      end
+
+      NET_HTTP_FETCH_ERRORS = [
+        SocketError, Errno::ECONNREFUSED, Errno::ECONNRESET,
+        Errno::EHOSTUNREACH, Errno::ENETUNREACH,
+        Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError
+      ].freeze
+      private_constant :NET_HTTP_FETCH_ERRORS
+
+      # Cookies are origin-scoped: ours don't go out, and response
+      # Set-Cookies are NOT merged into @cookies here (the caller's
+      # merge_set_cookie is for same-origin only). No redirect-follow
+      # either — navigate / rack_fetch's loop chooses per hop.
+      def net_http_fetch(url, env, method: 'GET', body: nil)
+        uri = URI.parse(url.to_s)
+        Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 30) do |http|
+          req = Net::HTTP.const_get(method.to_s.capitalize).new(uri.request_uri)
+          env.each_pair do |k, v|
+            next unless k.is_a?(String) && k.start_with?('HTTP_') && k != 'HTTP_COOKIE' && k != 'HTTP_HOST'
+            req[k.sub(/\AHTTP_/, '').split('_').map(&:capitalize).join('-')] = v.to_s
+          end
+          req['Content-Type'] = env['CONTENT_TYPE'] if env['CONTENT_TYPE']
+          req.body = body if body && !body.empty?
+          resp = http.request(req)
+          headers = {}
+          resp.each_capitalized {|k, v| (headers[k] ||= []) << v }
+          headers = headers.transform_values {|vs| vs.length == 1 ? vs.first : vs.join("\n") }
+          [resp.code.to_i, headers, [resp.body || '']]
+        end
+      rescue *NET_HTTP_FETCH_ERRORS => e
+        warn "[capybara-simulated] net_http_fetch failed (#{url}): #{e.class}: #{e.message[0, 200]}"
+        [502, {'Content-Type' => 'text/plain'}, ["upstream fetch failed: #{e.class}"]]
       end
 
       def merge_set_cookie(headers)

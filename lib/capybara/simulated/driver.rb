@@ -55,7 +55,11 @@ module Capybara
         drivers.each {|d| yield d if d.owner_thread == thread }
       end
 
-      def initialize(app, js_engine: nil)
+      # `viewport: [w, h]` (or via `Capybara.register_driver` block)
+      # forces the JS-side `innerWidth`/`innerHeight` before the first
+      # navigate, so `matchMedia` / mobile-breakpoint branches resolve
+      # before any document loads.
+      def initialize(app, js_engine: nil, viewport: nil)
         @app             = app
         @browser         = Browser.new(app, driver: self, js_engine: js_engine)
         @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
@@ -63,6 +67,7 @@ module Capybara
         @next_window_seq = 0
         @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
+        @browser.set_viewport(*viewport) if viewport
       end
 
       # Per-test trace recording. Mirrors capybara-playwright-driver's
