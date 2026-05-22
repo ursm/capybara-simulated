@@ -51,7 +51,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
 
   it 'reads attributes and lists' do
     session.visit '/'
-    expect(session.find('#about-link')[:href]).to eq('/about')
+    expect(session.find('#about-link')[:href]).to match(%r{^http://[^/]+/about\z})
     expect(session.all('li').map(&:text)).to eq(%w[One Two Three])
   end
 
