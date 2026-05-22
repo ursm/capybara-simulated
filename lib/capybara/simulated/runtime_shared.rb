@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'base64'
+require 'openssl'
 require 'securerandom'
 
 require_relative 'url_shape'
@@ -77,13 +78,20 @@ module Capybara
       # nothing to safe_call, no allocation needed for the wrap. Skip
       # the rescue overhead on every per-find / per-event invocation.
       STDLIB_HOST_FNS = {
-        '__csim_randomUUID'  => ->(*_) { SecureRandom.uuid },
-        '__csim_randomBytes' => ->(*a) { SecureRandom.bytes(a[0].to_i).bytes },
-        '__csim_atob'        => ->(*a) { Base64.decode64(a[0].to_s) },
-        '__csim_btoa'        => ->(*a) { Base64.strict_encode64(a[0].to_s) },
-        '__csim_utf8Encode'  => ->(*a) { a[0].to_s.b.bytes },
-        '__csim_utf8Decode'  => ->(*a) { a[0].pack('C*').force_encoding('UTF-8') },
-        '__csim_parseUrl'    => ->(*a) { UrlShape.parse_for_js(a[0], a[1]) }
+        '__csim_randomUUID'   => ->(*_) { SecureRandom.uuid },
+        '__csim_randomBytes'  => ->(*a) { SecureRandom.bytes(a[0].to_i).bytes },
+        '__csim_atob'         => ->(*a) { Base64.decode64(a[0].to_s) },
+        '__csim_btoa'         => ->(*a) { Base64.strict_encode64(a[0].to_s) },
+        '__csim_utf8Encode'   => ->(*a) { a[0].to_s.b.bytes },
+        '__csim_utf8Decode'   => ->(*a) { a[0].pack('C*').force_encoding('UTF-8') },
+        '__csim_parseUrl'     => ->(*a) { UrlShape.parse_for_js(a[0], a[1]) },
+        # Web Crypto SubtleCrypto.digest — algo is "SHA-1"/"SHA-256"/etc.
+        # JS hands us the byte array; we return the digest as bytes.
+        '__csim_subtleDigest' => lambda {|*a|
+          algo  = a[0].to_s.upcase.tr('-', '')
+          bytes = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
+          OpenSSL::Digest.new(algo).digest(bytes).bytes
+        }
       }.freeze
 
       def self.safe_call
