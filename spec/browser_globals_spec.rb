@@ -75,9 +75,22 @@ RSpec.describe 'browser global surface' do
       expect(second).to be >= first
     end
 
-    it 'has a timeOrigin and shape-only mark / measure / getEntries' do
+    it 'records mark / measure entries observable via getEntries* / clearMarks / clearMeasures' do
       expect(session.evaluate_script('typeof performance.timeOrigin')).to eq('number')
-      expect(session.evaluate_script("performance.mark('x'); performance.measure('m'); performance.getEntries()")).to eq([])
+      entries = session.evaluate_script(<<~JS)
+        performance.clearMarks(); performance.clearMeasures();
+        performance.mark('start');
+        performance.mark('end');
+        performance.measure('span', 'start', 'end');
+        performance.getEntries().map(e => ({name: e.name, type: e.entryType}))
+      JS
+      expect(entries).to eq([
+        {'name' => 'start', 'type' => 'mark'},
+        {'name' => 'end',   'type' => 'mark'},
+        {'name' => 'span',  'type' => 'measure'}
+      ])
+      cleared = session.evaluate_script('performance.clearMarks(); performance.clearMeasures(); performance.getEntries().length')
+      expect(cleared).to eq(0)
     end
   end
 
@@ -163,16 +176,17 @@ RSpec.describe 'browser global surface' do
 
   describe 'observer stubs' do
     it 'IntersectionObserver / ResizeObserver / PerformanceObserver construct cleanly and have spec methods' do
+      # `unobserve` is on Intersection / Resize / Mutation observers
+      # but NOT on PerformanceObserver per spec.
       shape = session.evaluate_script(<<~JS)
-        const probe = (Cls) => {
+        const probe = (Cls, methods) => {
           const o = new Cls(() => {});
-          return ['observe', 'unobserve', 'disconnect', 'takeRecords']
-            .every(m => typeof o[m] === 'function');
+          return methods.every(m => typeof o[m] === 'function');
         };
         ({
-          io: probe(IntersectionObserver),
-          ro: probe(ResizeObserver),
-          po: probe(PerformanceObserver)
+          io: probe(IntersectionObserver, ['observe', 'unobserve', 'disconnect', 'takeRecords']),
+          ro: probe(ResizeObserver,       ['observe', 'unobserve', 'disconnect', 'takeRecords']),
+          po: probe(PerformanceObserver,  ['observe', 'disconnect', 'takeRecords'])
         })
       JS
       expect(shape).to eq('io' => true, 'ro' => true, 'po' => true)
