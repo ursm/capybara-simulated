@@ -1038,21 +1038,45 @@ module Capybara
       end
       def viewport_width                  ; @viewport_width  || 1024 ; end
       def viewport_height                 ; @viewport_height || 768  ; end
-      def go_back
-        return if @history_idx <= 0
-        @history_idx -= 1
-        replay_history_entry(@history[@history_idx])
+      def go_back        ; history_go(-1) ; end
+      def go_forward     ; history_go(+1) ; end
+
+      # Move through the history stack by `delta`. Per HTML spec, a
+      # same-document traversal (within a chain of pushState entries
+      # rooted at a single navigation) updates `location` and fires
+      # `popstate` with the entry's state — no full reload. A cross-
+      # document traversal replays the entry (full navigate / re-POST).
+      def history_go(delta)
+        delta = delta.to_i
+        return if delta == 0
+        target = @history_idx + delta
+        return if target < 0 || target >= @history.size
+        if same_document_traversal?(@history_idx, target)
+          @history_idx = target
+          entry = @history[target]
+          @current_url = entry[:url]
+          @runtime.call('__csimUpdateLocation', @current_url)
+          @runtime.call('__csimDispatchPopState', entry[:state])
+        else
+          @history_idx = target
+          replay_history_entry(@history[target])
+        end
       end
-      def go_forward
-        return if @history_idx + 1 >= @history.size
-        @history_idx += 1
-        replay_history_entry(@history[@history_idx])
+
+      # Same-document = every entry between `from` and `to` (inclusive)
+      # is a `:push_state` entry (or the boundary just changed state on
+      # the current URL). A `:visit` entry between them means we'd
+      # cross a real navigation, which needs a fresh document.
+      def same_document_traversal?(from, to)
+        lo, hi = [from, to].sort
+        ((lo + 1)..hi).all? {|i| @history[i] && @history[i][:kind] == :push_state }
       end
+
       def record_history(entry)
         # Discard any forward-history tail (a real browser drops the
         # redo stack the moment you navigate after a `go_back`).
         @history = @history[0..@history_idx] if @history_idx + 1 < @history.size
-        @history << entry
+        @history << entry.merge(kind: entry[:kind] || :visit)
         @history_idx = @history.size - 1
       end
       def replay_history_entry(entry)
@@ -2111,16 +2135,28 @@ module Capybara
       # `@current_url` so subsequent `resolve_against_current(href)`
       # calls (e.g. click_link to a relative href) don't hit
       # `URI::BadURIError: both URI are relative`.
-      def history_state(url) ; @current_url = resolve_against_current(url.to_s) ; end
-      # `history.pushState` from SPA navigation (Turbo Visit, InstantClick,
-      # …) appends a new browser-history entry. Mirror that on the Ruby
-      # side so `Capybara#go_back` can replay it. Without this, the only
-      # entries in `@history` come from `visit` / `navigate` (full page
-      # loads), and `page.go_back` from a Turbo-Visit-rendered page no-ops.
-      def history_push(url)
+      # `history.replaceState(state, _, url)` updates the current entry
+      # in place rather than appending. Both the state and (when given)
+      # the URL are mirrored on Ruby's slot so a subsequent back to
+      # this entry restores the same state.
+      def history_state(url, state = nil)
+        @current_url = resolve_against_current(url.to_s) if url
+        return if @history_idx < 0
+        @history[@history_idx] = (@history[@history_idx] || {}).merge(
+          url:   @current_url,
+          state: state,
+          kind:  @history[@history_idx] ? @history[@history_idx][:kind] : :push_state
+        )
+      end
+      # `history.pushState(state, _, url)` from SPA navigation (Turbo
+      # Visit, InstantClick, …) appends a new browser-history entry.
+      # Mirror that on the Ruby side so `Capybara#go_back` traverses
+      # within the pushState chain (fires `popstate`) and only crosses
+      # to a real reload when the back hits a `:visit` boundary.
+      def history_push(url, state = nil)
         resolved = resolve_against_current(url.to_s)
         @current_url = resolved
-        record_history({method: :get, url: resolved})
+        record_history({method: :get, url: resolved, state: state, kind: :push_state})
       end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
       def write_document_cookie(s)
