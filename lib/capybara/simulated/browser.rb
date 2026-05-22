@@ -562,7 +562,7 @@ module Capybara
 
       def download_link(url, filename_hint = '')
         env = Rack::MockRequest.env_for(url, method: 'GET')
-        env['HTTP_USER_AGENT'] = USER_AGENT
+        env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
         env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
@@ -1022,6 +1022,30 @@ module Capybara
       # the JS-side `innerWidth` / `innerHeight` so the cascade's
       # `mediaMatches` and `matchMedia()` evaluate against the test's
       # chosen viewport instead of the 1024×768 default.
+      # Sticky defaults applied at `reset!`. Used by the driver to
+      # carry mobile viewport / user-agent across per-test resets —
+      # without these the second mobile-tagged spec sees the desktop
+      # default. The user-agent also flows into `navigator.userAgent`
+      # on every VM rebuild so JS-side UA branches (Discourse's
+      # `viewport_based_mobile_mode = false` path) resolve correctly.
+      attr_reader :default_viewport, :default_user_agent
+
+      def default_viewport=(vp)
+        @default_viewport = vp
+        set_viewport(*vp) if vp
+      end
+
+      def default_user_agent=(ua)
+        @default_user_agent = ua
+        push_user_agent_to_js if ua
+      end
+
+      def push_user_agent_to_js
+        ua = @default_user_agent or return
+        return unless @runtime
+        @runtime.eval("try { Object.defineProperty(navigator, 'userAgent', { value: #{ua.to_json}, configurable: true }); } catch (_) {}")
+      end
+
       def set_viewport(w, h)
         @viewport_width  = w.to_i
         @viewport_height = h.to_i
@@ -1477,9 +1501,18 @@ module Capybara
         # the next test's default viewport and any cascade rule that
         # gates on `(min-width: …)` reports the wrong answer for the
         # whole new test (Forem's comment-actions dropdown is
-        # mobile-collapsed-by-default).
-        @viewport_width = nil
-        @viewport_height = nil
+        # mobile-collapsed-by-default). The exception is the
+        # `default_viewport` channel — drivers built for a mobile
+        # session (Discourse's `playwright_mobile_chrome`) need to
+        # stay mobile across resets, not snap back to desktop on the
+        # next mobile-tagged test.
+        if @default_viewport
+          @viewport_width  = @default_viewport[0]
+          @viewport_height = @default_viewport[1]
+        else
+          @viewport_width  = nil
+          @viewport_height = nil
+        end
         @current_url     = nil
         @document_handle = 0
         @history.clear
@@ -2298,6 +2331,7 @@ module Capybara
         apply_trace_flag
         apply_viewport
         apply_timezone
+        push_user_agent_to_js
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
@@ -2348,11 +2382,11 @@ module Capybara
         # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
         # what real Chrome would have done after DNS resolution.
         if force
-          env['HTTP_USER_AGENT'] = USER_AGENT
+          env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
           env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         else
-          env['HTTP_USER_AGENT'] ||= USER_AGENT
+          env['HTTP_USER_AGENT'] ||= (@default_user_agent || USER_AGENT)
           env['REMOTE_ADDR']     ||= self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
         end

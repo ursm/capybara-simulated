@@ -55,11 +55,15 @@ module Capybara
         drivers.each {|d| yield d if d.owner_thread == thread }
       end
 
-      # `viewport: [w, h]` (or via `Capybara.register_driver` block)
-      # forces the JS-side `innerWidth`/`innerHeight` before the first
-      # navigate, so `matchMedia` / mobile-breakpoint branches resolve
-      # before any document loads.
-      def initialize(app, js_engine: nil, viewport: nil)
+      # `viewport: [w, h]` and `user_agent:` (typically supplied via
+      # `Capybara.register_driver`) force the JS-side
+      # `innerWidth`/`innerHeight` and `navigator.userAgent` (plus
+      # `HTTP_USER_AGENT` on Rack requests) before the first navigate,
+      # so `matchMedia` / mobile-breakpoint branches and server-side
+      # UA-based mobile detection both resolve before any document
+      # loads. The Browser tracks both as "defaults" so `reset!`
+      # (per-test teardown) restores them between specs.
+      def initialize(app, js_engine: nil, viewport: nil, user_agent: nil)
         @app             = app
         @browser         = Browser.new(app, driver: self, js_engine: js_engine)
         @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
@@ -67,7 +71,8 @@ module Capybara
         @next_window_seq = 0
         @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
-        @browser.set_viewport(*viewport) if viewport
+        @browser.default_viewport   = viewport   if viewport
+        @browser.default_user_agent = user_agent if user_agent
       end
 
       # Per-test trace recording. Mirrors capybara-playwright-driver's

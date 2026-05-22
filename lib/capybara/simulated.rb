@@ -15,19 +15,23 @@ module Capybara
     #   YAML `engine:` keys at load time
     JS_ENGINES = %i[v8 quickjs].freeze
 
-    # Host wrappers (csim_rspec / csim_minitest) set this just before
+    # Host wrappers (csim_rspec / csim_minitest) set these just before
     # `driven_by :simulated` to seed the next constructed driver's
-    # viewport — used when the host's spec asked for a mobile-shape
-    # driver (Discourse's `mobile: true`-tagged describes). Read-and-
-    # cleared by the register_driver block.
+    # viewport + user-agent — used when the host's spec asked for a
+    # mobile-shape driver (Discourse's `mobile: true`-tagged
+    # describes). Discourse uses BOTH viewport breakpoints AND UA
+    # sniffing to pick mobile/desktop rendering, so both have to be
+    # set together. Read-and-cleared by the register_driver block.
     class << self
-      attr_accessor :next_driver_viewport
+      attr_accessor :next_driver_viewport, :next_driver_user_agent
     end
   end
 end
 
 Capybara.register_driver :simulated do |app|
   vp = Capybara::Simulated.next_driver_viewport
+  ua = Capybara::Simulated.next_driver_user_agent
   Capybara::Simulated.next_driver_viewport = nil
-  Capybara::Simulated::Driver.new(app, js_engine: ENV['CSIM_JS_ENGINE']&.to_sym, viewport: vp)
+  Capybara::Simulated.next_driver_user_agent = nil
+  Capybara::Simulated::Driver.new(app, js_engine: ENV['CSIM_JS_ENGINE']&.to_sym, viewport: vp, user_agent: ua)
 end
