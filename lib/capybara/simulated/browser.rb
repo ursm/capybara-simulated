@@ -2376,11 +2376,13 @@ module Capybara
       # app host needs to come through @app again. Real-browser drivers
       # get this for free; we have to detect the boundary.
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
-        if url_is_local?(url)
-          @app.call(env)
-        else
-          net_http_fetch(url, env, method: method, body: body)
-        end
+        return @app.call(env) if url_is_local?(url)
+        # External fetch: if the network is blocked (WebMock) or the
+        # host is unreachable, fall back to @app — Rails will 404 or
+        # otherwise handle it, matching the pre-cross-host behavior
+        # for tests that route through an external OAuth provider URL
+        # without intending the call to land.
+        net_http_fetch(url, env, method: method, body: body) || @app.call(env)
       end
 
       # Path-only or fragment-only URLs are always against the current
@@ -2411,17 +2413,12 @@ module Capybara
         uri.port || (uri.scheme == 'https' ? 443 : 80)
       end
 
-      NET_HTTP_FETCH_ERRORS = [
-        SocketError, Errno::ECONNREFUSED, Errno::ECONNRESET,
-        Errno::EHOSTUNREACH, Errno::ENETUNREACH,
-        Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError
-      ].freeze
-      private_constant :NET_HTTP_FETCH_ERRORS
-
-      # Cookies are origin-scoped: ours don't go out, and response
-      # Set-Cookies are NOT merged into @cookies here (the caller's
-      # merge_set_cookie is for same-origin only). No redirect-follow
-      # either — navigate / rack_fetch's loop chooses per hop.
+      # Returns a Rack-shaped triple, or `nil` if the network attempt
+      # failed for any reason — the caller falls back to @app.call so
+      # WebMock-blocked external URLs (Discourse's OAuth provider
+      # redirects) still round-trip through Rails like before. Cookies
+      # are origin-scoped: ours don't go out. No redirect-follow either
+      # — navigate / rack_fetch's loop chooses per hop.
       def net_http_fetch(url, env, method: 'GET', body: nil)
         uri = URI.parse(url.to_s)
         Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 30) do |http|
@@ -2438,9 +2435,10 @@ module Capybara
           headers = headers.transform_values {|vs| vs.length == 1 ? vs.first : vs.join("\n") }
           [resp.code.to_i, headers, [resp.body || '']]
         end
-      rescue *NET_HTTP_FETCH_ERRORS => e
-        warn "[capybara-simulated] net_http_fetch failed (#{url}): #{e.class}: #{e.message[0, 200]}"
-        [502, {'Content-Type' => 'text/plain'}, ["upstream fetch failed: #{e.class}"]]
+      rescue SystemExit, Interrupt, NoMemoryError
+        raise
+      rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
+        nil
       end
 
       def merge_set_cookie(headers)
