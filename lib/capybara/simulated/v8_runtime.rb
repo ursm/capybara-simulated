@@ -229,13 +229,11 @@ module Capybara
       # an occasional JS-side infinite loop would otherwise stall the
       # whole run; the timeout converts the hang into a
       # `MiniRacer::ScriptTerminatedError` on that one example.
-      def self.call_timeout_ms
-        @@call_timeout_ms ||= (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
-      end
+      CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
 
       def build_ctx
         opts = { snapshot: @snapshot || self.class.snapshot }
-        opts[:timeout] = self.class.call_timeout_ms if self.class.call_timeout_ms > 0
+        opts[:timeout] = CALL_TIMEOUT_MS if CALL_TIMEOUT_MS > 0
         c = MiniRacer::Context.new(**opts)
         attach_host_fns(c)
         c.eval('__csim_installWorker();')

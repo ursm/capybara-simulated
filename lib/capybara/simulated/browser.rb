@@ -1101,8 +1101,7 @@ module Capybara
         elsif force
           # Ruby-driven (`page.go_back`) — no live JS call to interrupt,
           # safe to rebuild the Context synchronously.
-          @history_idx = target
-          replay_history_entry(@history[target])
+          perform_history_traverse(target)
         else
           # JS-driven (`history.back()` from a page handler): replaying
           # the history entry synchronously would call `rebuild_ctx`
@@ -1118,7 +1117,10 @@ module Capybara
       def consume_pending_history_traverse
         return unless (target = @pending_history_traverse)
         @pending_history_traverse = nil
-        return if target < 0 || target >= @history.size
+        perform_history_traverse(target)
+      end
+
+      private def perform_history_traverse(target)
         @history_idx = target
         replay_history_entry(@history[target])
       end
