@@ -112,7 +112,19 @@ module Capybara
 
       class FakePlaywrightPage
         def initialize(browser) = (@browser = browser)
-        def evaluate(js, *)     = @browser.evaluate_script(js.to_s)
+        # Playwright's `page.evaluate` takes either a string expression
+        # or a function literal — when given a function it calls it
+        # and returns the result. The simulated driver's underlying
+        # `evaluate_script` just runs the source as an expression, so
+        # a function-literal payload would return the function object
+        # instead of its return value. Wrap arrow-function-shaped
+        # bodies in `(...)()` so the function is invoked and the test
+        # sees its result.
+        def evaluate(js, *)
+          src = js.to_s.strip
+          src = "(#{src})()" if src.match?(/\A(\(?\s*(async\s+)?(\(.*?\)|\w+)\s*=>|\(?\s*(async\s+)?function\s*\*?\s*\()/m)
+          @browser.evaluate_script(src)
+        end
         def respond_to_missing?(*) = true
         # Yield to the block when one is given so Playwright methods
         # whose semantics live entirely in their block (the canonical
