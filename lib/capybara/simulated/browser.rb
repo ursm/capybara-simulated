@@ -1072,29 +1072,55 @@ module Capybara
       end
       def viewport_width                  ; @viewport_width  || 1024 ; end
       def viewport_height                 ; @viewport_height || 768  ; end
-      def go_back        ; history_go(-1) ; end
-      def go_forward     ; history_go(+1) ; end
+      # Capybara-initiated `page.go_back` runs from Ruby, not inside a
+      # JS call, so it's safe to rebuild the Context synchronously. The
+      # `force:` flag bypasses the deferral that `history_go` uses to
+      # avoid terminating the running JS context.
+      def go_back        ; history_go(-1, force: true) ; end
+      def go_forward     ; history_go(+1, force: true) ; end
 
       # Move through the history stack by `delta`. Per HTML spec, a
       # same-document traversal (within a chain of pushState entries
       # rooted at a single navigation) updates `location` and fires
       # `popstate` with the entry's state — no full reload. A cross-
       # document traversal replays the entry (full navigate / re-POST).
-      def history_go(delta)
+      def history_go(delta, force: false)
         delta = delta.to_i
         return if delta == 0
         target = @history_idx + delta
         return if target < 0 || target >= @history.size
         if same_document_traversal?(@history_idx, target)
+          # Pure pushState traversal — no VM rebuild, safe to run
+          # inline; the popstate dispatch happens within the current
+          # call's JS context.
           @history_idx = target
           entry = @history[target]
           @current_url = entry[:url]
           @runtime.call('__csimUpdateLocation', @current_url)
           @runtime.call('__csimDispatchPopState', entry[:state])
-        else
+        elsif force
+          # Ruby-driven (`page.go_back`) — no live JS call to interrupt,
+          # safe to rebuild the Context synchronously.
           @history_idx = target
           replay_history_entry(@history[target])
+        else
+          # JS-driven (`history.back()` from a page handler): replaying
+          # the history entry synchronously would call `rebuild_ctx`
+          # on the still-executing Context and terminate the current
+          # call with `ScriptTerminatedError` (mini_racer's
+          # `Context#stop` raises on the eval thread). Stash the intent
+          # and drain after the call returns — mirrors
+          # `location_assign` / `location_reload`.
+          @pending_history_traverse = target
         end
+      end
+
+      def consume_pending_history_traverse
+        return unless (target = @pending_history_traverse)
+        @pending_history_traverse = nil
+        return if target < 0 || target >= @history.size
+        @history_idx = target
+        replay_history_entry(@history[target])
       end
 
       # Same-document = every entry between `from` and `to` (inclusive)
@@ -2179,6 +2205,7 @@ module Capybara
       def drain_pending_navigation
         consume_pending_location
         consume_pending_reload
+        consume_pending_history_traverse
       end
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
