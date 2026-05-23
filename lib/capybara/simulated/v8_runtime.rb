@@ -221,8 +221,22 @@ module Capybara
         c
       end
 
+      # Per-call wall-clock cap (ms). Off by default — mini_racer's
+      # timeout watchdog routes every eval/call through a pipe-based
+      # rendezvous Thread that subtly shifts async timing and made
+      # `importmap_spec` ESM-load tests flake. Opt in via
+      # `CSIM_V8_CALL_TIMEOUT_MS=30000` for long-running suites where
+      # an occasional JS-side infinite loop would otherwise stall the
+      # whole run; the timeout converts the hang into a
+      # `MiniRacer::ScriptTerminatedError` on that one example.
+      def self.call_timeout_ms
+        @@call_timeout_ms ||= (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
+      end
+
       def build_ctx
-        c = MiniRacer::Context.new(snapshot: @snapshot || self.class.snapshot)
+        opts = { snapshot: @snapshot || self.class.snapshot }
+        opts[:timeout] = self.class.call_timeout_ms if self.class.call_timeout_ms > 0
+        c = MiniRacer::Context.new(**opts)
         attach_host_fns(c)
         c.eval('__csim_installWorker();')
         c
