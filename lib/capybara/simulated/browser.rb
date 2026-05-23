@@ -1127,8 +1127,14 @@ module Capybara
         when :tab       then @runtime.call('__csimAdvanceFocus',  false)
         when :backtab   then @runtime.call('__csimAdvanceFocus',  true)
         else
+          # Global keystrokes (Capybara's `page.send_keys("/")`) target
+          # the focused element when there is one; otherwise real
+          # browsers fire on `document.body` so window-level shortcut
+          # listeners (Discourse's `/`-to-open-search) still receive
+          # the event.
           handle = active_element_handle
-          send_keys(handle, [key]) if handle
+          handle = @document_handle if handle.nil? || handle.zero?
+          send_keys(handle, [key]) if handle && !handle.zero?
         end
       end
       attr_reader :trace, :pending_trace, :trace_mode
