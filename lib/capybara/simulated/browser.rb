@@ -62,12 +62,13 @@ module Capybara
       # When `@timers_active` is true but `@runtime.settle_gen` hasn't
       # bumped in this many consecutive polls, treat the page as
       # observably idle and let Capybara's per-find timer give up. See
-      # `polling?` for the full rationale. 100 polls ≈ 1 s at
-      # Capybara's default 10 ms retry interval — long enough for
-      # Toast-fade / debounced async updates (Avo's action-result
-      # banner takes ~700 ms to disappear) while still cutting the
-      # full 4 s wait when a `has_css?` is destined to fail.
-      IDLE_SETTLE_POLLS = 100
+      # `polling?` for the full rationale. 300 polls ≈ 3 s at
+      # Capybara's default 10 ms retry interval — long enough to ride
+      # through brief async idle windows during Discourse's
+      # ProseMirror editor boot (which sometimes pauses ~1 s mid-load
+      # while a webpack chunk + Glimmer reconcile complete) while
+      # still cutting the full 4 s wait on tests destined to fail.
+      IDLE_SETTLE_POLLS = 300
       # Brief window after a Ruby-side navigate (context rebuild) so
       # Capybara's outer synchronize gets one retry against the new
       # context.
