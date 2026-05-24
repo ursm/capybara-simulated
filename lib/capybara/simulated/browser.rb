@@ -865,29 +865,30 @@ module Capybara
             {'kind' => 'combo', 'parts' => parts}
           end
         }.compact
-        # Multi-char text atoms (`send_keys('> blockquote')`) get
-        # split into per-char atoms and each char gets its own
-        # `__csimSendKeys` + `settle` so contenteditable hosts
-        # (ProseMirror, Trix, Tiptap) finish their input-event
-        # transaction + DOM re-render before the next char's
-        # `beforeinput` arrives. PM transactions queue work on a
-        # macrotask (rAF / setTimeout); without a `settle` between
-        # chars the queued ops accumulate and PM's view reconciler
-        # nukes the editor wrapper when it can't reconcile them in
-        # order. The per-char settle costs ~ms per char and matches
-        # real-browser keyboard cadence.
-        expanded = atoms.flat_map {|a|
-          if a['kind'] == 'text' && a['value'].to_s.length > 1
+        # Contenteditable hosts (ProseMirror, Trix, Tiptap) reconcile
+        # their view between chars; a batched `__csimSendKeys` queues
+        # all `beforeinput` events on the same microtask round and PM
+        # nukes the editor wrapper when its reconciler can't apply
+        # them in order. Split multi-char text atoms into per-char
+        # calls with a `settle` between so PM commits each transaction
+        # before the next char arrives. Plain `<input>` / `<textarea>`
+        # don't need this — keep the single batched call there.
+        has_multichar_text = atoms.any? {|a| a['kind'] == 'text' && a['value'].to_s.length > 1 }
+        if has_multichar_text && @runtime.call('__csimIsContentEditable', handle)
+          per_char = atoms.flat_map {|a|
+            next a unless a['kind'] == 'text' && a['value'].to_s.length > 1
             a['value'].to_s.each_char.map {|c| {'kind' => 'text', 'value' => c} }
-          else
-            a
-          end
-        }
-        expanded.each_with_index {|atom, i|
-          tick_real_time if i > 0
-          @runtime.call('__csimSendKeys', handle, [atom])
-          settle if atoms.size != expanded.size  # only drain mid-stream when we expanded
-        }
+          }
+          head, *tail = per_char
+          @runtime.call('__csimSendKeys', handle, [head])
+          tail.each {|atom|
+            tick_real_time
+            @runtime.call('__csimSendKeys', handle, [atom])
+            settle
+          }
+        else
+          @runtime.call('__csimSendKeys', handle, atoms)
+        end
         drain_after_user_action
       end
 
