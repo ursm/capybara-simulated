@@ -59,6 +59,15 @@ module Capybara
       # calls (not wall time) for determinism under GC/load pressure.
       # 1000 polls × Capybara's default 0.01 s retry_interval ≈ 10 s.
       POLLING_GRACE_POLLS = 1000
+      # When `@timers_active` is true but `@runtime.settle_gen` hasn't
+      # bumped in this many consecutive polls, treat the page as
+      # observably idle and let Capybara's per-find timer give up. See
+      # `polling?` for the full rationale. 100 polls ≈ 1 s at
+      # Capybara's default 10 ms retry interval — long enough for
+      # Toast-fade / debounced async updates (Avo's action-result
+      # banner takes ~700 ms to disappear) while still cutting the
+      # full 4 s wait when a `has_css?` is destined to fail.
+      IDLE_SETTLE_POLLS = 100
       # Brief window after a Ruby-side navigate (context rebuild) so
       # Capybara's outer synchronize gets one retry against the new
       # context.
@@ -141,6 +150,8 @@ module Capybara
         @document_handle              = 0
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_grace                = nil
+        @last_polled_gen              = nil
+        @idle_settle_polls            = 0
         @ticking                      = false
         @history                      = []
         @history_idx                  = -1
@@ -1347,10 +1358,32 @@ module Capybara
       # `__setTimersActive` callback), plus a sticky grace window after
       # the last timer fires so a `setTimeout` firing mid-loop doesn't
       # drop us off polling before Capybara's own retry deadline.
+      #
+      # Settle-gen idle gate: a recurring `setInterval` from a framework
+      # runloop (Ember / Glimmer) keeps `@timers_active` true forever
+      # even when nothing observable is changing. Without a second
+      # signal, Capybara waits the full `default_max_wait_time` on every
+      # `has_css?` / `has_no_css?` that's destined to fail — which
+      # Discourse's `CapybaraTimeoutExtension` reports as a "slow
+      # spec" failure. Track `@runtime.settle_gen` across polls: when
+      # it hasn't bumped for `IDLE_SETTLE_POLLS` calls, drop polling
+      # even though timers are scheduled. `settle_gen` already bumps
+      # on every DOM mutation / URL change (see __settleGen wiring),
+      # so this only short-circuits genuinely idle loops.
       def polling?
         if @timers_active
-          @polling_grace = POLLING_GRACE_POLLS
-          true
+          gen = @runtime.settle_gen
+          if @last_polled_gen.nil? || gen != @last_polled_gen
+            @last_polled_gen = gen
+            @idle_settle_polls = 0
+            @polling_grace = POLLING_GRACE_POLLS
+            return true
+          end
+          @idle_settle_polls += 1
+          return true if @idle_settle_polls < IDLE_SETTLE_POLLS
+          # Treat as idle for this poll; if a fresh timer fires later
+          # the next poll's settle_gen check will resume polling.
+          false
         elsif @polling_grace && @polling_grace > 0
           @polling_grace -= 1
           true
@@ -1419,10 +1452,12 @@ module Capybara
       # every failing matcher through the full `default_max_wait_time`
       # retry loop.
       def reset_timer_state
-        @last_tick_ts  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @timers_active = false
-        @polling_grace = nil
-        @context_gen  += 1
+        @last_tick_ts      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @timers_active     = false
+        @polling_grace     = nil
+        @last_polled_gen   = nil
+        @idle_settle_polls = 0
+        @context_gen      += 1
       end
 
       attr_reader :context_gen
