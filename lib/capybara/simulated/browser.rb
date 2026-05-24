@@ -760,6 +760,11 @@ module Capybara
         2.times { @runtime.call('__csimClickResolve', handle, opts) }
         init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
+        # Real browsers' default-action on dblclick selects the word
+        # under the cursor — ProseMirror / Tiptap "paste URL over
+        # selection wraps with link" tests rely on the word being
+        # selected before the paste.
+        @runtime.call('__csimSelectWordAt', handle)
         settle
       end
 
