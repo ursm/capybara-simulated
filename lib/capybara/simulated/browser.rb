@@ -16,6 +16,7 @@ require_relative 'errors'
 require_relative 'esm_rewriter'
 require_relative 'stack_resolver'
 require_relative 'trace'
+require_relative 'webauthn_state'
 
 module Capybara
   module Simulated
@@ -2006,6 +2007,8 @@ module Capybara
         @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s) }
         nil
       end
+
+      def webauthn = (@webauthn ||= WebauthnState.new)
 
       # Worker thread entry. Builds an isolate via the engine class's
       # `build_worker` factory, evaluates the worker script, then

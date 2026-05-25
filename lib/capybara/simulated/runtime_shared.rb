@@ -4,6 +4,8 @@ require 'base64'
 require 'openssl'
 require 'securerandom'
 
+require_relative 'webauthn_state'
+
 require_relative 'url_shape'
 
 module Capybara
@@ -72,7 +74,28 @@ module Capybara
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1]); nil },
         '__csim_blobResolve'         => ->(b, *a) { b.blob_resolve(a[0]) },
-        '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil }
+        '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
+        # WebAuthn create / get raise `WebauthnState::Error` carrying
+        # the DOMException name (`InvalidStateError`, …); rescue here
+        # so the JS shim sees `{error:, name:}` instead of the
+        # `safe_call`-flattened nil that would collapse every failure
+        # to a generic NotAllowedError.
+        '__csimWebauthnCreate' => ->(b, *a) {
+          begin b.webauthn.create(a[0]); rescue WebauthnState::Error => e
+            {'error' => e.message, 'name' => e.webauthn_name}
+          end
+        },
+        '__csimWebauthnGet' => ->(b, *a) {
+          begin b.webauthn.get(a[0]); rescue WebauthnState::Error => e
+            {'error' => e.message, 'name' => e.webauthn_name}
+          end
+        },
+        '__csimWebauthnAddVirtualAuthenticator'    => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
+        '__csimWebauthnRemoveVirtualAuthenticator' => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
+        '__csimWebauthnAddCredential'              => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
+        '__csimWebauthnRemoveCredential'           => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
+        '__csimWebauthnGetCredentials'             => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
+        '__csimWebauthnSetUserVerified'            => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil }
       }.freeze
 
       # Host fns that route to pure stdlib — no Browser surface,
