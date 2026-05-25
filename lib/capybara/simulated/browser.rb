@@ -1197,22 +1197,31 @@ module Capybara
       # Session-level keystroke. Tab / shift-tab cycle focus; everything
       # else is routed to the currently focused element (if any) as a
       # plain keydown/keyup pair.
-      def send_session_key(key)
-        sym = key.is_a?(Symbol) ? key : (key.respond_to?(:to_sym) ? key.to_sym : nil)
-        case sym
-        when :tab       then @runtime.call('__csimAdvanceFocus',  false)
-        when :backtab   then @runtime.call('__csimAdvanceFocus',  true)
-        else
-          # Global keystrokes (Capybara's `page.send_keys("/")`) target
-          # the focused element when there is one; otherwise real
-          # browsers fire on `document.body` so window-level shortcut
-          # listeners (Discourse's `/`-to-open-search) still receive
-          # the event.
-          handle = active_element_handle
-          handle = @document_handle if handle.nil? || handle.zero?
-          send_keys(handle, [key]) if handle && !handle.zero?
+      def send_session_keys(keys)
+        # Walk the key list with running modifier state so a Selenium-
+        # style `(:shift, :enter)` invocation reaches `Browser#send_keys`
+        # as one combo atom (shift held over enter), while independent
+        # non-modifier keys stay separate calls — each one settles
+        # between dispatches so a dropdown highlight (Avo Tags input's
+        # arrow navigation) commits before the next key fires. Tab /
+        # backtab are focus-advance, dispatched out of band.
+        held = []
+        Array(keys).each do |k|
+          sym = k.is_a?(Symbol) ? k : (k.respond_to?(:to_sym) ? k.to_sym : nil)
+          if sym == :tab || sym == :backtab
+            @runtime.call('__csimAdvanceFocus', sym == :backtab)
+          elsif sym && MODIFIER_KEY_NAMES.include?(sym)
+            held << sym
+          else
+            handle = active_element_handle
+            handle = @document_handle if handle.nil? || handle.zero?
+            atom = held.empty? ? k : (held + [k])
+            send_keys(handle, [atom])
+          end
         end
       end
+
+      def send_session_key(key) = send_session_keys([key])
       attr_reader :trace, :pending_trace, :trace_mode
 
       TRACE_MODES = {'off' => :off, 'on-failure' => :on_failure, 'full' => :full}.freeze
