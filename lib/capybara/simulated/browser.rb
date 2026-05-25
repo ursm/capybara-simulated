@@ -106,7 +106,7 @@ module Capybara
       # without claiming a specific real-browser engine (which would
       # send Turbo / Stimulus down chrome-specific code paths Avo's
       # tests don't exercise).
-      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; Rails Testing) capybara-simulated (V8-resident DOM)'
+      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 capybara-simulated'
       # Approximate Chrome's resolution: when connecting to `localhost`,
       # Linux glibc returns IPv6 (::1) first and the server sees the
       # client at `::1`; for any literal IP (or a non-localhost name),
