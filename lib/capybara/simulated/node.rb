@@ -120,6 +120,14 @@ module Capybara
         browser.drop(handle_id, args)
         true
       end
+
+      def drag_to(target_node, **opts)
+        check_stale
+        target_node.check_stale if target_node.respond_to?(:check_stale)
+        target_handle = target_node.respond_to?(:handle_id) ? target_node.handle_id : target_node.native
+        browser.drag_to(handle_id, target_handle, **opts)
+        self
+      end
       def set(value, **_)
         check_stale
         browser.set_value_with_events(handle_id, value)

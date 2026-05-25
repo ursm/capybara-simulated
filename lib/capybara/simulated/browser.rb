@@ -742,6 +742,20 @@ module Capybara
         items = args.flat_map {|arg| drop_items(arg) }
         @runtime.call('__csimDropOnto', handle, items)
       end
+
+      # Element-to-element drag. Capybara's `Element#drag_to(target,
+      # delay: …)` lands here. Fires the HTML5 drag event sequence on
+      # the source / target pair (mousedown → dragstart → dragenter →
+      # dragover → drop → dragend) with a shared DataTransfer. Discourse
+      # sidebar reorder + Avo Sortable-shaped widgets read the
+      # `event.offsetY` to decide "above vs below"; without a layout
+      # engine we report 0, which routes drops above the target.
+      def drag_to(source_handle, target_handle, **_opts)
+        tick_real_time
+        invalidate_find_cache
+        @runtime.call('__csimDragOnto', source_handle, target_handle)
+        drain_after_user_action
+      end
       def drop_items(arg)
         case arg
         when Hash
