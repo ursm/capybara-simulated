@@ -65,14 +65,29 @@ module Capybara
       # (per-test teardown) restores them between specs.
       def initialize(app, js_engine: nil, viewport: nil, user_agent: nil)
         @app             = app
-        @browser         = Browser.new(app, driver: self, js_engine: js_engine)
-        @aux_windows     = []  # [{handle:, url:}, …]  URL-only mode
+        @js_engine       = js_engine
+        # Cookies + localStorage are origin-shared across windows
+        # (real browser semantics), so we own the jars at the Driver
+        # level and inject them into every per-window Browser. Each
+        # Browser still has its own sessionStorage + DOM + JS VM.
+        @cookies         = {}
+        @local_storage   = {}
+        @browser         = build_window_browser
+        @aux_windows     = []  # [{handle:, browser:}, …]
         @active_handle   = nil
         @next_window_seq = 0
         @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
         @browser.default_viewport   = viewport   if viewport
         @browser.default_user_agent = user_agent if user_agent
+      end
+
+      private def build_window_browser
+        Browser.new(@app,
+                    driver:        self,
+                    js_engine:     @js_engine,
+                    cookies:       @cookies,
+                    local_storage: @local_storage)
       end
 
       # Per-test trace recording. Mirrors capybara-playwright-driver's
@@ -91,7 +106,16 @@ module Capybara
       def current_trace = browser.trace || browser.pending_trace
 
       attr_reader :browser
-      alias current_browser browser
+
+      # Active window's Browser. Primary by default; switches when the
+      # test calls `switch_to_window(aux_handle)`. Every DOM / URL /
+      # JS-touching driver method routes through here so per-window
+      # state (DOM, sessionStorage, history) stays window-scoped.
+      def current_browser
+        return @browser unless @active_handle
+        w = @aux_windows.find {|win| win[:handle] == @active_handle }
+        w ? w[:browser] : @browser
+      end
 
       def needs_server?       = false
       def javascript_enabled? = true
@@ -107,7 +131,7 @@ module Capybara
       # propagate as a no-op rather than NoMethodError, while
       # `pw.evaluate("…")` runs the JS where it matters.
       def with_playwright_page
-        yield FakePlaywrightPage.new(browser) if block_given?
+        yield FakePlaywrightPage.new(current_browser) if block_given?
       end
 
       class FakePlaywrightPage
@@ -144,57 +168,77 @@ module Capybara
       # real-time advancement could resolve. With no timers queued,
       # polling can't change anything, so we fail fast via the
       # `wait? = false` synchronize path.
-      def wait?               = browser.polling?
+      def wait?               = current_browser.polling?
 
-      def visit(path)          = browser.visit(path)
-      def refresh              = browser.refresh
+      def visit(path)          = current_browser.visit(path)
+      def refresh              = current_browser.refresh
       def reset!
+        @aux_windows.each {|w| w[:browser].dispose rescue nil }
         @aux_windows.clear
         @active_handle = nil
         browser.reset!
       end
-      def go_back              = browser.go_back
-      def go_forward           = browser.go_forward
-      def current_url
-        if @active_handle && (w = @aux_windows.find {|win| win[:handle] == @active_handle })
-          return w[:url].to_s
-        end
-        browser.current_url || ''
-      end
-      def html                 = browser.html
-      def title                = browser.title
-      def status_code          = browser.status_code
-      def response_headers     = browser.response_headers
-      def header(name, value)  = browser.set_header(name, value)
+      def go_back              = current_browser.go_back
+      def go_forward           = current_browser.go_forward
+      def current_url          = current_browser.current_url || ''
+      def html                 = current_browser.html
+      def title                = current_browser.title
+      def status_code          = current_browser.status_code
+      def response_headers     = current_browser.response_headers
+      def header(name, value)  = current_browser.set_header(name, value)
 
       def find_xpath(query, **_)
-        browser.find_xpath(query).map {|id| Node.new(self, id) }
+        current_browser.find_xpath(query).map {|id| Node.new(self, id) }
       end
 
       def find_css(query, **_)
-        browser.find_css(query).map {|id| Node.new(self, id) }
+        current_browser.find_css(query).map {|id| Node.new(self, id) }
       end
 
-      # URL-only multi-window: `<a target="_blank">` clicks record an
-      # aux window {handle, url} pair. Aux windows have no JS VM and no
-      # DOM — `page.current_url` works inside `within_window`, but DOM
-      # queries don't. Sufficient for "PDF opens in new tab" assertions
-      # (Avo's `open_field_attachment` test).
+      # Per-window Browser/VM. `open_aux_window` creates a fresh
+      # Browser sharing the Driver's cookie + localStorage jars
+      # (origin-shared in real browsers) and visits the target URL;
+      # `switch_to_window` flips `@active_handle` so subsequent driver
+      # ops route through `current_browser`. sessionStorage + DOM +
+      # history + the JS VM stay per-window.
       PRIMARY_HANDLE = 'csim-window-0'
       def current_window_handle    = @active_handle || PRIMARY_HANDLE
       def window_handles
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
-      def open_aux_window(url)
+      def open_aux_window(url = nil)
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
-        @aux_windows << {handle: handle, url: url}
+        aux = build_window_browser
+        aux.visit(url) if url && !url.empty?
+        @aux_windows << {handle: handle, browser: aux}
+        handle
+      rescue StandardError => e
+        # Aux window URL-load failure (binary content, network error,
+        # …) shouldn't tear down the test — record the handle so
+        # `window_opened_by` succeeds; within_window assertions on
+        # `current_url` may still pass through whatever `visit`
+        # managed to set before raising.
+        warn "[csim] open_aux_window(#{url.inspect}) raised: #{e.class}: #{e.message[0, 200]}"
+        @aux_windows << {handle: handle, browser: aux}
         handle
       end
-      def window_size(_)           = [browser.viewport_width, browser.viewport_height]
+
+      # Capybara `Session#open_new_window(:tab)` entry point — visits
+      # `about:blank` so the test can `switch_to_window` then `visit`
+      # the real URL. We don't distinguish `:tab` from `:window` (no
+      # window-chrome semantics in this driver).
+      def open_new_window(_kind = :tab)
+        open_aux_window
+      end
+      def window_size(_)           = [current_browser.viewport_width, current_browser.viewport_height]
       def close_window(h)
         return if h == PRIMARY_HANDLE
-        @aux_windows.reject! {|w| w[:handle] == h }
+        @aux_windows.reject! {|w|
+          next false unless w[:handle] == h
+          w[:browser].dispose rescue nil
+          true
+        }
         @active_handle = nil if @active_handle == h
       end
       def switch_to_window(h)
@@ -206,14 +250,14 @@ module Capybara
           raise Capybara::WindowError, "Unknown window handle: #{h}"
         end
       end
-      def resize_window_to(_, w, h) = browser.set_viewport(w, h)
+      def resize_window_to(_, w, h) = current_browser.set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly
       # rather than through `current_window.resize_to`.
-      def resize(w, h) = browser.set_viewport(w, h)
+      def resize(w, h) = current_browser.set_viewport(w, h)
       def maximize_window(_)       ; nil ; end
 
       def evaluate_script(script, *args)
-        unwrap(browser.evaluate_script(script, args))
+        unwrap(current_browser.evaluate_script(script, args))
       end
 
       # Capybara's `execute_script` contract is "run it, discard the
@@ -223,12 +267,12 @@ module Capybara
       # filter recurses into until it stack-overflows) doesn't blow
       # up on the way back.
       def execute_script(script, *args)
-        browser.execute_script(script, args)
+        current_browser.execute_script(script, args)
         nil
       end
 
       def evaluate_async_script(script, *args)
-        unwrap(browser.evaluate_async_script(script, args))
+        unwrap(current_browser.evaluate_async_script(script, args))
       end
 
       private def unwrap(value)
@@ -246,12 +290,12 @@ module Capybara
       def no_such_window_error   = Capybara::WindowError
 
       def save_screenshot(path, **_opts)
-        File.write(path, browser.html.to_s)
+        File.write(path, current_browser.html.to_s)
         path
       end
 
       def active_element
-        handle = browser.active_element_handle
+        handle = current_browser.active_element_handle
         handle ? Node.new(self, handle) : nil
       end
       def send_keys(*keys)
@@ -264,7 +308,7 @@ module Capybara
         # JS-side handler can build a `combo` atom from the held
         # modifiers + the next key. Iterating per-key would split the
         # chord across calls and drop the modifier flags.
-        browser.send_session_keys(keys)
+        current_browser.send_session_keys(keys)
         nil
       end
 
@@ -284,14 +328,14 @@ module Capybara
           when :prompt  then accept ? (with.nil? ? default_value.to_s : with.to_s) : nil
           end
         }
-        browser.with_modal(handler) do
+        current_browser.with_modal(handler) do
           yield if block_given?
           # Pump timers so a setTimeout-driven alert can land.
           timeout = (wait || Capybara.default_max_wait_time).to_f
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
           while captured.nil? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
             sleep 0.01
-            browser.send(:tick_real_time)
+            current_browser.send(:tick_real_time)
           end
         end
         if captured.nil?

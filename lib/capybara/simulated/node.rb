@@ -12,8 +12,11 @@ module Capybara
       def initialize(driver, handle)
         super(driver, self)
         @handle_id    = handle
-        @initial_node = driver.browser.lookup_node(handle)
-        @context_gen  = driver.browser.context_gen
+        # Pin the Browser at construction so nodes from one window
+        # stay valid even after `switch_to_window` flips to another.
+        @browser      = driver.current_browser
+        @initial_node = @browser.lookup_node(handle)
+        @context_gen  = @browser.context_gen
       end
 
       attr_reader :handle_id, :context_gen
@@ -179,7 +182,7 @@ module Capybara
 
       private
 
-      def browser     = driver.browser
+      def browser     = @browser
       def check_stale = browser.check_stale(handle_id, @initial_node, @context_gen)
     end
   end

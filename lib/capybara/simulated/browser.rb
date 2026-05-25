@@ -124,13 +124,17 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil)
+      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil)
         @app                          = app
         @driver                       = driver
         @runtime                      = build_runtime(js_engine)
         @current_url                  = nil
-        @cookies                      = {}
-        @local_storage                = {}
+        # Cookies + localStorage are origin-shared in real browsers —
+        # the Driver injects the jars so aux windows (per-window VMs)
+        # see the same auth state and storage as the primary. Tests
+        # without a Driver (gem-internal callers) get fresh jars.
+        @cookies                      = cookies       || {}
+        @local_storage                = local_storage || {}
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
@@ -990,8 +994,11 @@ module Capybara
       def consume_pending_navigation
         pending = @runtime.call('__csimTakePendingNavigation')
         return unless pending.is_a?(Hash) && pending['url']
-        url = pending['url'].to_s
-        if pure_fragment_navigation?(url)
+        url    = pending['url'].to_s
+        target = pending['target'].to_s
+        if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
+          @driver.open_aux_window(resolve_against_current(url, use_base: true))
+        elsif pure_fragment_navigation?(url)
           update_current_hash(url)
         else
           tick_real_time
@@ -2414,11 +2421,15 @@ module Capybara
           body.close if body.respond_to?(:close)
           return navigate(next_url, depth: depth + 1)
         end
+        # Track the navigated URL even for download-shaped responses
+        # so an aux window opened on a binary asset (PDF / image
+        # opened via `target=_blank`) still reports `current_url`
+        # correctly to within_window assertions.
+        @current_url = url
         if download_response?(headers)
           save_downloaded_response(url, headers, body)
           return
         end
-        @current_url = url
         record_response(status, headers)
         html         = read_rack_body(body)
         # @module_cache and @importmap survive across navigates;
