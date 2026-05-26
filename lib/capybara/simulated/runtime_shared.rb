@@ -75,6 +75,10 @@ module Capybara
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1]); nil },
         '__csim_blobResolve'         => ->(b, *a) { b.blob_resolve(a[0]) },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
+        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
+        '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch_for_js(a[0]) },
+        '__csim_decodeVideoFrame'    => ->(b, *a) { b.decode_video_frame(a[0]) },
+        '__csim_encodeImage'         => ->(b, *a) { b.encode_image(a[0], a[1], a[2], a[3], a[4]) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying
         # the DOMException name (`InvalidStateError`, …); rescue here
         # so the JS shim sees `{error:, name:}` instead of the

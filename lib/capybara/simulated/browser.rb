@@ -198,12 +198,21 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
-        # Cross-isolate `blob:` URL store. Worker isolates can't see
-        # the main scope's `__csimBlobs` Map, so the main scope mirrors
-        # blob bytes (base64) here and workers resolve them through a
-        # host fn.
+        # Outstanding posts-to-worker; `polling?` stays true while > 0
+        # so long-running compute (e.g. mozjpeg over an 8900×8900 frame)
+        # isn't starved by the settle_gen idle gate.
+        @worker_in_flight = 0
+        # Cross-isolate `blob:` store. Worker isolates can't see the
+        # main scope's `__csimBlobs` Map, so we mirror bytes here and
+        # workers resolve them through a host fn.
         @blob_registry = {}
         @blob_registry_lock = Mutex.new
+        # Postmessage transferable-buffer store. Large Uint8Array /
+        # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
+        # rather than a JSON base64 string, so peak JS heap stays flat.
+        @transfer_buffer_lock = Mutex.new
+        @transfer_buffers     = {}
+        @transfer_buffer_seq  = 0
       end
 
       # Worker thread polling and termination intervals — split so a
@@ -1431,6 +1440,9 @@ module Capybara
       # on every DOM mutation / URL change (see __settleGen wiring),
       # so this only short-circuits genuinely idle loops.
       def polling?
+        # Background-thread work (workers, EventSource) keeps the
+        # settle loop alive even when settle_gen is otherwise idle.
+        return true if worker_pending? || event_source_pending?
         if @timers_active
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
@@ -1951,6 +1963,7 @@ module Capybara
       def worker_post_to_worker(handle, data)
         w = @workers[handle.to_i]
         return unless w
+        @worker_in_flight += 1
         w[:inbox] << data.to_s
       end
 
@@ -1962,17 +1975,24 @@ module Capybara
         # for blocked workers.
         w[:thread].join(WORKER_TERMINATE_GRACE)
         w[:thread].kill if w[:thread].alive?
+        # A blocked worker that never returned messages leaves
+        # `@worker_in_flight` permanently > 0; reset when no workers
+        # remain so `polling?` can short-circuit again.
+        @worker_in_flight = 0 if @workers.empty?
       end
 
       def deliver_worker_messages
         return 0 if @workers.empty? && @worker_outbox.empty?
         events = drain_queue(@worker_outbox)
         return 0 if events.empty?
+        # `__error` postbacks don't correspond to a prior post, so
+        # bottom out at zero.
+        @worker_in_flight = [0, @worker_in_flight - events.size].max
         @runtime.call('__csim_deliverWorkerMessages', events)
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty?
+      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0
 
       # ── Image decode (libvips) ─────────────────────────────────────
       #
@@ -1981,28 +2001,39 @@ module Capybara
       # source is an HTMLImageElement / Blob / ImageBitmap with
       # encoded bytes still on the wire. ruby-vips decodes any format
       # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
-      # row-major RGBA buffer. Returned as base64 because mini_racer /
-      # quickjs.rb string transport reinterprets binary as UTF-8;
-      # JS-side `atob` + `Uint8ClampedArray` rebuilds the pixel buffer
-      # exactly. Optional `max_w`/`max_h` lets the caller pre-shrink
-      # for cheap OCR-style "downscale before pixel-touch" flows.
+      # row-major RGBA buffer; the bytes ride the transfer-buffer
+      # registry so JS never builds a megabyte-scale base64 string.
+      # Optional `max_w`/`max_h` lets the caller pre-shrink for
+      # cheap "downscale before pixel-touch" flows.
       def decode_image(b64_bytes, max_w = nil, max_h = nil)
-        require 'vips' unless defined?(Vips)
-        bytes = Base64.decode64(b64_bytes.to_s)
-        img   = Vips::Image.new_from_buffer(bytes, '')
-        img   = img.colourspace('srgb')
-        img   = img.bandjoin(255) if img.bands < 4
-        if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
-           (img.width > max_w.to_i || img.height > max_h.to_i)
-          shrink_x = img.width.to_f  / max_w.to_i
-          shrink_y = img.height.to_f / max_h.to_i
-          shrink  = [shrink_x, shrink_y].max
-          img     = img.resize(1.0 / shrink) if shrink > 1
-        end
-        raw = img.write_to_memory
-        {'width' => img.width, 'height' => img.height, 'pixels' => Base64.strict_encode64(raw)}
-      rescue StandardError => e
-        warn "[capybara-simulated] decode_image failed: #{e.class}: #{e.message[0, 200]}"
+        host_image_op('decode_image') {
+          require 'vips' unless defined?(Vips)
+          bytes = Base64.decode64(b64_bytes.to_s)
+          # `access: :sequential` keeps libvips from applying the
+          # source's ICC profile mid-stream (changes RGBA values by ±2
+          # vs raw decode). `colourspace('srgb')` is the same ICC
+          # transform Chrome's createImageBitmap runs, but rounding
+          # differs by a few ulp; only convert when libvips reports
+          # a non-sRGB interpretation, otherwise trust the bytes.
+          img   = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
+          img   = img.colourspace('srgb') unless img.interpretation == :srgb || img.interpretation == :rgb
+          img   = img.bandjoin(255) if img.bands < 4
+          if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
+             (img.width > max_w.to_i || img.height > max_h.to_i)
+            shrink_x = img.width.to_f  / max_w.to_i
+            shrink_y = img.height.to_f / max_h.to_i
+            shrink  = [shrink_x, shrink_y].max
+            img     = img.resize(1.0 / shrink) if shrink > 1
+          end
+          raw = img.write_to_memory
+          {'width' => img.width, 'height' => img.height, 'refId' => transfer_buffer_stash(raw)}
+        }
+      end
+
+      private def host_image_op(name)
+        yield
+      rescue LoadError, StandardError => e
+        warn "[capybara-simulated] #{name} failed: #{e.class}: #{e.message[0, 200]}"
         nil
       end
 
@@ -2013,6 +2044,11 @@ module Capybara
         end
         @workers.clear
         @worker_outbox.clear
+        @worker_in_flight = 0
+        @transfer_buffer_lock.synchronize {
+          @transfer_buffers.clear
+          @transfer_buffer_seq = 0
+        }
       end
 
       def blob_register(url, body_b64)
@@ -2027,6 +2063,119 @@ module Capybara
       def blob_unregister(url)
         @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s) }
         nil
+      end
+
+      # ── postMessage transferable-buffer registry ───────────────────
+      #
+      # Large Uint8Array / ArrayBuffer payloads cross isolates by ID;
+      # mini_racer marshals typed arrays as ASCII-8BIT Strings so no
+      # JS-side latin-1 / base64 intermediate is built. Without this
+      # the 317 MB raw frames in Discourse's media-optimization-worker
+      # peak >4 GB of JS strings before the worker even sees them.
+      def transfer_buffer_stash(bytes)
+        s = bytes.to_s
+        s = s.dup.force_encoding(Encoding::ASCII_8BIT) unless s.encoding == Encoding::ASCII_8BIT
+        @transfer_buffer_lock.synchronize {
+          id = (@transfer_buffer_seq += 1)
+          @transfer_buffers[id] = s
+          id
+        }
+      end
+
+      def transfer_buffer_fetch(id)
+        @transfer_buffer_lock.synchronize { @transfer_buffers.delete(id.to_i) }
+      end
+
+      # Wraps the raw bytes so mini_racer marshals them as a Uint8Array
+      # on the JS side. QuickJS has no binary marshaler — strings get
+      # reinterpreted as UTF-8 and high-bit bytes corrupt, so we base64
+      # the payload there and the JS shim's `fetchedToBytes` atob's.
+      def transfer_buffer_fetch_for_js(id)
+        bytes = transfer_buffer_fetch(id)
+        return nil unless bytes
+        return MiniRacer::Binary.new(bytes) if defined?(MiniRacer::Binary)
+        Base64.strict_encode64(bytes)
+      end
+
+      # ── Video decode (ffprobe + ffmpeg) ────────────────────────────
+      #
+      # Called from the JS bridge when a `<video>` element's `src` is
+      # assigned a `blob:` URL. ffprobe extracts dimensions + duration,
+      # ffmpeg extracts the first frame as raw RGBA. JS caches both so
+      # `canvas.drawImage(video, …)` blits like any ImageBitmap.
+      def decode_video_frame(b64_bytes)
+        host_image_op('decode_video_frame') {
+          bytes = Base64.decode64(b64_bytes.to_s)
+          next nil if bytes.empty?
+          require 'tempfile'
+          require 'json'
+          Tempfile.create(['csim-video', '.bin'], binmode: true) do |f|
+            f.write(bytes)
+            f.flush
+            info   = ffprobe_stream(f.path) or break nil
+            width  = info['width'].to_i
+            height = info['height'].to_i
+            break nil if width <= 0 || height <= 0
+            raw = ffmpeg_first_frame_rgba(f.path)
+            duration = (info['duration'] || info.dig('format_duration')).to_f
+            result   = {'width' => width, 'height' => height, 'duration' => duration}
+            result['refId'] = transfer_buffer_stash(raw) if raw && !raw.empty?
+            result
+          end
+        }
+      end
+
+      private def ffprobe_stream(path)
+        json = IO.popen(
+          ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+           '-show_entries', 'stream=width,height,duration:format=duration',
+           '-of', 'json', path],
+          'r', err: File::NULL,
+          &:read
+        )
+        return nil unless $?.success?
+        parsed = JSON.parse(json) rescue {}
+        info   = parsed.dig('streams', 0) || {}
+        info['format_duration'] = parsed.dig('format', 'duration')
+        info
+      end
+
+      private def ffmpeg_first_frame_rgba(path)
+        raw = IO.popen(
+          ['ffmpeg', '-loglevel', 'error', '-i', path,
+           '-frames:v', '1', '-f', 'image2pipe',
+           '-vcodec', 'rawvideo', '-pix_fmt', 'rgba', '-'],
+          'rb', &:read
+        )
+        $?.success? ? raw : nil
+      end
+
+      # ── Image encode (libvips) ─────────────────────────────────────
+      #
+      # `canvas.toBlob`'s Ruby end. The pixel buffer comes in via the
+      # transfer registry (so JS doesn't build a megabyte-scale b64
+      # intermediate); the encoded image goes back the same way. Returns
+      # `{refId, type}` or nil on encoder failure.
+      MIME_TO_VIPS_EXT = {
+        'image/jpeg' => '.jpg',
+        'image/jpg'  => '.jpg',
+        'image/webp' => '.webp',
+        'image/png'  => '.png'
+      }.freeze
+      private_constant :MIME_TO_VIPS_EXT
+
+      def encode_image(pixels_ref, width, height, mime_type = 'image/png', quality = 90)
+        host_image_op('encode_image') {
+          require 'vips' unless defined?(Vips)
+          raw = transfer_buffer_fetch(pixels_ref).to_s
+          w   = width.to_i
+          h   = height.to_i
+          next nil if w <= 0 || h <= 0 || raw.bytesize < w * h * 4
+          img = Vips::Image.new_from_memory_copy(raw, w, h, 4, :uchar)
+          ext = MIME_TO_VIPS_EXT[mime_type.to_s.downcase] || '.png'
+          opts = (ext == '.jpg' || ext == '.webp') ? {Q: quality.to_i} : {}
+          {'refId' => transfer_buffer_stash(img.write_to_buffer(ext, **opts))}
+        }
       end
 
       def webauthn = (@webauthn ||= WebauthnState.new)

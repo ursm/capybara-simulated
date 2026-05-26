@@ -23,6 +23,14 @@ begin
   else
     MiniRacer::Platform.set_flags!(stack_size: stack_kb)
   end
+  # Default V8 old-space cap is ~1.4 GB, which OOMs on workloads that
+  # marshal large pixel buffers across postMessage (Discourse's
+  # media-optimization-worker hands a 317 MB raw RGBA frame from an
+  # 8900×8900 fixture through bytesToLatin1 + btoa + JSON before the
+  # transfer; the encode chain peaks at ~1.4 GB by itself). Match
+  # Discourse's own testem flag of 4 GB so the test fits.
+  max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
+  MiniRacer::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
   # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
@@ -294,6 +302,12 @@ module Capybara
         ctx = MiniRacer::Context.new(snapshot: snapshot)
         attach_host_fns(ctx, browser)
         ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        # Worker's timer table is independent from main's; routing the
+        # worker's `setTimersActive` through `browser.timers_active=`
+        # races the main isolate's polling? gate, dropping main-thread
+        # pending XHRs the moment the worker's queue empties. The settle
+        # loop already polls `worker_pending?` for worker thread activity.
+        ctx.attach('__setTimersActive', ->(_flag) { nil })
         ctx.eval('__csim_installWorkerScope();')
         WorkerRuntime.new(
           eval_fn:           ->(s)     { ctx.eval(s.to_s) },

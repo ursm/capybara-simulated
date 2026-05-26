@@ -312,6 +312,10 @@ module Capybara
         bridge_runnable.run(on: vm)
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
+        # Override main's __setTimersActive so worker's empty-timer-map
+        # flip doesn't race main's `polling?` gate. See v8_runtime's
+        # build_worker for the long-form rationale.
+        vm.define_function('__setTimersActive') {|_flag| nil }
         vm.eval_code('__csim_installWorkerScope();')
         vm.drain_microtasks!
         WorkerRuntime.new(
