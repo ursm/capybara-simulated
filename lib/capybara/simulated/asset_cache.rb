@@ -57,6 +57,7 @@ module Capybara
       end
 
       def lookup(url) = @entries[url]
+      def clear      = @entries.clear
 
       def store(url, status, headers, body)
         return unless CACHEABLE_STATUSES.include?(status)

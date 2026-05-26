@@ -1692,6 +1692,19 @@ module Capybara
         reset_event_sources
         reset_workers
         @blob_registry_lock.synchronize { @blob_registry.clear }
+        # `@module_cache` is per-(URL, importmap), intentionally
+        # surviving the per-navigate VM rebuild. But between tests
+        # the host may rebuild a same-URL module against new state
+        # (Discourse's `/extra-locales/<hash>/<locale>/mf.js` keeps
+        # the URL when its `js_digests` cache is stale but the body
+        # is freshly computed), so a per-test wipe is needed —
+        # otherwise the next test sees the previous test's bundle.
+        @module_cache = {}
+        # Same for the class-level HTTP asset cache: a long-immutable
+        # response cached in test 1 would block test 2 from reaching
+        # the app at all when the URL repeats, hiding test-local DB
+        # state (TranslationOverride, etc.).
+        @@asset_cache.clear if @@asset_cache.respond_to?(:clear)
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
