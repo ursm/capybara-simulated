@@ -43,10 +43,10 @@ there's no Node toolchain at consume time.
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'mini_racer'                # V8 (JIT, fastest per spec) — default
-gem 'quickjs', '>= 0.17.0.pre'  # QuickJS (interpreter, smaller per-VM
-                                # RAM — wins when scaling parallel
-                                # workers under a fixed memory budget)
+gem 'mini_racer'          # V8 (JIT, fastest per spec) — default
+gem 'quickjs', '>= 0.18'  # QuickJS (interpreter, smaller per-VM RAM —
+                          # wins when scaling parallel workers under
+                          # a fixed memory budget)
 ```
 
 The engine is auto-detected at boot; if both gems are present
