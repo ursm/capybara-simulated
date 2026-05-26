@@ -129,7 +129,7 @@ module Capybara
       def eval(code)
         v = vm
         result = v.eval_code(code.to_s)
-        v.drain_microtasks!
+        v.drain_jobs!
         normalize(result)
       end
 
@@ -141,13 +141,12 @@ module Capybara
       # Promise.then chains queued during a host-fn body (Turbo's
       # await fetch / Stimulus controllers, `evaluate_async_script`
       # test scripts) stall until the next async boundary.
-      # `drain_microtasks!` (quickjs.rb 0.18+) wraps
-      # `JS_ExecutePendingJob` in a loop to empty the queue, bounded
-      # by the VM's `timeout_msec`.
+      # `drain_jobs!` (quickjs.rb 0.18+) wraps `JS_ExecutePendingJob`
+      # in a loop to empty the queue, bounded by the VM's `timeout_msec`.
       def call(name, *args)
         v = vm
         result = v.call(name.to_s, *args)
-        v.drain_microtasks!
+        v.drain_jobs!
         normalize(result)
       end
 
@@ -157,12 +156,12 @@ module Capybara
         max_ms.nil? ? vm.call('__drainTimers') : vm.call('__drainTimers', max_ms.to_i)
       end
 
-      # `iters` is ignored — `drain_microtasks!` already loops to
-      # queue-empty, so further rounds drain nothing extra. The arity
-      # matches `V8Runtime#drain_microtasks` so `Browser#settle` can
-      # call either engine's method without branching.
+      # `iters` is ignored — `drain_jobs!` already loops to queue-empty,
+      # so further rounds drain nothing extra. The arity matches
+      # `V8Runtime#drain_microtasks` so `Browser#settle` can call either
+      # engine's method without branching.
       def drain_microtasks(_iters = 4)
-        vm.drain_microtasks!
+        vm.drain_jobs!
       end
 
       def settle_gen
@@ -225,7 +224,7 @@ module Capybara
         # allocation). 512 MB clears the ceiling without idle cost —
         # `JS_SetMemoryLimit` is a malloc ceiling, not a reservation.
         memory_limit:   512 * 1024 * 1024,
-        # `drain_microtasks!` loops `JS_ExecutePendingJob` until the
+        # `drain_jobs!` loops `JS_ExecutePendingJob` until the
         # queue empties — but Forem's article-feed render schedules
         # new microtasks faster than they drain, so without a timer
         # the call never returns. Real per-spec eval rarely runs over
@@ -250,7 +249,7 @@ module Capybara
         opts = src ? { from: src.to_s } : { filename: url.to_s }
         opts[:code_to_expose] = ''
         v.import("* as __csim_entry_#{rand(1 << 32)}", **opts)
-        v.drain_microtasks!
+        v.drain_jobs!
       end
 
       private
@@ -317,11 +316,11 @@ module Capybara
         # build_worker for the long-form rationale.
         vm.define_function('__setTimersActive') {|_flag| nil }
         vm.eval_code('__csim_installWorkerScope();')
-        vm.drain_microtasks!
+        vm.drain_jobs!
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_microtasks!; v },
-          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_microtasks!; v },
-          drain_microtasks:  ->        { vm.drain_microtasks! },
+          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_jobs!; v },
+          call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_jobs!; v },
+          drain_microtasks:  ->        { vm.drain_jobs! },
           drain_timers:      ->        { vm.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!vm.call('__hasReadyTimer') },
           # quickjs.rb has no explicit dispose; GC reclaims the VM.
@@ -333,14 +332,16 @@ module Capybara
       # for each module URL; QuickJS handles parsing, live bindings,
       # `import.meta`, and `import()` natively — no `EsmRewriter`,
       # no `__csim_liveImport` Proxy approximation, no column drift.
+      # quickjs.rb 0.18 passes the raw specifier + importer URL.
       # Bare specifiers go through `Browser#resolve_module_specifier`
-      # first so importmap entries (Stimulus / unbundled apps) resolve
-      # correctly. `nil` from `rack_fetch_body` propagates to QuickJS
-      # which raises a ReferenceError mirroring a real-browser 404.
+      # so importmap entries (Stimulus / unbundled apps) resolve
+      # correctly; relative paths resolve against the importer. `nil`
+      # from `rack_fetch_body` propagates to QuickJS which raises a
+      # ReferenceError mirroring a real-browser 404.
       def attach_module_loader(v)
         browser = @browser
-        v.module_loader = ->(url) {
-          resolved = browser.send(:resolve_module_specifier, url, nil)
+        v.module_loader = ->(specifier, importer) {
+          resolved = browser.send(:resolve_module_specifier, specifier, importer)
           body = browser.rack_fetch_body(resolved)
           return nil unless body
           # `.json` (and `?import` JSON) imports come from Vite's
@@ -351,33 +352,25 @@ module Capybara
           # browsers gate on `with { type: 'json' }`; Vite's bundler
           # output already injected that, but the resulting module
           # source is just the raw JSON so we need the wrap either way.
-          resolved.to_s.match?(/\.json(?:\?|$)/) ? "export default #{body};" : body
+          code = resolved.to_s.match?(/\.json(?:\?|$)/) ? "export default #{body};" : body
+          # Return `{ code:, as: }` so QuickJS caches by the resolved
+          # absolute URL — necessary for subsequent relative imports
+          # to use this URL as their importer, not the raw specifier.
+          {code: code, as: resolved.to_s}
         }
       end
 
-      # QuickJS surfaces every unhandled Promise rejection through this
-      # callback (quickjs.rb PR #42). Funnel them into `console.error`
-      # so the trace + any user-installed `log_console` override picks
-      # them up. Without this, an async chain that rejects without a
-      # `.catch` would disappear silently — the same class of bug that
-      # cost us half a session debugging `Intl.Collator` (the throw
-      # happened inside a module body that we couldn't see at the
-      # time). Now any future "module loads but nothing renders"
-      # symptom comes with a stack trace.
+      # Funnel unhandled Promise rejections into `console.error` so
+      # they show up in trace output / user-installed `log_console`
+      # overrides. Without this, an async chain that rejects without
+      # a `.catch` disappears silently — the same class of bug that
+      # cost half a session debugging Intl.Collator (the throw fired
+      # inside a module body we couldn't see).
       def attach_rejection_tracker(v)
         browser = @browser
         v.on_unhandled_rejection do |reason|
-          msg = reason.respond_to?(:message) ? "#{reason.class}: #{reason.message}" : reason.to_s
-          # QuickJS-side throw → reason.backtrace is the JS stack
-          # (frame strings like "at fn (file:L:C)"). Ruby exceptions
-          # raised from host callbacks land here with Ruby backtraces;
-          # both formats are useful.
-          stack =
-            if reason.respond_to?(:backtrace) && reason.backtrace && !reason.backtrace.empty?
-              "\n" + reason.backtrace.first(20).join("\n")
-            else
-              ''
-            end
+          msg = "#{reason.class}: #{reason.message}"
+          stack = reason.backtrace&.any? ? "\n#{reason.backtrace.first(20).join("\n")}" : ''
           browser.log_console('error', "unhandled rejection: #{msg}#{stack}")
         end
       end

@@ -2331,8 +2331,12 @@ module Capybara
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
+        # quickjs.rb's module_loader passes the importer for nested
+        # relative imports; if the importer was an inline-script
+        # pseudo-name (no scheme), fall through to the page URL.
+        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i
         URI.join(base || @current_url || @default_host, url).to_s
-      rescue URI::InvalidURIError
+      rescue URI::InvalidURIError, URI::BadURIError
         url
       end
 

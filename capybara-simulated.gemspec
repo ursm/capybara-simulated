@@ -37,12 +37,5 @@ Gem::Specification.new do |spec|
   #
   #   gem 'mini_racer', '>= 0.18' # V8 (JIT, fastest per-spec)
   #   gem 'quickjs',    '>= 0.18' # QuickJS (interpreter, smaller per-VM
-  #                               # footprint; wins on parallelism). The
-  #                               # `vm.drain_microtasks!` /
-  #                               # `on_unhandled_rejection` /
-  #                               # `vm.dispose!` API the runtime relies
-  #                               # on is merged on hmsk/quickjs.rb main
-  #                               # but unreleased; pin the
-  #                               # `ursm/quickjs.rb#combined-pr-40-and-47`
-  #                               # branch until 0.18 ships.
+  #                               # footprint; wins on parallelism).
 end
