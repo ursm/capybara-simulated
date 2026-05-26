@@ -81,6 +81,11 @@ module Capybara
       TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
+      # Post-user-action virtual-clock advance. Sized just above the
+      # typical UI debounce ceiling (Discourse's 500 ms text input)
+      # so input → debounce → parent state propagation lands before
+      # the next Capybara call.
+      USER_ACTION_DRAIN_MS = 600
       # Per-iter microtask drain depth. mini_racer drains one round
       # per `eval` boundary, so this is the supported chained-await
       # depth before we punt to drain_timers and let the virtual clock
@@ -966,6 +971,11 @@ module Capybara
         consume_pending_form_submit
         consume_pending_navigation
         settle
+        # Settle bails on first observable change, but Backburner-style
+        # 500 ms debounces park behind a setTimeout that hasn't fired
+        # yet. Drain one 600 ms window so input → debounce → parent
+        # state propagation completes before the next Capybara call.
+        @runtime.drain_timers(USER_ACTION_DRAIN_MS) if @timers_active && @runtime.respond_to?(:drain_timers)
       end
 
       # Yield on the first observable change. Each iter (a) drains
@@ -2001,10 +2011,13 @@ module Capybara
       # source is an HTMLImageElement / Blob / ImageBitmap with
       # encoded bytes still on the wire. ruby-vips decodes any format
       # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
-      # row-major RGBA buffer; the bytes ride the transfer-buffer
-      # registry so JS never builds a megabyte-scale base64 string.
-      # Optional `max_w`/`max_h` lets the caller pre-shrink for
-      # cheap "downscale before pixel-touch" flows.
+      # row-major RGBA buffer. Returns `{width, height, refId}` — the
+      # raw bytes land in the transfer-buffer registry so the JS side
+      # fetches them as a `Uint8Array` via `MiniRacer::Binary` rather
+      # than building a 423 MB latin-1 + base64 intermediate for the
+      # 8900×8900 frames Discourse uploads exercise. Optional
+      # `max_w`/`max_h` lets the caller pre-shrink for cheap OCR-style
+      # "downscale before pixel-touch" flows.
       def decode_image(b64_bytes, max_w = nil, max_h = nil)
         host_image_op('decode_image') {
           require 'vips' unless defined?(Vips)
@@ -2188,6 +2201,11 @@ module Capybara
         raise "worker script not found: #{url}" unless body
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         rt        = engine_class.build_worker(self, post_back)
+        # Set the worker's `self.location.href` so webpack /
+        # rollup public-path derivation + `new URL(rel, import.meta.url)`
+        # resolve chunks against the worker's own origin rather than
+        # the snapshot-time `http://placeholder/`.
+        rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
         rt.eval(body)
         loop do
           msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
