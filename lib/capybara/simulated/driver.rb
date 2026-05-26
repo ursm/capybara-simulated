@@ -149,6 +149,13 @@ module Capybara
           src = "(#{src})()" if src.match?(/\A(\(?\s*(async\s+)?(\(.*?\)|\w+)\s*=>|\(?\s*(async\s+)?function\s*\*?\s*\()/m)
           @browser.evaluate_script(src)
         end
+        # `pw_page.locator(selector)` returns a Locator that proxies
+        # click / fill / count / etc. through Capybara's current
+        # session. Discourse's SelectKit / system_helpers `locator`
+        # method drives the suspend / silence / penalize / dropdown
+        # chains via `pw_page.locator(...).click` — without a real
+        # locator the click is a no-op and the modal never advances.
+        def locator(selector) = FakePlaywrightLocator.new(selector)
         def respond_to_missing?(*) = true
         # Yield to the block when one is given so Playwright methods
         # whose semantics live entirely in their block (the canonical
@@ -163,6 +170,31 @@ module Capybara
           yield self if block_given?
           self
         end
+      end
+
+      class FakePlaywrightLocator
+        def initialize(selector, scope = nil)
+          @selector = selector
+          @scope    = scope
+        end
+        def locator(child)    = FakePlaywrightLocator.new(child, self)
+        def click             = node.click
+        def fill(value)       = node.set(value)
+        def click_via_js      = node.click
+        def count             = nodes.size
+        def first             = FakePlaywrightLocator.new("#{@selector}:first-of-type", @scope)
+        def text_content      = node.text
+        def inner_text        = node.text
+        def visible?          = node.visible?
+        def hover             = node.hover
+        def press(key)        = node.send_keys(key)
+        def get_attribute(name) = node[name]
+        def all               = nodes.each_with_index.map {|_, i| FakePlaywrightLocator.new("#{@selector}:nth-of-type(#{i + 1})", @scope) }
+        private
+        def session = Capybara.current_session
+        def context = @scope ? @scope.send(:node) : session
+        def node    = context.find(:css, @selector)
+        def nodes   = context.all(:css, @selector)
       end
       # Dynamic wait?: only poll when there's pending timer work that
       # real-time advancement could resolve. With no timers queued,
