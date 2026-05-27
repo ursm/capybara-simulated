@@ -134,6 +134,24 @@ module Capybara
         @driver                       = driver
         @runtime                      = build_runtime(js_engine)
         @current_url                  = nil
+        # Real browsers yield control between asynchronous URL
+        # transitions (XHR-driven model loads, then `replaceWith` to a
+        # child route), so Capybara polls catch the intermediate URL —
+        # e.g. Discourse's `/wizard` → `/wizard/steps/setup` flow holds
+        # at `/wizard` while `Wizard.load()` runs. Our env drains
+        # microtasks synchronously and only the final URL is reachable
+        # by the time Ruby regains control. Queue URLs we transitioned
+        # through; `current_url` shifts one out per call so a polling
+        # `assert_current_path` walks the same set the real browser
+        # would have observed.
+        @recent_urls                  = []
+        # The URL of the page that navigated to the current document —
+        # HTTP `Referer` header on the response that loaded the page,
+        # exposed to JS as `document.referrer`. Tracked by `navigate`
+        # so post-auth flows (Discourse login: `cookie('destination_url',
+        # referrer)` when navigating from `/t/N` → `/login` via link
+        # click) can reconstruct the origin URL.
+        @current_referer              = ''
         # Cookies + localStorage are origin-shared in real browsers —
         # the Driver injects the jars so aux windows (per-window VMs)
         # see the same auth state and storage as the primary. Tests
@@ -317,7 +335,30 @@ module Capybara
 
       def current_url
         tick_real_time
+        # If `tick_real_time` produced one or more URL transitions
+        # (`record_url_transition` queues the old URL), surface them
+        # one at a time so a polling matcher walks the same path the
+        # real browser would have observed before microtasks all
+        # collapsed onto the final URL.
+        return @recent_urls.shift if @recent_urls.any?
         @current_url || ''
+      end
+
+      # Called whenever `@current_url` is about to be set to a new
+      # value during a page-load or settle drain (`navigate` /
+      # `tick_real_time`); queues the prior URL for
+      # surface-via-`current_url`. Out-of-band JS-driven pushStates
+      # (`execute_script("history.pushState(...)")`) bypass the queue —
+      # they have no chain of microtask-driven transitions to walk,
+      # and the caller expects to read the new URL one-shot. The queue
+      # is bounded to guard against a runaway chain of transitions.
+      def record_url_transition(new_url)
+        return unless @ticking || @navigating
+        old = @current_url
+        return if old.nil? || old.to_s.empty?
+        return if old.to_s == new_url.to_s
+        @recent_urls << old.to_s
+        @recent_urls.shift while @recent_urls.size > 8
       end
 
       def find_css(css, context_handle = nil)
@@ -2529,7 +2570,11 @@ module Capybara
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
       def history_state(url, state = nil)
-        @current_url = resolve_against_current(url.to_s) if url
+        if url
+          resolved = resolve_against_current(url.to_s)
+          record_url_transition(resolved)
+          @current_url = resolved
+        end
         return if @history_idx < 0
         @history[@history_idx] = (@history[@history_idx] || {}).merge(
           url:   @current_url,
@@ -2544,10 +2589,12 @@ module Capybara
       # to a real reload when the back hits a `:visit` boundary.
       def history_push(url, state = nil)
         resolved = resolve_against_current(url.to_s)
+        record_url_transition(resolved)
         @current_url = resolved
         record_history({method: :get, url: resolved, state: state, kind: :push_state})
       end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
+      def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s)
         return if s.nil? || s.empty?
         name, rest = s.split('=', 2)
@@ -2628,40 +2675,60 @@ module Capybara
       def navigate(url, depth: 0, referer: @current_url, from_history: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
-        record_history({method: :get, url: url}) unless from_history || depth > 0
-        env = Rack::MockRequest.env_for(url, method: 'GET')
-        apply_default_request_env(env, referer: referer)
-        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
-        merge_set_cookie(headers)
-        if (loc = redirect_location(status, headers))
-          next_url = resolve_against_current(loc)
-          # Per RFC 7231: if the original request URL had a fragment
-          # and the redirect target doesn't specify one, preserve
-          # the original fragment in the final URL.
-          next_url = carry_fragment(url, next_url)
-          body.close if body.respond_to?(:close)
-          return navigate(next_url, depth: depth + 1)
+        # Capture the entry referer (the page initiating this navigation,
+        # e.g. clicked link's host page) at depth 0 — internal redirects
+        # at deeper depths don't replace the user-visible referrer.
+        # A full-document navigate also clears the pushState transition
+        # queue: any URLs we'd queued during the prior page's lifetime
+        # are stale once we cross a real document boundary.
+        if depth == 0
+          @current_referer = referer.to_s
+          @recent_urls.clear if @recent_urls
         end
-        # Track the navigated URL even for download-shaped responses
-        # so an aux window opened on a binary asset (PDF / image
-        # opened via `target=_blank`) still reports `current_url`
-        # correctly to within_window assertions.
-        @current_url = url
-        if download_response?(headers)
-          save_downloaded_response(url, headers, body)
-          return
+        # While navigate is in progress (and the loaded page's bootstrap
+        # JS is running synchronously inside __csimLoadDocument), any
+        # `history.pushState`/`replaceState` chain belongs to that load
+        # — record intermediates so a polling matcher can walk them.
+        prior_navigating = @navigating
+        @navigating = true unless from_history
+        begin
+          record_history({method: :get, url: url}) unless from_history || depth > 0
+          env = Rack::MockRequest.env_for(url, method: 'GET')
+          apply_default_request_env(env, referer: referer)
+          status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+          merge_set_cookie(headers)
+          if (loc = redirect_location(status, headers))
+            next_url = resolve_against_current(loc)
+            # Per RFC 7231: if the original request URL had a fragment
+            # and the redirect target doesn't specify one, preserve
+            # the original fragment in the final URL.
+            next_url = carry_fragment(url, next_url)
+            body.close if body.respond_to?(:close)
+            return navigate(next_url, depth: depth + 1)
+          end
+          # Track the navigated URL even for download-shaped responses
+          # so an aux window opened on a binary asset (PDF / image
+          # opened via `target=_blank`) still reports `current_url`
+          # correctly to within_window assertions.
+          @current_url = url
+          if download_response?(headers)
+            save_downloaded_response(url, headers, body)
+            return
+          end
+          record_response(status, headers)
+          html         = read_rack_body(body)
+          # @module_cache and @importmap survive across navigates;
+          # set_importmap flushes the cache only when the new page
+          # ships a different importmap (handles cross-app navigation).
+          # Full-reload navigation rebuilds the JS Context from the warm
+          # snapshot. Per-visit fresh VM avoids partial-reset drift
+          # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
+          # `$(document).on(...)` delegates) — snapshot warmup keeps the
+          # rebuild itself cheap; app-bundle re-eval dominates.
+          boot_response_into_ctx(html)
+        ensure
+          @navigating = prior_navigating
         end
-        record_response(status, headers)
-        html         = read_rack_body(body)
-        # @module_cache and @importmap survive across navigates;
-        # set_importmap flushes the cache only when the new page
-        # ships a different importmap (handles cross-app navigation).
-        # Full-reload navigation rebuilds the JS Context from the warm
-        # snapshot. Per-visit fresh VM avoids partial-reset drift
-        # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
-        # `$(document).on(...)` delegates) — snapshot warmup keeps the
-        # rebuild itself cheap; app-bundle re-eval dominates.
-        boot_response_into_ctx(html)
       end
 
       # Rebuild the JS Context and load `html` into it. Called from
