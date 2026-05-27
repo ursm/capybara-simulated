@@ -300,6 +300,16 @@ module Capybara
         RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
           v.define_function(name, &body)
         }
+        # `dispatchEventForUserAction` calls this between listener
+        # invocations. `drain_jobs!` loops `JS_ExecutePendingJob` until
+        # the queue is empty, matching V8's
+        # `MicrotasksScope::PerformCheckpoint`. Older quickjs.rb
+        # without `drain_jobs!` falls back to a no-op.
+        if v.respond_to?(:drain_jobs!)
+          v.define_function('__csim_yield') { v.drain_jobs!; nil }
+        else
+          v.define_function('__csim_yield') { nil }
+        end
       end
 
       # Worker-isolate factory: fresh VM, bridge bytecode replayed,

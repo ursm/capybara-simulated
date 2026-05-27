@@ -291,6 +291,19 @@ module Capybara
         RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
           c.attach(name, body)
         }
+        # `dispatchEventForUserAction` calls this between listener
+        # invocations to match HTML spec "clean up after running
+        # script" microtask-checkpoint semantics. Older mini_racer
+        # without rubyjs/mini_racer#418 falls back to a no-op, leaving
+        # dispatch correct but losing the listener-interleaved
+        # Backburner-style autorun drains.
+        body =
+          if c.respond_to?(:perform_microtask_checkpoint)
+            -> { c.perform_microtask_checkpoint; nil }
+          else
+            -> { nil }
+          end
+        c.attach('__csim_yield', body)
       end
 
       # Worker-isolate factory: fresh Context from the shared
