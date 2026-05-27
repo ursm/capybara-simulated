@@ -477,9 +477,23 @@ module Capybara
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
+      # `tick_real_time` may have rebuilt the DOM (Ember route hydration
+      # finishing on its first idle tick replaces server-rendered nodes
+      # with fresh ones). `Node` ran check_stale before calling here,
+      # but that was BEFORE the tick — re-verify after so Capybara
+      # catches the now-stale handle and retries the find. Otherwise
+      # `__csim*` lookups would return null and the operation would
+      # silently no-op (or, in the case of `__csimClickResolve`,
+      # dispatch on a detached node whose listeners no longer matter).
+      def ensure_alive_after_tick(handle)
+        return if @runtime.call('__csimAlive', handle)
+        raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
+      end
+
       def click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         init = click_event_init(handle, keys, opts)
         delay = opts[:delay].to_f
         action =
@@ -631,6 +645,7 @@ module Capybara
       def set_value_with_events(handle, value)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # mini_racer rejects non-primitive types. Coerce to a path-list
         # form V8 can hold — the actual multipart upload happens later
@@ -739,6 +754,7 @@ module Capybara
       def right_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         init = {'bubbles' => true, 'cancelable' => true, 'button' => 2, 'which' => 3}.merge(click_event_init(handle, keys, opts))
         @runtime.call('__csimDispatchEvent', handle, 'mousedown', init)
         sleep opts[:delay].to_f if opts[:delay].to_f > 0
@@ -753,6 +769,7 @@ module Capybara
       def drop(handle, args)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         items = args.flat_map {|arg| drop_items(arg) }
         @runtime.call('__csimDropOnto', handle, items)
       end
@@ -767,6 +784,8 @@ module Capybara
       def drag_to(source_handle, target_handle, **_opts)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(source_handle)
+        ensure_alive_after_tick(target_handle)
         @runtime.call('__csimDragOnto', source_handle, target_handle)
         drain_after_user_action
       end
@@ -787,6 +806,7 @@ module Capybara
       def double_click(handle, keys = [], **opts)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         # UI Events spec: two full mousedown→mouseup→click chains
         # before the trailing `dblclick`. Jspreadsheet (table-builder's
         # `.jss_worksheet`) enters edit mode on the inner mousedown.
@@ -842,6 +862,7 @@ module Capybara
       def hover(handle)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         # Set `document._hoverElement` so `:hover` pseudo-class matches
         # resolve against this element (Redmine's gantt tooltips +
         # context-menu submenus rely on CSS `:hover`). The host fn
@@ -857,6 +878,7 @@ module Capybara
       def dispatch_event(handle, type, init = {})
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         @runtime.call('__csimDispatchEvent', handle, type.to_s, init)
       end
 
@@ -874,6 +896,7 @@ module Capybara
       def send_keys(handle, keys)
         tick_real_time
         invalidate_find_cache
+        ensure_alive_after_tick(handle)
         # Selenium's contract: a bare modifier symbol (`:shift`) at the
         # top level "holds" the modifier from that point on. `:null`
         # releases all modifiers. We rewrite the atom stream so each
