@@ -74,18 +74,28 @@ module Capybara
       # Capybara's outer synchronize gets one retry against the new
       # context.
       POST_NAV_POLL_GRACE_POLLS = 10
-      # Virtual JS clock advances by a fixed step per tick_real_time
-      # call so timer firing order is identical across runs regardless
-      # of wall-clock pressure (GC, core competition). The driver's
-      # "deterministic" contract depends on this.
+      # Fallback fixed step when wall-elapsed is 0 ms (e.g. nested
+      # tick calls from the same Ruby boundary, or a brand-new
+      # session whose last_tick_ts has just been initialised). Kept
+      # tiny so a same-frame double-call doesn't accidentally fire
+      # debounces; the wall-sync path in `tick_real_time` is the
+      # main clock driver.
       TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
-      # Post-user-action virtual-clock advance. Sized just above the
-      # typical UI debounce ceiling (Discourse's 500 ms text input)
-      # so input → debounce → parent state propagation lands before
-      # the next Capybara call.
-      USER_ACTION_DRAIN_MS = 600
+      # Post-user-action virtual-clock advance. Held at 0 — the
+      # wall-sync model (each tick_real_time advances by the wall
+      # ms elapsed since the last tick) lets Capybara's outer poll
+      # loop drive the clock at the same rate a real browser sees,
+      # so debounced chains complete naturally during polling
+      # without being pre-emptively flushed past the transient
+      # window real-browser tests rely on.
+      USER_ACTION_DRAIN_MS = 0
+      # Upper bound on a single tick's virtual advance. Prevents a
+      # long Ruby pause (asset compile, debugger break) from being
+      # replayed as one giant drain that fires every debounce in
+      # the queue at once.
+      MAX_TICK_MS = 1000
       # Per-iter microtask drain depth. mini_racer drains one round
       # per `eval` boundary, so this is the supported chained-await
       # depth before we punt to drain_timers and let the virtual clock
@@ -484,6 +494,13 @@ module Capybara
         result.nil? || (result.respond_to?(:empty?) && result.empty?)
       end
 
+      # Minimum wall-clock gap before find() re-ticks. The smoke
+      # contract is "first find returns the current DOM without
+      # firing pending timers" — apps assert `have_selector` on a
+      # `<div>` whose constructor schedules a `setTimeout(0)` to
+      # remove it, expecting to catch the div before removal. Keep
+      # this above one Ruby boundary so a single visit+find pair
+      # doesn't accidentally tick.
       FIND_PRE_TICK_MIN_S = 0.05
       def timer_wait_elapsed?
         @timers_active &&
@@ -1596,11 +1613,17 @@ module Capybara
         end
       end
 
-      # Advance the virtual JS clock by `step_ms` and fire timers that
-      # came due. Each find / has_? path enters here with the default
-      # step; `SleepHook` calls in via `advance_virtual_clock_ms` with
-      # the explicit duration from `Kernel#sleep(n)`.
-      def tick_real_time(step_ms: TICK_STEP_MS)
+      # Advance the virtual JS clock and fire timers that came due.
+      # When `step_ms` is omitted, advance by the wall-clock ms
+      # elapsed since the last tick (clamped to MAX_TICK_MS) — this
+      # is the wall-sync model: Capybara polls every retry_interval
+      # ms of wall, each find here advances virtual by the same
+      # amount, and a 200 ms debounce naturally fires after 20 polls
+      # the way a real browser would observe it. Explicit `step_ms`
+      # is used by `SleepHook#advance_virtual_clock_ms` (from
+      # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout`
+      # to step a precise virtual duration.
+      def tick_real_time(step_ms: nil)
         return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
@@ -1609,9 +1632,11 @@ module Capybara
         return if @ticking
         @ticking = true
         begin
-          @last_tick_ts = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          if @timers_active && step_ms > 0
-            fired = @runtime.drain_timers(step_ms).to_i
+          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          effective_step = step_ms || ((now - (@last_tick_ts || now)) * 1000).to_i.clamp(0, MAX_TICK_MS)
+          @last_tick_ts = now
+          if @timers_active && effective_step > 0
+            fired = @runtime.drain_timers(effective_step).to_i
             @find_cache_dirty = true if fired > 0
           end
           # Pull any pending Worker / EventSource messages into JS
