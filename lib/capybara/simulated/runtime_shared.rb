@@ -69,6 +69,8 @@ module Capybara
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
         '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
+        '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
+        '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },

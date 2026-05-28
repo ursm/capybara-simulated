@@ -213,6 +213,17 @@ module Capybara
         @event_source_seq     = 0
         @event_source_threads = {}
         @event_source_queue   = Thread::Queue.new
+        # Hijacked-XHR delivery — per-Browser handle counter,
+        # background threads, and a Queue of completed responses for
+        # Rack calls where the middleware used `rack.hijack` to hold
+        # the connection open (the contract `message_bus`'s long-poll
+        # uses to push publishes immediately rather than waiting for
+        # the next client poll). Same shape as SSE: the thread reads
+        # the hijacked pipe; main settle drains the Queue and
+        # dispatches via `__csim_deliverHijackedFetches`.
+        @hijack_fetch_seq     = 0
+        @hijack_fetch_threads = {}
+        @hijack_fetch_queue   = Thread::Queue.new
         # Web Workers — per-Browser handle counter, per-worker
         # {thread, inbox} pair, and a shared outbox the main settle
         # drains via `__csim_deliverWorkerMessages`. Each worker
@@ -1087,18 +1098,20 @@ module Capybara
           @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
           deliver_event_source_events
           deliver_worker_messages
+          deliver_hijacked_fetches
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending? || worker_pending?
+          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending?
           @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
           deliver_event_source_events
           deliver_worker_messages
+          deliver_hijacked_fetches
           break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending?
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -1538,9 +1551,10 @@ module Capybara
       # on every DOM mutation / URL change (see __settleGen wiring),
       # so this only short-circuits genuinely idle loops.
       def polling?
-        # Background-thread work (workers, EventSource) keeps the
-        # settle loop alive even when settle_gen is otherwise idle.
-        return true if worker_pending? || event_source_pending?
+        # Background-thread work (workers, EventSource, MessageBus
+        # long-poll) keeps the settle loop alive even when settle_gen
+        # is otherwise idle.
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending?
         if @timers_active
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
@@ -1567,7 +1581,7 @@ module Capybara
       # step; `SleepHook` calls in via `advance_virtual_clock_ms` with
       # the explicit duration from `Kernel#sleep(n)`.
       def tick_real_time(step_ms: TICK_STEP_MS)
-        return unless @timers_active || worker_pending? || event_source_pending?
+        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -1587,6 +1601,7 @@ module Capybara
           # for direct `execute_script` / `evaluate_script` calls.
           @find_cache_dirty = true if deliver_worker_messages > 0
           @find_cache_dirty = true if deliver_event_source_events > 0
+          @find_cache_dirty = true if deliver_hijacked_fetches > 0
         ensure
           @ticking = false
         end
@@ -1778,6 +1793,7 @@ module Capybara
         # would collide on the fresh handle counter the bridge starts
         # from after `reset_page`. Same shape for worker threads.
         reset_event_sources
+        reset_hijacked_fetches
         reset_workers
         @blob_registry_lock.synchronize { @blob_registry.clear }
         # `@module_cache` is per-(URL, importmap), intentionally
@@ -2039,6 +2055,169 @@ module Capybara
         @event_source_threads.each_value(&:kill)
         @event_source_threads.clear
         @event_source_queue.clear
+      end
+
+      # ── Hijack-aware async XHR ─────────────────────────────────────
+      #
+      # Real browsers' long-poll keeps the request socket open across
+      # the entire user-interactive session, so a server-side
+      # `MessageBus.publish` (or any other middleware writing through
+      # `rack.hijack`) lands on the open connection and the client
+      # gets the response when the server is ready. Our default
+      # `__rackFetch` is purely sync — the middleware's hijack path
+      # never engaged, so MessageBus's `subscribe(channel, -1)` +
+      # `__status` reset chain dropped any publish that landed
+      # between two scheduled polls.
+      #
+      # `rack_fetch_async` runs the Rack call with a `rack.hijack`
+      # lambda installed. The lambda is invoked iff the middleware
+      # actually hijacks; we detect that and spawn a background
+      # thread to read from the pipe until the middleware closes its
+      # end (a publish landed via `notify_clients`, or
+      # `cleanup_timer` fired the empty-`[]` close after
+      # `long_polling_interval`). Non-hijacking responses queue
+      # immediately on the same thread — no thread spawn, no
+      # backpressure beyond the existing sync `__rackFetch` cost.
+      #
+      # The contract is generic: any middleware that follows the
+      # Rack hijack protocol works, not just `message_bus`. JS-side
+      # XHR's async path routes every request here; sync XHRs
+      # (`xhr.open(_, _, false)`, deprecated) stay on `__rackFetch`
+      # because the hijack contract can't satisfy a synchronous XHR
+      # response anyway.
+      def rack_fetch_async(method, url, body, headers_json)
+        headers = begin
+          JSON.parse(headers_json.to_s)
+        rescue JSON::ParserError
+          {}
+        end
+        id    = (@hijack_fetch_seq += 1)
+        queue = @hijack_fetch_queue
+        # `rack_fetch` already does redirect-following, cookie merge,
+        # the asset cache shortcut, and download-detection — keep
+        # async XHRs on that single source of truth. The only new
+        # behaviour is the hijack hook: if the middleware engages
+        # `rack.hijack` for a hop, switch to the background pipe
+        # reader. `with_hijack_capture` is the closure-passing
+        # wrapper that bridges the two paths.
+        read_io = nil
+        env_extras = {
+          'rack.hijack?' => true,
+          'rack.hijack'  => lambda {
+            read_io, write_io = IO.pipe
+            write_io
+          }
+        }
+        resp = rack_fetch(method, url, body, headers, 'follow', env_extras: env_extras)
+        # Middleware hijacked at some redirect hop → switch to
+        # background read. The fetched `resp` from `rack_fetch` is
+        # the synthetic 418 placeholder; ignore it.
+        if read_io
+          thread = Thread.new do
+            Thread.current.report_on_exception = false
+            run_hijacked_pipe_read(id, read_io, queue)
+          end
+          @hijack_fetch_threads[id] = thread
+        elsif resp
+          queue << resp.merge('handle' => id)
+        else
+          queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => ''}
+        end
+        id
+      rescue StandardError => e
+        @hijack_fetch_queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => '', 'error' => "#{e.class}: #{e.message}"}
+        id
+      end
+
+      def rack_fetch_async_abort(id)
+        thread = @hijack_fetch_threads.delete(id.to_i)
+        thread&.kill
+        nil
+      end
+
+      def hijack_fetch_pending? = !@hijack_fetch_threads.empty? || !@hijack_fetch_queue.empty?
+
+      def deliver_hijacked_fetches
+        return 0 if @hijack_fetch_threads.empty? && @hijack_fetch_queue.empty?
+        responses = drain_queue(@hijack_fetch_queue)
+        return 0 if responses.empty?
+        @runtime.call('__csim_deliverHijackedFetches', responses)
+        responses.size
+      end
+
+      def reset_hijacked_fetches
+        @hijack_fetch_threads.each_value(&:kill)
+        @hijack_fetch_threads.clear
+        @hijack_fetch_queue.clear
+      end
+
+      # MessageBus's `long_polling_interval` defaults to 25 s — its
+      # `cleanup_timer` fires after that interval, closing the
+      # hijacked connection with an empty `[]` write. Pick a slightly
+      # larger wall cap so the close reaches us before our pipe read
+      # gives up. Other hijack-using middleware likely behaves
+      # similarly; if any need much longer waits, this becomes a per-
+      # request option.
+      HIJACK_PIPE_MAX_WAIT_S = 30
+
+      private def run_hijacked_pipe_read(id, read_io, queue)
+        buf = String.new
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + HIJACK_PIPE_MAX_WAIT_S
+        loop do
+          remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          break if remaining <= 0
+          ready, = IO.select([read_io], nil, nil, remaining)
+          break unless ready
+          begin
+            buf << read_io.read_nonblock(8192)
+          rescue EOFError, Errno::EPIPE, Errno::ECONNRESET
+            break
+          rescue IO::WaitReadable
+            next
+          end
+        end
+        queue << {'handle' => id, **parse_hijacked_http_response(buf)}
+      rescue StandardError => e
+        queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => '', 'error' => "#{e.class}: #{e.message}"}
+      ensure
+        @hijack_fetch_threads.delete(id)
+        begin
+          read_io.close unless read_io.closed?
+        rescue StandardError
+          # pipe already closed by the middleware; ignore.
+        end
+      end
+
+      # Hijacked middleware writes raw HTTP/1.1 over the socket:
+      # `HTTP/1.1 200 OK\r\nheader: value\r\n...\r\n\r\nbody`.
+      private def parse_hijacked_http_response(buf)
+        status   = 200
+        headers  = {}
+        sep_idx  = buf.index("\r\n\r\n") || buf.index("\n\n")
+        head, body =
+          if sep_idx
+            sep_len = buf[sep_idx, 4] == "\r\n\r\n" ? 4 : 2
+            [buf[0...sep_idx], buf[(sep_idx + sep_len)..]]
+          else
+            [buf, '']
+          end
+        head.split(/\r?\n/).each_with_index do |line, i|
+          if i == 0 && (m = line.match(%r{\AHTTP/[\d.]+\s+(\d+)}))
+            status = m[1].to_i
+          elsif (idx = line.index(':'))
+            k = line[0...idx].strip.downcase
+            v = line[(idx + 1)..].to_s.strip
+            headers[k] = v
+          end
+        end
+        {'status' => status, 'headers' => headers, 'body' => body.to_s}
+      end
+
+      private def normalize_response_headers(headers)
+        return {} unless headers
+        out = {}
+        headers.each {|k, v| out[k.to_s.downcase] = v.to_s }
+        out
       end
 
       # ── Web Workers ────────────────────────────────────────────────
@@ -2446,7 +2625,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode)
+      def rack_fetch(method, url, body, headers, redirect_mode, env_extras: nil)
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         method = (method || 'GET').to_s.upcase
@@ -2472,6 +2651,7 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
+          env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
           merge_set_cookie(resp_headers)
           log_network(method, target, status)
