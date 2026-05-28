@@ -145,6 +145,7 @@ module Capybara
         # `assert_current_path` walks the same set the real browser
         # would have observed.
         @recent_urls                  = []
+        @recent_urls_last_push_at     = nil
         # The URL of the page that navigated to the current document —
         # HTTP `Referer` header on the response that loaded the page,
         # exposed to JS as `document.referrer`. Tracked by `navigate`
@@ -355,45 +356,64 @@ module Capybara
         s.match?(URL_UNSAFE_CHARS) ? URI::DEFAULT_PARSER.escape(s, URL_UNSAFE_CHARS) : s
       end
 
+      # Queued URLs older than this (real wall clock) are treated as
+      # stale and dropped on the next `current_url` read. Capybara's
+      # default polling interval is 50 ms, so a `have_current_path`
+      # walk runs through its iterations well under this threshold;
+      # a `page.current_url` read between unrelated user actions
+      # arrives long after the prior action's settle pushed
+      # intermediates, falls past the cutoff, and surfaces the
+      # current URL directly.
+      RECENT_URLS_STALE_AGE_MS = 250
+
       def current_url
         tick_real_time
-        # If `tick_real_time` produced one or more URL transitions
-        # (`record_url_transition` queues the old URL), surface them
-        # one at a time so a polling matcher walks the same path the
-        # real browser would have observed before microtasks all
-        # collapsed onto the final URL.
+        # `tick_real_time` may have queued URL transitions via
+        # `record_url_transition`. A polling matcher
+        # (`have_current_path`) calls here once per ~50 ms iteration
+        # and shifts one entry per call so it walks the same
+        # intermediate-URL chain a real browser would have observed
+        # before microtasks all collapsed onto the final URL — the
+        # finish_installation_spec wizard chain depends on this for
+        # the `/wizard` step before the JS replaceWith to
+        # `/wizard/steps/setup` lands. A non-polling read
+        # (`topic_url = page.current_url` long after the prior
+        # action's settle) just wants the current URL; drop entries
+        # older than the polling-cadence window so they don't leak
+        # into an unrelated call (tags_spec:221's composer-submit
+        # leaves `/new-topic` queued, and the read happens minutes
+        # of test wall-clock later).
+        if @recent_urls_last_push_at && @recent_urls.any?
+          age_ms = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond) - @recent_urls_last_push_at
+          @recent_urls.clear if age_ms > RECENT_URLS_STALE_AGE_MS
+        end
         return @recent_urls.shift if @recent_urls.any?
         @current_url || ''
       end
 
       # Called whenever `@current_url` is about to be set to a new
-      # value during a page-load drain; queues the prior URL for
-      # surface-via-`current_url`. Polling matchers (`have_current_path`)
-      # call `current_url` per iteration and shift one out per call, so
-      # they walk the same intermediate-URL chain a real browser would
-      # have observed before microtasks all collapsed onto the final
-      # URL. Out-of-band JS-driven pushStates
+      # value during a page-load drain or a settle tick driven by a
+      # user action; queues the prior URL for surface-via-
+      # `current_url` so a polling matcher walks the intermediate
+      # chain. Out-of-band JS-driven pushStates
       # (`execute_script("history.pushState(...)")`) bypass the queue —
       # they have no chain of microtask-driven transitions to walk,
-      # and the caller expects to read the new URL one-shot. The queue
-      # is bounded to guard against a runaway chain of transitions.
-      #
-      # Gate on `@navigating` only (page-load drain), NOT `@ticking`:
-      # user-action drains (click → in-app SPA transition → settle
-      # ticks) update `@current_url` without queuing. If we queued
-      # there too, the queue would persist past the action — the next
-      # caller's first `page.current_url` read would return a stale
-      # entry from the prior click's transition chain (Discourse's
-      # composer-submit-then-record-URL pattern: tags_spec stores
-      # `topic_url = page.current_url` after the submit + transition,
-      # gets the pre-submit URL back).
+      # and the caller expects to read the new URL one-shot. Bounded
+      # to size 8 to guard against runaway chains; `current_url`'s
+      # staleness check drops the rest on any read past the polling-
+      # cadence window. Without the queue the finish_installation
+      # wizard chain's intermediate `/wizard` would be invisible:
+      # the JS-side `replaceWith` to `/wizard/steps/setup` lands
+      # during a tick, so by the time Capybara polls `@current_url`
+      # is already the final URL.
       def record_url_transition(new_url)
-        return unless @navigating
+        return unless @ticking || @navigating
         old = @current_url
         return if old.nil? || old.to_s.empty?
         return if old.to_s == new_url.to_s
         @recent_urls << old.to_s
         @recent_urls.shift while @recent_urls.size > 8
+        @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
       end
 
       def find_css(css, context_handle = nil)
@@ -2085,49 +2105,63 @@ module Capybara
       # (`xhr.open(_, _, false)`, deprecated) stay on `__rackFetch`
       # because the hijack contract can't satisfy a synchronous XHR
       # response anyway.
+      # Returns either a response hash (immediate — middleware didn't
+      # hijack) or a `{'handle' => N}` token (deferred — middleware
+      # hijacked the connection and a background thread is reading
+      # the pipe). The JS-side XHR checks the return shape to pick
+      # between inline processing and waiting for `__csim_
+      # deliverHijackedFetches`.
       def rack_fetch_async(method, url, body, headers_json)
         headers = begin
           JSON.parse(headers_json.to_s)
         rescue JSON::ParserError
           {}
         end
-        id    = (@hijack_fetch_seq += 1)
-        queue = @hijack_fetch_queue
-        # `rack_fetch` already does redirect-following, cookie merge,
-        # the asset cache shortcut, and download-detection — keep
-        # async XHRs on that single source of truth. The only new
-        # behaviour is the hijack hook: if the middleware engages
-        # `rack.hijack` for a hop, switch to the background pipe
-        # reader. `with_hijack_capture` is the closure-passing
-        # wrapper that bridges the two paths.
+        # `rack_fetch` already handles redirects, cookie merge, the
+        # asset cache shortcut, and download detection — keep async
+        # XHRs on that single source of truth. The new behaviour is
+        # the hijack hook for long-poll-shaped requests: install
+        # `rack.hijack` so the middleware can hold the connection
+        # open until something publishes through it.
+        #
+        # We can't unconditionally install the hijack env keys: some
+        # downstream Discourse middleware paths take a different
+        # streaming branch when `rack.hijack?` is truthy (even
+        # without ever invoking the lambda) and the response then
+        # re-renders the page in a slightly different order, racing
+        # subsequent Capybara `find`s into StaleElement. Restrict
+        # the hook to URLs that look like the long-poll endpoints
+        # we actually need it for (`/message-bus/{id}/poll` today;
+        # extend as new patterns surface).
         read_io = nil
-        env_extras = {
-          'rack.hijack?' => true,
-          'rack.hijack'  => lambda {
-            read_io, write_io = IO.pipe
-            write_io
-          }
-        }
-        resp = rack_fetch(method, url, body, headers, 'follow', env_extras: env_extras)
-        # Middleware hijacked at some redirect hop → switch to
-        # background read. The fetched `resp` from `rack_fetch` is
-        # the synthetic 418 placeholder; ignore it.
-        if read_io
-          thread = Thread.new do
-            Thread.current.report_on_exception = false
-            run_hijacked_pipe_read(id, read_io, queue)
+        env_extras =
+          if HIJACK_AWARE_URL_PATTERNS.any? {|re| re.match?(url.to_s) }
+            {
+              'rack.hijack?' => true,
+              'rack.hijack'  => lambda {
+                read_io, write_io = IO.pipe
+                write_io
+              }
+            }
           end
-          @hijack_fetch_threads[id] = thread
-        elsif resp
-          queue << resp.merge('handle' => id)
-        else
-          queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => ''}
+        resp = rack_fetch(method, url, body, headers, 'follow', env_extras: env_extras)
+        return resp || {'status' => 0, 'headers' => {}, 'body' => ''} unless read_io
+        id = (@hijack_fetch_seq += 1)
+        @hijack_fetch_threads[id] = Thread.new do
+          Thread.current.report_on_exception = false
+          run_hijacked_pipe_read(id, read_io, @hijack_fetch_queue)
         end
-        id
-      rescue StandardError => e
-        @hijack_fetch_queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => '', 'error' => "#{e.class}: #{e.message}"}
-        id
+        {'handle' => id}
       end
+
+      # URLs whose middleware needs `rack.hijack` to hold the
+      # connection open. Only enable hijack for these so the
+      # `rack.hijack?` capability check doesn't perturb the response
+      # path on unrelated requests.
+      HIJACK_AWARE_URL_PATTERNS = [
+        %r{/message-bus/[^/]+/poll(?:\?|$)}
+      ].freeze
+      private_constant :HIJACK_AWARE_URL_PATTERNS
 
       def rack_fetch_async_abort(id)
         thread = @hijack_fetch_threads.delete(id.to_i)
@@ -2888,6 +2922,7 @@ module Capybara
         if depth == 0
           @current_referer = referer.to_s
           @recent_urls.clear if @recent_urls
+          @recent_urls_last_push_at = nil
         end
         # While navigate is in progress (and the loaded page's bootstrap
         # JS is running synchronously inside __csimLoadDocument), any
