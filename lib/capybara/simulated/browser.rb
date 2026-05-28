@@ -356,15 +356,28 @@ module Capybara
       end
 
       # Called whenever `@current_url` is about to be set to a new
-      # value during a page-load or settle drain (`navigate` /
-      # `tick_real_time`); queues the prior URL for
-      # surface-via-`current_url`. Out-of-band JS-driven pushStates
+      # value during a page-load drain; queues the prior URL for
+      # surface-via-`current_url`. Polling matchers (`have_current_path`)
+      # call `current_url` per iteration and shift one out per call, so
+      # they walk the same intermediate-URL chain a real browser would
+      # have observed before microtasks all collapsed onto the final
+      # URL. Out-of-band JS-driven pushStates
       # (`execute_script("history.pushState(...)")`) bypass the queue —
       # they have no chain of microtask-driven transitions to walk,
       # and the caller expects to read the new URL one-shot. The queue
       # is bounded to guard against a runaway chain of transitions.
+      #
+      # Gate on `@navigating` only (page-load drain), NOT `@ticking`:
+      # user-action drains (click → in-app SPA transition → settle
+      # ticks) update `@current_url` without queuing. If we queued
+      # there too, the queue would persist past the action — the next
+      # caller's first `page.current_url` read would return a stale
+      # entry from the prior click's transition chain (Discourse's
+      # composer-submit-then-record-URL pattern: tags_spec stores
+      # `topic_url = page.current_url` after the submit + transition,
+      # gets the pre-submit URL back).
       def record_url_transition(new_url)
-        return unless @ticking || @navigating
+        return unless @navigating
         old = @current_url
         return if old.nil? || old.to_s.empty?
         return if old.to_s == new_url.to_s
