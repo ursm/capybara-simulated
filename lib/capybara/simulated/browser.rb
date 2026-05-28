@@ -308,6 +308,17 @@ module Capybara
         @runtime.call('__csimSetTimezone', ENV['TZ'].to_s)
       end
 
+      # Mirror Ruby-side `freeze_time` / `travel_to` into JS `Date.now`.
+      # `Process.clock_gettime(CLOCK_REALTIME)` returns the actual wall
+      # clock unaffected by ActiveSupport / Timecop stubs, so the diff
+      # is exactly the test's time-travel delta. The diff is zero when
+      # no time travel is active, so unstubbed runs pay nothing past
+      # the host-fn round trip.
+      def apply_time_travel
+        offset_ms = ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+        @runtime.call('__csimSetTimeTravelOffsetMs', offset_ms)
+      end
+
       # ── Capybara DSL surface ────────────────────────────────────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -2749,6 +2760,7 @@ module Capybara
         apply_trace_flag
         apply_viewport
         apply_timezone
+        apply_time_travel
         push_user_agent_to_js
         @runtime.call('__csimUpdateLocation', @current_url.to_s)
         @document_handle = @runtime.call('__csimLoadDocument', html).to_i
