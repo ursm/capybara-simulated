@@ -174,6 +174,42 @@ RSpec.describe 'browser global surface' do
     end
   end
 
+  describe 'Text#splitText' do
+    it 'splits a text node at offset, keeps prefix in-place and inserts the suffix node after it' do
+      shape = session.evaluate_script(<<~JS)
+        const host = document.createElement('div');
+        const t = document.createTextNode('hello world');
+        host.appendChild(t);
+        const suffix = t.splitText(5);
+        ({
+          prefix:        t.data,
+          suffix:        suffix.data,
+          siblings:      Array.from(host.childNodes).map(n => n.data),
+          suffixIsText:  suffix.nodeName === '#text',
+          suffixParent:  suffix.parentNode === host
+        })
+      JS
+      expect(shape).to eq(
+        'prefix'       => 'hello',
+        'suffix'       => ' world',
+        'siblings'     => ['hello', ' world'],
+        'suffixIsText' => true,
+        'suffixParent' => true
+      )
+    end
+
+    it 'throws IndexSizeError for out-of-range offsets' do
+      err = session.evaluate_script(<<~JS)
+        (() => {
+          const t = document.createTextNode('hi');
+          try { t.splitText(10); return 'no-throw'; }
+          catch (e) { return e.name; }
+        })()
+      JS
+      expect(err).to eq('IndexSizeError')
+    end
+  end
+
   describe 'observer stubs' do
     it 'IntersectionObserver / ResizeObserver / PerformanceObserver construct cleanly and have spec methods' do
       # `unobserve` is on Intersection / Resize / Mutation observers
