@@ -157,18 +157,6 @@ module Capybara
         # locator the click is a no-op and the modal never advances.
         def locator(selector) = FakePlaywrightLocator.new(selector)
         def respond_to_missing?(*) = true
-        # Playwright's `wait_for_timeout(ms)` advances the wall clock
-        # by `ms` and lets queued tasks fire. In our env that maps to
-        # advancing the virtual clock + draining ready timers — tests
-        # use it to step past throttle / debounce windows between
-        # actions (Discourse image-carousel keyboard nav: 150 ms
-        # throttle, the test calls wait_for_timeout(150) between two
-        # send_keys to let the second key actually fire).
-        def wait_for_timeout(ms = 100)
-          @browser.advance_virtual_clock_ms(ms.to_i) if @browser.respond_to?(:advance_virtual_clock_ms)
-          self
-        end
-
         # Yield to the block when one is given so Playwright methods
         # whose semantics live entirely in their block (the canonical
         # case is `pw_page.expect_download { click_link "…" }` —
