@@ -392,6 +392,81 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     expect(s.find('#log').text).to eq('mouseover mousedown click')
   end
 
+  it 'fires the pointer+mouse hover sequence on explicit hover (pointerover/enter/move + mouseover/enter/move)' do
+    hover_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <span id="target">Hover me</span>
+            <ul id="log"></ul>
+            <script>
+              const log = document.querySelector('#log');
+              const target = document.querySelector('#target');
+              const types = [
+                'pointerover', 'pointerenter',
+                'mouseover', 'mouseenter',
+                'pointermove', 'mousemove'
+              ];
+              for (const t of types) {
+                target.addEventListener(t, () => {
+                  const li = document.createElement('li');
+                  li.textContent = t;
+                  log.appendChild(li);
+                });
+              }
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, hover_app)
+    s.visit '/'
+
+    s.find('#target').hover
+
+    expect(s.all('#log li').map(&:text)).to eq(%w[
+      pointerover pointerenter mouseover mouseenter pointermove mousemove
+    ])
+  end
+
+  it 'bubbles pointer hover events through ancestors (Float-kit tooltip trigger pattern)' do
+    bubble_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <span id="trigger">
+              <span id="container">
+                <input id="leaf" type="checkbox" disabled>
+              </span>
+            </span>
+            <ul id="log"></ul>
+            <script>
+              const log = document.querySelector('#log');
+              const trigger = document.querySelector('#trigger');
+              for (const t of ['pointermove', 'pointerenter', 'pointerleave']) {
+                trigger.addEventListener(t, (e) => {
+                  const li = document.createElement('li');
+                  li.textContent = t + '@' + e.target.id;
+                  log.appendChild(li);
+                });
+              }
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, bubble_app)
+    s.visit '/'
+
+    s.find('#leaf').hover
+
+    # `pointerenter` is non-bubbling but fires on each newly-entered
+    # ancestor (per UI Events spec) — so the trigger's listener sees
+    # one with `event.target === trigger`. `pointermove` bubbles, so
+    # the trigger's listener sees one with `event.target === leaf`.
+    expect(s.all('#log li').map(&:text)).to include('pointerenter@trigger', 'pointermove@leaf')
+  end
+
   it 'sets the focused replacement control when focus swaps the original field' do
     replace_app = Rack::Builder.new {
       run lambda {|_env|
