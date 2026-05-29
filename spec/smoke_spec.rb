@@ -467,6 +467,43 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     expect(s.all('#log li').map(&:text)).to include('pointerenter@trigger', 'pointermove@leaf')
   end
 
+  it 'refires IntersectionObserver targets on scrollIntoView for pagination patterns' do
+    pager_app = Rack::Builder.new {
+      run lambda {|_env|
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <ul id="items"><li>1</li><li>2</li></ul>
+            <div id="sentinel"></div>
+            <ul id="log"></ul>
+            <script>
+              const log = document.querySelector('#log');
+              const sentinel = document.querySelector('#sentinel');
+              const io = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                  if (!e.isIntersecting) continue;
+                  const li = document.createElement('li');
+                  li.textContent = 'fire';
+                  log.appendChild(li);
+                }
+              });
+              io.observe(sentinel);
+            </script>
+          </body></html>
+        HTML
+      }
+    }.to_app
+    s = Capybara::Session.new(:simulated, pager_app)
+    s.visit '/'
+
+    expect(s.all('#log li').size).to eq(1)
+
+    s.execute_script("document.querySelector('#sentinel').scrollIntoView(true)")
+    expect(s.all('#log li').size).to eq(2)
+
+    s.execute_script("document.querySelector('#sentinel').scrollIntoView(true)")
+    expect(s.all('#log li').size).to eq(3)
+  end
+
   it 'sets the focused replacement control when focus swaps the original field' do
     replace_app = Rack::Builder.new {
       run lambda {|_env|
