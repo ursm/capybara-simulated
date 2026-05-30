@@ -295,52 +295,6 @@ module Capybara
           raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|g| "`gem '#{g}'`" }.join(' / ')} to your Gemfile")
       end
 
-      # `console.*` short-circuits to a property read when this flag
-      # is false (see `lib/capybara/simulated/js/bridge.js`). The flag is a JS-side
-      # global, so it has to be re-applied after every `rebuild_ctx`
-      # while a trace is live — without this, page scripts that run
-      # during the per-visit `__csimLoadDocument` log to a stale
-      # (false) flag and their console output is dropped from the
-      # trace.
-      def apply_trace_flag
-        @runtime.call('__csimSetTraceActive', !@trace.nil?)
-      end
-
-      # The viewport size lives on the JS-side `globalThis.innerWidth`
-      # / `globalThis.innerHeight` slots. Per-visit `rebuild_ctx` boots
-      # a fresh Context from the snapshot (1024×768) so we have to
-      # re-apply a resize made before the visit. Caller-level resizes
-      # via `set_viewport` use the same setter directly.
-      def apply_viewport
-        return unless @viewport_width && @viewport_height
-        @runtime.eval("globalThis.innerWidth = #{@viewport_width}; globalThis.innerHeight = #{@viewport_height};")
-      end
-
-      # V8 caches the local-zone resolution at platform init; tests
-      # that flip `ENV['TZ']` per example (Avo's `tz:` metadata)
-      # otherwise leave Luxon's `DateTime.local()` and Avo's
-      # date_field controller reading the boot-time zone. The bridge
-      # patches `Intl.DateTimeFormat`'s default `timeZone` to this
-      # Ruby-supplied target — Luxon's `SystemZone` routes through
-      # Intl so the override propagates to the user-visible date.
-      # Per-visit Context rebuilds reset the JS-side override, so
-      # we always re-apply after `rebuild_ctx` regardless of whether
-      # ENV['TZ'] changed.
-      def apply_timezone
-        @runtime.call('__csimSetTimezone', ENV['TZ'].to_s)
-      end
-
-      # Mirror Ruby-side `freeze_time` / `travel_to` into JS `Date.now`.
-      # `Process.clock_gettime(CLOCK_REALTIME)` returns the actual wall
-      # clock unaffected by ActiveSupport / Timecop stubs, so the diff
-      # is exactly the test's time-travel delta. The diff is zero when
-      # no time travel is active, so unstubbed runs pay nothing past
-      # the host-fn round trip.
-      def apply_time_travel
-        offset_ms = ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
-        @runtime.call('__csimSetTimeTravelOffsetMs', offset_ms)
-      end
-
       # ── Capybara DSL surface ────────────────────────────────────
 
       # Address-bar navigation: no Referer, and relative paths resolve
@@ -3019,13 +2973,19 @@ module Capybara
       def boot_response_into_ctx(html)
         @runtime.rebuild_ctx
         reset_timer_state
-        apply_trace_flag
-        apply_viewport
-        apply_timezone
-        apply_time_travel
-        push_user_agent_to_js
-        @runtime.call('__csimUpdateLocation', @current_url.to_s)
-        @document_handle = @runtime.call('__csimLoadDocument', html).to_i
+        opts = {
+          'traceActive'        => !@trace.nil?,
+          'timezone'           => ENV['TZ'].to_s,
+          'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
+          'url'                => @current_url.to_s,
+          'html'               => html
+        }
+        if @viewport_width && @viewport_height
+          opts['viewportW'] = @viewport_width
+          opts['viewportH'] = @viewport_height
+        end
+        opts['userAgent'] = @default_user_agent if @default_user_agent
+        @document_handle = @runtime.call('__csimBootContext', opts).to_i
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
 
