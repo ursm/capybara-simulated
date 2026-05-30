@@ -13,7 +13,6 @@ require 'time'
 require 'uri'
 require_relative 'asset_cache'
 require_relative 'errors'
-require_relative 'esm_rewriter'
 require_relative 'stack_resolver'
 require_relative 'trace'
 require_relative 'webauthn_state'
@@ -196,7 +195,6 @@ module Capybara
         @history                      = []
         @history_idx                  = -1
         @modal_handlers               = []
-        @module_cache                 = {}
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
         # session reset still has access. `@trace_mode` is cached at
@@ -1795,14 +1793,6 @@ module Capybara
         reset_hijacked_fetches
         reset_workers
         @blob_registry_lock.synchronize { @blob_registry.clear }
-        # `@module_cache` is per-(URL, importmap), intentionally
-        # surviving the per-navigate VM rebuild. But between tests
-        # the host may rebuild a same-URL module against new state
-        # (Discourse's `/extra-locales/<hash>/<locale>/mf.js` keeps
-        # the URL when its `js_digests` cache is stale but the body
-        # is freshly computed), so a per-test wipe is needed —
-        # otherwise the next test sees the previous test's bundle.
-        @module_cache = {}
         # Same for the class-level HTTP asset cache: a long-immutable
         # response cached in test 1 would block test 2 from reaching
         # the app at all when the URL repeats, hiding test-local DB
@@ -1819,47 +1809,17 @@ module Capybara
 
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
-      # JS-side loader callback: hand back the rewritten module body
-      # for `url` (import specifiers resolved through the active
-      # importmap + EsmRewriter applied). Cached at Browser scope so
-      # the rewrite cost is paid once per (URL, importmap) — the cache
-      # survives Context rebuilds (between-test reset + per-navigate
-      # rebuild) and is flushed only when `set_importmap` detects a
-      # change. Inline modules are pre-registered via the JS-side
-      # `__csim_inlineSources` map, indexed by hashed-body URL — we
-      # surface them here so the same cache covers both paths.
-      def load_module(url)
-        return @module_cache[url] if @module_cache.key?(url)
-        body =
-          if url.to_s.include?('#inline-')
-            # Inline-module sentinel: when the JS bridge sees a
-            # `<script type="module">` without `src`, it synthesises a
-            # URL of the form `<page>#inline-<hash>` and stashes the
-            # body in `__csim_inlineSources[url]`. Pull it back.
-            inline = @runtime.eval("(globalThis.__csim_inlineSources || {})[#{url.to_json}] || null")
-            inline&.to_s
-          else
-            rack_fetch_body(url)
-          end
-        return @module_cache[url] = nil unless body
-        resolved  = rewrite_module_imports(body, url)
-        rewritten = EsmRewriter.rewrite(resolved, url: url).first
-        @module_cache[url] = rewritten
-      end
-
       def rack_fetch_body(url)
         result = rack_fetch('GET', url, '', {}, 'follow')
         return nil unless result && result['status'].to_i < 400
         result['body'].to_s
       end
 
-      # Native-ESM entry point — only the QuickJS runtime registers this
-      # path (its `vm.module_loader` handles transitive imports, live
-      # bindings, `import.meta`, and `import()` per the ES spec). V8
-      # stays on bridge.js's JS-side loader + `EsmRewriter` because
-      # mini_racer doesn't yet expose V8's Module API.
+      # Native ESM entry point. QuickJS uses its `vm.module_loader`;
+      # V8 uses `Context#compile_module` + `Module#instantiate` /
+      # `#evaluate` + `Context#dynamic_import_resolver=`. Both runtimes
+      # expose `eval_esm_module`.
       def eval_esm_module(url, src = nil)
-        return nil unless @runtime.respond_to?(:eval_esm_module)
         @runtime.eval_esm_module(url, src)
       end
 
@@ -2547,68 +2507,13 @@ module Capybara
         out
       end
 
-      # Resolve every static / dynamic import specifier in `source` to
-      # an absolute URL so EsmRewriter (and the JS-side loader) can
-      # treat them as opaque keys. Bare specifiers go through the
-      # importmap; everything else is URL-joined against the importer.
-      # Match every quoted URL inside a module-level import / export-from
-      # statement so we can resolve it against the importer's base URL
-      # before EsmRewriter sees it. Two shapes:
-      #
-      #   `import[ …]"url"`     — any of bare / default / named / namespace
-      #   `export {…|*}[ as X] from "url"` — re-export shapes only
-      #
-      # Vite/Rolldown's minified output omits whitespace
-      # (`import{x}from"foo"`), so the binding region is captured as
-      # "non-quote chars OR balanced braces" rather than relying on
-      # `\s+`-separated chunks. The lookahead `(?=[\s'"{*])` after
-      # `\bimport` rejects `import.meta` / `importx` / etc. while
-      # allowing every legitimate import follow-up token. Exports use a
-      # narrower form that *requires* `from` so `export const x = "…"`
-      # doesn't get its string literal mis-resolved as a module URL.
-      MODULE_IMPORT_RE = %r<
-        (?<lead>(?:^|[^\w$.]))
-        (?<static>
-          (?:
-            import\b(?=[\s'"{*])
-            (?:[^'"\n;{}]|\{[^}]*\})*
-            |
-            export\b\s*(?:\*|\{[^}]*\})(?:\s*\bas\b\s+\w+)?\s*\bfrom\b\s*
-          )
-        )(?<q1>['"])(?<spec1>[^'"\n]+)\k<q1>
-        |
-        (?<lead2>[^\w$.])
-        (?<dynamic>import\s*\(\s*)
-        (?<q2>['"])(?<spec2>[^'"\n]+)\k<q2>
-      >x.freeze
-      def rewrite_module_imports(source, base_url)
-        source.gsub(MODULE_IMPORT_RE) do
-          m        = Regexp.last_match
-          spec     = m[:spec1] || m[:spec2]
-          quote    = m[:q1]    || m[:q2]
-          resolved = resolve_module_specifier(spec, base_url)
-          prefix   = m[:static] || m[:dynamic]
-          lead     = m[:lead]   || m[:lead2]
-          "#{lead}#{prefix}#{quote}#{resolved}#{quote}"
-        end
-      end
-
       # JS-side `ingestImportmaps` calls this through the host fn so
-      # Ruby-side `resolve_module_specifier` and JS-side
-      # `__csim_resolveSpecifier` agree on the bare-specifier map.
-      # Flush `@module_cache` whenever the importmap actually changes —
-      # cached module bodies embed import URLs that were resolved
-      # against the previous map. For apps with a stable importmap
-      # across pages (the common case) this preserves cache hits
-      # across navigations.
+      # Ruby-side `resolve_module_specifier` agrees with the bare-
+      # specifier map shipped by `<script type="importmap">`.
       def set_importmap(json)
-        parsed = begin
-          JSON.parse(json.to_s)
-        rescue JSON::ParserError
-          {'imports' => {}, 'scopes' => {}}
-        end
-        @module_cache = {} if @importmap && @importmap != parsed
-        @importmap = parsed
+        @importmap = JSON.parse(json.to_s)
+      rescue JSON::ParserError
+        @importmap = {'imports' => {}, 'scopes' => {}}
       end
 
       def resolve_module_specifier(specifier, base_url)
@@ -2944,9 +2849,6 @@ module Capybara
           end
           record_response(status, headers)
           html         = read_rack_body(body)
-          # @module_cache and @importmap survive across navigates;
-          # set_importmap flushes the cache only when the new page
-          # ships a different importmap (handles cross-app navigation).
           # Full-reload navigation rebuilds the JS Context from the warm
           # snapshot. Per-visit fresh VM avoids partial-reset drift
           # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
@@ -2963,7 +2865,7 @@ module Capybara
       # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
       # importmaps + module scripts during `runInlineScripts`; the bridge
       # pushes the importmap back via `__csim_pushImportmap` before any
-      # module loads, so `load_module` sees the fully-merged map.
+      # module loads so resolver lookups agree with the JS side.
       #
       # The post-nav grace bridges Capybara's outer-synchronize gap when
       # the new page has no scripts of its own to flip `@timers_active`

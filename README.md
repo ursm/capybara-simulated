@@ -31,7 +31,9 @@ escapes via screenshots and we don't try to simulate.
 
 ```ruby
 gem 'capybara-simulated', group: :test
-gem 'mini_racer',         group: :test  # JS engine — pick one
+gem 'mini_racer', git:    'https://github.com/ursm/mini_racer.git',
+                  branch: 'experimental/cached-data-and-module-api',
+                  group:  :test  # JS engine — pick one
 ```
 
 `bundle install`. The gem ships its JS bridge under
@@ -43,11 +45,19 @@ there's no Node toolchain at consume time.
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'mini_racer'          # V8 (JIT, fastest per spec) — default
+gem 'mini_racer', git:    'https://github.com/ursm/mini_racer.git',
+                  branch: 'experimental/cached-data-and-module-api'
+                          # V8 (JIT, fastest per spec) — default
 gem 'quickjs', '>= 0.18'  # QuickJS (interpreter, smaller per-VM RAM —
                           # wins when scaling parallel workers under
                           # a fixed memory budget)
 ```
+
+mini_racer must come from the experimental fork until V8's native ES
+Module API + `ScriptCompiler::CachedData` surface lands upstream —
+stock 0.21.x lacks `Context#compile_module` and
+`Context#dynamic_import_resolver=` and will NoMethodError on the
+first `<script type="module">`.
 
 The engine is auto-detected at boot; if both gems are present
 mini_racer wins. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`

@@ -325,6 +325,68 @@ module Capybara
       def attach_host_fns(c)
         self.class.attach_host_fns(c, @browser)
         attach_run_script_with_cache(c)
+        attach_native_module_loader(c)
+      end
+
+      def eval_esm_module(url, inline_src = nil)
+        m = native_module_for(url, inline_src)
+        return nil unless m
+        instantiate_native_module(m, url)
+        m.evaluate
+        nil
+      end
+
+      # MiniRacer::Module handles are bound to their Context; rebuild_ctx
+      # invalidates them, so the cache is keyed off `@ctx.object_id` and
+      # rebuilt lazily on first use after a rebuild.
+      def native_module_handles
+        @native_module_handles ||= {}
+        if @native_module_handles_ctx != ctx.object_id
+          @native_module_handles = {}
+          @native_module_handles_ctx = ctx.object_id
+        end
+        @native_module_handles
+      end
+
+      def native_module_for(url, inline_src = nil)
+        cache = native_module_handles
+        return cache[url] if cache.key?(url)
+        url_s = url.to_s
+        src = inline_src || @browser.rack_fetch_body(url_s)
+        return cache[url] = nil unless src
+        body = url_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
+        cache[url] = ctx.compile_module(body, filename: url_s)
+      rescue MiniRacer::ParseError => e
+        @browser.log_console('error', "module parse error in #{url}: #{e.message}")
+        cache[url] = nil
+      end
+
+      def instantiate_native_module(m, importer_url)
+        return unless m.status == :uninstantiated
+        browser = @browser
+        m.instantiate do |specifier, referrer|
+          resolved = browser.resolve_module_specifier(specifier, referrer || importer_url)
+          child = native_module_for(resolved)
+          raise "module not found: #{resolved}" unless child
+          child
+        end
+      end
+
+      # `import('x')` routes through this callback; mini_racer's C side
+      # auto-evaluates the returned Module and drains microtasks before
+      # resolving the outer Promise.
+      def attach_native_module_loader(c)
+        c.attach('__csim_evalEsmEntry', ->(url, inline) {
+          RuntimeShared.safe_call { eval_esm_module(url, inline) }
+          nil
+        })
+        c.dynamic_import_resolver = ->(specifier, referrer) {
+          resolved = @browser.resolve_module_specifier(specifier, referrer)
+          m = native_module_for(resolved)
+          raise "module not found: #{resolved}" unless m
+          instantiate_native_module(m, resolved)
+          m
+        }
       end
 
       # When mini_racer exposes `Context#compile` + `Script#cached_data`

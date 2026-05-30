@@ -35,7 +35,14 @@ Gem::Specification.new do |spec|
   # wins when both are present. Override explicitly with
   # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
   #
-  #   gem 'mini_racer', '>= 0.18' # V8 (JIT, fastest per-spec)
+  # mini_racer must come from the experimental fork until V8's native
+  # ES Module API + cached_data surface lands upstream — stock 0.21.x
+  # does not expose `Context#compile_module` /
+  # `Context#dynamic_import_resolver=` and will NoMethodError on the
+  # first `<script type="module">`.
+  #
+  #   gem 'mini_racer', git:    'https://github.com/ursm/mini_racer.git',
+  #                     branch: 'experimental/cached-data-and-module-api'
   #   gem 'quickjs',    '>= 0.18' # QuickJS (interpreter, smaller per-VM
   #                               # footprint; wins on parallelism).
 end

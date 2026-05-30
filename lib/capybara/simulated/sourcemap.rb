@@ -5,18 +5,9 @@ require 'json'
 module Capybara
   module Simulated
     # Minimal source-map v3 decoder. Just enough for the stack-trace
-    # rewriter to map `<asset URL>:<line>:<col>` (positions in the
-    # served bundle, after EsmRewriter applied its column-only edits)
-    # back to `<source file>:<line>:<col>` so failing-test traces point
-    # at the original TS/JS instead of a 100k-char minified blob.
-    #
-    # EsmRewriter is line-preserving (every `import`/`export` rewrite
-    # stays on its original line; `__csim_defineExport(...)` calls are
-    # inlined alongside the originating declaration rather than appended
-    # after the module body), so the only line-shift we have to apply
-    # before lookup is the +1 wrapper line baked into bridge.js's
-    # `globalThis.__csim_pending_factory = function (__exports) {\n` +
-    # body + `\n}` wrap. Callers subtract that before calling `resolve`.
+    # rewriter to map `<asset URL>:<line>:<col>` back to
+    # `<source file>:<line>:<col>` so failing-test traces point at the
+    # original TS/JS instead of a 100k-char minified blob.
     #
     # Not handled:
     #   - `sections` (composite maps) — Vite/Rolldown don't emit them

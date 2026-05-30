@@ -64,7 +64,6 @@ module Capybara
         '__csim_storageKey'          => ->(b, *a) { b.storage_key(a[0], a[1]) },
         '__csim_storageLength'       => ->(b, *a) { b.storage_length(a[0]) },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
-        '__csim_fetchModuleSource'   => ->(b, *a) { b.load_module(a[0]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
         '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },

@@ -281,9 +281,8 @@ module Capybara
           nil
         }
         # Native-ESM entry. `bridge.js`'s `runModuleScript` calls this
-        # if it's defined; presence is the engine-capability signal.
-        # The V8 runtime doesn't register it, so bridge.js falls back
-        # to its JS-side `__csim_require` + EsmRewriter loader there.
+        # for every `<script type="module">`; V8 registers it too via
+        # `V8Runtime#attach_native_module_loader`.
         browser = @browser
         v.define_function('__csim_evalEsmEntry') {|url, inline_src|
           RuntimeShared.safe_call { browser.eval_esm_module(url, inline_src) }
@@ -340,18 +339,17 @@ module Capybara
 
       # QuickJS's native ESM loader. The Ruby block returns the source
       # for each module URL; QuickJS handles parsing, live bindings,
-      # `import.meta`, and `import()` natively — no `EsmRewriter`,
-      # no `__csim_liveImport` Proxy approximation, no column drift.
-      # quickjs.rb 0.18 passes the raw specifier + importer URL.
-      # Bare specifiers go through `Browser#resolve_module_specifier`
-      # so importmap entries (Stimulus / unbundled apps) resolve
-      # correctly; relative paths resolve against the importer. `nil`
-      # from `rack_fetch_body` propagates to QuickJS which raises a
-      # ReferenceError mirroring a real-browser 404.
+      # `import.meta`, and `import()` natively. quickjs.rb 0.18 passes
+      # the raw specifier + importer URL. Bare specifiers go through
+      # `Browser#resolve_module_specifier` so importmap entries
+      # (Stimulus / unbundled apps) resolve correctly; relative paths
+      # resolve against the importer. `nil` from `rack_fetch_body`
+      # propagates to QuickJS which raises a ReferenceError mirroring
+      # a real-browser 404.
       def attach_module_loader(v)
         browser = @browser
         v.module_loader = ->(specifier, importer) {
-          resolved = browser.send(:resolve_module_specifier, specifier, importer)
+          resolved = browser.resolve_module_specifier(specifier, importer)
           body = browser.rack_fetch_body(resolved)
           return nil unless body
           # `.json` (and `?import` JSON) imports come from Vite's

@@ -14,25 +14,7 @@ module Capybara
     #
     # Frames whose URL has no `.map` (snapshot stubs, eval'd app inline
     # scripts) pass through unchanged.
-    #
-    # The V8-line → bundle-line adjustment is `-1` because every ESM
-    # module is eval'd inside a one-line wrapper
-    # (`globalThis.__csim_pending_factory = function (__exports) {\n…\n}`).
-    # EsmRewriter is line-preserving for everything else, so the wrapper
-    # offset is the entire correction.
-    #
-    # Column drift caveat: when an `import` / `export` rewrite expands
-    # on the same line as later body code (the common minified case
-    # where all imports + body live on line 1), the column of body
-    # tokens shifts to the right in the rewritten source. We resolve
-    # using the post-rewrite column verbatim, which usually still lands
-    # on the right sourcemap segment because Vite-style bundles put the
-    # body on its own line below the import header. Targeted column
-    # adjustment per rewrite would tighten this up but isn't needed for
-    # the workloads we currently care about.
     class StackResolver
-      WRAPPER_LINE_OFFSET = 1
-
       # Matches `(URL:LINE:COL)` inside V8 stack frames. URLs can contain
       # `:` (e.g. `:port`), so the URL class includes `:` and the engine
       # backtracks to find the trailing `:digits:digits)`. `file:` and
@@ -67,7 +49,7 @@ module Capybara
       def resolve(url, line, col)
         map = load_map(url)
         return nil unless map
-        pos = map.resolve(line - WRAPPER_LINE_OFFSET, col)
+        pos = map.resolve(line, col)
         return nil unless pos
         "#{pos.source}:#{pos.line}:#{pos.column}"
       end
