@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'digest'
 
 module Capybara
   module Simulated
@@ -124,12 +125,44 @@ module Capybara
       # bundle never references it.
       IMPORT_META_RE = /\bimport\.meta\b/.freeze
 
+      # Process-wide cache of rewritten output keyed by
+      # `(url, sha256(source))`. Each Discourse test wipes its
+      # `Browser#@module_cache` (URL-keyed) to guard against stale
+      # rewritten bodies when the server recomputes a same-URL module
+      # against new state — but the rewrite itself is purely a function
+      # of (source, url). Caching here lets identical bodies skip the
+      # 9-regex-gsub pass that dominates ~6.5 % of Discourse suite wall
+      # time. Bounded so a long-running process can't grow without
+      # limit; LRU-ish eviction (delete-oldest-on-overflow via Hash
+      # insertion order) is enough for the access pattern we see.
+      CACHE_LIMIT = 4096
+      @cache      = {}
+      @cache_lock = Mutex.new
+
+      def self.cache_clear
+        @cache_lock.synchronize { @cache.clear }
+      end
+
       # Returns [rewritten_source, dependency_urls]. `dependency_urls` is
       # the de-duped specifier list in appearance order so callers can
       # pre-warm `__csim_require`'s source cache before evaluating. Pass
       # the module's own URL via `url:` to populate the inlined
-      # `import.meta.url`.
+      # `import.meta.url`. Result is cached by (url, sha256(source)) so
+      # the next caller paying the same input pays only a hash lookup.
       def self.rewrite(source, url: nil)
+        key = "#{url}\x00#{Digest::SHA256.hexdigest(source)}"
+        if (hit = @cache_lock.synchronize { @cache[key] })
+          return hit
+        end
+        result = rewrite_uncached(source, url: url).freeze
+        @cache_lock.synchronize {
+          @cache.shift while @cache.size >= CACHE_LIMIT
+          @cache[key] = result
+        }
+        result
+      end
+
+      def self.rewrite_uncached(source, url: nil)
         deps = []
 
         result = source.dup

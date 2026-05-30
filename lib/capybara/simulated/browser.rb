@@ -2757,25 +2757,34 @@ module Capybara
         }
       end
 
+      # Content types whose bytes are already representable in the
+      # UTF-8 string that ships back to JS — base64 wouldn't add
+      # anything and `Base64.strict_encode64` is ~1 % of suite wall
+      # time on Discourse. Binary types (images, octet-stream,
+      # gzipped traineddata, etc.) still need `body_b64` because V8 /
+      # QuickJS mangle bytes 0x80-0xFF over the UTF-8 string boundary.
+      # `fetch.js#_decodeBytes` and `xhr.js` both fall back to the
+      # text body when `body_b64` is absent.
+      TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
+
       def response_hash(status, headers, body, url, redirected)
-        # `body` keeps the legacy UTF-8 transport — fine for the >95%
-        # text/json/css/js path. `body_b64` ships the raw bytes
-        # base64-encoded so the binary consumers (fetch's
-        # `arrayBuffer()` / `blob()`, ActiveStorage Blob loops) get
-        # the original bytes intact through the mini_racer /
-        # quickjs.rb UTF-8 string boundary. Without it, V8 mangles
-        # bytes 0x80-0xFF in binary payloads (Tesseract.js's 10 MB
-        # `eng.traineddata.gz` would round-trip corrupted, OCR
-        # recognises nothing in the image).
-        {
+        body_str = body.to_s
+        out = {
           'status'     => status,
           'headers'    => stringify(headers),
-          'body'       => body,
-          'body_b64'   => Base64.strict_encode64(body.to_s),
+          'body'       => body_str,
           'url'        => url,
           'redirected' => redirected,
           'type'       => 'basic'
         }
+        out['body_b64'] = Base64.strict_encode64(body_str) unless text_response?(out['headers'])
+        out
+      end
+
+      def text_response?(headers)
+        ct = (headers['content-type'] || headers['Content-Type']).to_s.downcase
+        return false if ct.empty?
+        TEXT_CONTENT_TYPE_PREFIXES.any? {|p| ct.start_with?(p) }
       end
 
       # Rack response bodies must respond to `each` (or be an Array of
