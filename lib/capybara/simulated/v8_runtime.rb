@@ -328,15 +328,15 @@ module Capybara
       end
 
       # When mini_racer exposes `Context#compile` + `Script#cached_data`
-      # + `Snapshot.load` (the experimental cache branch of
-      # rubyjs/mini_racer#413), override the JS-side `__csim_runScript`
-      # fallback with a Ruby host fn that bytecode-caches each script
-      # body in a process-wide hash + on-disk store. Discourse's main
-      # chunk is ~140 ms of parse + JIT per visit otherwise; the cache
-      # reduces it to a deserialize + run path. Worker isolates run on
-      # their own threads — `compile` from the main thread against a
-      # Worker isolate is unsafe — so the class-level `attach_host_fns`
-      # (used by `build_worker`) intentionally skips this attach.
+      # + `Snapshot.load` (rubyjs/mini_racer#413), override the JS-side
+      # `__csim_runScript` fallback with a Ruby host fn that
+      # bytecode-caches each script body in a process-wide hash +
+      # on-disk store. Discourse's main chunk is ~140 ms of parse +
+      # JIT per visit otherwise; the cache reduces it to a deserialize
+      # + run path. Worker isolates run on their own threads —
+      # `compile` from the main thread against a Worker isolate is
+      # unsafe — so the class-level `attach_host_fns` (used by
+      # `build_worker`) intentionally skips this attach.
       def attach_run_script_with_cache(c)
         return unless c.respond_to?(:compile)
         version_tag = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
