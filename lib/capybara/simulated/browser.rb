@@ -1793,11 +1793,12 @@ module Capybara
         reset_hijacked_fetches
         reset_workers
         @blob_registry_lock.synchronize { @blob_registry.clear }
-        # Same for the class-level HTTP asset cache: a long-immutable
-        # response cached in test 1 would block test 2 from reaching
-        # the app at all when the URL repeats, hiding test-local DB
-        # state (TranslationOverride, etc.).
-        @@asset_cache.clear if @@asset_cache.respond_to?(:clear)
+        # Drop volatile entries from the class-level HTTP asset cache
+        # so test-local DB state (TranslationOverride, etc.) reaches
+        # the app on subsequent visits. Fingerprinted assets
+        # (`Cache-Control: immutable`) survive: their URLs are content-
+        # addressable so a stale entry can't shadow a later test.
+        @@asset_cache.clear_volatile if @@asset_cache.respond_to?(:clear_volatile)
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the

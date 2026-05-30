@@ -35,7 +35,7 @@ module Capybara
     # `stored_at`/`max_age` pair — that just means freshness is computed
     # against a transient mix, never corrupted.
     class AssetCache
-      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :must_revalidate, keyword_init: true) do
+      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :must_revalidate, :immutable, keyword_init: true) do
         def fresh?(now = Time.now)
           return false unless max_age
           return false if must_revalidate
@@ -45,6 +45,15 @@ module Capybara
 
       # RFC 9111 §3: status codes cacheable by default.
       CACHEABLE_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
+
+      # A 20+ hex run in the path means the URL itself is the content
+      # digest (`/extra-locales/<sha1>/en/main.js`,
+      # `/theme-javascripts/<sha1>.js`, Rails fingerprinted assets).
+      # The response can't vary without the URL changing, so we treat
+      # such entries as immutable even when the host sends `no-store` —
+      # Discourse's locale/theme endpoints do this defensively, paying
+      # the per-test refetch cost a real browser amortises.
+      FINGERPRINTED_URL = %r{/[0-9a-f]{20,}(?:[./]|\z)}.freeze
 
       # `Vary` fields we can safely ignore because Simulated never sends
       # the corresponding request header — the cached "no value" variant
@@ -59,22 +68,34 @@ module Capybara
       def lookup(url) = @entries[url]
       def clear      = @entries.clear
 
+      # Per-test reset path: keep `Cache-Control: immutable` entries
+      # (Rails-fingerprinted assets — the URL is content-addressable so
+      # a stale entry can't shadow a later test's response) and drop
+      # everything else. Across a Discourse 6-spec run this turns ~6 s
+      # of repeat module-source fetches into hash hits.
+      def clear_volatile
+        @entries.reject! {|_, e| e.immutable }
+      end
+
       def store(url, status, headers, body)
         return unless CACHEABLE_STATUSES.include?(status)
         h = ensure_lowercase(headers)
         return unless vary_compatible?(h['vary'])
         cc = parse_cache_control(h['cache-control'])
-        return if cc[:no_store]
+        fingerprinted = url.match?(FINGERPRINTED_URL)
+        return if cc[:no_store] && !fingerprinted
         max_age = freshness_seconds(cc, h)
         # No freshness info and no validators → nothing useful to cache
-        return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil?
+        # unless the URL itself is content-addressable.
+        return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil? && !fingerprinted
         @entries[url] = Entry.new(
           status:          status,
           headers:         h,
           body:            body,
           stored_at:       Time.now,
-          max_age:         max_age,
-          must_revalidate: cc[:no_cache] || cc[:must_revalidate]
+          max_age:         max_age || (fingerprinted ? 365 * 24 * 3600 : nil),
+          must_revalidate: (cc[:no_cache] || cc[:must_revalidate]) && !fingerprinted,
+          immutable:       cc[:immutable] == true || fingerprinted
         )
       end
 
