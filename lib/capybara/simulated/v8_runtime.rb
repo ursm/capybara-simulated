@@ -9,20 +9,26 @@
 # `settle_gen` / `has_ready_timer?` / `reset_timers` / `rebuild_ctx` /
 # `reset_page`). Browser picks one at construction.
 
+require 'digest'
+require 'fileutils'
 require 'mini_racer'
 require 'set'
 
 require_relative 'runtime_shared'
+require_relative 'script_cache'
 require_relative 'worker_runtime'
 
 
 begin
   stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
-  if ENV['CSIM_V8_SINGLE_THREADED'] == '1'
-    MiniRacer::Platform.set_flags!(:single_threaded, stack_size: stack_kb)
-  else
-    MiniRacer::Platform.set_flags!(stack_size: stack_kb)
-  end
+  # `:single_threaded` mode is for production fork-safety. csim tests
+  # never fork mini_racer contexts, and the mode actively breaks two
+  # things we need: `eval` deadlocks on certain reentrant patterns
+  # (see `feedback_v8_backend_progress` memory) and cross-process
+  # bytecode cache blobs become process-local (V8 embeds isolate
+  # state in `CreateCodeCache` under single-threaded). Always run
+  # multi-threaded.
+  MiniRacer::Platform.set_flags!(stack_size: stack_kb)
   # Default V8 old-space cap is ~1.4 GB, which OOMs on workloads that
   # marshal large pixel buffers across postMessage (Discourse's
   # media-optimization-worker hands a 317 MB raw RGBA frame from an
@@ -103,15 +109,57 @@ module Capybara
         })();
       JS
 
+      # `Snapshot.new(source)` is non-deterministic — V8 embeds
+      # transient allocator state in the produced bytes, so the same
+      # source yields different blobs across runs. V8's bytecode-cache
+      # validation (`ScriptCompiler::CompileUnboundScript` with
+      # `kConsumeCodeCache`) keys on snapshot bytes, so re-`new`-ing in
+      # each process makes cross-process `ScriptCache` hits get
+      # rejected and fall back to a SEGV-prone re-parse path. Building
+      # once and persisting the dump fixes both: every process boots
+      # off byte-identical snapshot bytes and `cached_data` accepts.
       def self.build_snapshot
+        cache_path = snapshot_cache_path
+        if cache_path
+          begin
+            return MiniRacer::Snapshot.load(File.binread(cache_path))
+          rescue StandardError
+            # Fall through to rebuild; cache may be corrupt.
+          end
+        end
         snap = MiniRacer::Snapshot.new(RuntimeShared.snapshot_src)
         # `warmup!` runs `SNAPSHOT_WARMUP` against the snapshot once
         # and rolls the resulting V8 bytecode-cache state back in, so
         # Contexts created from this snapshot inherit JIT-primed
-        # versions of the hot paths above. Without warmup, every per-
-        # visit Context rebuild paid first-time compilation again.
+        # versions of the hot paths above.
         snap.warmup!(SNAPSHOT_WARMUP) rescue nil
-        snap
+        return snap unless cache_path
+        # Persist + reload so this process also boots from the same
+        # bytes other processes will load — the produce-side snapshot
+        # must equal the consume-side snapshot for `cached_data` to
+        # accept (see the build_snapshot header rationale).
+        bytes = snap.dump
+        persist_snapshot_bytes(bytes, cache_path)
+        MiniRacer::Snapshot.load(bytes)
+      end
+
+      def self.snapshot_cache_path
+        return nil if ENV['CSIM_SNAPSHOT_CACHE'].to_s.casecmp('off').zero?
+        dir = ENV['CSIM_SNAPSHOT_CACHE_DIR'] ||
+              File.join(ENV['HOME'] || '/tmp', '.cache', 'capybara-simulated', 'snapshot')
+        sha = Digest::SHA256.hexdigest(RuntimeShared.snapshot_src + SNAPSHOT_WARMUP)
+        tag = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
+        File.join(dir, "#{tag}-#{sha[0, 16]}.bin")
+      end
+
+      def self.persist_snapshot_bytes(bytes, path)
+        FileUtils.mkdir_p(File.dirname(path))
+        tmp = "#{path}.#{Process.pid}.tmp"
+        File.binwrite(tmp, bytes)
+        File.rename(tmp, path)
+      rescue StandardError
+        # Best-effort: snapshot rebuild on every process is fine,
+        # we just lose the cross-process startup savings.
       end
 
       # Maintain a small pool of warmed-up Contexts per Browser. Each
@@ -143,7 +191,11 @@ module Capybara
       end
 
       def eval(code)         = ctx.eval(code.to_s)
-      def call(name, *args)  = ctx.call(name, *args)
+      def call(name, *args)
+        result = ctx.call(name, *args)
+        ScriptCache.warm_pending!
+        result
+      end
 
       # bridge.js owns the virtual clock; Ruby still drives it because
       # Capybara's polling cadence is wall-clock-anchored. Use `call`
@@ -272,12 +324,42 @@ module Capybara
 
       def attach_host_fns(c)
         self.class.attach_host_fns(c, @browser)
-        # `__csim_runScript` stays on the JS-side fallback baked into
-        # `snapshot_stubs.js` until mini_racer exposes
-        # `ScriptCompiler::CachedData`. Routing through Ruby costs a
-        # ~50 µs round-trip per script with no bytecode-cache offset,
-        # which measured at +8 % on Avo's `actions_spec`. Override here
-        # once a cache API is available.
+        attach_run_script_with_cache(c)
+      end
+
+      # When mini_racer exposes `Context#compile` + `Script#cached_data`
+      # + `Snapshot.load` (the experimental cache branch of
+      # rubyjs/mini_racer#413), override the JS-side `__csim_runScript`
+      # fallback with a Ruby host fn that bytecode-caches each script
+      # body in a process-wide hash + on-disk store. Discourse's main
+      # chunk is ~140 ms of parse + JIT per visit otherwise; the cache
+      # reduces it to a deserialize + run path. Worker isolates run on
+      # their own threads — `compile` from the main thread against a
+      # Worker isolate is unsafe — so the class-level `attach_host_fns`
+      # (used by `build_worker`) intentionally skips this attach.
+      def attach_run_script_with_cache(c)
+        return unless c.respond_to?(:compile)
+        version_tag = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
+        debug = ENV['CSIM_SCRIPT_CACHE_DEBUG']
+        c.attach('__csim_runScript', ->(label, body) {
+          RuntimeShared.safe_call {
+            sha    = Digest::SHA256.hexdigest(body)
+            cached = ScriptCache.lookup(sha, version_tag)
+            script = c.compile(body, filename: label.to_s, cached_data: cached)
+            $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
+            # V8 forbids `produce_cache: true` from inside a host-fn
+            # callback so we queue misses + rejects for top-level
+            # produce via `ScriptCache.warm_pending!` after the
+            # current `V8Runtime#call` returns.
+            ScriptCache.queue_warm(c, sha, label, body, version_tag) if cached.nil? || script.cache_rejected?
+            begin
+              script.run
+            ensure
+              script.dispose
+            end
+          }
+          nil
+        })
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
