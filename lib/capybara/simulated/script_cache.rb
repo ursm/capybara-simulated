@@ -39,29 +39,29 @@ module Capybara
         def dir = ENV['CSIM_SCRIPT_CACHE_DIR'] || DEFAULT_DIR
         def enabled? = !ENV['CSIM_SCRIPT_CACHE'].to_s.casecmp('off').zero?
 
-        def lookup(sha, version_tag)
+        def lookup(sha, version_tag, kind: :script)
           return nil unless enabled?
-          key = cache_key(sha, version_tag)
+          key = cache_key(sha, version_tag, kind)
           mem_hit = @lock.synchronize { @mem[key] }
           return mem_hit if mem_hit
-          blob = File.binread(disk_path_for(sha, version_tag)) rescue nil
+          blob = File.binread(disk_path_for(sha, version_tag, kind)) rescue nil
           return nil unless blob
           @lock.synchronize { @mem[key] ||= blob }
         end
 
-        def store(sha, version_tag, blob)
+        def store(sha, version_tag, blob, kind: :script)
           return unless enabled? && blob
-          key = cache_key(sha, version_tag)
+          key = cache_key(sha, version_tag, kind)
           @lock.synchronize { @mem[key] = blob }
-          enqueue_disk_write(disk_path_for(sha, version_tag), blob)
+          enqueue_disk_write(disk_path_for(sha, version_tag, kind), blob)
         end
 
-        def queue_warm(ctx, sha, label, body, version_tag)
+        def queue_warm(ctx, sha, label, body, version_tag, kind: :script)
           return unless enabled?
-          key = cache_key(sha, version_tag)
+          key = cache_key(sha, version_tag, kind)
           @lock.synchronize {
-            return if @mem.key?(key) || @pending.key?(sha)
-            @pending[sha] = {ctx: ctx, label: label, body: body, version_tag: version_tag}
+            return if @mem.key?(key) || @pending.key?(key)
+            @pending[key] = {ctx: ctx, label: label, body: body, version_tag: version_tag, sha: sha, kind: kind}
           }
         end
 
@@ -78,12 +78,16 @@ module Capybara
             ctx = job[:ctx]
             next unless ctx.respond_to?(:compile)
             begin
-              script = ctx.compile(job[:body], filename: job[:label].to_s, produce_cache: true)
-              blob   = script.cached_data
-              script.dispose
-              store(Digest::SHA256.hexdigest(job[:body]), job[:version_tag], blob) if blob
+              handle = if job[:kind] == :module
+                         ctx.compile_module(job[:body], filename: job[:label].to_s, produce_cache: true)
+                       else
+                         ctx.compile(job[:body], filename: job[:label].to_s, produce_cache: true)
+                       end
+              blob = handle.cached_data
+              handle.dispose
+              store(job[:sha], job[:version_tag], blob, kind: job[:kind]) if blob
             rescue StandardError
-              # Best effort: a script that fails to produce a cache
+              # Best effort: a body that fails to produce a cache
               # just keeps doing a parse-from-source next encounter.
             end
           }
@@ -99,10 +103,14 @@ module Capybara
 
         private
 
-        def cache_key(sha, version_tag) = "#{version_tag}/#{sha}"
+        def cache_key(sha, version_tag, kind = :script)
+          prefix = kind == :module ? 'm:' : ''
+          "#{version_tag}/#{prefix}#{sha}"
+        end
 
-        def disk_path_for(sha, version_tag)
-          File.join(dir, version_tag.to_s, "#{sha}.bin")
+        def disk_path_for(sha, version_tag, kind = :script)
+          prefix = kind == :module ? 'm-' : ''
+          File.join(dir, version_tag.to_s, "#{prefix}#{sha}.bin")
         end
 
         # Single background writer serialises disk I/O so the host-fn

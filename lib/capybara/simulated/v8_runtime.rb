@@ -355,7 +355,13 @@ module Capybara
         src = inline_src || @browser.rack_fetch_body(url_s)
         return cache[url] = nil unless src
         body = url_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
-        cache[url] = ctx.compile_module(body, filename: url_s)
+        c       = ctx
+        sha     = Digest::SHA256.hexdigest(body)
+        version = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
+        cached  = ScriptCache.lookup(sha, version, kind: :module)
+        m       = c.compile_module(body, filename: url_s, cached_data: cached)
+        ScriptCache.queue_warm(c, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
+        cache[url] = m
       rescue MiniRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
         cache[url] = nil
@@ -399,11 +405,37 @@ module Capybara
       # `compile` from the main thread against a Worker isolate is
       # unsafe — so the class-level `attach_host_fns` (used by
       # `build_worker`) intentionally skips this attach.
+      # V8's bytecode cache only pays off above a body-size threshold
+      # — the rendezvous round-trip + Ruby-side SHA256 + compile +
+      # dispose runs ~150–300 µs, while `(0, eval)(body)` at V8
+      # globalThis for a tiny script is sub-microsecond. Above the
+      # threshold, V8 parse + JIT cold-path is multiple ms — worth
+      # the cache. Redmine's jQuery + Stimulus inline scripts
+      # (median ~400 B) dominated the regression: pre-threshold,
+      # routing every snippet through Ruby blew the 122-test suite
+      # from 56 s → 224 s. Threshold sweep:
+      #
+      #   threshold | Redmine wall
+      #     1 KB    | 143 s
+      #     8 KB    | 103 s
+      #    32 KB    |  90 s
+      #    64 KB    |  62 s  ← baseline parity
+      #
+      # 64 KB keeps Discourse's main Ember chunk (140 KB+) on the
+      # cache path while Stimulus / Trix / etc. shorts stay on the
+      # JS-only fast path. `CSIM_SCRIPT_CACHE_MIN_BYTES=0` forces
+      # the cache for everything (debug / cross-process bench).
+      SCRIPT_CACHE_MIN_BYTES = (ENV['CSIM_SCRIPT_CACHE_MIN_BYTES'] || '65536').to_i
+
       def attach_run_script_with_cache(c)
         return unless c.respond_to?(:compile)
         version_tag = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
+        threshold = SCRIPT_CACHE_MIN_BYTES
         debug = ENV['CSIM_SCRIPT_CACHE_DEBUG']
-        c.attach('__csim_runScript', ->(label, body) {
+        # Big bodies → Ruby-side bytecode cache. The dispatcher below
+        # routes small bodies to a JS-only `(0, eval)` so they don't
+        # pay the rendezvous round-trip.
+        c.attach('__csim_runScriptCached', ->(label, body) {
           RuntimeShared.safe_call {
             sha    = Digest::SHA256.hexdigest(body)
             cached = ScriptCache.lookup(sha, version_tag)
@@ -422,6 +454,16 @@ module Capybara
           }
           nil
         })
+        c.eval(<<~JS)
+          (function () {
+            const cached    = globalThis.__csim_runScriptCached;
+            const threshold = #{threshold};
+            globalThis.__csim_runScript = function (label, body) {
+              if (body.length >= threshold) return cached(label, body);
+              (0, eval)(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
+            };
+          })();
+        JS
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
