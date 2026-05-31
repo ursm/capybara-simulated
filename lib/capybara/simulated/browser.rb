@@ -82,14 +82,21 @@ module Capybara
       TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
-      # Post-user-action virtual-clock advance. Held at 0 — the
+      # Post-user-action virtual-clock advance. Default 0 — the
       # wall-sync model (each tick_real_time advances by the wall
       # ms elapsed since the last tick) lets Capybara's outer poll
       # loop drive the clock at the same rate a real browser sees,
       # so debounced chains complete naturally during polling
       # without being pre-emptively flushed past the transient
       # window real-browser tests rely on.
-      USER_ACTION_DRAIN_MS = 0
+      #
+      # `CSIM_USER_ACTION_DRAIN_MS=600` restores the pre-wall-sync
+      # burst behaviour: post-action, drain everything due in the next
+      # 600 ms of virtual time before returning. Costs the transient-
+      # state observability the wall-sync model preserves; recovers
+      # the ~5-10 % wall on action-heavy suites where Capybara would
+      # otherwise poll N times to catch a single debounce.
+      USER_ACTION_DRAIN_MS = (ENV['CSIM_USER_ACTION_DRAIN_MS'] || '0').to_i
       # Upper bound on a single tick's virtual advance. Prevents a
       # long Ruby pause (asset compile, debugger break) from being
       # replayed as one giant drain that fires every debounce in
