@@ -202,6 +202,11 @@ module Capybara
         @history                      = []
         @history_idx                  = -1
         @modal_handlers               = []
+        # Geolocation override (CDP-ish). nil = no override configured →
+        # navigator.geolocation reports POSITION_UNAVAILABLE. Ruby-backed so
+        # it survives the per-call VM rebuilds, like web storage. Read by the
+        # `__csimGeolocationState` host fn.
+        @geolocation                  = nil
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
         # session reset still has access. `@trace_mode` is cached at
@@ -1498,6 +1503,41 @@ module Capybara
         @runtime.call('__csimExecScript', code.to_s, marshal_args(args || []))
         drain_pending_navigation
         nil
+      end
+
+      # CDP-ish shim: override navigator.geolocation (like CDP's
+      # `Emulation.setGeolocationOverride`). State is Ruby-backed on
+      # `@geolocation`; the JS geolocation object reads it on every call via
+      # the `__csimGeolocationState` host fn, so it survives the per-call VM
+      # rebuilds (the same model web storage uses).
+      #
+      #   set_geolocation(latitude: 35.6, longitude: 139.7)
+      #   set_geolocation(latitude: 1, longitude: 2, accuracy: 5, altitude: 10)
+      #   set_geolocation(denied: true)  # report PERMISSION_DENIED
+      #   set_geolocation                # clear -> report POSITION_UNAVAILABLE
+      def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)
+        @geolocation =
+          if denied
+            {'denied' => true}
+          elsif latitude.nil? || longitude.nil?
+            nil
+          else
+            {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
+          end
+
+        # Re-deliver to any active watchPosition watchers, mirroring a real
+        # browser firing the watch again when the location updates. The JS
+        # side reads the fresh @geolocation via the host fn.
+        execute_script('if (typeof globalThis.__csimGeoRefireWatches === "function") globalThis.__csimGeoRefireWatches();')
+        nil
+      end
+
+      # Backs the `__csimGeolocationState` host fn. Returns the configured
+      # geolocation override as a JSON string (or 'null' when none is set),
+      # which the JS geolocation object reads on every getCurrentPosition /
+      # watchPosition call.
+      def geolocation_state_json
+        JSON.generate(@geolocation)
       end
 
       # Capybara passes Node instances directly as script args

@@ -330,6 +330,16 @@ module Capybara
         handle = current_browser.active_element_handle
         handle ? Node.new(self, handle) : nil
       end
+
+      # CDP-ish geolocation override (Capybara driver-level API).
+      #
+      #   page.driver.set_geolocation(latitude: 35.6, longitude: 139.7)
+      #   page.driver.set_geolocation(denied: true)  # PERMISSION_DENIED
+      #   page.driver.set_geolocation                # clear -> POSITION_UNAVAILABLE
+      def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)
+        current_browser.set_geolocation(latitude: latitude, longitude: longitude, accuracy: accuracy, denied: denied, **rest)
+      end
+
       def send_keys(*keys)
         # Selenium contract: top-level modifier symbols (`send_keys(
         # :shift, :enter)`) press the modifier *and hold it* over the

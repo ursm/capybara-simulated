@@ -64,6 +64,7 @@ module Capybara
         '__csim_storageClear'        => ->(b, *a) { b.storage_clear(a[0]); nil },
         '__csim_storageKey'          => ->(b, *a) { b.storage_key(a[0], a[1]) },
         '__csim_storageLength'       => ->(b, *a) { b.storage_length(a[0]) },
+        '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
