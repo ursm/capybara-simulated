@@ -264,4 +264,75 @@ RSpec.describe 'WebIDL reflection behaviour' do
       expect(rejected).to start_with('rejected:')
     end
   end
+
+  describe 'HTMLInputElement reflection' do
+    it 'reflects string/boolean/unsigned-long attributes with correct defaults' do
+      result = session.evaluate_script(<<~JS)
+        const mk = (attrs) => {
+          const i = document.createElement('input');
+          for (const k in attrs) i.setAttribute(k, attrs[k]);
+          return i;
+        };
+        const m = mk({}); m.multiple = true;
+        ({
+          accept: mk({accept: 'image/*'}).accept,
+          max: mk({max: '9'}).max,
+          size_default: mk({}).size,
+          multiple: m.multiple,
+          multiple_attr: m.getAttribute('multiple')
+        })
+      JS
+      expect(result).to eq(
+        'accept' => 'image/*', 'max' => '9', 'size_default' => 20,
+        'multiple' => true, 'multiple_attr' => ''
+      )
+    end
+
+    it 'defaultValue reflects the content attribute, independent of the live value' do
+      result = session.evaluate_script(<<~JS)
+        const i = document.createElement('input');
+        i.setAttribute('value', 'foo');
+        const before = i.defaultValue;
+        i.value = 'bar';
+        ({ before: before, default_after: i.defaultValue, live: i.value })
+      JS
+      expect(result).to eq('before' => 'foo', 'default_after' => 'foo', 'live' => 'bar')
+    end
+
+    it 'indeterminate is an instance flag, not attribute-backed' do
+      result = session.evaluate_script(<<~JS)
+        const i = document.createElement('input');
+        i.setAttribute('type', 'checkbox');
+        i.indeterminate = true;
+        ({ flag: i.indeterminate, no_attr: i.hasAttribute('indeterminate') })
+      JS
+      expect(result).to eq('flag' => true, 'no_attr' => false)
+    end
+
+    it 'valueAsNumber parses numeric input and stepUp/stepDown adjust by step' do
+      result = session.evaluate_script(<<~JS)
+        const n = document.createElement('input'); n.setAttribute('type', 'number'); n.value = '42';
+        const s = document.createElement('input');
+        s.setAttribute('type', 'number'); s.setAttribute('step', '5'); s.value = '10';
+        s.stepUp(2);
+        const after_up = s.value;
+        s.stepDown(1);
+        ({ asNumber: n.valueAsNumber, after_up: after_up, after_down: s.value })
+      JS
+      expect(result).to eq('asNumber' => 42, 'after_up' => '20', 'after_down' => '15')
+    end
+
+    it 'labels collects label[for=id] plus ancestor labels' do
+      len = session.evaluate_script(<<~JS)
+        const i = document.createElement('input');
+        i.id = 'fld';
+        const lab = document.createElement('label');
+        lab.setAttribute('for', 'fld');
+        document.body.appendChild(lab);
+        document.body.appendChild(i);
+        i.labels.length
+      JS
+      expect(len).to eq(1)
+    end
+  end
 end
