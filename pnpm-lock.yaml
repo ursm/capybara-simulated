@@ -15,6 +15,9 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0
     devDependencies:
+      '@webref/idl':
+        specifier: ^3.79.0
+        version: 3.79.0(webidl2@24.5.0)
       esbuild:
         specifier: ^0.27.0
         version: 0.27.7
@@ -177,6 +180,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@webref/idl@3.79.0':
+    resolution: {integrity: sha512-4wZ6d0xY3JQZY1vHOCk8Z1jEPq9YVzds0VGAJtv6hJAwnxmePP20KQqETp7vXYvx/auqldLYTEHiAsAfosgMVQ==}
+    peerDependencies:
+      webidl2: ^24.5.0
+
   boolbase@2.0.0:
     resolution: {integrity: sha512-DkVaaQHymRhpYEYo9x1oo7Q7B0Y6KJUsjm3c9eTyFDby4MHLBTwZ6ZDWBel5zrYxj1WsZgC5oLpiz+93MluXeA==}
     engines: {node: '>=20.19.0'}
@@ -217,6 +225,10 @@ packages:
   nth-check@3.0.1:
     resolution: {integrity: sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==}
     engines: {node: '>=20.19.0'}
+
+  webidl2@24.5.0:
+    resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
+    engines: {node: '>= 18'}
 
 snapshots:
 
@@ -298,6 +310,10 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
+  '@webref/idl@3.79.0(webidl2@24.5.0)':
+    dependencies:
+      webidl2: 24.5.0
+
   boolbase@2.0.0: {}
 
   css-select@7.0.0:
@@ -362,3 +378,5 @@ snapshots:
   nth-check@3.0.1:
     dependencies:
       boolbase: 2.0.0
+
+  webidl2@24.5.0: {}

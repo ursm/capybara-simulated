@@ -5,13 +5,15 @@
   "scripts": {
     "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --global-name=__csimVendor --outfile=vendor/js/vendor.bundle.js",
     "build:bridge": "esbuild lib/capybara/simulated/js/src/bridge.entry.js --bundle --format=iife --outfile=lib/capybara/simulated/js/bridge.bundle.js",
-    "build":        "pnpm run build:vendor && pnpm run build:bridge"
+    "build":        "pnpm run build:vendor && pnpm run build:bridge",
+    "gen:idl":      "node script/gen_idl_surface.mjs"
   },
   "dependencies": {
     "css-select": "^7.0.0",
     "css-what": "^8.0.0"
   },
   "devDependencies": {
+    "@webref/idl": "^3.79.0",
     "esbuild": "^0.27.0"
   }
 }
