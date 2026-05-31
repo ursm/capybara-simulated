@@ -24,9 +24,6 @@ dom/abort/reason-constructor.html:
 - AbortSignal.reason.constructor should be from iframe
 dom/attributes-are-nodes.html:
 - Attrs are subclasses of Nodes
-- appendChild with an attribute as the child should fail
-- insertBefore with an attribute as the child should fail
-- replaceChild with an attribute as the child should fail
 dom/collections/HTMLCollection-as-prototype.html:
 - HTMLCollection as a prototype and setting own properties
 - HTMLCollection as a prototype should not allow getting .length on the base object
@@ -532,15 +529,11 @@ dom/lists/DOMTokenList-stringifier.html:
 dom/lists/DOMTokenList-value.html:
 - DOMTokenList value
 dom/nodes/CharacterData-appendChild.html:
-- Comment.appendChild(Comment)
 - Comment.appendChild(ProcessingInstruction)
-- Comment.appendChild(Text)
 - ProcessingInstruction.appendChild(Comment)
 - ProcessingInstruction.appendChild(ProcessingInstruction)
 - ProcessingInstruction.appendChild(Text)
-- Text.appendChild(Comment)
 - Text.appendChild(ProcessingInstruction)
-- Text.appendChild(Text)
 dom/nodes/CharacterData-appendData.html:
 - Comment.appendData('')
 - Comment.appendData('', 'bar')
@@ -682,9 +675,6 @@ dom/nodes/CharacterData-surrogates.html:
 - Text.substringData() splitting surrogate pairs
 dom/nodes/ChildNode-after.html:
 - Comment.after() with all siblings of child as arguments.
-- Comment.after() with context object itself and node as the arguments, switching
-  positions.
-- Comment.after() with context object itself as the argument.
 - Comment.after() with null as an argument.
 - Comment.after() with one sibling of child and text as arguments.
 - Comment.after() with some siblings of child as arguments; no changes in tree.
@@ -706,9 +696,6 @@ dom/nodes/ChildNode-after.html:
 - Text.before() with some siblings of child as arguments; no changes in tree; viable
   sibling is first child.
 dom/nodes/ChildNode-before.html:
-- Comment.before() with context object itself and node as the arguments, switching
-  positions.
-- Comment.before() with context object itself as the argument.
 - Comment.before() with null as an argument.
 - Comment.before() with undefined as an argument.
 - Element.before() with null as an argument.
@@ -2774,9 +2761,7 @@ dom/nodes/Node-appendChild.html:
 - Adopting a non-orphan
 - Adopting an orphan
 - Appending a document
-- Appending to a comment
 - Appending to a doctype
-- Appending to a text node
 dom/nodes/Node-baseURI.html:
 - For attributes in elements belonging to document fragments in document, baseURI
   should be document URL
@@ -2857,34 +2842,22 @@ dom/nodes/Node-constants.html:
 - Constants for nodeType on Node prototype object.
 - Constants for nodeType on Text object.
 dom/nodes/Node-insertBefore.html:
-- Calling insertBefore an a leaf node Comment must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore an a leaf node DocumentType must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.
-- Calling insertBefore an a leaf node Text must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction
   must throw TypeError.
-- Calling insertBefore with a reference child whose parent is not the context node
-  must throw a NotFoundError.
-- Calling insertBefore with an inclusive ancestor of the context object must throw
-  HIERARCHY_REQUEST_ERR.
 - If node is a DocumentFragment with an element and parent is a document with another
   element, then throw a HierarchyRequestError DOMException.
 - If node is a DocumentFragment with multiple elements and parent is a document, then
   throw a HierarchyRequestError DOMException.
-- If node is a Text node and parent is a document, then throw a HierarchyRequestError
-  DOMException.
 - If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
   DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError
-  DOMException.
 - If node is an Element and parent is a document with another element, then throw
   a HierarchyRequestError DOMException.
-- If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction,
-  or Comment node, then throw a HierarchyRequestError DOMException.
 - If the context node is a DocumentFragment, inserting a document or a doctype should
   throw a HierarchyRequestError.
 - If the context node is a document and a doctype is following the reference child,
@@ -2903,8 +2876,6 @@ dom/nodes/Node-insertBefore.html:
   should throw a HierarchyRequestError.
 - If the context node is a document, inserting a doctype if there already is a doctype
   child should throw a HierarchyRequestError.
-- If the context node is a document, inserting a document or text node should throw
-  a HierarchyRequestError.
 - If the context node is a document, inserting an element before the doctype should
   throw a HierarchyRequestError.
 - If the context node is a document, inserting an element if there already is an element
@@ -2912,15 +2883,11 @@ dom/nodes/Node-insertBefore.html:
 - If the context node is an element, inserting a document or a doctype should throw
   a HierarchyRequestError.
 - Inserting a node before itself should not move the node
-- Should check that 'node' is not an ancestor of 'parent' before checking whether
-  'child' is a child of 'parent'
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
   can be inserted into the document given the kids the document has right now.
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
   is of a type that can have a parent of the type that 'parent' is.
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  is of a type that can have a parent.
 dom/nodes/Node-isConnected.html:
 - Test with iframes
 dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
@@ -3062,9 +3029,6 @@ dom/nodes/Node-removeChild.html:
   it.
 - Passing a value that is not a Node reference to removeChild should throw TypeError.
 dom/nodes/Node-replaceChild.html:
-- If child's parent is not the context node, a NotFoundError exception should be thrown
-- If node is an inclusive ancestor of the context node, a HierarchyRequestError should
-  be thrown.
 - If the context node is a DocumentFragment, inserting a document or a doctype should
   throw a HierarchyRequestError.
 - If the context node is a document (without element children), inserting a DocumentFragment
@@ -3079,8 +3043,6 @@ dom/nodes/Node-replaceChild.html:
   should throw a HierarchyRequestError.
 - If the context node is a document, inserting a doctype if there already is a doctype
   child should throw a HierarchyRequestError.
-- If the context node is a document, inserting a document or text node should throw
-  a HierarchyRequestError.
 - If the context node is a document, inserting a new doctype should work.
 - If the context node is a document, inserting an element before the doctype should
   throw a HierarchyRequestError.
@@ -3090,22 +3052,17 @@ dom/nodes/Node-replaceChild.html:
   a HierarchyRequestError.
 - If the context node is not a node that can contain children, a HierarchyRequestError
   exception should be thrown
-- Passing null to replaceChild should throw a TypeError.
 - Replacing a node with itself should not move the node
 - Replacing the document element with a DocumentFragment containing a single element
   and comments should work.
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
 - Replacing the document element with a single element should work.
-- Should check that 'node' is not an ancestor of 'parent' before checking whether
-  'child' is a child of 'parent'
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
   can be inserted into the document given the kids the document has right now.
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
   is of a type that can have a parent of the type that 'parent' is.
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  is of a type that can have a parent.
 - replaceChild should work in the presence of mutation events.
 dom/nodes/NodeList-Iterable.html:
 - live NodeLists are for-of iterable and update appropriately
@@ -3132,20 +3089,14 @@ dom/nodes/ParentNode-append.html:
   element, then throw a HierarchyRequestError DOMException.
 - If node is a DocumentFragment with multiple elements and parent is a document, then
   throw a HierarchyRequestError DOMException.
-- If node is a Text node and parent is a document, then throw a HierarchyRequestError
-  DOMException.
 - If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
   DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError
-  DOMException.
 - If node is an Element and parent is a document with another element, then throw
   a HierarchyRequestError DOMException.
-- If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction,
-  or Comment node, then throw a HierarchyRequestError DOMException.
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
 dom/nodes/ParentNode-prepend.html:
@@ -3160,18 +3111,12 @@ dom/nodes/ParentNode-prepend.html:
   element, then throw a HierarchyRequestError DOMException.
 - If node is a DocumentFragment with multiple elements and parent is a document, then
   throw a HierarchyRequestError DOMException.
-- If node is a Text node and parent is a document, then throw a HierarchyRequestError
-  DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError
-  DOMException.
 - If node is an Element and parent is a document with another element, then throw
   a HierarchyRequestError DOMException.
-- If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction,
-  or Comment node, then throw a HierarchyRequestError DOMException.
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-escapes.html:
@@ -3577,7 +3522,6 @@ dom/nodes/getElementsByClassName-whitespace-class-names.html:
   span
 dom/nodes/insert-adjacent.html:
 - invalid caller object insertAdjacentElement
-- invalid caller object insertAdjacentText
 - invalid syntax for insertAdjacentElement
 - invalid syntax for insertAdjacentText
 dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.html:
