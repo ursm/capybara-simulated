@@ -1045,22 +1045,8 @@ dom/nodes/Document-getElementsByClassName.html:
 dom/nodes/Document-getElementsByTagName-xhtml.xhtml:
 - Element in HTML namespace, no prefix, non-ascii characters in name
 - Element in HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, no prefix, lowercase name
-- Element in non-HTML namespace, no prefix, uppercase name
-- Element in non-HTML namespace, non-ascii characters in name
-- Element in non-HTML namespace, prefix, lowercase name
-- Element in non-HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, prefix, uppercase name
 - HTML element with uppercase tag name matches in XHTML documents
 dom/nodes/Document-getElementsByTagName.html:
-- Element in HTML namespace, no prefix, non-ascii characters in name
-- Element in HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, no prefix, lowercase name
-- Element in non-HTML namespace, no prefix, uppercase name
-- Element in non-HTML namespace, non-ascii characters in name
-- Element in non-HTML namespace, prefix, lowercase name
-- Element in non-HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, prefix, uppercase name
 - HTML element with uppercase tagName never matches in HTML Documents
 - Interfaces
 - Shouldn't be able to set unsigned properties on a HTMLCollection (non-strict mode)
@@ -1109,14 +1095,6 @@ dom/nodes/Element-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html: HARNESS_ERROR
 dom/nodes/Element-getElementsByTagName.html:
-- Element in HTML namespace, no prefix, non-ascii characters in name
-- Element in HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, no prefix, lowercase name
-- Element in non-HTML namespace, no prefix, uppercase name
-- Element in non-HTML namespace, non-ascii characters in name
-- Element in non-HTML namespace, prefix, lowercase name
-- Element in non-HTML namespace, prefix, non-ascii characters in name
-- Element in non-HTML namespace, prefix, uppercase name
 - HTML element with uppercase tagName never matches in HTML Documents
 - Should be able to set expando shadowing a proto prop (item)
 - Should be able to set expando shadowing a proto prop (namedItem)
@@ -1127,11 +1105,11 @@ dom/nodes/Element-getElementsByTagName.html:
 dom/nodes/Element-getElementsByTagNameNS.html:
 - ABC element in html namespace
 - AÇ, case sensitivity
-- BODY element in test namespace, no prefix
 - BODY element in test namespace, prefix
 - Empty lists
 - Empty string namespace
 - abc element in html namespace
+- body element in test namespace, prefix
 - getElementsByTagNameNS('http://www.w3.org/1999/xhtml', '*')
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
@@ -1761,14 +1739,7 @@ dom/nodes/case.html:
 - getAttributeNS http://www.w3.org/2000/svg,ä,ä
 - getElementsByTagName ABC
 - getElementsByTagName Abc
-- getElementsByTagName a:ABC
-- getElementsByTagName a:Abc
-- getElementsByTagName a:abc
-- getElementsByTagName a:Ä
-- getElementsByTagName a:ä
 - getElementsByTagName abc
-- getElementsByTagName Ä
-- getElementsByTagName ä
 - setAttribute Ä
 - setAttributeNS ABC
 - setAttributeNS Abc
