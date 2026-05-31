@@ -24,7 +24,6 @@ Document:
   - convertRectFromNode
   - createCDATASection
   - createProcessingInstruction
-  - customElementRegistry
   - doctype
   - fonts
   - fragmentDirective
@@ -49,15 +48,7 @@ Document:
   - writeln
 Element:
   - activeViewTransition
-  - ariaActiveDescendantElement
-  - ariaControlsElements
-  - ariaDescribedByElements
-  - ariaDetailsElements
-  - ariaErrorMessageElements
-  - ariaFlowToElements
-  - ariaLabelledByElements
   - ariaNotify
-  - ariaOwnsElements
   - assignedSlot
   - clientLeft
   - clientTop
@@ -68,7 +59,6 @@ Element:
   - convertQuadFromNode
   - convertRectFromNode
   - currentCSSZoom
-  - customElementRegistry
   - elementTiming
   - focusableAreas
   - getBoxQuads
@@ -165,5 +155,3 @@ Performance:
   - onresourcetimingbufferfull
   - setResourceTimingBufferSize
   - toJSON
-Permissions:
-  - request

@@ -44,6 +44,65 @@ RSpec.describe 'WebIDL reflection behaviour' do
       v = session.evaluate_script("const e=document.createElement('div'); e.setAttribute('role','button'); e.role")
       expect(v).to eq('button')
     end
+
+    it 'resolves element-reference ARIA (single + IDREF-list) by id' do
+      result = session.evaluate_script(<<~JS)
+        const a = document.createElement('div'); a.id = 'a';
+        const b = document.createElement('div'); b.id = 'b';
+        const host = document.createElement('div');
+        host.setAttribute('aria-controls', 'a b missing');
+        host.setAttribute('aria-activedescendant', 'b');
+        document.body.appendChild(a);
+        document.body.appendChild(b);
+        document.body.appendChild(host);
+        ({
+          controls_ids: host.ariaControlsElements.map(e => e.id),
+          active_id: host.ariaActiveDescendantElement && host.ariaActiveDescendantElement.id,
+          empty_is_null: document.createElement('div').ariaControlsElements
+        })
+      JS
+      expect(result).to eq(
+        'controls_ids'  => %w[a b],   # 'missing' (no element) dropped
+        'active_id'     => 'b',
+        'empty_is_null' => nil
+      )
+    end
+
+    it 'element-reference ARIA setter stores refs in an internal slot, not the content attribute' do
+      # Per ARIA element reflection (verified vs Chromium): assigning elements
+      # via the IDL property keeps them in an internal slot and sets the content
+      # attribute to '' — getAttribute returns '' (NOT the joined ids), and the
+      # getter reads the stored elements back.
+      result = session.evaluate_script(<<~JS)
+        const x = document.createElement('div'); x.id = 'x';
+        const y = document.createElement('div'); y.id = 'y';
+        const host = document.createElement('div');
+        host.ariaControlsElements = [x, y];
+        ({
+          attr:         host.getAttribute('aria-controls'),
+          has:          host.hasAttribute('aria-controls'),
+          readback_ids: host.ariaControlsElements.map(e => e.id),
+          frozen:       Object.isFrozen(host.ariaControlsElements)
+        })
+      JS
+      expect(result).to eq(
+        'attr'         => '',
+        'has'          => true,
+        'readback_ids' => %w[x y],
+        'frozen'       => true
+      )
+    end
+
+    it 'element-reference ARIA list setter rejects a non-iterable value (matches browser TypeError)' do
+      name = session.evaluate_script(<<~JS)
+        (() => {
+          const host = document.createElement('div');
+          try { host.ariaControlsElements = document.createElement('div'); return 'no-throw'; }
+          catch (e) { return e.name; }
+        })()
+      JS
+      expect(name).to eq('TypeError')
+    end
   end
 
   describe 'HTMLElement enumerated reflection' do
