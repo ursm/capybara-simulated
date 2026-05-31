@@ -6,7 +6,8 @@
     "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --global-name=__csimVendor --outfile=vendor/js/vendor.bundle.js",
     "build:bridge": "esbuild lib/capybara/simulated/js/src/bridge.entry.js --bundle --format=iife --outfile=lib/capybara/simulated/js/bridge.bundle.js",
     "build":        "pnpm run build:vendor && pnpm run build:bridge",
-    "gen:idl":      "node script/gen_idl_surface.mjs"
+    "gen:idl":      "node script/gen_idl_surface.mjs",
+    "vendor:wpt":   "node script/vendor_wpt.mjs"
   },
   "dependencies": {
     "css-select": "^7.0.0",

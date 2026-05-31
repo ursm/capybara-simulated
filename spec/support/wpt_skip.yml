@@ -1,0 +1,17 @@
+# WPT files excluded from the conformance run because they CRASH or
+# pathologically hang the driver — as opposed to merely producing wrong
+# subtest results (those stay in wpt_expected_failures.yml and keep running).
+#
+# This is the driver-crasher backlog. Each entry is relpath => reason. Removing
+# an entry means the underlying driver crash/hang has been fixed; the file then
+# rejoins the run and needs its real result reflected in the allowlist.
+#
+# Keep this list as short as possible: a crasher hides every subtest in the
+# file. Prefer fixing the driver over adding here.
+
+"dom/events/Event-dispatch-bubbles-true.html": >-
+  Cross-document event dispatch (the test clones documentElement into a fresh
+  document.implementation.createHTMLDocument and dispatches through it) sends
+  the driver's event path into unbounded recursion — "Maximum call stack size
+  exceeded" repeated, ~90s wall before completing. Driver bug in cross-document
+  dispatch; excluded until the recursion is bounded.
