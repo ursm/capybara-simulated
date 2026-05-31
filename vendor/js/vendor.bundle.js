@@ -3,6 +3,7 @@ var __csimVendor = (() => {
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
@@ -40,9 +41,11 @@ var __csimVendor = (() => {
   function trueFunc() {
     return true;
   }
+  __name(trueFunc, "trueFunc");
   function falseFunc() {
     return false;
   }
+  __name(falseFunc, "falseFunc");
 
   // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/index.js
   var dist_exports = {};
@@ -166,6 +169,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(isTraversal, "isTraversal");
   var stripQuotesFromPseudos = /* @__PURE__ */ new Set(["contains", "icontains"]);
   function funescape(_, escaped, escapedWhitespace) {
     const high = Number.parseInt(escaped, 16) - 65536;
@@ -177,15 +181,19 @@ var __csimVendor = (() => {
       String.fromCharCode(high >> 10 | 55296, high & 1023 | 56320)
     );
   }
+  __name(funescape, "funescape");
   function unescapeCSS(cssString) {
     return cssString.replace(reEscape, funescape);
   }
+  __name(unescapeCSS, "unescapeCSS");
   function isQuote(c) {
     return c === CharCode.SingleQuote || c === CharCode.DoubleQuote;
   }
+  __name(isQuote, "isQuote");
   function isWhitespace(c) {
     return c === CharCode.Space || c === CharCode.Tab || c === CharCode.NewLine || c === CharCode.FormFeed || c === CharCode.CarriageReturn;
   }
+  __name(isWhitespace, "isWhitespace");
   function parse(selector) {
     const subselects2 = [];
     const endIndex = parseSelector(subselects2, `${selector}`, 0);
@@ -194,6 +202,7 @@ var __csimVendor = (() => {
     }
     return subselects2;
   }
+  __name(parse, "parse");
   function parseSelector(subselects2, selector, selectorIndex) {
     let tokens = [];
     function getName2(offset) {
@@ -205,12 +214,14 @@ var __csimVendor = (() => {
       selectorIndex += offset + name.length;
       return unescapeCSS(name);
     }
+    __name(getName2, "getName");
     function stripWhitespace(offset) {
       selectorIndex += offset;
       while (selectorIndex < selector.length && isWhitespace(selector.charCodeAt(selectorIndex))) {
         selectorIndex++;
       }
     }
+    __name(stripWhitespace, "stripWhitespace");
     function readValueWithParenthesis() {
       selectorIndex += 1;
       const start = selectorIndex;
@@ -235,11 +246,13 @@ var __csimVendor = (() => {
       }
       throw new Error("Parenthesis not matched");
     }
+    __name(readValueWithParenthesis, "readValueWithParenthesis");
     function ensureNotTraversal() {
       if (tokens.length > 0 && isTraversal(tokens[tokens.length - 1])) {
         throw new Error("Did not expect successive traversals.");
       }
     }
+    __name(ensureNotTraversal, "ensureNotTraversal");
     function addTraversal(type) {
       if (tokens.length > 0 && tokens[tokens.length - 1].type === SelectorType.Descendant) {
         tokens[tokens.length - 1].type = type;
@@ -248,6 +261,7 @@ var __csimVendor = (() => {
       ensureNotTraversal();
       tokens.push({ type });
     }
+    __name(addTraversal, "addTraversal");
     function addSpecialAttribute(name, action) {
       tokens.push({
         type: SelectorType.Attribute,
@@ -258,6 +272,7 @@ var __csimVendor = (() => {
         ignoreCase: "quirks"
       });
     }
+    __name(addSpecialAttribute, "addSpecialAttribute");
     function finalizeSubselector() {
       if (tokens.length > 0 && tokens[tokens.length - 1].type === SelectorType.Descendant) {
         tokens.pop();
@@ -267,6 +282,7 @@ var __csimVendor = (() => {
       }
       subselects2.push(tokens);
     }
+    __name(finalizeSubselector, "finalizeSubselector");
     stripWhitespace(0);
     if (selector.length === selectorIndex) {
       return selectorIndex;
@@ -495,6 +511,7 @@ var __csimVendor = (() => {
     finalizeSubselector();
     return selectorIndex;
   }
+  __name(parseSelector, "parseSelector");
 
   // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/stringify.js
   var attribValueChars = ["\\", '"'];
@@ -520,6 +537,7 @@ var __csimVendor = (() => {
   function stringify(selector) {
     return selector.map((token) => token.map((token2, index, array) => stringifyToken(token2, index, array)).join("")).join(", ");
   }
+  __name(stringify, "stringify");
   function stringifyToken(token, index, array) {
     switch (token.type) {
       // Simple types
@@ -568,6 +586,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(stringifyToken, "stringifyToken");
   function getActionValue(action) {
     switch (action) {
       case AttributeAction.Equals: {
@@ -596,12 +615,15 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(getActionValue, "getActionValue");
   function getNamespacedName(token) {
     return `${getNamespace(token.namespace)}${escapeName(token.name, charsToEscapeInName)}`;
   }
+  __name(getNamespacedName, "getNamespacedName");
   function getNamespace(namespace) {
     return namespace === null ? "" : `${namespace === "*" ? "*" : escapeName(namespace, charsToEscapeInName)}|`;
   }
+  __name(getNamespace, "getNamespace");
   function escapeName(name, charsToEscape) {
     let lastIndex = 0;
     let escapedName = "";
@@ -613,6 +635,7 @@ var __csimVendor = (() => {
     }
     return escapedName.length > 0 ? escapedName + name.slice(lastIndex) : name;
   }
+  __name(escapeName, "escapeName");
 
   // node_modules/.pnpm/domelementtype@3.0.0/node_modules/domelementtype/dist/index.js
   var ElementType;
@@ -630,6 +653,7 @@ var __csimVendor = (() => {
   function isTag(element) {
     return element.type === ElementType.Tag || element.type === ElementType.Script || element.type === ElementType.Style;
   }
+  __name(isTag, "isTag");
   var Root = ElementType.Root;
   var Text = ElementType.Text;
   var Directive = ElementType.Directive;
@@ -644,18 +668,23 @@ var __csimVendor = (() => {
   function isTag2(node) {
     return isTag(node);
   }
+  __name(isTag2, "isTag");
   function isCDATA(node) {
     return node.type === ElementType.CDATA;
   }
+  __name(isCDATA, "isCDATA");
   function isText(node) {
     return node.type === ElementType.Text;
   }
+  __name(isText, "isText");
   function isComment(node) {
     return node.type === ElementType.Comment;
   }
+  __name(isComment, "isComment");
   function hasChildren(node) {
     return Object.hasOwn(node, "children");
   }
+  __name(hasChildren, "hasChildren");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/index.js
   var dist_exports3 = {};
@@ -701,6 +730,7 @@ var __csimVendor = (() => {
   function filter(test, node, recurse = true, limit = Number.POSITIVE_INFINITY) {
     return find(test, Array.isArray(node) ? node : [node], recurse, limit);
   }
+  __name(filter, "filter");
   function find(test, nodes, recurse, limit) {
     const result = [];
     const nodeStack = [Array.isArray(nodes) ? nodes : [nodes]];
@@ -726,6 +756,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(find, "find");
   function findOne(test, nodes, recurse = true) {
     const searchedNodes = Array.isArray(nodes) ? nodes : [nodes];
     for (const node of searchedNodes) {
@@ -740,9 +771,11 @@ var __csimVendor = (() => {
     }
     return null;
   }
+  __name(findOne, "findOne");
   function existsOne(test, nodes) {
     return (Array.isArray(nodes) ? nodes : [nodes]).some((node) => isTag2(node) && test(node) || hasChildren(node) && existsOne(test, node.children));
   }
+  __name(existsOne, "existsOne");
   function findAll(test, nodes) {
     const result = [];
     const nodeStack = [Array.isArray(nodes) ? nodes : [nodes]];
@@ -765,6 +798,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(findAll, "findAll");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/legacy.js
   var Checks = {
@@ -796,9 +830,11 @@ var __csimVendor = (() => {
     }
     return (element) => isTag2(element) && element.attribs[attrib] === value;
   }
+  __name(getAttribCheck, "getAttribCheck");
   function combineFuncs(a, b) {
     return (element) => a(element) || b(element);
   }
+  __name(combineFuncs, "combineFuncs");
   function compileTest(options) {
     const funcs = Object.keys(options).map((key) => {
       const value = options[key];
@@ -806,28 +842,35 @@ var __csimVendor = (() => {
     });
     return funcs.length === 0 ? null : funcs.reduce(combineFuncs);
   }
+  __name(compileTest, "compileTest");
   function testElement(options, node) {
     const test = compileTest(options);
     return test ? test(node) : true;
   }
+  __name(testElement, "testElement");
   function getElements(options, nodes, recurse, limit = Number.POSITIVE_INFINITY) {
     const test = compileTest(options);
     return test ? filter(test, nodes, recurse, limit) : [];
   }
+  __name(getElements, "getElements");
   function getElementById(id, nodes, recurse = true) {
     if (!Array.isArray(nodes))
       nodes = [nodes];
     return findOne(getAttribCheck("id", id), nodes, recurse);
   }
+  __name(getElementById, "getElementById");
   function getElementsByTagName(tagName, nodes, recurse = true, limit = Number.POSITIVE_INFINITY) {
     return filter(Checks["tag_name"](tagName), nodes, recurse, limit);
   }
+  __name(getElementsByTagName, "getElementsByTagName");
   function getElementsByClassName(className, nodes, recurse = true, limit = Number.POSITIVE_INFINITY) {
     return filter(getAttribCheck("class", className), nodes, recurse, limit);
   }
+  __name(getElementsByClassName, "getElementsByClassName");
   function getElementsByTagType(type, nodes, recurse = true, limit = Number.POSITIVE_INFINITY) {
     return filter(Checks["tag_type"](type), nodes, recurse, limit);
   }
+  __name(getElementsByTagType, "getElementsByTagType");
 
   // node_modules/.pnpm/entities@8.0.0/node_modules/entities/dist/escape.js
   var xmlCodeMap = /* @__PURE__ */ new Map([
@@ -872,8 +915,9 @@ var __csimVendor = (() => {
       out += input.substr(last);
     return out;
   }
+  __name(encodeXML, "encodeXML");
   function getEscaper(regex, map) {
-    return function escape2(data) {
+    return /* @__PURE__ */ __name(function escape2(data) {
       let match;
       let lastIndex = 0;
       let result = "";
@@ -885,8 +929,9 @@ var __csimVendor = (() => {
         lastIndex = match.index + 1;
       }
       return result + data.substring(lastIndex);
-    };
+    }, "escape");
   }
+  __name(getEscaper, "getEscaper");
   var escapeAttribute = /* @__PURE__ */ getEscaper(/["&\u00A0]/g, /* @__PURE__ */ new Map([
     [34, "&quot;"],
     [38, "&amp;"],
@@ -932,6 +977,7 @@ var __csimVendor = (() => {
     }
     return output;
   }
+  __name(render, "render");
   var dist_default = render;
   function renderChildren(children, options, xmlMode) {
     let output = "";
@@ -940,6 +986,7 @@ var __csimVendor = (() => {
     }
     return output;
   }
+  __name(renderChildren, "renderChildren");
   function renderNode(node, options, xmlMode) {
     switch (node.type) {
       case Root: {
@@ -969,6 +1016,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(renderNode, "renderNode");
   function renderTag(element, options, xmlMode) {
     if (xmlMode === "foreign") {
       element.name = elementNames.get(element.name) ?? element.name;
@@ -995,9 +1043,11 @@ var __csimVendor = (() => {
     }
     return tag;
   }
+  __name(renderTag, "renderTag");
   function replaceQuotes(value) {
     return value.replaceAll('"', "&quot;");
   }
+  __name(replaceQuotes, "replaceQuotes");
   function formatAttributes(attributes, options, xmlMode) {
     if (!attributes)
       return "";
@@ -1014,14 +1064,17 @@ var __csimVendor = (() => {
     }
     return result;
   }
+  __name(formatAttributes, "formatAttributes");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/stringify.js
   function getOuterHTML(node, options) {
     return dist_default(node, options);
   }
+  __name(getOuterHTML, "getOuterHTML");
   function getInnerHTML(node, options) {
     return hasChildren(node) ? node.children.map((node2) => getOuterHTML(node2, options)).join("") : "";
   }
+  __name(getInnerHTML, "getInnerHTML");
   function getText(node) {
     if (Array.isArray(node))
       return node.map(getText).join("");
@@ -1033,6 +1086,7 @@ var __csimVendor = (() => {
       return node.data;
     return "";
   }
+  __name(getText, "getText");
   function textContent(node) {
     if (Array.isArray(node))
       return node.map(textContent).join("");
@@ -1043,6 +1097,7 @@ var __csimVendor = (() => {
       return node.data;
     return "";
   }
+  __name(textContent, "textContent");
   function innerText(node) {
     if (Array.isArray(node))
       return node.map(innerText).join("");
@@ -1053,12 +1108,14 @@ var __csimVendor = (() => {
       return node.data;
     return "";
   }
+  __name(innerText, "innerText");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/feeds.js
   function getFeed(document) {
     const feedRoot = getOneElement(isValidFeed, document);
     return feedRoot ? feedRoot.name === "feed" ? getAtomFeed(feedRoot) : getRssFeed(feedRoot) : null;
   }
+  __name(getFeed, "getFeed");
   function getAtomFeed(feedRoot) {
     const childs = feedRoot.children;
     const feed = {
@@ -1097,6 +1154,7 @@ var __csimVendor = (() => {
     addConditionally(feed, "author", "email", childs, true);
     return feed;
   }
+  __name(getAtomFeed, "getAtomFeed");
   function getRssFeed(feedRoot) {
     const childs = getOneElement("channel", feedRoot.children)?.children ?? [];
     const feed = {
@@ -1125,6 +1183,7 @@ var __csimVendor = (() => {
     addConditionally(feed, "author", "managingEditor", childs, true);
     return feed;
   }
+  __name(getRssFeed, "getRssFeed");
   var MEDIA_KEYS_STRING = ["url", "type", "lang"];
   var MEDIA_KEYS_INT = [
     "fileSize",
@@ -1159,20 +1218,25 @@ var __csimVendor = (() => {
       return media;
     });
   }
+  __name(getMediaElements, "getMediaElements");
   function getOneElement(tagName, node) {
     return getElementsByTagName(tagName, node, true, 1)[0];
   }
+  __name(getOneElement, "getOneElement");
   function fetch(tagName, where, recurse = false) {
     return textContent(getElementsByTagName(tagName, where, recurse, 1)).trim();
   }
+  __name(fetch, "fetch");
   function addConditionally(object, property, tagName, where, recurse = false) {
     const value = fetch(tagName, where, recurse);
     if (value)
       object[property] = value;
   }
+  __name(addConditionally, "addConditionally");
   function isValidFeed(value) {
     return value === "rss" || value === "feed" || value === "rdf:RDF";
   }
+  __name(isValidFeed, "isValidFeed");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/helpers.js
   function removeSubsets(nodes) {
@@ -1192,6 +1256,7 @@ var __csimVendor = (() => {
     }
     return nodes;
   }
+  __name(removeSubsets, "removeSubsets");
   var DocumentPosition;
   (function(DocumentPosition2) {
     DocumentPosition2[DocumentPosition2["DISCONNECTED"] = 1] = "DISCONNECTED";
@@ -1239,6 +1304,7 @@ var __csimVendor = (() => {
     }
     return DocumentPosition.PRECEDING;
   }
+  __name(compareDocumentPosition, "compareDocumentPosition");
   function uniqueSort(nodes) {
     nodes = nodes.filter((node, index, array) => !array.includes(node, index + 1));
     nodes.sort((a, b) => {
@@ -1253,6 +1319,7 @@ var __csimVendor = (() => {
     });
     return nodes;
   }
+  __name(uniqueSort, "uniqueSort");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/manipulation.js
   function removeElement(element) {
@@ -1271,6 +1338,7 @@ var __csimVendor = (() => {
     element.prev = null;
     element.parent = null;
   }
+  __name(removeElement, "removeElement");
   function replaceElement(element, replacement) {
     replacement.prev = element.prev;
     if (replacement.prev) {
@@ -1291,6 +1359,7 @@ var __csimVendor = (() => {
       element.parent = null;
     }
   }
+  __name(replaceElement, "replaceElement");
   function appendChild(parent, child) {
     removeElement(child);
     child.next = null;
@@ -1303,6 +1372,7 @@ var __csimVendor = (() => {
       child.prev = null;
     }
   }
+  __name(appendChild, "appendChild");
   function append(element, next) {
     removeElement(next);
     const { parent } = element;
@@ -1321,6 +1391,7 @@ var __csimVendor = (() => {
       parent.children.push(next);
     }
   }
+  __name(append, "append");
   function prependChild(parent, child) {
     removeElement(child);
     child.parent = parent;
@@ -1333,6 +1404,7 @@ var __csimVendor = (() => {
       child.next = sibling;
     }
   }
+  __name(prependChild, "prependChild");
   function prepend(element, previous) {
     removeElement(previous);
     const { parent } = element;
@@ -1348,14 +1420,17 @@ var __csimVendor = (() => {
     previous.next = element;
     element.prev = previous;
   }
+  __name(prepend, "prepend");
 
   // node_modules/.pnpm/domutils@4.0.2/node_modules/domutils/dist/traversal.js
   function getChildren(element) {
     return hasChildren(element) ? element.children : [];
   }
+  __name(getChildren, "getChildren");
   function getParent(element) {
     return element.parent || null;
   }
+  __name(getParent, "getParent");
   function getSiblings(element) {
     const parent = getParent(element);
     if (parent != null)
@@ -1372,29 +1447,35 @@ var __csimVendor = (() => {
     }
     return siblings;
   }
+  __name(getSiblings, "getSiblings");
   function getAttributeValue(element, name) {
     const { attribs } = element;
     return attribs?.[name];
   }
+  __name(getAttributeValue, "getAttributeValue");
   function hasAttrib(element, name) {
     const { attribs } = element;
     return attribs != null && Object.hasOwn(attribs, name) && attribs[name] != null;
   }
+  __name(hasAttrib, "hasAttrib");
   function getName(element) {
     return element.name;
   }
+  __name(getName, "getName");
   function nextElementSibling(element) {
     let { next } = element;
     while (next !== null && !isTag2(next))
       ({ next } = next);
     return next;
   }
+  __name(nextElementSibling, "nextElementSibling");
   function prevElementSibling(element) {
     let { prev } = element;
     while (prev !== null && !isTag2(prev))
       ({ prev } = prev);
     return prev;
   }
+  __name(prevElementSibling, "prevElementSibling");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/attributes.js
   var reChars = /[-[\]{}()*+?.,\\^$|#\s]/g;
@@ -1402,6 +1483,7 @@ var __csimVendor = (() => {
   function escapeRegex(value) {
     return value.replace(reChars, "\\$&");
   }
+  __name(escapeRegex, "escapeRegex");
   var caseInsensitiveAttributes = /* @__PURE__ */ new Set([
     "accept",
     "accept-charset",
@@ -1453,6 +1535,7 @@ var __csimVendor = (() => {
   function shouldIgnoreCase(selector, options) {
     return typeof selector.ignoreCase === "boolean" ? selector.ignoreCase : selector.ignoreCase === "quirks" ? !!options.quirksMode : !options.xmlMode && caseInsensitiveAttributes.has(selector.name);
   }
+  __name(shouldIgnoreCase, "shouldIgnoreCase");
   var attributeRules = {
     equals(next, data, options) {
       const { adapter } = options;
@@ -1474,15 +1557,15 @@ var __csimVendor = (() => {
       const { length } = value;
       if (shouldIgnoreCase(data, options)) {
         value = value.toLowerCase();
-        return function hyphenIC(element) {
+        return /* @__PURE__ */ __name(function hyphenIC(element) {
           const attribute = adapter.getAttributeValue(element, name);
           return attribute != null && (attribute.length === length || attribute.charAt(length) === "-") && attribute.substr(0, length).toLowerCase() === value && next(element);
-        };
+        }, "hyphenIC");
       }
-      return function hyphen(element) {
+      return /* @__PURE__ */ __name(function hyphen(element) {
         const attribute = adapter.getAttributeValue(element, name);
         return attribute != null && (attribute.length === length || attribute.charAt(length) === "-") && attribute.substr(0, length) === value && next(element);
-      };
+      }, "hyphen");
     },
     element(next, data, options) {
       const { adapter } = options;
@@ -1491,10 +1574,10 @@ var __csimVendor = (() => {
         return falseFunc;
       }
       const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
-      return function element(node) {
+      return /* @__PURE__ */ __name(function element(node) {
         const attribute = adapter.getAttributeValue(node, name);
         return attribute != null && attribute.length >= value.length && regex.test(attribute) && next(node);
-      };
+      }, "element");
     },
     exists(next, { name }, { adapter }) {
       return (element) => adapter.hasAttrib(element, name) && next(element);
@@ -1538,10 +1621,10 @@ var __csimVendor = (() => {
       }
       if (shouldIgnoreCase(data, options)) {
         const regex = new RegExp(escapeRegex(value), "i");
-        return function anyIC(element) {
+        return /* @__PURE__ */ __name(function anyIC(element) {
           const attribute = adapter.getAttributeValue(element, name);
           return attribute != null && attribute.length >= value.length && regex.test(attribute) && next(element);
-        };
+        }, "anyIC");
       }
       return (element) => !!adapter.getAttributeValue(element, name)?.includes(value) && next(element);
     },
@@ -1594,6 +1677,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(findAll2, "findAll");
   function findOne2(query, nodes, options) {
     const { adapter, xmlMode = false } = options;
     const nodeStack = [nodes];
@@ -1623,6 +1707,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(findOne2, "findOne");
   function getNextSiblings(element, adapter) {
     const siblings = adapter.getSiblings(element);
     if (siblings.length <= 1) {
@@ -1634,10 +1719,12 @@ var __csimVendor = (() => {
     }
     return siblings.slice(elementIndex + 1).filter(adapter.isTag);
   }
+  __name(getNextSiblings, "getNextSiblings");
   function getElementParent(node, adapter) {
     const parent = adapter.getParent(node);
     return parent != null && adapter.isTag(parent) ? parent : null;
   }
+  __name(getElementParent, "getElementParent");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/aliases.js
   var textControl = "input:is([type=text i],[type=search i],[type=url i],[type=tel i],[type=email i],[type=password i],[type=date i],[type=month i],[type=week i],[type=time i],[type=datetime-local i],[type=number i])";
@@ -1697,6 +1784,7 @@ var __csimVendor = (() => {
     const bModulo = (b % absA + absA) % absA;
     return a > 1 ? (index) => index >= b && index % absA === bModulo : (index) => index <= b && index % absA === bModulo;
   }
+  __name(compile, "compile");
 
   // node_modules/.pnpm/nth-check@3.0.1/node_modules/nth-check/dist/parse.js
   var whitespace = /* @__PURE__ */ new Set([9, 10, 12, 13, 32]);
@@ -1745,6 +1833,7 @@ var __csimVendor = (() => {
       }
       return 1;
     }
+    __name(readSign, "readSign");
     function readNumber() {
       const start = index;
       let value = 0;
@@ -1754,17 +1843,21 @@ var __csimVendor = (() => {
       }
       return index === start ? null : value;
     }
+    __name(readNumber, "readNumber");
     function skipWhitespace() {
       while (index < formula.length && whitespace.has(formula.charCodeAt(index))) {
         index++;
       }
     }
+    __name(skipWhitespace, "skipWhitespace");
   }
+  __name(parse2, "parse");
 
   // node_modules/.pnpm/nth-check@3.0.1/node_modules/nth-check/dist/index.js
   function nthCheck(formula) {
     return compile(parse2(formula));
   }
+  __name(nthCheck, "nthCheck");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/cache.js
   function cacheParentResults(next, { adapter, cacheResults }, matches) {
@@ -1777,7 +1870,8 @@ var __csimVendor = (() => {
       resultCache.set(element, result);
       return result;
     }
-    return function cachedMatcher(element) {
+    __name(addResultToCache, "addResultToCache");
+    return /* @__PURE__ */ __name(function cachedMatcher(element) {
       if (!next(element)) {
         return false;
       }
@@ -1793,14 +1887,16 @@ var __csimVendor = (() => {
         node = parent;
       } while (!resultCache.has(node));
       return resultCache.get(node) ? addResultToCache(element) : false;
-    };
+    }, "cachedMatcher");
   }
+  __name(cacheParentResults, "cacheParentResults");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/options.js
   function copyOptions(options) {
     const { context: _, rootFunc: __, ...copied } = options;
     return copied;
   }
+  __name(copyOptions, "copyOptions");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/filters.js
   function extendedFilter(tag, range) {
@@ -1820,9 +1916,10 @@ var __csimVendor = (() => {
     }
     return true;
   }
+  __name(extendedFilter, "extendedFilter");
   var nthOfRegex = /^(.+?)\s+of\s+(.+)$/is;
   function compileNth(reverse, ofType) {
-    return function nth(next, rule, options, context, compileToken2) {
+    return /* @__PURE__ */ __name(function nth(next, rule, options, context, compileToken2) {
       const { adapter, equals } = options;
       const ofMatch = ofType ? null : rule.match(nthOfRegex);
       const nthCheck2 = nthCheck(ofMatch ? ofMatch[1].trim() : rule);
@@ -1836,7 +1933,7 @@ var __csimVendor = (() => {
       }
       const shouldCount = ofSelector ? (_element, sibling) => ofSelector(sibling) : ofType ? (element, sibling) => adapter.getName(sibling) === adapter.getName(element) : trueFunc;
       if (reverse) {
-        return function nthLast(element) {
+        return /* @__PURE__ */ __name(function nthLast(element) {
           if (ofSelector && !ofSelector(element))
             return false;
           const siblings = adapter.getSiblings(element);
@@ -1849,9 +1946,9 @@ var __csimVendor = (() => {
               pos++;
           }
           return nthCheck2(pos) && next(element);
-        };
+        }, "nthLast");
       }
-      return function nth2(element) {
+      return /* @__PURE__ */ __name(function nth2(element) {
         if (ofSelector && !ofSelector(element))
           return false;
         const siblings = adapter.getSiblings(element);
@@ -1863,9 +1960,10 @@ var __csimVendor = (() => {
             pos++;
         }
         return nthCheck2(pos) && next(element);
-      };
-    };
+      }, "nth");
+    }, "nth");
   }
+  __name(compileNth, "compileNth");
   var filters = {
     contains(next, text, options) {
       const { getText: getText2 } = options.adapter;
@@ -1897,7 +1995,7 @@ var __csimVendor = (() => {
     },
     lang(next, code, { adapter }) {
       const ranges = code.split(",").map((r) => r.trim()).filter((r) => r.length > 0).map((r) => r.replace(/^['"]|['"]$/g, "").toLowerCase().split("-"));
-      return function lang(element) {
+      return /* @__PURE__ */ __name(function lang(element) {
         let node = element;
         while (node != null) {
           const value = adapter.getAttributeValue(node, "xml:lang") ?? adapter.getAttributeValue(node, "lang");
@@ -1912,23 +2010,24 @@ var __csimVendor = (() => {
           node = parent != null && adapter.isTag(parent) ? parent : null;
         }
         return ranges.some((r) => r[0] === "") && next(element);
-      };
+      }, "lang");
     },
     hover: dynamicStatePseudo("isHovered"),
     visited: dynamicStatePseudo("isVisited"),
     active: dynamicStatePseudo("isActive")
   };
   function dynamicStatePseudo(name) {
-    return function dynamicPseudo(next, _rule, { adapter }) {
+    return /* @__PURE__ */ __name(function dynamicPseudo(next, _rule, { adapter }) {
       const filterFunction = adapter[name];
       if (typeof filterFunction !== "function") {
         return falseFunc;
       }
-      return function active(element) {
+      return /* @__PURE__ */ __name(function active(element) {
         return filterFunction(element) && next(element);
-      };
-    };
+      }, "active");
+    }, "dynamicPseudo");
   }
+  __name(dynamicStatePseudo, "dynamicStatePseudo");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/pseudos.js
   var isDocumentWhiteSpace = /^[ \t\r\n]*$/;
@@ -2007,11 +2106,13 @@ var __csimVendor = (() => {
       throw new Error(`Pseudo-class :${name} doesn't have any arguments`);
     }
   }
+  __name(verifyPseudoArguments, "verifyPseudoArguments");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/selectors.js
   function isTraversal2(token) {
     return token.type === "_flexibleDescendant" || isTraversal(token);
   }
+  __name(isTraversal2, "isTraversal");
   function sortRules(array) {
     const ratings = array.map(getQuality);
     for (let index = 1; index < array.length; index++) {
@@ -2028,6 +2129,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(sortRules, "sortRules");
   function getAttributeQuality(token) {
     switch (token.action) {
       case AttributeAction.Exists: {
@@ -2056,6 +2158,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(getAttributeQuality, "getAttributeQuality");
   function getQuality(token) {
     switch (token.type) {
       case SelectorType.Universal: {
@@ -2086,19 +2189,22 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(getQuality, "getQuality");
   function includesScopePseudo(t) {
     return t.type === SelectorType.Pseudo && (t.name === "scope" || Array.isArray(t.data) && t.data.some((data) => data.some(includesScopePseudo)));
   }
+  __name(includesScopePseudo, "includesScopePseudo");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/subselects.js
   var PLACEHOLDER_ELEMENT = {};
   function hasDependsOnCurrentElement(selector) {
     return selector.some((sel) => sel.length > 0 && (isTraversal2(sel[0]) || sel.some(includesScopePseudo)));
   }
-  var is = (next, token, options, context, compileToken2) => {
+  __name(hasDependsOnCurrentElement, "hasDependsOnCurrentElement");
+  var is = /* @__PURE__ */ __name((next, token, options, context, compileToken2) => {
     const compiledToken = compileToken2(token, copyOptions(options), context);
     return compiledToken === trueFunc ? next : compiledToken === falseFunc ? falseFunc : (element) => compiledToken(element) && next(element);
-  };
+  }, "is");
   var subselects = {
     is,
     /**
@@ -2139,7 +2245,7 @@ var __csimVendor = (() => {
           return findOne2(compiled, adapter.getChildren(element), options) !== null;
         });
       }
-      const hasOne = (element) => findOne2(compiled, adapter.getChildren(element), options) !== null;
+      const hasOne = /* @__PURE__ */ __name((element) => findOne2(compiled, adapter.getChildren(element), options) !== null, "hasOne");
       return skipCache ? (element) => next(element) && hasOne(element) : cacheParentResults(next, options, hasOne);
     }
   };
@@ -2176,6 +2282,7 @@ var __csimVendor = (() => {
     }
     throw new Error(`Unknown pseudo-class :${name}`);
   }
+  __name(compilePseudoSelector, "compilePseudoSelector");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/general.js
   function compileGeneralSelector(next, selector, options, context, compileToken2, hasExpensiveSubselector) {
@@ -2208,14 +2315,14 @@ var __csimVendor = (() => {
         if (!options.xmlMode || options.lowerCaseTags) {
           name = name.toLowerCase();
         }
-        return function tag(element) {
+        return /* @__PURE__ */ __name(function tag(element) {
           return adapter.getName(element) === name && next(element);
-        };
+        }, "tag");
       }
       // Traversal
       case SelectorType.Descendant: {
         if (!hasExpensiveSubselector || cacheResults === false || typeof WeakMap === "undefined") {
-          return function descendant(element) {
+          return /* @__PURE__ */ __name(function descendant(element) {
             let current = element;
             while (current = getElementParent(current, adapter)) {
               if (next(current)) {
@@ -2223,10 +2330,10 @@ var __csimVendor = (() => {
               }
             }
             return false;
-          };
+          }, "descendant");
         }
         const resultCache = /* @__PURE__ */ new WeakMap();
-        return function cachedDescendant(element) {
+        return /* @__PURE__ */ __name(function cachedDescendant(element) {
           let current = element;
           let result;
           while (current = getElementParent(current, adapter)) {
@@ -2246,10 +2353,10 @@ var __csimVendor = (() => {
             }
           }
           return false;
-        };
+        }, "cachedDescendant");
       }
       case "_flexibleDescendant": {
-        return function flexibleDescendant(element) {
+        return /* @__PURE__ */ __name(function flexibleDescendant(element) {
           let current = element;
           do {
             if (next(current)) {
@@ -2258,21 +2365,21 @@ var __csimVendor = (() => {
             current = getElementParent(current, adapter);
           } while (current);
           return false;
-        };
+        }, "flexibleDescendant");
       }
       case SelectorType.Parent: {
-        return function parent(element) {
+        return /* @__PURE__ */ __name(function parent(element) {
           return adapter.getChildren(element).some((element2) => adapter.isTag(element2) && next(element2));
-        };
+        }, "parent");
       }
       case SelectorType.Child: {
-        return function child(element) {
+        return /* @__PURE__ */ __name(function child(element) {
           const parent = getElementParent(element, adapter);
           return parent !== null && next(parent);
-        };
+        }, "child");
       }
       case SelectorType.Sibling: {
-        return function sibling(element) {
+        return /* @__PURE__ */ __name(function sibling(element) {
           const siblings = adapter.getSiblings(element);
           for (const currentSibling of siblings) {
             if (equals(element, currentSibling)) {
@@ -2283,16 +2390,16 @@ var __csimVendor = (() => {
             }
           }
           return false;
-        };
+        }, "sibling");
       }
       case SelectorType.Adjacent: {
         if (adapter.prevElementSibling) {
-          return function adjacent(element) {
+          return /* @__PURE__ */ __name(function adjacent(element) {
             const previous = adapter.prevElementSibling(element);
             return previous != null && next(previous);
-          };
+          }, "adjacent");
         }
-        return function adjacent(element) {
+        return /* @__PURE__ */ __name(function adjacent(element) {
           const siblings = adapter.getSiblings(element);
           let lastElement;
           for (const currentSibling of siblings) {
@@ -2304,7 +2411,7 @@ var __csimVendor = (() => {
             }
           }
           return !!lastElement && next(lastElement);
-        };
+        }, "adjacent");
       }
       case SelectorType.Universal: {
         if (selector.namespace != null && selector.namespace !== "*") {
@@ -2314,6 +2421,7 @@ var __csimVendor = (() => {
       }
     }
   }
+  __name(compileGeneralSelector, "compileGeneralSelector");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/compile.js
   var DESCENDANT_TOKEN = { type: SelectorType.Descendant };
@@ -2337,6 +2445,7 @@ var __csimVendor = (() => {
       t.unshift(SCOPE_TOKEN);
     }
   }
+  __name(absolutize, "absolutize");
   function compileToken(token, options, compilationContext) {
     for (const rules of token) {
       sortRules(rules);
@@ -2381,12 +2490,14 @@ var __csimVendor = (() => {
     query.shouldTestNextSiblings = shouldTestNextSiblings;
     return query;
   }
+  __name(compileToken, "compileToken");
   function or(a, b) {
     return (element) => a(element) || b(element);
   }
+  __name(or, "or");
 
   // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/index.js
-  var defaultEquals = (a, b) => a === b;
+  var defaultEquals = /* @__PURE__ */ __name((a, b) => a === b, "defaultEquals");
   var defaultOptions = {
     adapter: { ...dist_exports3, isTag: isTag2 },
     equals: defaultEquals
@@ -2397,30 +2508,35 @@ var __csimVendor = (() => {
     finalOptions.equals ??= finalOptions.adapter?.equals ?? defaultEquals;
     return finalOptions;
   }
+  __name(convertOptionFormats, "convertOptionFormats");
   function compile2(selector, options, context) {
     const convertedOptions = convertOptionFormats(options);
     const next = _compileUnsafe(selector, convertedOptions, context);
     return next === falseFunc ? falseFunc : (element) => convertedOptions.adapter.isTag(element) && next(element);
   }
+  __name(compile2, "compile");
   function _compileUnsafe(selector, options, context) {
     return compileToken(typeof selector === "string" ? parse(selector) : selector, convertOptionFormats(options), context);
   }
+  __name(_compileUnsafe, "_compileUnsafe");
   function getSelectorFunction(searchFunction) {
-    return function select(query, elements, options) {
+    return /* @__PURE__ */ __name(function select(query, elements, options) {
       const convertedOptions = convertOptionFormats(options);
       if (typeof query !== "function") {
         query = _compileUnsafe(query, convertedOptions, elements);
       }
       const filteredElements = prepareContext(elements, convertedOptions.adapter, query.shouldTestNextSiblings);
       return searchFunction(query, filteredElements, convertedOptions);
-    };
+    }, "select");
   }
+  __name(getSelectorFunction, "getSelectorFunction");
   function prepareContext(elements, adapter, shouldTestNextSiblings = false) {
     if (shouldTestNextSiblings) {
       elements = appendNextSiblings(elements, adapter);
     }
     return Array.isArray(elements) ? adapter.removeSubsets(elements) : adapter.getChildren(elements);
   }
+  __name(prepareContext, "prepareContext");
   function appendNextSiblings(element, adapter) {
     const elements = Array.isArray(element) ? [...element] : [element];
     const elementsLength = elements.length;
@@ -2430,11 +2546,13 @@ var __csimVendor = (() => {
     }
     return elements;
   }
+  __name(appendNextSiblings, "appendNextSiblings");
   var selectAll = getSelectorFunction((query, elements, options) => query === falseFunc || !elements || elements.length === 0 ? [] : findAll2(query, elements, options));
   var selectOne = getSelectorFunction((query, elements, options) => query === falseFunc || !elements || elements.length === 0 ? null : findOne2(query, elements, options));
   function is2(element, query, options) {
     return (typeof query === "function" ? query : compile2(query, options))(element);
   }
+  __name(is2, "is");
   var dist_default2 = selectAll;
   return __toCommonJS(vendor_entry_exports);
 })();
