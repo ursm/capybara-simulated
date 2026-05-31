@@ -53,6 +53,7 @@ module Capybara
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1]); nil },
         '__historyGo'                => ->(b, *a) { b.history_go(a[0]); nil },
+        '__historyLength'            => ->(b, *_) { b.history_length },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *_) { b.document_cookie },
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s); nil },

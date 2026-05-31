@@ -21,6 +21,17 @@ module Capybara
 
       attr_reader :handle_id, :context_gen
 
+      # Tick the virtual clock unconditionally on the text path. Unlike
+      # `Node#[]` (attribute reads), the text readers are NOT preceded by
+      # a `find_css` that ticks under the wall throttle: `have_text` /
+      # `assert_text` polls `.text` directly against an already-found,
+      # cached scope node, so the find loop short-circuits without
+      # re-ticking. Gating these behind `timer_wait_elapsed?` therefore
+      # stalls a pure text-poll loop's virtual clock and scheduled
+      # `setTimeout`s never fire (smoke_spec virtual-clock contract).
+      # They run ~once per poll-scope (not once per matched result like
+      # the attribute filters the audit targeted), so they are not the
+      # O(N) hot path and are safe to tick every call.
       def all_text
         browser.tick_real_time
         check_stale
@@ -66,7 +77,22 @@ module Capybara
         # progress. Without this the body class never transitions
         # because we only advance time during `find`, and the helper
         # caches the body node before its poll loop.
-        browser.tick_real_time
+        #
+        # Gated behind the same wall-clock throttle `find_css` uses
+        # (`timer_wait_elapsed?`): on framework-runloop pages that keep
+        # `@timers_active` permanently true, an ungated tick here would
+        # drain timers on every per-result attribute filter / poll
+        # iteration. The throttle still ticks the first time and once
+        # per ~50 ms window thereafter, so poll loops that wait for a
+        # timer to fire between reads still make progress.
+        #
+        # `tick_real_time` also drains the Worker / EventSource / hijacked
+        # -fetch outboxes, so an attribute poll whose value is delivered
+        # only by one of those channels (with no active timer) would
+        # otherwise never see it. `async_io_pending?` is an O(1) gate
+        # (three empty? checks) that lets those cases drain without paying
+        # an unconditional tick on timer-driven runloop pages.
+        browser.tick_real_time if browser.timer_wait_elapsed? || browser.async_io_pending?
         check_stale
         browser.attr(handle_id, name.to_s)
       end

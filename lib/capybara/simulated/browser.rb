@@ -466,6 +466,19 @@ module Capybara
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
       end
 
+      # Cheap O(1) gate: is there any non-timer async channel with traffic
+      # that `tick_real_time` would drain? `tick_real_time` itself runs
+      # exactly when `worker_pending? || event_source_pending? ||
+      # hijack_fetch_pending?` (plus `@timers_active`), and each of those
+      # predicates is a single `.empty?` / counter check. Reusing them
+      # here lets an attribute poll whose value is delivered only by a
+      # Worker / SSE / hijacked-fetch message (with no active timer) still
+      # drain that channel, without paying an unconditional drain on
+      # timer-driven runloop pages.
+      def async_io_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending?
+      end
+
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
       # re-issues the same find on every poll while waiting for an
@@ -2731,6 +2744,12 @@ module Capybara
         record_url_transition(resolved)
         @current_url = resolved
         record_history({method: :get, url: resolved, state: state, kind: :push_state})
+      end
+
+      # Total history entries (after forward-tail truncation), surfaced
+      # to JS `history.length` via the `__historyLength` host fn.
+      def history_length
+        [@history.size, 1].max
       end
       def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
       def current_referer      ; @current_referer.to_s ; end
