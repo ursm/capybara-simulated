@@ -940,7 +940,6 @@ dom/nodes/Document-getElementsByTagNameNS.html:
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
 dom/nodes/Element-children.html:
-- HTMLCollection edge cases
 - HTMLCollection edge cases 1
 dom/nodes/Element-closest.html:
 - Element.closest with context node 'test11' and selector ':invalid'
@@ -1207,11 +1206,7 @@ dom/nodes/Node-appendChild.html:
 - Adopting an orphan
 - Appending a document
 dom/nodes/Node-childNodes.html:
-- Caching of Node.childNodes
 - Node.childNodes on a Document.
-- Node.childNodes on a DocumentFragment.
-- Node.childNodes on an Element.
-- Node.childNodes should be a live collection
 dom/nodes/Node-cloneNode-document-with-doctype.html:
 - Created with DOMParser
 dom/nodes/Node-cloneNode-svg.html:
@@ -1256,8 +1251,6 @@ dom/nodes/Node-replaceChild.html:
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
 - replaceChild should work in the presence of mutation events.
-dom/nodes/NodeList-Iterable.html:
-- live NodeLists are for-of iterable and update appropriately
 dom/nodes/NodeList-static-length-getter-tampered-1.html:
 - NodeList (static collection) "length" getter tampered
 dom/nodes/NodeList-static-length-getter-tampered-2.html:
