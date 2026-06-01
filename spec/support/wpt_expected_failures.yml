@@ -481,11 +481,7 @@ dom/nodes/Node-insertBefore.html:
   is of a type that can have a parent of the type that 'parent' is.
 dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Node-isEqualNode.html:
-- doctypes should be compared on name, public ID, and system ID
 - documents should not be compared based on properties
-- elements should be compared on attribute namespace, local name, and value
-- elements should be compared on namespace, namespace prefix, local name, and number
-  of attributes
 - node equality testing should test descendant equality too
 - processing instructions should be compared on target and data
 dom/nodes/Node-isSameNode.html:
