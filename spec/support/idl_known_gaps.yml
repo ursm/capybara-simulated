@@ -22,7 +22,6 @@ Document:
   - convertPointFromNode
   - convertQuadFromNode
   - convertRectFromNode
-  - createCDATASection
   - fonts
   - fragmentDirective
   - fullscreen

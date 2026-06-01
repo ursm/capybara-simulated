@@ -264,8 +264,14 @@ dom/nodes/Document-contentType/contentType/contenttype_txt.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/contenttype_xml.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
-dom/nodes/Document-createCDATASection-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Document-createCDATASection.html: HARNESS_ERROR
+dom/nodes/Document-createCDATASection-xhtml.xhtml:
+- Creating a CDATA section containing the string "]]>" must throw
+- createCDATASection("-b")
+- createCDATASection("\v")
+- createCDATASection("a -- b")
+- createCDATASection("a-")
+- createCDATASection(null)
+- createCDATASection(undefined)
 dom/nodes/Document-createComment.html:
 - createComment(null)
 - createComment(undefined)
@@ -356,8 +362,6 @@ dom/nodes/Element-removeAttribute.html:
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-siblingElement-null-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-tagName.html:
-- tagName should be updated when changing ownerDocument
 dom/nodes/Element-webkitMatchesSelector.html: HARNESS_ERROR
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
 dom/nodes/MutationObserver-callback-arguments.html:
@@ -379,7 +383,6 @@ dom/nodes/MutationObserver-sanity.html:
 - Should throw if attributeOldValue is true and attributes is false
 - Should throw if characterDataOldValue is true and characterData is false
 - Should throw if none of childList, attributes, characterData are true
-dom/nodes/MutationObserver-textContent.html: HARNESS_ERROR
 dom/nodes/Node-appendChild.html:
 - Adopting a non-orphan
 - Adopting an orphan
@@ -403,7 +406,6 @@ dom/nodes/Node-cloneNode.html:
 - implementation.createDocument
 dom/nodes/Node-insertBefore.html:
 - Inserting a node before itself should not move the node
-- Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
@@ -424,8 +426,6 @@ dom/nodes/Node-nodeName-xhtml.xhtml:
 - For Element nodes, nodeName should return the same as tagName.
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
-dom/nodes/Node-normalize.html:
-- Non-text nodes with empty textContent values.
 dom/nodes/Node-parentNode.html: HARNESS_ERROR
 dom/nodes/Node-removeChild.html:
 - Calling removeChild on a comment from a frame document with no children should throw
@@ -447,14 +447,11 @@ dom/nodes/Node-removeChild.html:
   it.
 dom/nodes/Node-replaceChild.html:
 - If the context node is a document, inserting a new doctype should work.
-- If the context node is not a node that can contain children, a HierarchyRequestError
-  exception should be thrown
 - Replacing a node with itself should not move the node
 - Replacing the document element with a DocumentFragment containing a single element
   and comments should work.
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
-- Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 - replaceChild should work in the presence of mutation events.
 dom/nodes/NodeList-Iterable.html:
 - live NodeLists are for-of iterable and update appropriately
@@ -769,24 +766,6 @@ dom/ranges/Range-intersectsNode-binding.html:
   a TypeError.
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
-dom/ranges/StaticRange-constructor.html:
-- Construct collapsed static range
-- Construct inverted static range
-- Construct static range with CDATASection container
-- Construct static range with Comment container
-- Construct static range with Document container
-- Construct static range with DocumentFragment container
-- Construct static range with Element container
-- Construct static range with Element startContainer and Text endContainer
-- Construct static range with ProcessingInstruction container
-- Construct static range with Text container
-- Construct static range with Text startContainer and Element endContainer
-- Construct static range with endpoints in disconnected documents
-- Construct static range with endpoints in disconnected trees
-- Construct static range with offset greater than length
-- Construct static range with standalone Node container
-- Throw on DocumentType or Attr container
-- Throw on missing or invalid arguments
 dom/ranges/tentative/OpaqueRange-auto-disconnect.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-basic.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-disconnect.html: HARNESS_ERROR
