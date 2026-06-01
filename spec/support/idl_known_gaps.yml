@@ -31,7 +31,6 @@ Document:
   - hasRedemptionRecord
   - measureElement
   - measureText
-  - moveBefore
   - namedFlows
   - open
   - permissionsPolicy
@@ -61,7 +60,6 @@ Element:
   - getBoxQuads
   - getRegionFlowRanges
   - getSpatialNavigationContainer
-  - moveBefore
   - part
   - pseudo
   - regionOverset

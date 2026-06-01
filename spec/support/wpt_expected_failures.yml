@@ -587,49 +587,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.
 dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.html:
 - 'Node.appendChild: inserting three scripts from a div'
 dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html: HARNESS_ERROR
-dom/nodes/moveBefore/Node-moveBefore.html:
-- If node is a DocumentFragment with an element and parent is a document with another
-  element, then throw a HierarchyRequestError DOMException.
-- If node is a DocumentFragment with multiple elements and parent is a document, then
-  throw a HierarchyRequestError DOMException.
-- If node is a Text node and parent is a document, then throw a HierarchyRequestError
-  DOMException.
-- If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
-  DOMException.
-- If node is a doctype and parent is a document with another doctype, then throw a
-  HierarchyRequestError DOMException.
-- If node is a doctype and parent is not a document, then throw a HierarchyRequestError
-  DOMException.
-- If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError
-  DOMException.
-- If node is an Element and parent is a document with another element, then throw
-  a HierarchyRequestError DOMException.
-- If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction,
-  or Comment node, then throw a HierarchyRequestError DOMException.
-- Invalid node hierarchy with null old parent does not crash
-- Move disconnected iframe does not crash
-- Moving a node before itself should not move the node
-- Moving a node from a disconnected container to a disconnected new parent in the
-  same tree succeeds
-- Moving a node from a disconnected container to a disconnected new parent in the
-  same tree succeeds,also across shadow-roots
-- Moving a node from a disconnected container to a disconnected new parent without
-  a shared ancestor throws a HIERARCHY_REQUEST_ERR
-- Moving a node from connected->disconnected throws a HIERARCHY_REQUEST_ERR
-- Moving a node from disconnected->connected throws a HIERARCHY_REQUEST_ERR
-- No custom element callbacks are run during disconnected moveBefore()
-- moveBefore on a paragraph's Text node child
-- moveBefore with an Element or CharacterData succeeds
-- moveBefore with reference child whose parent is NOT the destination parent (context
-  node) throws a NotFoundError.
-- moveBefore() CharacterData into a Document
-- moveBefore() into a Document throws a HierarchyRequestError
-- moveBefore() on a cross-document target node throws a HierarchyRequestError
-- moveBefore() on disconnected parent throws a HierarchyRequestError
-- moveBefore() returns undefined
-- moveBefore() with a non-{Element, CharacterData} throws a HierarchyRequestError
-- moveBefore() with disconnected target node throws a HierarchyRequestError
-- moveBefore() with node being an inclusive ancestor of parent throws a HierarchyRequestError
 dom/nodes/moveBefore/child-style-preserve.html: HARNESS_ERROR
 dom/nodes/moveBefore/continue-css-animation-left.html: HARNESS_ERROR
 dom/nodes/moveBefore/continue-css-animation-transform.html: HARNESS_ERROR
@@ -652,19 +609,13 @@ dom/nodes/moveBefore/fire-focusin-focusout.html:
 - Don't fire focusin/out when moving to the same parent
 - Don't fire focusin/out when reparenting an element that has focus within
 - Don't fire focusin/out when reparenting focused element directly
-dom/nodes/moveBefore/focus-preserve.html:
-- when reparenting a focused element into a hidden parent, reset the document focus
-- when reparenting a focused element into an inert parent, reset the document focus
-- when reparenting an ancestor of an focused element into a hidden parent, reset the
-  document focus
-- when reparenting an element, don't automatically reset the document focus
+dom/nodes/moveBefore/focus-preserve.html: HARNESS_ERROR
 dom/nodes/moveBefore/focus-within.html:
 - ":focus-within should be eventually up to date when moving to a subtree that would
   become inert via style"
 - ":focus-within should be eventually up to date when moving to an inert subtree"
 - focus-within should be updated when reparenting an element that has focus within
 - focus-within should be updated when reparenting focused element directly
-- focus-within should remain the same when moving to the same parent
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - Document#fullscreenElement
 dom/nodes/moveBefore/hover-style-update.html: HARNESS_ERROR
@@ -689,7 +640,6 @@ dom/nodes/moveBefore/moveBefore-size-query.html:
 - moveBefore() between different size containers invalidates target
 dom/nodes/moveBefore/mutation-observer.html:
 - "[Connected move] MutationObserver removal + insertion is tracked by moveBefore()"
-- "[Disconnected move] MutationObserver removal + insertion is tracked by moveBefore()"
 dom/nodes/moveBefore/nonce.html:
 - Element nonce content attribute is not cleared after move
 dom/nodes/moveBefore/object-crash-regression.html:
@@ -704,14 +654,8 @@ dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 - Option selectedness is updated on option and optgroup DOM moves
 dom/nodes/moveBefore/selection-preserve.html: HARNESS_ERROR
-dom/nodes/moveBefore/slotchange-events.html:
-- Moving a slot runs the assign slottables algorithm
-- Moving a slottable into and out out of a custom element fires 'slotchange' event
-- Moving default content into a slot fires 'slotchange' event
-- Moving default content out of a slot fires 'slotchange' event
+dom/nodes/moveBefore/slotchange-events.html: HARNESS_ERROR
 dom/nodes/moveBefore/style-applies.html: HARNESS_ERROR
-dom/nodes/moveBefore/throws-exception.html:
-- moveBefore() on a cross-document target node
 dom/nodes/prepend-on-Document.html:
 - Document.append() with only one element as an argument, on a Document having one
   child.
