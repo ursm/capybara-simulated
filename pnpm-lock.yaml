@@ -17,6 +17,9 @@ importers:
       css-what:
         specifier: ^8.0.0
         version: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
+      xpathway:
+        specifier: file:../xpathway
+        version: file:../xpathway
     devDependencies:
       '@webref/idl':
         specifier: ^3.79.0
@@ -233,6 +236,10 @@ packages:
     resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
     engines: {node: '>= 18'}
 
+  xpathway@file:../xpathway:
+    resolution: {directory: ../xpathway, type: directory}
+    engines: {node: '>=18'}
+
 snapshots:
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -383,3 +390,5 @@ snapshots:
       boolbase: 2.0.0
 
   webidl2@24.5.0: {}
+
+  xpathway@file:../xpathway: {}

@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "css-select": "^7.0.0",
-    "css-what": "^8.0.0"
+    "css-what": "^8.0.0",
+    "xpathway": "file:../xpathway"
   },
   "devDependencies": {
     "@webref/idl": "^3.79.0",

@@ -178,7 +178,7 @@ module Capybara
         @pool_lock   = Mutex.new
         @refill_busy = false
         # Every Context is built from the base snapshot (bridge +
-        # wgxpath). Library scripts (`<script src>`) get evaluated
+        # vendor bundle). Library scripts (`<script src>`) get evaluated
         # per-visit just like a real browser does on page navigation.
         # Pre-evaluating libraries into the snapshot heap is not safe:
         # jQuery's `readyList` Callbacks queue would carry `$(handler)`

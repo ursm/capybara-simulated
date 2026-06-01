@@ -18,27 +18,23 @@ module Capybara
     module RuntimeShared
       BRIDGE_JS         = File.expand_path('js/bridge.bundle.js',                 __dir__).freeze
       SNAPSHOT_STUBS_JS = File.expand_path('js/snapshot_stubs.js',                __dir__).freeze
-      WGXPATH_JS        = File.expand_path('../../../vendor/js/wgxpath.js',       __dir__).freeze
       VENDOR_BUNDLE_JS  = File.expand_path('../../../vendor/js/vendor.bundle.js', __dir__).freeze
 
       def self.snapshot_stubs_src = File.read(SNAPSHOT_STUBS_JS)
       def self.bridge_src         = File.read(BRIDGE_JS)
-      def self.wgxpath_src        = File.read(WGXPATH_JS)
       def self.vendor_bundle_src  = File.read(VENDOR_BUNDLE_JS)
 
       # Combined source baked into the V8 Snapshot / QuickJS bytecode.
       # Order matters: stubs first (so bridge's IIFE can reference the
       # `globalThis.__rackFetch` etc. slots), then the vendor bundle
-      # (so bridge can reference `globalThis.__csimVendor.cssSelect`),
-      # then bridge proper, then wgxpath, finally the install hook
-      # that ties wgxpath's `Document.prototype.evaluate` to the live
-      # document the bridge created.
+      # (so bridge can reference `globalThis.__csimVendor.cssSelect` and
+      # `.xpathway`), then bridge proper — which installs the xpathway-backed
+      # `Document.prototype.evaluate` itself (see js/src/xpath.js). The
+      # standalone xpathway engine in the vendor blob replaces the old wgxpath.
       def self.snapshot_src
         snapshot_stubs_src +
           vendor_bundle_src + ";\n" +
-          bridge_src +
-          wgxpath_src + ";\n" +
-          "wgxpath.install(globalThis);\n"
+          bridge_src
       end
 
       # Host fns whose body touches `Browser` — wrap with `safe_call`

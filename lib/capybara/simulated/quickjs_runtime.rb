@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # QuickJS-backed Runtime, alternate to `V8Runtime`. The DOM still lives
-# in JS (same bridge.js, same wgxpath); this class swaps the engine to
+# in JS (same bridge.js, same vendor bundle); this class swaps the engine to
 # trade JIT speed for ~10× smaller per-VM footprint — useful when the
 # scaling target is "many parallel workers on a fixed RAM budget"
 # rather than absolute per-spec wall time.
@@ -20,10 +20,10 @@ require_relative 'worker_runtime'
 module Capybara
   module Simulated
     class QuickJSRuntime
-      # Compile bridge.js + wgxpath into bytecode once per process. Every
-      # per-visit VM replays this in ~10–20 ms (PR 31's microbench: 504KB
-      # bundle in ~4 ms; bridge.js + wgxpath is ~10× larger). Side
-      # effects (class definitions, `wgxpath.install(globalThis)`) run on
+      # Compile the vendor bundle + bridge.js into bytecode once per process.
+      # Every per-visit VM replays this in ~10–20 ms (PR 31's microbench: 504KB
+      # bundle in ~4 ms; vendor + bridge is ~10× larger). Side effects (class
+      # definitions, the xpathway `Document.prototype.evaluate` install) run on
       # each new VM — `compile` itself is pure (`COMPILE_ONLY` flag).
       @@bridge_lock     = Mutex.new
       @@bridge_runnable = nil
@@ -219,10 +219,10 @@ module Capybara
         features:       [Quickjs::POLYFILL_INTL].freeze,
         max_stack_size: 0,
         # quickjs.rb's 128 MB default trips "out of memory in regexp
-        # execution" inside wgxpath's `normalize-space` on class-
-        # attribute-heavy polls (cumulative heap, not a single
-        # allocation). 512 MB clears the ceiling without idle cost —
-        # `JS_SetMemoryLimit` is a malloc ceiling, not a reservation.
+        # execution" on class-attribute-heavy polls and the heaviest
+        # Mastodon hydrate (cumulative heap, not a single allocation).
+        # 512 MB clears the ceiling without idle cost — `JS_SetMemoryLimit`
+        # is a malloc ceiling, not a reservation.
         memory_limit:   512 * 1024 * 1024,
         # `drain_jobs!` loops `JS_ExecutePendingJob` until the
         # queue empties — but Forem's article-feed render schedules
