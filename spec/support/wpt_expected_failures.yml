@@ -229,8 +229,6 @@ dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
 dom/nodes/Comment-constructor.html: HARNESS_ERROR
-dom/nodes/Comment-in-doctype.xhtml:
-- 'XML: Comment in doctype internal subset'
 dom/nodes/DOMImplementation-createHTMLDocument.html:
 - 'createHTMLDocument(): URL parsing'
 - 'createHTMLDocument(): document location getter is null'
@@ -297,13 +295,6 @@ dom/nodes/Document-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
-dom/nodes/DocumentType-literal-xhtml.xhtml:
-- DocumentType literals
-dom/nodes/Element-childElement-null-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-childElementCount-dynamic-add-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-childElementCount-dynamic-remove-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-childElementCount-nochild-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-childElementCount-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-children.html:
 - HTMLCollection edge cases
 - HTMLCollection edge cases 1
@@ -312,9 +303,8 @@ dom/nodes/Element-closest.html:
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
 - Element.closest with context node 'test4' and selector ':scope'
 - Element.closest with context node 'test4' and selector 'select > :scope'
-dom/nodes/Element-firstElementChild-entity-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-firstElementChild-namespace-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-firstElementChild-xhtml.xhtml: HARNESS_ERROR
+dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
+- Entity References
 dom/nodes/Element-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html: HARNESS_ERROR
@@ -332,13 +322,10 @@ dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
 dom/nodes/Element-insertAdjacentElement.html:
 - Inserting to an invalid location should cause a Syntax Error exception
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
-dom/nodes/Element-lastElementChild-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-matches-namespaced-elements.html:
 - has a namespace, *|, matches
 - has a namespace, *|, webkitMatchesSelector
 dom/nodes/Element-matches.html: HARNESS_ERROR
-dom/nodes/Element-nextElementSibling-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Element-previousElementSibling-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-removeAttribute.html:
 - removeAttribute should remove the first attribute, irrespective of namespace, when
   the first attribute is in a namespace
@@ -346,7 +333,6 @@ dom/nodes/Element-removeAttribute.html:
   the first attribute is not in a namespace
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
-dom/nodes/Element-siblingElement-null-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-webkitMatchesSelector.html: HARNESS_ERROR
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
 dom/nodes/MutationObserver-callback-arguments.html:
@@ -391,14 +377,10 @@ dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
-dom/nodes/Node-lookupPrefix.xhtml:
-- Node.lookupPrefix 9
 dom/nodes/Node-mutation-adoptNode.html:
 - Adopting an element into a different document update's the element's owner doc as
   well as the owner docs of it's attributes
 - simple append of foreign div with text
-dom/nodes/Node-nodeName-xhtml.xhtml:
-- For DocumentType nodes, nodeName should return the name.
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
 dom/nodes/Node-parentNode.html: HARNESS_ERROR
@@ -454,13 +436,8 @@ dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
 dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR
-dom/nodes/ProcessingInstruction-escapes-1.xhtml: HARNESS_ERROR
-dom/nodes/ProcessingInstruction-in-doctype.xhtml:
-- 'XML: Processing instruction in doctype internal subset'
-dom/nodes/ProcessingInstruction-literal-1.xhtml:
-- "<?xml?> is not a ProcessingInstruction"
-dom/nodes/ProcessingInstruction-literal-2.xhtml:
-- ProcessingInstruction literals
+dom/nodes/ProcessingInstruction-escapes-1.xhtml:
+- ProcessingInstruction numeric escapes
 dom/nodes/Text-constructor.html: HARNESS_ERROR
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
