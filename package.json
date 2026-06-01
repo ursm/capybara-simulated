@@ -13,7 +13,7 @@
     "css-select": "^7.0.0",
     "css-tree": "^3.2.1",
     "css-what": "^8.0.0",
-    "xpathway": "^1.0.2"
+    "xpathway": "^1.0.3"
   },
   "devDependencies": {
     "@webref/idl": "^3.79.0",

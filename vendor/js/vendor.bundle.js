@@ -3469,7 +3469,7 @@ var __csimVendor = (() => {
   __name(is2, "is");
   var dist_default2 = selectAll;
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/index.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/index.js
   var src_exports = {};
   __export(src_exports, {
     AXES: () => AXES,
@@ -3492,7 +3492,7 @@ var __csimVendor = (() => {
     tokenize: () => tokenize
   });
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/errors.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/errors.js
   var XPathSyntaxError = class extends Error {
     static {
       __name(this, "XPathSyntaxError");
@@ -3513,7 +3513,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/lexer.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/lexer.js
   var T = {
     LPAREN: "LPAREN",
     RPAREN: "RPAREN",
@@ -3840,7 +3840,7 @@ var __csimVendor = (() => {
   }
   __name(readName, "readName");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/parser.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/parser.js
   var AXES = /* @__PURE__ */ new Set([
     "ancestor",
     "ancestor-or-self",
@@ -4110,7 +4110,7 @@ var __csimVendor = (() => {
   }
   __name(parse3, "parse");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/types.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/types.js
   var NodeSet = class {
     static {
       __name(this, "NodeSet");
@@ -4220,7 +4220,7 @@ var __csimVendor = (() => {
   }
   __name(expandExponential, "expandExponential");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/compare.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/compare.js
   var EQ_TESTS = {
     "=": /* @__PURE__ */ __name((x, y) => x === y, "="),
     "!=": /* @__PURE__ */ __name((x, y) => x !== y, "!=")
@@ -4300,7 +4300,7 @@ var __csimVendor = (() => {
   }
   __name(compareValueLiteral, "compareValueLiteral");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/node-types.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/node-types.js
   var ELEMENT = 1;
   var ATTRIBUTE = 2;
   var TEXT = 3;
@@ -4310,7 +4310,7 @@ var __csimVendor = (() => {
   var XML_NS = "http://www.w3.org/XML/1998/namespace";
   var XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/axes.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/axes.js
   function previousSibling(node, adapter) {
     if (adapter.previousSibling) return adapter.previousSibling(node);
     const parent = adapter.parent(node);
@@ -4340,6 +4340,19 @@ var __csimVendor = (() => {
     return out;
   }
   __name(collectDescendants, "collectDescendants");
+  function descendantsMatching(node, adapter, match, includeSelf) {
+    const out = [];
+    if (includeSelf && match(node)) out.push(node);
+    const stack = [];
+    pushChildrenReversed(node, adapter, stack);
+    while (stack.length) {
+      const n = stack.pop();
+      if (match(n)) out.push(n);
+      pushChildrenReversed(n, adapter, stack);
+    }
+    return out;
+  }
+  __name(descendantsMatching, "descendantsMatching");
   function pushChildrenReversed(node, adapter, stack) {
     const kids = adapter.childNodes(node);
     for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
@@ -4357,7 +4370,7 @@ var __csimVendor = (() => {
   __name(ancestors, "ancestors");
   var AXES2 = {
     self: /* @__PURE__ */ __name((node) => [node], "self"),
-    child: /* @__PURE__ */ __name((node, adapter) => adapter.childNodes(node).slice(), "child"),
+    child: /* @__PURE__ */ __name((node, adapter) => adapter.childNodes(node), "child"),
     parent: /* @__PURE__ */ __name((node, adapter) => {
       const p = adapter.parent(node);
       return p ? [p] : [];
@@ -4403,19 +4416,19 @@ var __csimVendor = (() => {
       out.reverse();
       return out;
     }, "preceding"),
-    attribute: /* @__PURE__ */ __name((node, adapter) => adapter.attributes(node).slice(), "attribute"),
+    attribute: /* @__PURE__ */ __name((node, adapter) => adapter.attributes(node), "attribute"),
     // Namespace nodes are not modeled by the target DOMs (§5/§12); the namespace
     // axis is always empty. The `namespace::` syntax still parses and evaluates.
     namespace: /* @__PURE__ */ __name(() => [], "namespace")
   };
-  function axisNodes(axis, node, adapter) {
+  function resolveAxis(axis) {
     const fn = AXES2[axis];
     if (!fn) throw new Error(`unsupported axis: ${axis}`);
-    return fn(node, adapter);
+    return fn;
   }
-  __name(axisNodes, "axisNodes");
+  __name(resolveAxis, "resolveAxis");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/nodetest.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/nodetest.js
   function principalType(axis) {
     return axis === "attribute" ? ATTRIBUTE : ELEMENT;
   }
@@ -4516,7 +4529,7 @@ var __csimVendor = (() => {
   }
   __name(isHtmlDocument, "isHtmlDocument");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/functions.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/functions.js
   function arity(name50, args, min, max = min) {
     if (args.length < min || args.length > max) {
       const range = min === max ? `${min}` : `${min}-${max}`;
@@ -4728,7 +4741,7 @@ var __csimVendor = (() => {
     }, "round")
   };
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/context.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/context.js
   function makeRootContext(node, adapter, { resolver = null, functions = coreFunctions } = {}) {
     return {
       node,
@@ -4756,7 +4769,7 @@ var __csimVendor = (() => {
   }
   __name(withNode, "withNode");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/evaluate.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/evaluate.js
   function evaluate(ast, ctx) {
     switch (ast.type) {
       case "Literal":
@@ -4903,17 +4916,29 @@ var __csimVendor = (() => {
   __name(evaluatePath, "evaluatePath");
   var DISJOINT_AXES = /* @__PURE__ */ new Set(["self", "child", "attribute", "namespace"]);
   function evaluateStep(step, inputNodes, ctx, html) {
-    const { adapter } = ctx;
     const out = [];
+    if (inputNodes.length === 0) return out;
+    const { adapter } = ctx;
     const seen = inputNodes.length > 1 && !DISJOINT_AXES.has(step.axis) ? /* @__PURE__ */ new Set() : null;
     const test = step.nodeTest;
     const matchesAll = test.kind === "type" && test.name === "node";
+    const fuseDescendant = !matchesAll && (step.axis === "descendant" || step.axis === "descendant-or-self");
+    const includeSelf = step.axis === "descendant-or-self";
+    const match = fuseDescendant ? (n) => matchesNodeTest(n, test, step.axis, adapter, ctx.resolver, html) : null;
+    const axisFn = fuseDescendant ? null : resolveAxis(step.axis);
+    const predicates = step.predicates;
+    const purity = predicates.length ? predicates.map(isPureNodeSet) : null;
     for (const node of inputNodes) {
-      let candidates = axisNodes(step.axis, node, adapter);
-      if (!matchesAll) {
-        candidates = candidates.filter((n) => matchesNodeTest(n, test, step.axis, adapter, ctx.resolver, html));
+      let candidates;
+      if (fuseDescendant) {
+        candidates = descendantsMatching(node, adapter, match, includeSelf);
+      } else {
+        candidates = axisFn(node, adapter);
+        if (!matchesAll) {
+          candidates = candidates.filter((n) => matchesNodeTest(n, test, step.axis, adapter, ctx.resolver, html));
+        }
       }
-      candidates = applyPredicates(candidates, step.predicates, ctx, html);
+      if (purity) candidates = applyPredicates(candidates, predicates, purity, ctx, html);
       if (seen) {
         for (const n of candidates) {
           if (!seen.has(n)) {
@@ -4936,11 +4961,12 @@ var __csimVendor = (() => {
     return false;
   }
   __name(isPureNodeSet, "isPureNodeSet");
-  function applyPredicates(nodes, predicates, ctx, html) {
+  function applyPredicates(nodes, predicates, purity, ctx, html) {
     let current = nodes;
-    for (const predicate of predicates) {
+    for (let p = 0; p < predicates.length; p++) {
+      const predicate = predicates[p];
+      const existence = purity[p];
       const size = current.length;
-      const existence = isPureNodeSet(predicate);
       const kept = [];
       for (let i = 0; i < current.length; i++) {
         const position = i + 1;
@@ -4988,7 +5014,8 @@ var __csimVendor = (() => {
       throw new XPathTypeError("predicate applied to a non-node-set value");
     }
     const ordered = value.ordered(ctx.adapter).slice();
-    return new NodeSet(applyPredicates(ordered, ast.predicates, ctx, ctx.html), true);
+    const purity = ast.predicates.map(isPureNodeSet);
+    return new NodeSet(applyPredicates(ordered, ast.predicates, purity, ctx, ctx.html), true);
   }
   __name(evaluateFilter, "evaluateFilter");
   function evaluateFunction(ast, ctx) {
@@ -5004,7 +5031,7 @@ var __csimVendor = (() => {
   }
   __name(evaluateFunction, "evaluateFunction");
 
-  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/api.js
+  // node_modules/.pnpm/xpathway@1.0.3/node_modules/xpathway/src/api.js
   var ANY_TYPE = 0;
   var NUMBER_TYPE = 1;
   var STRING_TYPE = 2;
