@@ -965,7 +965,6 @@ dom/nodes/Element-matches-namespaced-elements.html:
 - has a namespace, *|, matches
 - has a namespace, *|, webkitMatchesSelector
 dom/nodes/Element-matches.html:
-- DIV Element.matches no parameter
 - DIV Element.matches(null)
 - DIV Element.matches(undefined)
 - 'Detached Element.matches: Attribute presence selector, matching attribute with
@@ -1060,10 +1059,8 @@ dom/nodes/Element-matches.html:
 - 'In-document Element.matches: Unknown pseudo-class: div:linkexample'
 - 'In-document Element.matches: Unknown pseudo-element: ::example'
 - 'In-document Element.matches: Unknown pseudo-element: div::example'
-- NULL Element.matches no parameter
 - NULL Element.matches(null)
 - NULL Element.matches(undefined)
-- UNDEFINED Element.matches no parameter
 - UNDEFINED Element.matches(null)
 - UNDEFINED Element.matches(undefined)
 dom/nodes/Element-removeAttribute.html:
@@ -1074,7 +1071,6 @@ dom/nodes/Element-removeAttribute.html:
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-webkitMatchesSelector.html:
-- DIV Element.webkitMatchesSelector no parameter
 - DIV Element.webkitMatchesSelector(null)
 - DIV Element.webkitMatchesSelector(undefined)
 - 'Detached Element.webkitMatchesSelector: Attribute presence selector, matching attribute
@@ -1171,10 +1167,8 @@ dom/nodes/Element-webkitMatchesSelector.html:
 - 'In-document Element.webkitMatchesSelector: Unknown pseudo-class: div:linkexample'
 - 'In-document Element.webkitMatchesSelector: Unknown pseudo-element: ::example'
 - 'In-document Element.webkitMatchesSelector: Unknown pseudo-element: div::example'
-- NULL Element.webkitMatchesSelector no parameter
 - NULL Element.webkitMatchesSelector(null)
 - NULL Element.webkitMatchesSelector(undefined)
-- UNDEFINED Element.webkitMatchesSelector no parameter
 - UNDEFINED Element.webkitMatchesSelector(null)
 - UNDEFINED Element.webkitMatchesSelector(undefined)
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
@@ -1265,22 +1259,6 @@ dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html:
 - Detached Element.querySelector null
 - Detached Element.querySelector undefined
-- 'Detached Element.querySelector: ::after pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::after'
-- 'Detached Element.querySelector: ::before pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::before'
-- 'Detached Element.querySelector: ::first-letter pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-letter'
-- 'Detached Element.querySelector: ::first-line pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-line'
-- 'Detached Element.querySelector: :after pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:after'
-- 'Detached Element.querySelector: :before pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:before'
-- 'Detached Element.querySelector: :first-letter pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-letter'
-- 'Detached Element.querySelector: :first-line pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-line'
 - 'Detached Element.querySelector: Attribute presence selector, matching attribute
   with non-ASCII characters: ul[data-中文]'
 - 'Detached Element.querySelector: Attribute presence selector, matching title attribute,
@@ -1323,8 +1301,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelector: Namespace selector, matching element with any namespace:
   #any-namespace *|div'
 - 'Detached Element.querySelector: Relative selector: >*'
-- 'Detached Element.querySelector: Slotted selector (no matching closing paren): ::slotted(foo'
-- 'Detached Element.querySelector: Slotted selector: ::slotted(foo)'
 - 'Detached Element.querySelector: Undeclared namespace: :not(ns|div)'
 - 'Detached Element.querySelector: Undeclared namespace: ns|div'
 - 'Detached Element.querySelector: Unknown pseudo-class: :example'
@@ -1334,26 +1310,10 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelector: Unknown pseudo-element: div::example'
 - Detached Element.querySelectorAll null
 - Detached Element.querySelectorAll undefined
-- 'Detached Element.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::after'
-- 'Detached Element.querySelectorAll: ::before pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::before'
-- 'Detached Element.querySelectorAll: ::first-letter pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-letter'
-- 'Detached Element.querySelectorAll: ::first-line pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-line'
-- 'Detached Element.querySelectorAll: :after pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:after'
-- 'Detached Element.querySelectorAll: :before pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:before'
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching all empty
   elements: #pseudo-empty :empty'
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching empty
   p elements: #pseudo-empty p:empty'
-- 'Detached Element.querySelectorAll: :first-letter pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-letter'
-- 'Detached Element.querySelectorAll: :first-line pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-line'
 - 'Detached Element.querySelectorAll: Attribute presence selector, matching attribute
   with non-ASCII characters: ul[data-中文]'
 - 'Detached Element.querySelectorAll: Attribute presence selector, matching title
@@ -1396,9 +1356,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelectorAll: Namespace selector, matching element with any
   namespace: #any-namespace *|div'
 - 'Detached Element.querySelectorAll: Relative selector: >*'
-- 'Detached Element.querySelectorAll: Slotted selector (no matching closing paren):
-  ::slotted(foo'
-- 'Detached Element.querySelectorAll: Slotted selector: ::slotted(foo)'
 - 'Detached Element.querySelectorAll: Undeclared namespace: :not(ns|div)'
 - 'Detached Element.querySelectorAll: Undeclared namespace: ns|div'
 - 'Detached Element.querySelectorAll: Unknown pseudo-class: :example'
@@ -1408,22 +1365,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelectorAll: Unknown pseudo-element: div::example'
 - Document.querySelector null
 - Document.querySelector undefined
-- 'Document.querySelector: ::after pseudo-element (two-colon syntax) selector, not
-  matching any elements: #pseudo-element::after'
-- 'Document.querySelector: ::before pseudo-element (two-colon syntax) selector, not
-  matching any elements: #pseudo-element::before'
-- 'Document.querySelector: ::first-letter pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-letter'
-- 'Document.querySelector: ::first-line pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-line'
-- 'Document.querySelector: :after pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:after'
-- 'Document.querySelector: :before pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:before'
-- 'Document.querySelector: :first-letter pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-letter'
-- 'Document.querySelector: :first-line pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-line'
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
   elements: #head :link, #head :visited'
 - 'Document.querySelector: :target pseudo-class selector, matching the element referenced
@@ -1469,8 +1410,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Document.querySelector: Namespace selector, matching element with any namespace:
   #any-namespace *|div'
 - 'Document.querySelector: Relative selector: >*'
-- 'Document.querySelector: Slotted selector (no matching closing paren): ::slotted(foo'
-- 'Document.querySelector: Slotted selector: ::slotted(foo)'
 - 'Document.querySelector: Undeclared namespace: :not(ns|div)'
 - 'Document.querySelector: Undeclared namespace: ns|div'
 - 'Document.querySelector: Unknown pseudo-class: :example'
@@ -1481,26 +1420,10 @@ dom/nodes/ParentNode-querySelector-All.html:
 - Document.querySelectorAll null
 - Document.querySelectorAll tree order
 - Document.querySelectorAll undefined
-- 'Document.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::after'
-- 'Document.querySelectorAll: ::before pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::before'
-- 'Document.querySelectorAll: ::first-letter pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-letter'
-- 'Document.querySelectorAll: ::first-line pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-line'
-- 'Document.querySelectorAll: :after pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:after'
-- 'Document.querySelectorAll: :before pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:before'
 - 'Document.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
   #pseudo-empty :empty'
 - 'Document.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
   #pseudo-empty p:empty'
-- 'Document.querySelectorAll: :first-letter pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-letter'
-- 'Document.querySelectorAll: :first-line pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-line'
 - 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
   no elements: #head :link, #head :visited'
 - 'Document.querySelectorAll: :target pseudo-class selector, matching the element
@@ -1547,8 +1470,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Document.querySelectorAll: Namespace selector, matching element with any namespace:
   #any-namespace *|div'
 - 'Document.querySelectorAll: Relative selector: >*'
-- 'Document.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo'
-- 'Document.querySelectorAll: Slotted selector: ::slotted(foo)'
 - 'Document.querySelectorAll: Undeclared namespace: :not(ns|div)'
 - 'Document.querySelectorAll: Undeclared namespace: ns|div'
 - 'Document.querySelectorAll: Unknown pseudo-class: :example'
@@ -1628,22 +1549,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Empty Element.querySelectorAll: Unknown pseudo-element: div::example'
 - Fragment.querySelector null
 - Fragment.querySelector undefined
-- 'Fragment.querySelector: ::after pseudo-element (two-colon syntax) selector, not
-  matching any elements: #pseudo-element::after'
-- 'Fragment.querySelector: ::before pseudo-element (two-colon syntax) selector, not
-  matching any elements: #pseudo-element::before'
-- 'Fragment.querySelector: ::first-letter pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-letter'
-- 'Fragment.querySelector: ::first-line pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-line'
-- 'Fragment.querySelector: :after pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:after'
-- 'Fragment.querySelector: :before pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:before'
-- 'Fragment.querySelector: :first-letter pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-letter'
-- 'Fragment.querySelector: :first-line pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-line'
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
 - 'Fragment.querySelector: Attribute presence selector, matching attribute with non-ASCII
@@ -1687,8 +1592,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelector: Namespace selector, matching element with any namespace:
   #any-namespace *|div'
 - 'Fragment.querySelector: Relative selector: >*'
-- 'Fragment.querySelector: Slotted selector (no matching closing paren): ::slotted(foo'
-- 'Fragment.querySelector: Slotted selector: ::slotted(foo)'
 - 'Fragment.querySelector: Undeclared namespace: :not(ns|div)'
 - 'Fragment.querySelector: Undeclared namespace: ns|div'
 - 'Fragment.querySelector: Unknown pseudo-class: :example'
@@ -1698,26 +1601,10 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelector: Unknown pseudo-element: div::example'
 - Fragment.querySelectorAll null
 - Fragment.querySelectorAll undefined
-- 'Fragment.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::after'
-- 'Fragment.querySelectorAll: ::before pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::before'
-- 'Fragment.querySelectorAll: ::first-letter pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-letter'
-- 'Fragment.querySelectorAll: ::first-line pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::first-line'
-- 'Fragment.querySelectorAll: :after pseudo-element (one-colon syntax) selector, not
-  matching any elements: #pseudo-element:after'
-- 'Fragment.querySelectorAll: :before pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:before'
 - 'Fragment.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
   #pseudo-empty :empty'
 - 'Fragment.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
   #pseudo-empty p:empty'
-- 'Fragment.querySelectorAll: :first-letter pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-letter'
-- 'Fragment.querySelectorAll: :first-line pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:first-line'
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
 - 'Fragment.querySelectorAll: Attribute presence selector, matching attribute with
@@ -1762,8 +1649,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelectorAll: Namespace selector, matching element with any namespace:
   #any-namespace *|div'
 - 'Fragment.querySelectorAll: Relative selector: >*'
-- 'Fragment.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo'
-- 'Fragment.querySelectorAll: Slotted selector: ::slotted(foo)'
 - 'Fragment.querySelectorAll: Undeclared namespace: :not(ns|div)'
 - 'Fragment.querySelectorAll: Undeclared namespace: ns|div'
 - 'Fragment.querySelectorAll: Unknown pseudo-class: :example'
@@ -1773,22 +1658,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelectorAll: Unknown pseudo-element: div::example'
 - In-document Element.querySelector null
 - In-document Element.querySelector undefined
-- 'In-document Element.querySelector: ::after pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::after'
-- 'In-document Element.querySelector: ::before pseudo-element (two-colon syntax) selector,
-  not matching any elements: #pseudo-element::before'
-- 'In-document Element.querySelector: ::first-letter pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-letter'
-- 'In-document Element.querySelector: ::first-line pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-line'
-- 'In-document Element.querySelector: :after pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:after'
-- 'In-document Element.querySelector: :before pseudo-element (one-colon syntax) selector,
-  not matching any elements: #pseudo-element:before'
-- 'In-document Element.querySelector: :first-letter pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-letter'
-- 'In-document Element.querySelector: :first-line pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-line'
 - 'In-document Element.querySelector: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
 - 'In-document Element.querySelector: Attribute presence selector, matching attribute
@@ -1833,9 +1702,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelector: Namespace selector, matching element with any
   namespace: #any-namespace *|div'
 - 'In-document Element.querySelector: Relative selector: >*'
-- 'In-document Element.querySelector: Slotted selector (no matching closing paren):
-  ::slotted(foo'
-- 'In-document Element.querySelector: Slotted selector: ::slotted(foo)'
 - 'In-document Element.querySelector: Undeclared namespace: :not(ns|div)'
 - 'In-document Element.querySelector: Undeclared namespace: ns|div'
 - 'In-document Element.querySelector: Unknown pseudo-class: :example'
@@ -1845,26 +1711,10 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelector: Unknown pseudo-element: div::example'
 - In-document Element.querySelectorAll null
 - In-document Element.querySelectorAll undefined
-- 'In-document Element.querySelectorAll: ::after pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::after'
-- 'In-document Element.querySelectorAll: ::before pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::before'
-- 'In-document Element.querySelectorAll: ::first-letter pseudo-element (two-colon
-  syntax) selector, not matching any elements: #pseudo-element::first-letter'
-- 'In-document Element.querySelectorAll: ::first-line pseudo-element (two-colon syntax)
-  selector, not matching any elements: #pseudo-element::first-line'
-- 'In-document Element.querySelectorAll: :after pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:after'
-- 'In-document Element.querySelectorAll: :before pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:before'
 - 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching all
   empty elements: #pseudo-empty :empty'
 - 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching empty
   p elements: #pseudo-empty p:empty'
-- 'In-document Element.querySelectorAll: :first-letter pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-letter'
-- 'In-document Element.querySelectorAll: :first-line pseudo-element (one-colon syntax)
-  selector, not matching any elements: #pseudo-element:first-line'
 - 'In-document Element.querySelectorAll: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
 - 'In-document Element.querySelectorAll: Attribute presence selector, matching attribute
@@ -1909,9 +1759,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelectorAll: Namespace selector, matching element with
   any namespace: #any-namespace *|div'
 - 'In-document Element.querySelectorAll: Relative selector: >*'
-- 'In-document Element.querySelectorAll: Slotted selector (no matching closing paren):
-  ::slotted(foo'
-- 'In-document Element.querySelectorAll: Slotted selector: ::slotted(foo)'
 - 'In-document Element.querySelectorAll: Undeclared namespace: :not(ns|div)'
 - 'In-document Element.querySelectorAll: Undeclared namespace: ns|div'
 - 'In-document Element.querySelectorAll: Unknown pseudo-class: :example'
