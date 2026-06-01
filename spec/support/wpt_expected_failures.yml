@@ -75,9 +75,41 @@ dom/collections/namednodemap-supported-property-names.html:
 - Object.getOwnPropertyNames on NamedNodeMap of input
 dom/events/Body-FrameSet-Event-Handlers.html:
 - Forward HTMLBodyElement.onblur to Window
+- Forward HTMLBodyElement.onerror to Window
+- Forward HTMLBodyElement.onfocus to Window
+- Forward HTMLBodyElement.onload to Window
+- Forward HTMLBodyElement.onresize to Window
+- Forward HTMLBodyElement.onscroll to Window
+- Forward HTMLFrameSetElement.onblur to Window
+- Forward HTMLFrameSetElement.onerror to Window
+- Forward HTMLFrameSetElement.onfocus to Window
+- Forward HTMLFrameSetElement.onload to Window
+- Forward HTMLFrameSetElement.onresize to Window
+- Forward HTMLFrameSetElement.onscroll to Window
 - Reflect HTMLBodyElement.onblur
+- Reflect HTMLBodyElement.onerror
+- Reflect HTMLBodyElement.onfocus
+- Reflect HTMLBodyElement.onload
+- Reflect HTMLBodyElement.onresize
+- Reflect HTMLBodyElement.onscroll
+- Reflect HTMLFrameSetElement.onblur
+- Reflect HTMLFrameSetElement.onerror
+- Reflect HTMLFrameSetElement.onfocus
+- Reflect HTMLFrameSetElement.onload
+- Reflect HTMLFrameSetElement.onresize
+- Reflect HTMLFrameSetElement.onscroll
 - Set HTMLBodyElement.onblur
+- Set HTMLBodyElement.onerror
+- Set HTMLBodyElement.onfocus
+- Set HTMLBodyElement.onload
+- Set HTMLBodyElement.onresize
+- Set HTMLBodyElement.onscroll
 - Set HTMLFrameSetElement.onblur
+- Set HTMLFrameSetElement.onerror
+- Set HTMLFrameSetElement.onfocus
+- Set HTMLFrameSetElement.onload
+- Set HTMLFrameSetElement.onresize
+- Set HTMLFrameSetElement.onscroll
 dom/events/CustomEvent.html:
 - First parameter to initCustomEvent should be mandatory.
 - initCustomEvent's default parameter values.
@@ -509,8 +541,6 @@ dom/nodes/ChildNode-replaceWith.html:
 - Text.replaceWith() with one sibling of child and child itself as arguments.
 - Text.replaceWith() with undefined as an argument.
 dom/nodes/Comment-constructor.html: HARNESS_ERROR
-dom/nodes/Comment-in-doctype.xhtml:
-- 'XML: Comment in doctype internal subset'
 dom/nodes/DOMImplementation-createDocument.html:
 - DOMImplementation.createDocument(namespace, qualifiedName, doctype)
 dom/nodes/DOMImplementation-createHTMLDocument.html:
@@ -531,7 +561,6 @@ dom/nodes/Document-adoptNode.html:
 - Adopting a Document should throw.
 - Adopting an Element called ':good:times:' should work.
 - Adopting an Element called 'x<' should work.
-- Explicitly adopting a DocumentType should work.
 dom/nodes/Document-characterSet-normalization-1.html: HARNESS_ERROR
 dom/nodes/Document-characterSet-normalization-2.html: HARNESS_ERROR
 dom/nodes/Document-constructor.html:
@@ -636,10 +665,6 @@ dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
 dom/nodes/Document-importNode.html:
 - Import an Attr node with namespace/prefix correctly.
-dom/nodes/DocumentType-literal-xhtml.xhtml:
-- DocumentType literals
-dom/nodes/DocumentType-literal.html:
-- DocumentType literals
 dom/nodes/Element-childElement-null-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-add-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-remove-xhtml.xhtml: HARNESS_ERROR
@@ -742,7 +767,6 @@ dom/nodes/Node-appendChild.html:
 - Adopting a non-orphan
 - Adopting an orphan
 - Appending a document
-- Appending to a doctype
 dom/nodes/Node-baseURI.html:
 - For attributes in elements belonging to document fragments in document, baseURI
   should be document URL
@@ -751,11 +775,6 @@ dom/nodes/Node-baseURI.html:
 - For attributes in elements belonging to document, baseURI should be document URL
 - For attributes in elements unassigned to document, baseURI should be document URL
 - For attributes unassigned to element, baseURI should be document URL
-- For elements belonging to document fragments in document, baseURI should be document
-  URL
-- For elements belonging to document fragments, baseURI should be document URL
-- For elements belonging to document, baseURI should be document URL
-- For elements unassigned to document, baseURI should be document URL
 dom/nodes/Node-childNodes.html:
 - Caching of Node.childNodes
 - Node.childNodes on a Document.
@@ -774,54 +793,11 @@ dom/nodes/Node-cloneNode-svg.html:
 - cloned <use> should have the right properties
 - cloned <use>'s xlink:href attribute should have the right properties
 dom/nodes/Node-cloneNode.html:
-- Node with custom prototype
 - createAttribute
 - createAttributeNS
-- createElement(base)
-- createElement(br)
-- createElement(caption)
-- createElement(col)
-- createElement(colgroup)
-- createElement(del)
-- createElement(dir)
-- createElement(dl)
-- createElement(font)
-- createElement(frame)
-- createElement(frameset)
-- createElement(h1)
-- createElement(h2)
-- createElement(h3)
-- createElement(h4)
-- createElement(h5)
-- createElement(h6)
-- createElement(hr)
-- createElement(ins)
-- createElement(legend)
-- createElement(map)
-- createElement(meter)
-- createElement(p)
-- createElement(param)
-- createElement(pre)
-- createElement(q)
-- createElement(tbody)
-- createElement(td)
-- createElement(th)
-- createElement(title)
-- createElement(tr)
-- createElement(unknown)
 - createProcessingInstruction
 - implementation.createDocument
-dom/nodes/Node-constants.html:
-- Constants for createDocumentPosition on Element object.
-- Constants for createDocumentPosition on Node interface object.
-- Constants for createDocumentPosition on Node prototype object.
-- Constants for createDocumentPosition on Text object.
-- Constants for nodeType on Element object.
-- Constants for nodeType on Node interface object.
-- Constants for nodeType on Node prototype object.
-- Constants for nodeType on Text object.
 dom/nodes/Node-insertBefore.html:
-- Calling insertBefore an a leaf node DocumentType must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction
   must throw TypeError.
@@ -869,46 +845,12 @@ dom/nodes/Node-isSameNode.html:
 - documents should be compared on reference
 - processing instructions should be compared on reference
 dom/nodes/Node-lookupNamespaceURI.html:
-- Child element has namespace URI matching prefix
-- Child element should have XMLNS namespace
-- Child element should have null namespace
-- Child element should inherit baz namespace
-- Comment should inherit  baz namespace
-- Comment should inherit bar namespace
-- Comment should inherit baz namespace
-- Comment should inherit namespace URI matching prefix
 - Connected Attr has namespace URI matching "xml"
 - Connected Attr no namespace URI matching "xmlns"
 - Disconnected Attr has no namespace URI matching "xml"
 - Disconnected Attr has no namespace URI matching "xmlns"
-- Document has bar namespace
-- DocumentFragment is in default namespace, prefix ""
-- DocumentFragment is in default namespace, prefix null
-- DocumentFragment should have null namespace, prefix ""
-- DocumentFragment should have null namespace, prefix null
-- DocumentType is in default namespace, prefix ""
-- DocumentType is in default namespace, prefix "foo"
-- DocumentType is in default namespace, prefix "xmlns"
-- DocumentType is in default namespace, prefix null
-- DocumentType should have null namespace, prefix ""
-- DocumentType should have null namespace, prefix "foo"
-- DocumentType should have null namespace, prefix "xml"
-- DocumentType should have null namespace, prefix "xmlns"
-- DocumentType should have null namespace, prefix null
-- Element has bar namespace
-- Element has namespace URI matching prefix
-- Element should have XML namespace
-- Element should have XMLNS namespace
-- Element should have baz namespace, prefix ""
-- Element should have baz namespace, prefix null
-- Element should have namespace with xmlns prefix
-- Element should have null namespace, prefix ""
-- Element should have null namespace, prefix null
-- Empty namespace is not default, prefix ""
-- Empty namespace is not default, prefix null
-- For comment, inherited baz namespace is default
-- baz namespace is default
-- childNamespace is default for child
+- Document without documentElement has no namespace URI matching "xml"
+- Document without documentElement has no namespace URI matching "xmlns"
 dom/nodes/Node-lookupPrefix.xhtml:
 - Node.lookupPrefix
 - Node.lookupPrefix 10
@@ -922,19 +864,13 @@ dom/nodes/Node-mutation-adoptNode.html:
   well as the owner docs of it's attributes
 - simple append of foreign div with text
 dom/nodes/Node-nodeName-xhtml.xhtml:
-- For DocumentType nodes, nodeName should return the name.
 - For Element nodes, nodeName should return the same as tagName.
 - For ProcessingInstruction nodes, nodeName should return the target.
-dom/nodes/Node-nodeName.html:
-- For DocumentType nodes, nodeName should return the name.
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
-- DocumentType.nodeValue
 - ProcessingInstruction.nodeValue
 dom/nodes/Node-normalize.html:
 - Non-text nodes with empty textContent values.
-dom/nodes/Node-parentElement.html:
-- When the parent is a document, parentElement should be null (doctype)
 dom/nodes/Node-parentNode.html: HARNESS_ERROR
 dom/nodes/Node-removeChild.html:
 - Calling removeChild on a comment from a frame document with no children should throw
@@ -1059,8 +995,6 @@ dom/nodes/ParentNode-querySelector-escapes.html:
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
 dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR
 dom/nodes/ProcessingInstruction-escapes-1.xhtml: HARNESS_ERROR
-dom/nodes/ProcessingInstruction-in-doctype.xhtml:
-- 'XML: Processing instruction in doctype internal subset'
 dom/nodes/ProcessingInstruction-literal-2.xhtml:
 - ProcessingInstruction literals
 dom/nodes/Text-constructor.html: HARNESS_ERROR
