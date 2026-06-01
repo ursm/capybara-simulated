@@ -110,7 +110,50 @@ RSpec.describe 'CSS cascade visibility conformance' do
     { name: 'attribute presence selector',
       css:  '[data-hide] { display: none }',
       body: '<div data-hide id="t">x</div>',
-      expect: { 't' => false } }
+      expect: { 't' => false } },
+
+    # css-select matching edge cases (stress the matcher swap)
+    { name: 'escaped class selector (Tailwind-style)',
+      css:  '.lg\\:flex { display: none }',
+      body: '<div class="lg:flex" id="t">x</div>',
+      expect: { 't' => false } },
+
+    { name: 'attribute value operator',
+      css:  '[data-state="open"] { display: none }',
+      body: '<div data-state="open" id="t">x</div><div data-state="closed" id="t2">y</div>',
+      expect: { 't' => false, 't2' => true } },
+
+    { name: ':has() relational',
+      css:  '.card:has(.badge) { display: none }',
+      body: '<div class="card" id="t"><span class="badge">b</span></div>' \
+            '<div class="card" id="t2"><span>plain</span></div>',
+      expect: { 't' => false, 't2' => true } },
+
+    { name: ':nth-child positional',
+      css:  'li:nth-child(2) { display: none }',
+      body: '<ul><li id="t1">1</li><li id="t2">2</li><li id="t3">3</li></ul>',
+      expect: { 't1' => true, 't2' => false, 't3' => true } },
+
+    { name: ':not(compound) with tag',
+      css:  'div:not(.keep) { display: none }',
+      body: '<div id="t">x</div><div class="keep" id="t2">y</div>',
+      expect: { 't' => false, 't2' => true } },
+
+    # :nth-child carries a B-component (0,1,1) — it must BEAT a bare tag (0,0,1)
+    # when both set display. (Regression guard: undercounting :nth-child to
+    # (0,0,1) would tie and let source order pick the wrong winner.)
+    { name: ':nth-child specificity beats tag',
+      css:  'li:nth-child(2) { display: none } li { display: block }',
+      body: '<ul><li id="t1">1</li><li id="t2">2</li><li id="t3">3</li></ul>',
+      expect: { 't1' => true, 't2' => false, 't3' => true } },
+
+    # :target (CSS-only reveal via the URL fragment). css-select lacks :target
+    # natively; ported into userPseudos.
+    { name: ':target reveal',
+      css:  '.panel { display: none } .panel:target { display: block }',
+      body: '<div class="panel" id="p1">a</div><div class="panel" id="p2">b</div>',
+      hash: '#p1',
+      expect: { 'p1' => true, 'p2' => false } }
   ].freeze
 
   let(:app) {
@@ -131,7 +174,7 @@ RSpec.describe 'CSS cascade visibility conformance' do
   CASES.each_with_index do |c, idx|
     it "matches real-browser visibility: #{c[:name]}" do
       pending(c[:pending]) if c[:pending]
-      session.visit("/#{idx}")
+      session.visit("/#{idx}#{c[:hash]}")
       c[:expect].each do |id, want|
         got = session.find("##{id}", visible: :all).visible?
         expect(got).to eq(want), "##{id}: expected visible?=#{want}, got #{got} (#{c[:name]})"

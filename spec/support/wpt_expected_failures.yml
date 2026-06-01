@@ -1281,8 +1281,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   selector, not matching any elements: #pseudo-element:first-letter'
 - 'Detached Element.querySelector: :first-line pseudo-element (one-colon syntax) selector,
   not matching any elements: #pseudo-element:first-line'
-- 'Detached Element.querySelector: :target pseudo-class selector, matching the element
-  referenced by the URL fragment identifier: :target'
 - 'Detached Element.querySelector: Attribute presence selector, matching attribute
   with non-ASCII characters: ul[data-中文]'
 - 'Detached Element.querySelector: Attribute presence selector, matching title attribute,
@@ -1356,8 +1354,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   selector, not matching any elements: #pseudo-element:first-letter'
 - 'Detached Element.querySelectorAll: :first-line pseudo-element (one-colon syntax)
   selector, not matching any elements: #pseudo-element:first-line'
-- 'Detached Element.querySelectorAll: :target pseudo-class selector, matching the
-  element referenced by the URL fragment identifier: :target'
 - 'Detached Element.querySelectorAll: Attribute presence selector, matching attribute
   with non-ASCII characters: ul[data-中文]'
 - 'Detached Element.querySelectorAll: Attribute presence selector, matching title
@@ -1650,8 +1646,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   not matching any elements: #pseudo-element:first-line'
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelector: :target pseudo-class selector, matching the element referenced
-  by the URL fragment identifier: :target'
 - 'Fragment.querySelector: Attribute presence selector, matching attribute with non-ASCII
   characters: ul[data-中文]'
 - 'Fragment.querySelector: Attribute presence selector, matching title attribute,
@@ -1726,8 +1720,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   not matching any elements: #pseudo-element:first-line'
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelectorAll: :target pseudo-class selector, matching the element
-  referenced by the URL fragment identifier: :target'
 - 'Fragment.querySelectorAll: Attribute presence selector, matching attribute with
   non-ASCII characters: ul[data-中文]'
 - 'Fragment.querySelectorAll: Attribute presence selector, matching title attribute,
