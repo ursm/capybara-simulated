@@ -76,7 +76,6 @@ dom/events/CustomEvent.html:
 - initCustomEvent's default parameter values.
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
-- In window.document.cloneNode(true)
 dom/events/Event-dispatch-click.html: HARNESS_ERROR
 dom/events/Event-dispatch-detached-input-and-change.html: HARNESS_ERROR
 dom/events/Event-dispatch-handlers-changed.html:
@@ -395,15 +394,11 @@ dom/nodes/Node-childNodes.html:
 - Node.childNodes should be a live collection
 dom/nodes/Node-cloneNode-document-with-doctype.html:
 - Created with DOMParser
-- Created with the createDocument/createDocumentType
-- Created with the createHTMLDocument
 dom/nodes/Node-cloneNode-svg.html:
 - cloned <svg> should have the right properties
 - cloned <svg>'s xmlns:xlink attribute should have the right properties
 - cloned <use> should have the right properties
 - cloned <use>'s xlink:href attribute should have the right properties
-dom/nodes/Node-cloneNode.html:
-- implementation.createDocument
 dom/nodes/Node-insertBefore.html:
 - Inserting a node before itself should not move the node
 dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
@@ -486,14 +481,6 @@ dom/nodes/Text-constructor.html: HARNESS_ERROR
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
   order.
-dom/nodes/append-on-Document.html:
-- Document.append() with only one element as an argument, on a Document having no
-  child.
-- Document.append() with only one element as an argument, on a Document having one
-  child.
-- Document.append() with text as an argument, on a Document having no child.
-- Document.append() with two elements as the argument, on a Document having no child.
-- Document.append() without any argument, on a Document having no child.
 dom/nodes/attributes-namednodemap.html:
 - setNamedItem and removeNamedItem on `attributes` should add and remove fields from
   `attributes`
@@ -656,14 +643,6 @@ dom/nodes/moveBefore/select-option-optgroup.html:
 dom/nodes/moveBefore/selection-preserve.html: HARNESS_ERROR
 dom/nodes/moveBefore/slotchange-events.html: HARNESS_ERROR
 dom/nodes/moveBefore/style-applies.html: HARNESS_ERROR
-dom/nodes/prepend-on-Document.html:
-- Document.append() with only one element as an argument, on a Document having one
-  child.
-- Document.prepend() with only one element as an argument, on a Document having no
-  child.
-- Document.prepend() with text as an argument, on a Document having no child.
-- Document.prepend() with two elements as the argument, on a Document having no child.
-- Document.prepend() without any argument, on a Document having no child.
 dom/nodes/query-target-in-load-event.html: HARNESS_ERROR
 dom/nodes/querySelector-mixed-case.html: HARNESS_ERROR
 dom/nodes/remove-and-adopt-thcrash.html:
