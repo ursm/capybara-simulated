@@ -414,13 +414,16 @@ module Capybara
         end
       end
 
-      # JS-side selector parser throws with a `csim: ` prefix and the
-      # JS engine surfaces it as a `…::SyntaxError` (Quickjs via
-      # dynamic-named class, mini_racer via the wrapped JS Error). Match
-      # by class-name suffix so neither gem becomes a hard dependency.
+      # JS-side selector parser throws a `DOMException('csim: …',
+      # 'SyntaxError')`. The JS engine surfaces it as a `…::SyntaxError`
+      # (QuickJS via dynamic-named class) or, under mini_racer, a
+      # `MiniRacer::RuntimeError` whose message is `"SyntaxError: csim: …"`.
+      # Match the `csim: ` marker anywhere in the message (it's no longer at
+      # the start once the DOMException name is prefixed) or the class suffix,
+      # so neither gem becomes a hard dependency.
       def syntax_or_invalid_selector_error?(e)
         e.class.name.to_s.end_with?('::SyntaxError') ||
-          e.message.to_s.start_with?('csim: ')
+          e.message.to_s.include?('csim: ')
       end
 
       def xpath_shaped?(s)
