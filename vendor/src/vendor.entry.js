@@ -12,9 +12,9 @@
 
 import * as cssSelect from 'css-select';
 import * as cssWhat   from 'css-what';
-// xpathway: standalone XPath 1.0 engine, replaces the vendored wgxpath blob.
-// Currently a local `file:../xpathway` dep (pending an npm publish); only needed
-// when rebuilding this bundle — the gem ships the pre-built output.
+// xpathway: standalone XPath 1.0 engine (npm, MIT), replaces the vendored
+// wgxpath blob. Only needed when rebuilding this bundle — the gem ships the
+// pre-built output.
 import * as xpathway  from 'xpathway';
 
 export { cssSelect, cssWhat, xpathway };

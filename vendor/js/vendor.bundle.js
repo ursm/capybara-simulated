@@ -2554,7 +2554,7 @@ var __csimVendor = (() => {
   __name(is2, "is");
   var dist_default2 = selectAll;
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/index.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/index.js
   var src_exports = {};
   __export(src_exports, {
     AXES: () => AXES,
@@ -2577,7 +2577,7 @@ var __csimVendor = (() => {
     tokenize: () => tokenize
   });
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/errors.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/errors.js
   var XPathSyntaxError = class extends Error {
     static {
       __name(this, "XPathSyntaxError");
@@ -2598,7 +2598,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/lexer.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/lexer.js
   var T = {
     LPAREN: "LPAREN",
     RPAREN: "RPAREN",
@@ -2925,7 +2925,7 @@ var __csimVendor = (() => {
   }
   __name(readName, "readName");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/parser.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/parser.js
   var AXES = /* @__PURE__ */ new Set([
     "ancestor",
     "ancestor-or-self",
@@ -3195,7 +3195,7 @@ var __csimVendor = (() => {
   }
   __name(parse3, "parse");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/types.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/types.js
   var NodeSet = class {
     static {
       __name(this, "NodeSet");
@@ -3305,7 +3305,7 @@ var __csimVendor = (() => {
   }
   __name(expandExponential, "expandExponential");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/compare.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/compare.js
   var EQ_TESTS = {
     "=": /* @__PURE__ */ __name((x, y) => x === y, "="),
     "!=": /* @__PURE__ */ __name((x, y) => x !== y, "!=")
@@ -3375,7 +3375,7 @@ var __csimVendor = (() => {
   }
   __name(numericValues, "numericValues");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/node-types.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/node-types.js
   var ELEMENT = 1;
   var ATTRIBUTE = 2;
   var TEXT = 3;
@@ -3385,7 +3385,7 @@ var __csimVendor = (() => {
   var XML_NS = "http://www.w3.org/XML/1998/namespace";
   var XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/axes.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/axes.js
   function previousSibling(node, adapter) {
     if (adapter.previousSibling) return adapter.previousSibling(node);
     const parent = adapter.parent(node);
@@ -3490,7 +3490,7 @@ var __csimVendor = (() => {
   }
   __name(axisNodes, "axisNodes");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/nodetest.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/nodetest.js
   function principalType(axis) {
     return axis === "attribute" ? ATTRIBUTE : ELEMENT;
   }
@@ -3568,7 +3568,7 @@ var __csimVendor = (() => {
   }
   __name(isHtmlDocument, "isHtmlDocument");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/functions.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/functions.js
   function arity(name, args, min, max = min) {
     if (args.length < min || args.length > max) {
       const range = min === max ? `${min}` : `${min}-${max}`;
@@ -3780,7 +3780,7 @@ var __csimVendor = (() => {
     }, "round")
   };
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/context.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/context.js
   function makeRootContext(node, adapter, { resolver = null, functions = coreFunctions } = {}) {
     return { node, position: 1, size: 1, adapter, resolver, functions, cache: /* @__PURE__ */ new Map() };
   }
@@ -3798,7 +3798,7 @@ var __csimVendor = (() => {
   }
   __name(withNode, "withNode");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/evaluate.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/evaluate.js
   function evaluate(ast, ctx) {
     switch (ast.type) {
       case "Literal":
@@ -3962,7 +3962,7 @@ var __csimVendor = (() => {
   }
   __name(evaluateFunction, "evaluateFunction");
 
-  // node_modules/.pnpm/xpathway@file+..+xpathway/node_modules/xpathway/src/api.js
+  // node_modules/.pnpm/xpathway@1.0.0/node_modules/xpathway/src/api.js
   var ANY_TYPE = 0;
   var NUMBER_TYPE = 1;
   var STRING_TYPE = 2;
