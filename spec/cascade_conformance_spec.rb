@@ -153,7 +153,33 @@ RSpec.describe 'CSS cascade visibility conformance' do
       css:  '.panel { display: none } .panel:target { display: block }',
       body: '<div class="panel" id="p1">a</div><div class="panel" id="p2">b</div>',
       hash: '#p1',
-      expect: { 'p1' => true, 'p2' => false } }
+      expect: { 'p1' => true, 'p2' => false } },
+
+    # @layer cascade (all Chromium-cross-checked):
+    { name: '@layer rule applies (layered alone)',
+      css:  '@layer a { .x { display: none } }',
+      body: '<div class="x" id="t">x</div>',
+      expect: { 't' => false } },
+
+    { name: '@layer: unlayered beats layered (normal)',
+      css:  '@layer a { .y { display: none } } .y { display: block }',
+      body: '<div class="y" id="t">y</div>',
+      expect: { 't' => true } },
+
+    { name: '@layer: later-declared layer wins (normal)',
+      css:  '@layer o1, o2; @layer o1 { .z { display: none } } @layer o2 { .z { display: block } }',
+      body: '<div class="z" id="t">z</div>',
+      expect: { 't' => true } },
+
+    { name: '@layer: !important inverts — earlier layer wins',
+      css:  '@layer i1, i2; @layer i1 { .w { display: none !important } } @layer i2 { .w { display: block !important } }',
+      body: '<div class="w" id="t">w</div>',
+      expect: { 't' => false } },
+
+    { name: '@layer: parent direct content beats its sublayer',
+      css:  '@layer outer { .n { display: none } @layer inner { .n { display: block } } }',
+      body: '<div class="n" id="t">n</div>',
+      expect: { 't' => false } }
   ].freeze
 
   let(:app) {
