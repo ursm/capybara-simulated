@@ -12,7 +12,7 @@
   "dependencies": {
     "css-select": "^7.0.0",
     "css-what": "^8.0.0",
-    "xpathway": "^1.0.0"
+    "xpathway": "^1.0.1"
   },
   "devDependencies": {
     "@webref/idl": "^3.79.0",

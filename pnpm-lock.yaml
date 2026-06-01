@@ -18,8 +18,8 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
       xpathway:
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: ^1.0.1
+        version: 1.0.1
     devDependencies:
       '@webref/idl':
         specifier: ^3.79.0
@@ -236,8 +236,8 @@ packages:
     resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
     engines: {node: '>= 18'}
 
-  xpathway@1.0.0:
-    resolution: {integrity: sha512-Ppl9RD2nPFvcjQ2Dn+Yx3yQke8iddGCcM5y6UzJM+Ffc1xwRFI5774VYFu9qSDGDDXUKHxShIBMNSgm/50j6Ag==}
+  xpathway@1.0.1:
+    resolution: {integrity: sha512-+EzuHogb+zL1qxiFQNwWMrYwFkEKGsRLiitJpI5CePyHS6tdptveT7wluM6ZcuactD0fKdbOctko0XwXYeNmow==}
     engines: {node: '>=18'}
 
 snapshots:
@@ -391,4 +391,4 @@ snapshots:
 
   webidl2@24.5.0: {}
 
-  xpathway@1.0.0: {}
+  xpathway@1.0.1: {}
