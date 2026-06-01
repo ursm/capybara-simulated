@@ -719,34 +719,11 @@ dom/nodes/ParentNode-children.html:
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-escapes.html:
-- '"\ud83dsurrogateFirst" should never match with "#\\d83d surrogateFirst"'
-- '"ab�c" should match with "#ab\u0000c"'
 - '"eof\\" should never match with "#eof\\"'
 - '"eof�" should match with "#eof\\"'
 - '"hello" should match with "#hel\\6C o"'
-- '"large�" should match with "#large\\110000"'
-- '"large�" should match with "#large\\23456a"'
-- '"null�" should match with "#null\\0"'
-- '"null�" should match with "#null\\0000"'
-- '"outOfRange�" should match with "#outOfRange\\110000"'
-- '"outOfRange�" should match with "#outOfRange\\110030"'
-- '"outOfRange�" should match with "#outOfRange\\555555"'
-- '"outOfRange�" should match with "#outOfRange\\ffffff"'
 - '"spaces" should match with "#spac\\65\r\ns"'
-- '"surrogatePair��" should match with "#surrogatePair\\d83d\\dd11"'
-- "\"surrogatePair\U0001F511\" should never match with \"#surrogatePair\\\\d83d\\\\dd11\""
-- '"surrogateSecond\udd11" should never match with "#surrogateSecond\\dd11"'
-- '"surrogateSecond�" should match with "#surrogateSecond\\dd11"'
-- '"surrogate�" should match with "#surrogate\\0DBAC"'
-- '"surrogate�" should match with "#surrogate\\D800"'
-- '"zero\u0000" should never match with "#zero\\0"'
-- '"zero\u0000" should never match with "#zero\\000000"'
-- '"zero�" should match with "#zero\\0"'
-- '"zero�" should match with "#zero\\000000"'
 - '" " should match with "# "'
-- '"�" should match with "#\u0000"'
-- '"�surrogate" should match with "#\\00DFFFsurrogate"'
-- '"�surrogateFirst" should match with "#\\d83d surrogateFirst"'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
 dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR
 dom/nodes/ProcessingInstruction-escapes-1.xhtml: HARNESS_ERROR

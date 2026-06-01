@@ -1,0 +1,30 @@
+diff --git a/dist/parse.js b/dist/parse.js
+index f598b5c129a91c1f047f1312710793aa85211cb1..18e3c7e51f469ede37094473951cb9ffe70e960c 100644
+--- a/dist/parse.js
++++ b/dist/parse.js
+@@ -92,15 +92,16 @@ export function isTraversal(selector) {
+ const stripQuotesFromPseudos = new Set(["contains", "icontains"]);
+ // Unescape function taken from https://github.com/jquery/sizzle/blob/master/src/sizzle.js#L152
+ function funescape(_, escaped, escapedWhitespace) {
+-    const high = Number.parseInt(escaped, 16) - 0x1_00_00;
+-    // NaN means non-codepoint
+-    return Number.isNaN(high) || escapedWhitespace
+-        ? escaped
+-        : high < 0
+-            ? // BMP codepoint
+-                String.fromCharCode(high + 0x1_00_00)
+-            : // Supplemental Plane codepoint (surrogate pair)
+-                String.fromCharCode((high >> 10) | 0xd8_00, (high & 0x3_ff) | 0xdc_00);
++    const codePoint = Number.parseInt(escaped, 16);
++    // NaN means non-codepoint (a `\<char>` literal escape).
++    if (Number.isNaN(codePoint) || escapedWhitespace)
++        return escaped;
++    // CSS "consume an escaped code point": NULL, a surrogate, or a value above
++    // the maximum code point all become U+FFFD (csim patch — upstream/Sizzle
++    // funescape omits this and yields NUL / lone surrogates).
++    if (codePoint === 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff))
++        return "\uFFFD";
++    return String.fromCodePoint(codePoint);
+ }
+ function unescapeCSS(cssString) {
+     return cssString.replace(reEscape, funescape);

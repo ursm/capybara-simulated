@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  css-what@8.0.0: 9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a
+
 importers:
 
   .:
@@ -13,7 +16,7 @@ importers:
         version: 7.0.0
       css-what:
         specifier: ^8.0.0
-        version: 8.0.0
+        version: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
     devDependencies:
       '@webref/idl':
         specifier: ^3.79.0
@@ -319,12 +322,12 @@ snapshots:
   css-select@7.0.0:
     dependencies:
       boolbase: 2.0.0
-      css-what: 8.0.0
+      css-what: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
       domhandler: 6.0.1
       domutils: 4.0.2
       nth-check: 3.0.1
 
-  css-what@8.0.0: {}
+  css-what@8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a): {}
 
   dom-serializer@3.1.1:
     dependencies:

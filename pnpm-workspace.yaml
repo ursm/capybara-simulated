@@ -1,0 +1,4 @@
+allowBuilds:
+  esbuild: set this to true or false
+patchedDependencies:
+  css-what@8.0.0: patches/css-what@8.0.0.patch

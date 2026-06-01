@@ -47,7 +47,7 @@ var __csimVendor = (() => {
   }
   __name(falseFunc, "falseFunc");
 
-  // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/index.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/index.js
   var dist_exports = {};
   __export(dist_exports, {
     AttributeAction: () => AttributeAction,
@@ -58,7 +58,7 @@ var __csimVendor = (() => {
     stringify: () => stringify
   });
 
-  // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/types.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/types.js
   var SelectorType;
   (function(SelectorType2) {
     SelectorType2["Attribute"] = "attribute";
@@ -91,7 +91,7 @@ var __csimVendor = (() => {
     AttributeAction2["Start"] = "start";
   })(AttributeAction || (AttributeAction = {}));
 
-  // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/parse.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/parse.js
   var reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}\s?|.)|[\w\u00B0-\uFFFF-])+/;
   var reEscape = /\\([\da-f]{1,6}\s?|(\s)|.)/gi;
   var CharCode;
@@ -172,14 +172,12 @@ var __csimVendor = (() => {
   __name(isTraversal, "isTraversal");
   var stripQuotesFromPseudos = /* @__PURE__ */ new Set(["contains", "icontains"]);
   function funescape(_, escaped, escapedWhitespace) {
-    const high = Number.parseInt(escaped, 16) - 65536;
-    return Number.isNaN(high) || escapedWhitespace ? escaped : high < 0 ? (
-      // BMP codepoint
-      String.fromCharCode(high + 65536)
-    ) : (
-      // Supplemental Plane codepoint (surrogate pair)
-      String.fromCharCode(high >> 10 | 55296, high & 1023 | 56320)
-    );
+    const codePoint = Number.parseInt(escaped, 16);
+    if (Number.isNaN(codePoint) || escapedWhitespace)
+      return escaped;
+    if (codePoint === 0 || codePoint > 1114111 || codePoint >= 55296 && codePoint <= 57343)
+      return "\uFFFD";
+    return String.fromCodePoint(codePoint);
   }
   __name(funescape, "funescape");
   function unescapeCSS(cssString) {
@@ -513,7 +511,7 @@ var __csimVendor = (() => {
   }
   __name(parseSelector, "parseSelector");
 
-  // node_modules/.pnpm/css-what@8.0.0/node_modules/css-what/dist/stringify.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/stringify.js
   var attribValueChars = ["\\", '"'];
   var pseudoValueChars = [...attribValueChars, "(", ")"];
   var charsToEscapeInAttributeValue = new Set(attribValueChars.map((c) => c.charCodeAt(0)));
