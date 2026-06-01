@@ -22,8 +22,6 @@ dom/abort/abort-signal-timeout.html:
 - Signal returned by AbortSignal.timeout() is not aborted after frame detach
 dom/abort/reason-constructor.html:
 - AbortSignal.reason.constructor should be from iframe
-dom/attributes-are-nodes.html:
-- Attrs are subclasses of Nodes
 dom/collections/HTMLCollection-as-prototype.html:
 - HTMLCollection as a prototype and setting own properties
 - HTMLCollection as a prototype should not allow getting .length on the base object
@@ -595,8 +593,6 @@ dom/nodes/Document-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
-dom/nodes/Document-importNode.html:
-- Import an Attr node with namespace/prefix correctly.
 dom/nodes/Element-childElement-null-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-add-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-remove-xhtml.xhtml: HARNESS_ERROR
@@ -651,8 +647,6 @@ dom/nodes/Element-removeAttribute.html:
   the first attribute is in a namespace
 - removeAttribute should remove the first attribute, irrespective of namespace, when
   the first attribute is not in a namespace
-dom/nodes/Element-removeAttributeNS.html:
-- removeAttributeNS should take a local name.
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-siblingElement-null-xhtml.xhtml: HARNESS_ERROR
@@ -699,14 +693,6 @@ dom/nodes/Node-appendChild.html:
 - Adopting a non-orphan
 - Adopting an orphan
 - Appending a document
-dom/nodes/Node-baseURI.html:
-- For attributes in elements belonging to document fragments in document, baseURI
-  should be document URL
-- For attributes in elements belonging to document fragments, baseURI should be document
-  URL
-- For attributes in elements belonging to document, baseURI should be document URL
-- For attributes in elements unassigned to document, baseURI should be document URL
-- For attributes unassigned to element, baseURI should be document URL
 dom/nodes/Node-childNodes.html:
 - Caching of Node.childNodes
 - Node.childNodes on a Document.
@@ -725,8 +711,6 @@ dom/nodes/Node-cloneNode-svg.html:
 - cloned <use> should have the right properties
 - cloned <use>'s xlink:href attribute should have the right properties
 dom/nodes/Node-cloneNode.html:
-- createAttribute
-- createAttributeNS
 - createProcessingInstruction
 - implementation.createDocument
 dom/nodes/Node-insertBefore.html:
@@ -773,14 +757,9 @@ dom/nodes/Node-isEqualNode.html:
 - node equality testing should test descendant equality too
 - processing instructions should be compared on target and data
 dom/nodes/Node-isSameNode.html:
-- attributes should be compared on reference
 - documents should be compared on reference
 - processing instructions should be compared on reference
 dom/nodes/Node-lookupNamespaceURI.html:
-- Connected Attr has namespace URI matching "xml"
-- Connected Attr no namespace URI matching "xmlns"
-- Disconnected Attr has no namespace URI matching "xml"
-- Disconnected Attr has no namespace URI matching "xmlns"
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
 dom/nodes/Node-lookupPrefix.xhtml:
@@ -941,22 +920,10 @@ dom/nodes/attributes-namednodemap.html:
   method names
 - setting an attribute should not overwrite the length property of an `NamedNodeMap`
   object
-- setting an attribute should not overwrite the methods defined by prototype ancestors
-  of an `NamedNodeMap` object
-- setting an attribute should not overwrite the methods of an `NamedNodeMap` object
 dom/nodes/attributes.html:
-- Attribute loses its owner when removed
-- Attribute values should not be parsed.
-- Attribute with prefix in local name
-- Attributes should work in document fragments.
-- Basic functionality of getAttributeNode/getAttributeNodeNS
-- Basic functionality of removeAttributeNode
-- Basic functionality of setAttributeNode
-- Entities in attributes should have been expanded while parsing.
 - First set attribute is returned by getAttribute
 - First set attribute is returned with mapped attribute set first
 - First set attribute is returned with mapped attribute set later
-- If attr’s element is neither null nor element, throw an InUseAttributeError.
 - Non-HTML element with upper-case attribute
 - Own property correctness with basic attributes
 - Own property correctness with namespaced attribute before same-name non-namespaced
@@ -970,33 +937,9 @@ dom/nodes/attributes.html:
   document
 - Own property names should only include all-lowercase qualified names for an HTML
   element in an HTML document
-- Replacing an attr by itself
-- Setting the same attribute with another prefix should not change the prefix
-- Specified attributes should be accessible.
-- When qualifiedName does not match the Name production, an INVALID_CHARACTER_ERR
-  exception is to be thrown. (setAttribute)
-- When qualifiedName does not match the Name production, an INVALID_CHARACTER_ERR
-  exception is to be thrown. (toggleAttribute)
-- XML-namespaced attributes don't need an xml prefix
 - getAttributeNames tests
-- null and the empty string should result in a null namespace.
-- setAttribute should not change the order of previously set attributes.
-- setAttribute should set the attribute with the given qualified name
 - setAttribute should set the first attribute with the given name
-- setAttributeNode doesn't have case-insensitivity even with an HTMLElement 1
-- setAttributeNode doesn't have case-insensitivity even with an HTMLElement 2
-- setAttributeNode doesn't have case-insensitivity even with an HTMLElement 3
-- setAttributeNode on bound attribute should throw InUseAttributeError
-- setAttributeNode should distinguish attributes with same local name and different
-  namespaces
-- setAttributeNode, if it fires mutation events, should fire one with the new node
-  when resetting an existing attribute (outer shell)
-- toggleAttribute should not change the order of previously set attributes.
-- toggleAttribute should set the attribute with the given qualified name
 - toggleAttribute should set the first attribute with the given name
-- xmlns should be allowed as local name
-- xmlns should be allowed as prefix in the XMLNS namespace
-- xmlns should be allowed as qualified name in the XMLNS namespace
 dom/nodes/case.html:
 - getElementsByTagName ABC
 - getElementsByTagName Abc
@@ -1218,8 +1161,6 @@ dom/nodes/moveBefore/throws-exception.html:
 - moveBefore() on a cross-document target node
 dom/nodes/name-validation.html:
 - Valid and invalid characters in createElementNS and createDocument.
-- Valid and invalid characters in setAttribute, toggleAttribute, and createAttribute.
-- Valid and invalid characters in setAttributeNS and createAttributeNS.
 dom/nodes/prepend-on-Document.html: HARNESS_ERROR
 dom/nodes/query-target-in-load-event.html: HARNESS_ERROR
 dom/nodes/querySelector-mixed-case.html: HARNESS_ERROR
