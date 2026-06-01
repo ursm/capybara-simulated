@@ -918,10 +918,6 @@ dom/nodes/Document-createElementNS.html:
 dom/nodes/Document-createTextNode.html:
 - createTextNode(null)
 - createTextNode(undefined)
-dom/nodes/Document-createTreeWalker.html:
-- Optional arguments to createTreeWalker should be optional (1 passed).
-- Optional arguments to createTreeWalker should be optional (2 passed).
-- Required arguments to createTreeWalker should be required.
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
@@ -2180,11 +2176,6 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
 - NodeFilter is cross-realm plain object without 'acceptNode' property
 dom/traversal/TreeWalker-acceptNode-filter.html:
 - Testing with object lacking acceptNode property
-dom/traversal/TreeWalker-basic.html:
-- Construct a TreeWalker by document.createTreeWalker(root).
-- Construct a TreeWalker by document.createTreeWalker(root, null, null).
-- Construct a TreeWalker by document.createTreeWalker(root, undefined, undefined).
-- Give an invalid root node to document.createTreeWalker().
 dom/traversal/TreeWalker-currentNode.html:
 - Test how we handle the case when the traversed to node is within the root, but the
   currentElement is not.
