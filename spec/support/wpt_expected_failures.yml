@@ -562,7 +562,6 @@ dom/nodes/Element-firstElementChild-entity-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-firstElementChild-namespace-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-firstElementChild-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-getElementsByClassName.html:
-- Interface should be correct.
 - getElementsByClassName() should be a live collection
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html: HARNESS_ERROR
 dom/nodes/Element-getElementsByTagName.html:
@@ -832,33 +831,6 @@ dom/nodes/case.html:
 - getElementsByTagName ABC
 - getElementsByTagName Abc
 - getElementsByTagName abc
-dom/nodes/getElementsByClassName-empty-set.html:
-- Passing a space to getElementsByClassName should return an empty HTMLCollection
-- Passing an empty string to getElementsByClassName should return an empty HTMLCollection
-- Passing three spaces to getElementsByClassName should return an empty HTMLCollection
-dom/nodes/getElementsByClassName-whitespace-class-names.html:
-- Passing a EM QUAD to getElementsByClassName still finds the span
-- Passing a EM SPACE to getElementsByClassName still finds the span
-- Passing a EN QUAD to getElementsByClassName still finds the span
-- Passing a EN SPACE to getElementsByClassName still finds the span
-- Passing a FIGURE SPACE to getElementsByClassName still finds the span
-- Passing a FOUR-PER-EM SPACE to getElementsByClassName still finds the span
-- Passing a HAIR SPACE to getElementsByClassName still finds the span
-- Passing a IDEOGRAPHIC SPACE to getElementsByClassName still finds the span
-- Passing a LINE SEPARATOR to getElementsByClassName still finds the span
-- Passing a LINE TABULATION to getElementsByClassName still finds the span
-- Passing a MEDIUM MATHEMATICAL SPACE to getElementsByClassName still finds the span
-- Passing a NARROW NO-BREAK SPACE to getElementsByClassName still finds the span
-- Passing a NEXT LINE to getElementsByClassName still finds the span
-- Passing a NO-BREAK SPACE to getElementsByClassName still finds the span
-- Passing a OGHAM SPACE MARK to getElementsByClassName still finds the span
-- Passing a PARAGRAPH SEPARATOR to getElementsByClassName still finds the span
-- Passing a PUNCTUATION SPACE to getElementsByClassName still finds the span
-- Passing a SIX-PER-EM SPACE to getElementsByClassName still finds the span
-- Passing a THIN SPACE to getElementsByClassName still finds the span
-- Passing a THREE-PER-EM SPACE to getElementsByClassName still finds the span
-- Passing a ZERO WIDTH NON-BREAKING SPACE to getElementsByClassName still finds the
-  span
 dom/nodes/insert-adjacent.html:
 - invalid object argument insertAdjacentElement
 - invalid syntax for insertAdjacentElement
