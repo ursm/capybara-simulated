@@ -24,7 +24,6 @@ Document:
   - convertRectFromNode
   - createCDATASection
   - createProcessingInstruction
-  - doctype
   - fonts
   - fragmentDirective
   - fullscreen

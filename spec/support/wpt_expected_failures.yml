@@ -680,7 +680,6 @@ dom/nodes/Element-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
 dom/nodes/Element-insertAdjacentElement.html:
-- Adding more than one child to document should cause a HierarchyRequestError exception
 - Inserting to an invalid location should cause a Syntax Error exception
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-lastElementChild-xhtml.xhtml: HARNESS_ERROR
@@ -826,28 +825,24 @@ dom/nodes/Node-insertBefore.html:
 - Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction
   must throw TypeError.
-- If node is a DocumentFragment with an element and parent is a document with another
-  element, then throw a HierarchyRequestError DOMException.
-- If node is a DocumentFragment with multiple elements and parent is a document, then
-  throw a HierarchyRequestError DOMException.
 - If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
   DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is an Element and parent is a document with another element, then throw
-  a HierarchyRequestError DOMException.
 - If the context node is a document and a doctype is following the reference child,
   inserting a DocumentFragment with an element should throw a HierarchyRequestError.
 - If the context node is a document and a doctype is following the reference child,
   inserting an element should throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment that contains a
-  text node or too many elements should throw a HierarchyRequestError.
+- If the context node is a document with and element child, appending a doctype should
+  throw a HierarchyRequestError.
 - If the context node is a document, inserting a DocumentFragment with an element
   before the doctype should throw a HierarchyRequestError.
 - If the context node is a document, inserting a DocumentFragment with an element
   if there already is an element child should throw a HierarchyRequestError.
+- If the context node is a document, inserting a doctype after the document element
+  should throw a HierarchyRequestError.
 - If the context node is a document, inserting a doctype if there already is a doctype
   child should throw a HierarchyRequestError.
 - If the context node is a document, inserting an element before the doctype should
@@ -944,67 +939,30 @@ dom/nodes/Node-parentNode.html: HARNESS_ERROR
 dom/nodes/Node-removeChild.html:
 - Calling removeChild on a comment from a frame document with no children should throw
   NOT_FOUND_ERR.
-- Calling removeChild on a comment from a synthetic document with no children should
-  throw NOT_FOUND_ERR.
-- Calling removeChild on a comment from the main document with no children should
-  throw NOT_FOUND_ERR.
 - Calling removeChild on a element from a frame document with no children should throw
   NOT_FOUND_ERR.
-- Calling removeChild on a element from a synthetic document with no children should
-  throw NOT_FOUND_ERR.
-- Calling removeChild on a element from the main document with no children should
-  throw NOT_FOUND_ERR.
 - Calling removeChild on a text from a frame document with no children should throw
-  NOT_FOUND_ERR.
-- Calling removeChild on a text from a synthetic document with no children should
-  throw NOT_FOUND_ERR.
-- Calling removeChild on a text from the main document with no children should throw
   NOT_FOUND_ERR.
 - Passing a detached comment from a frame document to removeChild should not affect
   it.
-- Passing a detached comment from a synthetic document to removeChild should not affect
-  it.
-- Passing a detached comment from the main document to removeChild should not affect
-  it.
 - Passing a detached element from a frame document to removeChild should not affect
   it.
-- Passing a detached element from a synthetic document to removeChild should not affect
-  it.
-- Passing a detached element from the main document to removeChild should not affect
-  it.
 - Passing a detached text from a frame document to removeChild should not affect it.
-- Passing a detached text from a synthetic document to removeChild should not affect
-  it.
-- Passing a detached text from the main document to removeChild should not affect
-  it.
 - Passing a non-detached comment from a frame document to removeChild should not affect
   it.
-- Passing a non-detached comment from a synthetic document to removeChild should not
-  affect it.
-- Passing a non-detached comment from the main document to removeChild should not
-  affect it.
 - Passing a non-detached element from a frame document to removeChild should not affect
   it.
-- Passing a non-detached element from a synthetic document to removeChild should not
-  affect it.
-- Passing a non-detached element from the main document to removeChild should not
-  affect it.
 - Passing a non-detached text from a frame document to removeChild should not affect
   it.
-- Passing a non-detached text from a synthetic document to removeChild should not
-  affect it.
-- Passing a non-detached text from the main document to removeChild should not affect
-  it.
-- Passing a value that is not a Node reference to removeChild should throw TypeError.
 dom/nodes/Node-replaceChild.html:
 - If the context node is a document (without element children), inserting a DocumentFragment
   that contains multiple elements should throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment that contains a
-  text node or too many elements should throw a HierarchyRequestError.
 - If the context node is a document, inserting a DocumentFragment with an element
   before the doctype should throw a HierarchyRequestError.
 - If the context node is a document, inserting a DocumentFragment with an element
   if there already is an element child should throw a HierarchyRequestError.
+- If the context node is a document, inserting a doctype after the document element
+  should throw a HierarchyRequestError.
 - If the context node is a document, inserting a doctype if there already is a doctype
   child should throw a HierarchyRequestError.
 - If the context node is a document, inserting a new doctype should work.
@@ -1047,18 +1005,12 @@ dom/nodes/ParentNode-append.html:
 - Element.append() with null as an argument, on a parent having a child.
 - Element.append() with null as an argument, on a parent having no child.
 - Element.append() with undefined as an argument, on a parent having no child.
-- If node is a DocumentFragment with an element and parent is a document with another
-  element, then throw a HierarchyRequestError DOMException.
-- If node is a DocumentFragment with multiple elements and parent is a document, then
-  throw a HierarchyRequestError DOMException.
 - If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
   DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is an Element and parent is a document with another element, then throw
-  a HierarchyRequestError DOMException.
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
 dom/nodes/ParentNode-prepend.html:
@@ -1069,16 +1021,10 @@ dom/nodes/ParentNode-prepend.html:
 - Element.prepend() with null as an argument, on a parent having a child.
 - Element.prepend() with null as an argument, on a parent having no child.
 - Element.prepend() with undefined as an argument, on a parent having no child.
-- If node is a DocumentFragment with an element and parent is a document with another
-  element, then throw a HierarchyRequestError DOMException.
-- If node is a DocumentFragment with multiple elements and parent is a document, then
-  throw a HierarchyRequestError DOMException.
 - If node is a doctype and parent is a document with another doctype, then throw a
   HierarchyRequestError DOMException.
 - If node is a doctype and parent is not a document, then throw a HierarchyRequestError
   DOMException.
-- If node is an Element and parent is a document with another element, then throw
-  a HierarchyRequestError DOMException.
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-escapes.html:
@@ -1217,7 +1163,6 @@ dom/nodes/getElementsByClassName-whitespace-class-names.html:
 - Passing a ZERO WIDTH NON-BREAKING SPACE to getElementsByClassName still finds the
   span
 dom/nodes/insert-adjacent.html:
-- invalid caller object insertAdjacentElement
 - invalid object argument insertAdjacentElement
 - invalid syntax for insertAdjacentElement
 - invalid syntax for insertAdjacentText
@@ -1440,6 +1385,7 @@ dom/ranges/Range-adopt-test.html:
   the only element in the range must collapse the range'
 - 'Range container''s parentless container moved to another document with appendChild:
   Removing the only element in the range must collapse the range'
+- 'Range in document: Removing the only element in the range must collapse the range'
 dom/ranges/Range-attributes.html:
 - Range attributes
 dom/ranges/Range-commonAncestorContainer-2.html:
