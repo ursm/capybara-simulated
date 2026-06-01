@@ -229,6 +229,8 @@ dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
 dom/nodes/Comment-constructor.html: HARNESS_ERROR
+dom/nodes/Comment-in-doctype.xhtml:
+- 'XML: Comment in doctype internal subset'
 dom/nodes/DOMImplementation-createHTMLDocument.html:
 - 'createHTMLDocument(): URL parsing'
 - 'createHTMLDocument(): document location getter is null'
@@ -257,14 +259,6 @@ dom/nodes/Document-contentType/contentType/contenttype_txt.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/contenttype_xml.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
-dom/nodes/Document-createCDATASection-xhtml.xhtml:
-- Creating a CDATA section containing the string "]]>" must throw
-- createCDATASection("-b")
-- createCDATASection("\v")
-- createCDATASection("a -- b")
-- createCDATASection("a-")
-- createCDATASection(null)
-- createCDATASection(undefined)
 dom/nodes/Document-createComment.html:
 - createComment(null)
 - createComment(undefined)
@@ -292,10 +286,6 @@ dom/nodes/Document-doctype.html:
 dom/nodes/Document-getElementById.html: HARNESS_ERROR
 dom/nodes/Document-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
-dom/nodes/Document-getElementsByTagName-xhtml.xhtml:
-- Element in HTML namespace, no prefix, non-ascii characters in name
-- Element in HTML namespace, prefix, non-ascii characters in name
-- HTML element with uppercase tag name matches in XHTML documents
 dom/nodes/Document-getElementsByTagName.html:
 - HTML element with uppercase tagName never matches in HTML Documents
 - Interfaces
@@ -307,6 +297,8 @@ dom/nodes/Document-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
+dom/nodes/DocumentType-literal-xhtml.xhtml:
+- DocumentType literals
 dom/nodes/Element-childElement-null-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-add-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-childElementCount-dynamic-remove-xhtml.xhtml: HARNESS_ERROR
@@ -400,19 +392,13 @@ dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
 dom/nodes/Node-lookupPrefix.xhtml:
-- Node.lookupPrefix
-- Node.lookupPrefix 10
-- Node.lookupPrefix 5
-- Node.lookupPrefix 6
-- Node.lookupPrefix 7
-- Node.lookupPrefix 8
 - Node.lookupPrefix 9
 dom/nodes/Node-mutation-adoptNode.html:
 - Adopting an element into a different document update's the element's owner doc as
   well as the owner docs of it's attributes
 - simple append of foreign div with text
 dom/nodes/Node-nodeName-xhtml.xhtml:
-- For Element nodes, nodeName should return the same as tagName.
+- For DocumentType nodes, nodeName should return the name.
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
 dom/nodes/Node-parentNode.html: HARNESS_ERROR
@@ -469,6 +455,10 @@ dom/nodes/ParentNode-querySelector-escapes.html:
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
 dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR
 dom/nodes/ProcessingInstruction-escapes-1.xhtml: HARNESS_ERROR
+dom/nodes/ProcessingInstruction-in-doctype.xhtml:
+- 'XML: Processing instruction in doctype internal subset'
+dom/nodes/ProcessingInstruction-literal-1.xhtml:
+- "<?xml?> is not a ProcessingInstruction"
 dom/nodes/ProcessingInstruction-literal-2.xhtml:
 - ProcessingInstruction literals
 dom/nodes/Text-constructor.html: HARNESS_ERROR

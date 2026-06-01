@@ -2949,6 +2949,12 @@ module Capybara
           'url'                => @current_url.to_s,
           'html'               => html
         }
+        # Carry the response content type so the JS side can pick the XML vs
+        # HTML parser (XHTML / XML / SVG documents parse case-sensitively, with
+        # no html/head/body skeleton, and report `isHtmlDocument` false).
+        ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
+        ct = ct.first if ct.is_a?(Array)
+        opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
         if @viewport_width && @viewport_height
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height
