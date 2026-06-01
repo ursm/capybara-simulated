@@ -17,5 +17,6 @@ group :development, :test do
   gem 'rspec',             '~> 3.13'
   gem 'ruby-vips'          # canvas/image-decode backend; soft-required at runtime
   gem 'selenium-webdriver' # bench/run.rb under :selenium
+  gem 'stackprof',         require: false # sampling profiler for perf investigations
   gem 'sinatra',           '>= 4.0'
 end
