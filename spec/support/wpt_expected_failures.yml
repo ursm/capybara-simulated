@@ -431,58 +431,10 @@ dom/nodes/CharacterData-appendChild.html:
 - ProcessingInstruction.appendChild(ProcessingInstruction)
 - ProcessingInstruction.appendChild(Text)
 - Text.appendChild(ProcessingInstruction)
-dom/nodes/ChildNode-after.html:
-- Comment.after() with all siblings of child as arguments.
-- Comment.after() with null as an argument.
-- Comment.after() with one sibling of child and text as arguments.
-- Comment.after() with some siblings of child as arguments; no changes in tree.
-- Comment.after() with undefined as an argument.
-- Comment.before() with some siblings of child as arguments; no changes in tree; viable
-  sibling is first child.
-- Element.after() with all siblings of child as arguments.
-- Element.after() with null as an argument.
-- Element.after() with one sibling of child and text as arguments.
-- Element.after() with some siblings of child as arguments; no changes in tree.
-- Element.after() with undefined as an argument.
-- Element.before() with some siblings of child as arguments; no changes in tree; viable
-  sibling is first child.
-- Text.after() with all siblings of child as arguments.
-- Text.after() with null as an argument.
-- Text.after() with one sibling of child and text as arguments.
-- Text.after() with some siblings of child as arguments; no changes in tree.
-- Text.after() with undefined as an argument.
-- Text.before() with some siblings of child as arguments; no changes in tree; viable
-  sibling is first child.
-dom/nodes/ChildNode-before.html:
-- Comment.before() with null as an argument.
-- Comment.before() with undefined as an argument.
-- Element.before() with null as an argument.
-- Element.before() with undefined as an argument.
-- Text.before() with null as an argument.
-- Text.before() with undefined as an argument.
-dom/nodes/ChildNode-replaceWith.html:
-- Comment.replaceWith() with null as an argument.
-- Comment.replaceWith() with one sibling of child and child itself as arguments.
-- Comment.replaceWith() with undefined as an argument.
-- Element.replaceWith() with null as an argument.
-- Element.replaceWith() with one sibling of child and child itself as arguments.
-- Element.replaceWith() with undefined as an argument.
-- Text.replaceWith() with null as an argument.
-- Text.replaceWith() with one sibling of child and child itself as arguments.
-- Text.replaceWith() with undefined as an argument.
 dom/nodes/Comment-constructor.html: HARNESS_ERROR
 dom/nodes/DOMImplementation-createDocument.html:
 - DOMImplementation.createDocument(namespace, qualifiedName, doctype)
 dom/nodes/DOMImplementation-createHTMLDocument.html:
-- Missing title argument
-- 'createHTMLDocument test 0: "","",""'
-- 'createHTMLDocument test 1: null,"null","null"'
-- 'createHTMLDocument test 2: undefined,undefined,""'
-- 'createHTMLDocument test 3: "foo  bar baz","foo  bar baz","foo bar baz"'
-- 'createHTMLDocument test 4: "foo\t\tbar baz","foo\t\tbar baz","foo bar baz"'
-- 'createHTMLDocument test 5: "foo\n\nbar baz","foo\n\nbar baz","foo bar baz"'
-- 'createHTMLDocument test 6: "foo\f\fbar baz","foo\f\fbar baz","foo bar baz"'
-- 'createHTMLDocument test 7: "foo\r\rbar baz","foo\r\rbar baz","foo bar baz"'
 - 'createHTMLDocument(): URL parsing'
 - 'createHTMLDocument(): document location getter is null'
 - 'createHTMLDocument(): metadata'
@@ -717,30 +669,6 @@ dom/nodes/Node-insertBefore.html:
 - Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.
 - Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction
   must throw TypeError.
-- If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
-  DOMException.
-- If node is a doctype and parent is a document with another doctype, then throw a
-  HierarchyRequestError DOMException.
-- If node is a doctype and parent is not a document, then throw a HierarchyRequestError
-  DOMException.
-- If the context node is a document and a doctype is following the reference child,
-  inserting a DocumentFragment with an element should throw a HierarchyRequestError.
-- If the context node is a document and a doctype is following the reference child,
-  inserting an element should throw a HierarchyRequestError.
-- If the context node is a document with and element child, appending a doctype should
-  throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment with an element
-  before the doctype should throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment with an element
-  if there already is an element child should throw a HierarchyRequestError.
-- If the context node is a document, inserting a doctype after the document element
-  should throw a HierarchyRequestError.
-- If the context node is a document, inserting a doctype if there already is a doctype
-  child should throw a HierarchyRequestError.
-- If the context node is a document, inserting an element before the doctype should
-  throw a HierarchyRequestError.
-- If the context node is a document, inserting an element if there already is an element
-  child should throw a HierarchyRequestError.
 - Inserting a node before itself should not move the node
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
@@ -802,21 +730,7 @@ dom/nodes/Node-removeChild.html:
 - Passing a non-detached text from a frame document to removeChild should not affect
   it.
 dom/nodes/Node-replaceChild.html:
-- If the context node is a document (without element children), inserting a DocumentFragment
-  that contains multiple elements should throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment with an element
-  before the doctype should throw a HierarchyRequestError.
-- If the context node is a document, inserting a DocumentFragment with an element
-  if there already is an element child should throw a HierarchyRequestError.
-- If the context node is a document, inserting a doctype after the document element
-  should throw a HierarchyRequestError.
-- If the context node is a document, inserting a doctype if there already is a doctype
-  child should throw a HierarchyRequestError.
 - If the context node is a document, inserting a new doctype should work.
-- If the context node is a document, inserting an element before the doctype should
-  throw a HierarchyRequestError.
-- If the context node is a document, inserting an element if there already is an element
-  child should throw a HierarchyRequestError.
 - If the context node is not a node that can contain children, a HierarchyRequestError
   exception should be thrown
 - Replacing a node with itself should not move the node
@@ -824,7 +738,6 @@ dom/nodes/Node-replaceChild.html:
   and comments should work.
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
-- Replacing the document element with a single element should work.
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
 - Should check whether 'child' is a child of 'parent' before checking whether 'node'
   can be inserted into the document given the kids the document has right now.
@@ -845,33 +758,8 @@ dom/nodes/NodeList-static-length-getter-tampered-indexOf-2.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
 dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
-dom/nodes/ParentNode-append.html:
-- DocumentFragment.append() with null as an argument, on a parent having a child.
-- DocumentFragment.append() with null as an argument, on a parent having no child.
-- DocumentFragment.append() with undefined as an argument, on a parent having no child.
-- Element.append() with null as an argument, on a parent having a child.
-- Element.append() with null as an argument, on a parent having no child.
-- Element.append() with undefined as an argument, on a parent having no child.
-- If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
-  DOMException.
-- If node is a doctype and parent is a document with another doctype, then throw a
-  HierarchyRequestError DOMException.
-- If node is a doctype and parent is not a document, then throw a HierarchyRequestError
-  DOMException.
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
-dom/nodes/ParentNode-prepend.html:
-- DocumentFragment.prepend() with null as an argument, on a parent having a child.
-- DocumentFragment.prepend() with null as an argument, on a parent having no child.
-- DocumentFragment.prepend() with undefined as an argument, on a parent having no
-  child.
-- Element.prepend() with null as an argument, on a parent having a child.
-- Element.prepend() with null as an argument, on a parent having no child.
-- Element.prepend() with undefined as an argument, on a parent having no child.
-- If node is a doctype and parent is a document with another doctype, then throw a
-  HierarchyRequestError DOMException.
-- If node is a doctype and parent is not a document, then throw a HierarchyRequestError
-  DOMException.
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-escapes.html:
