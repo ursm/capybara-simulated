@@ -23,7 +23,6 @@ Document:
   - convertQuadFromNode
   - convertRectFromNode
   - createCDATASection
-  - createProcessingInstruction
   - fonts
   - fragmentDirective
   - fullscreen
