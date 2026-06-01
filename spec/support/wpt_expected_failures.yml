@@ -1346,7 +1346,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelector: Unknown pseudo-element: ::example'
 - 'Detached Element.querySelector: Unknown pseudo-element: div::example'
 - Detached Element.querySelectorAll null
-- Detached Element.querySelectorAll returns NodeList instance
 - Detached Element.querySelectorAll undefined
 - 'Detached Element.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
   not matching any elements: #pseudo-element::after'
@@ -1495,7 +1494,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Document.querySelector: Unknown pseudo-element: ::example'
 - 'Document.querySelector: Unknown pseudo-element: div::example'
 - Document.querySelectorAll null
-- Document.querySelectorAll returns NodeList instance
 - Document.querySelectorAll tree order
 - Document.querySelectorAll undefined
 - 'Document.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
@@ -1716,7 +1714,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelector: Unknown pseudo-element: ::example'
 - 'Fragment.querySelector: Unknown pseudo-element: div::example'
 - Fragment.querySelectorAll null
-- Fragment.querySelectorAll returns NodeList instance
 - Fragment.querySelectorAll undefined
 - 'Fragment.querySelectorAll: ::after pseudo-element (two-colon syntax) selector,
   not matching any elements: #pseudo-element::after'
@@ -1866,7 +1863,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelector: Unknown pseudo-element: ::example'
 - 'In-document Element.querySelector: Unknown pseudo-element: div::example'
 - In-document Element.querySelectorAll null
-- In-document Element.querySelectorAll returns NodeList instance
 - In-document Element.querySelectorAll undefined
 - 'In-document Element.querySelectorAll: ::after pseudo-element (two-colon syntax)
   selector, not matching any elements: #pseudo-element::after'
