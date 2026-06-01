@@ -229,41 +229,13 @@ dom/events/webkit-animation-start-event.html: HARNESS_ERROR
 dom/events/webkit-transition-end-event.html: HARNESS_ERROR
 dom/events/window-composed-path.html: HARNESS_ERROR
 dom/historical.html:
-- 'Historical DOM features must be removed: async'
-- 'Historical DOM features must be removed: commands'
-- 'Historical DOM features must be removed: createEntityReference'
-- 'Historical DOM features must be removed: cssElementMap'
-- 'Historical DOM features must be removed: defaultCharset'
-- 'Historical DOM features must be removed: domConfig'
-- 'Historical DOM features must be removed: height'
-- 'Historical DOM features must be removed: normalizeDocument'
-- 'Historical DOM features must be removed: origin'
-- 'Historical DOM features must be removed: renameNode'
-- 'Historical DOM features must be removed: strictErrorChecking'
-- 'Historical DOM features must be removed: width'
-- 'Historical DOM features must be removed: xmlEncoding'
-- 'Historical DOM features must be removed: xmlStandalone'
-- 'Historical DOM features must be removed: xmlVersion'
-- 'Node member must be removed: attributes'
-- 'Node member must be removed: getFeature'
-- 'Node member must be removed: getUserData'
-- 'Node member must be removed: hasAttributes'
-- 'Node member must be removed: isSupported'
 - 'Node member must be removed: localName'
 - 'Node member must be removed: namespaceURI'
 - 'Node member must be removed: prefix'
-- 'Node member must be removed: rootNode'
-- 'Node member must be removed: setUserData'
-- XMLDocument.load
 dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
-dom/nodes/CharacterData-remove.html:
-- remove() should work if PI does have a parent
-- remove() should work if PI does have a parent and siblings
 dom/nodes/Comment-constructor.html: HARNESS_ERROR
-dom/nodes/DOMImplementation-createDocument.html:
-- DOMImplementation.createDocument(namespace, qualifiedName, doctype)
 dom/nodes/DOMImplementation-createHTMLDocument.html:
 - 'createHTMLDocument(): URL parsing'
 - 'createHTMLDocument(): document location getter is null'
@@ -271,14 +243,12 @@ dom/nodes/DOMImplementation-createHTMLDocument.html:
 dom/nodes/Document-URL.html: HARNESS_ERROR
 dom/nodes/Document-adoptNode.html:
 - Adopting a Document should throw.
-- Adopting an Element called ':good:times:' should work.
 - Adopting an Element called 'x<' should work.
 dom/nodes/Document-characterSet-normalization-1.html: HARNESS_ERROR
 dom/nodes/Document-characterSet-normalization-2.html: HARNESS_ERROR
 dom/nodes/Document-constructor.html:
 - 'new Document(): URL parsing'
 - 'new Document(): children'
-- 'new Document(): interfaces'
 - 'new Document(): metadata'
 dom/nodes/Document-contentType/contentType/contenttype_bmp.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/contenttype_css.html: HARNESS_ERROR
@@ -292,8 +262,6 @@ dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html: HARNE
 dom/nodes/Document-contentType/contentType/contenttype_png.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/contenttype_txt.html: HARNESS_ERROR
 dom/nodes/Document-contentType/contentType/contenttype_xml.html: HARNESS_ERROR
-dom/nodes/Document-contentType/contentType/createDocument.html:
-- 'document.implementation.createDocument: document.contentType === ''application/xhtml+xml'''
 dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
 dom/nodes/Document-createCDATASection-xhtml.xhtml: HARNESS_ERROR
@@ -390,8 +358,6 @@ dom/nodes/Element-setAttribute.html:
 dom/nodes/Element-siblingElement-null-xhtml.xhtml: HARNESS_ERROR
 dom/nodes/Element-tagName.html:
 - tagName should be updated when changing ownerDocument
-- tagName should be updated when changing ownerDocument (createDocument with prefix)
-- tagName should be updated when changing ownerDocument (createDocument without prefix)
 dom/nodes/Element-webkitMatchesSelector.html: HARNESS_ERROR
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
 dom/nodes/MutationObserver-callback-arguments.html:
@@ -424,8 +390,6 @@ dom/nodes/Node-childNodes.html:
 - Node.childNodes on a DocumentFragment.
 - Node.childNodes on an Element.
 - Node.childNodes should be a live collection
-dom/nodes/Node-cloneNode-XMLDocument.html:
-- Created with createDocument
 dom/nodes/Node-cloneNode-document-with-doctype.html:
 - Created with DOMParser
 - Created with the createDocument/createDocumentType
@@ -440,16 +404,7 @@ dom/nodes/Node-cloneNode.html:
 dom/nodes/Node-insertBefore.html:
 - Inserting a node before itself should not move the node
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  can be inserted into the document given the kids the document has right now.
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  is of a type that can have a parent of the type that 'parent' is.
 dom/nodes/Node-isEqualNode-xhtml.xhtml: HARNESS_ERROR
-dom/nodes/Node-isEqualNode.html:
-- documents should not be compared based on properties
-- node equality testing should test descendant equality too
-dom/nodes/Node-isSameNode.html:
-- documents should be compared on reference
 dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
@@ -500,10 +455,6 @@ dom/nodes/Node-replaceChild.html:
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
 - Should check the 'parent' type before checking whether 'child' is a child of 'parent'
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  can be inserted into the document given the kids the document has right now.
-- Should check whether 'child' is a child of 'parent' before checking whether 'node'
-  is of a type that can have a parent of the type that 'parent' is.
 - replaceChild should work in the presence of mutation events.
 dom/nodes/NodeList-Iterable.html:
 - live NodeLists are for-of iterable and update appropriately
@@ -538,7 +489,14 @@ dom/nodes/Text-constructor.html: HARNESS_ERROR
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
   order.
-dom/nodes/append-on-Document.html: HARNESS_ERROR
+dom/nodes/append-on-Document.html:
+- Document.append() with only one element as an argument, on a Document having no
+  child.
+- Document.append() with only one element as an argument, on a Document having one
+  child.
+- Document.append() with text as an argument, on a Document having no child.
+- Document.append() with two elements as the argument, on a Document having no child.
+- Document.append() without any argument, on a Document having no child.
 dom/nodes/attributes-namednodemap.html:
 - setNamedItem and removeNamedItem on `attributes` should add and remove fields from
   `attributes`
@@ -757,9 +715,14 @@ dom/nodes/moveBefore/slotchange-events.html:
 dom/nodes/moveBefore/style-applies.html: HARNESS_ERROR
 dom/nodes/moveBefore/throws-exception.html:
 - moveBefore() on a cross-document target node
-dom/nodes/name-validation.html:
-- Valid and invalid characters in createElementNS and createDocument.
-dom/nodes/prepend-on-Document.html: HARNESS_ERROR
+dom/nodes/prepend-on-Document.html:
+- Document.append() with only one element as an argument, on a Document having one
+  child.
+- Document.prepend() with only one element as an argument, on a Document having no
+  child.
+- Document.prepend() with text as an argument, on a Document having no child.
+- Document.prepend() with two elements as the argument, on a Document having no child.
+- Document.prepend() without any argument, on a Document having no child.
 dom/nodes/query-target-in-load-event.html: HARNESS_ERROR
 dom/nodes/querySelector-mixed-case.html: HARNESS_ERROR
 dom/nodes/remove-and-adopt-thcrash.html:
@@ -775,16 +738,10 @@ dom/nodes/remove-unscopable.html:
 - remove() should be unscopable
 - replaceWith() should be unscopable
 dom/nodes/rootNode.html:
-- getRootNode() must return a document fragment when a node is in the fragment
 - getRootNode() must return context object's shadow-including root if options's composed
   is true, and context object's root otherwise
-- getRootNode() must return the document when a node is in document
-- getRootNode() must return the parent node of the context object when the context
-  object has a single ancestor not in a document
 dom/observable/tentative/idlharness.html: HARNESS_ERROR
 dom/ranges/Range-adopt-test.html:
-- 'Parented range container moved to another document with appendChild: Moving the
-  element to the other document must collapse the range'
 - 'Parentless range container moved to another document with appendChild: Removing
   the only element in the range must collapse the range'
 - 'Range container''s parentless container moved to another document with appendChild:
@@ -812,7 +769,24 @@ dom/ranges/Range-intersectsNode-binding.html:
   a TypeError.
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
-dom/ranges/StaticRange-constructor.html: HARNESS_ERROR
+dom/ranges/StaticRange-constructor.html:
+- Construct collapsed static range
+- Construct inverted static range
+- Construct static range with CDATASection container
+- Construct static range with Comment container
+- Construct static range with Document container
+- Construct static range with DocumentFragment container
+- Construct static range with Element container
+- Construct static range with Element startContainer and Text endContainer
+- Construct static range with ProcessingInstruction container
+- Construct static range with Text container
+- Construct static range with Text startContainer and Element endContainer
+- Construct static range with endpoints in disconnected documents
+- Construct static range with endpoints in disconnected trees
+- Construct static range with offset greater than length
+- Construct static range with standalone Node container
+- Throw on DocumentType or Attr container
+- Throw on missing or invalid arguments
 dom/ranges/tentative/OpaqueRange-auto-disconnect.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-basic.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-disconnect.html: HARNESS_ERROR
