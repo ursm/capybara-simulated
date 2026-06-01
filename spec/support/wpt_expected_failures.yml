@@ -111,19 +111,6 @@ dom/events/Body-FrameSet-Event-Handlers.html:
 dom/events/CustomEvent.html:
 - First parameter to initCustomEvent should be mandatory.
 - initCustomEvent's default parameter values.
-dom/events/Event-cancelBubble.html:
-- Event.cancelBubble=false must have no effect during event propagation.
-- Event.cancelBubble=false must have no effect.
-- Event.cancelBubble=true must set the stop propagation flag.
-- Initializing an event must set cancelBubble to false.
-- cancelBubble must be false after an event has been dispatched.
-- cancelBubble must be false when an event is initially created.
-- stopImmediatePropagation() must set cancelBubble to true.
-- stopPropagation() must set cancelBubble to true.
-dom/events/Event-defaultPrevented.html:
-- initEvent should unset defaultPrevented.
-dom/events/Event-dispatch-bubble-canceled.html:
-- Setting cancelBubble=true prior to dispatchEvent()
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 - In window.document.cloneNode(true)
@@ -131,10 +118,6 @@ dom/events/Event-dispatch-click.html: HARNESS_ERROR
 dom/events/Event-dispatch-detached-input-and-change.html: HARNESS_ERROR
 dom/events/Event-dispatch-handlers-changed.html:
 - " Dispatch additional events inside an event listener "
-dom/events/Event-dispatch-multiple-cancelBubble.html:
-- Multiple dispatchEvent() and cancelBubble
-dom/events/Event-dispatch-multiple-stopPropagation.html:
-- " Multiple dispatchEvent() and stopPropagation() "
 dom/events/Event-dispatch-on-disabled-elements.html: HARNESS_ERROR
 dom/events/Event-dispatch-order-at-target.html:
 - Listeners are invoked in correct order (AT_TARGET phase)
@@ -151,15 +134,7 @@ dom/events/Event-init-while-dispatching.html:
 - Calling initMouseEvent while dispatching.
 - Calling initUIEvent while dispatching.
 dom/events/Event-initEvent.html:
-- Calling initEvent must unset the stop immediate propagation flag.
-- Calling initEvent must unset the stop propagation flag.
 - First parameter to initEvent should be mandatory.
-dom/events/Event-propagation.html:
-- After cancelBubble=true
-- After stopImmediatePropagation()
-- After stopPropagation()
-- Reinitialized after stopImmediatePropagation()
-- Reinitialized after stopPropagation()
 dom/events/Event-stopPropagation-cancel-bubbling.html:
 - Event-stopPropagation-cancel-bubbling
 dom/events/Event-timestamp-cross-realm-getter.html: HARNESS_ERROR
@@ -488,17 +463,6 @@ dom/nodes/Document-getElementsByTagName.html:
 - getElementsByTagName() should be a live collection
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Document-getElementsByTagNameNS.html:
-- ABC element in html namespace
-- AÇ, case sensitivity
-- BODY element in test namespace, no prefix
-- BODY element in test namespace, prefix
-- Document.getElementsByTagNameNS
-- Empty lists
-- Empty string namespace
-- abc element in html namespace
-- body element in test namespace, no prefix
-- body element in test namespace, prefix
-- getElementsByTagNameNS('http://www.w3.org/1999/xhtml', '*')
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
@@ -530,14 +494,6 @@ dom/nodes/Element-getElementsByTagName.html:
 - getElementsByTagName() should be a live collection
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Element-getElementsByTagNameNS.html:
-- ABC element in html namespace
-- AÇ, case sensitivity
-- BODY element in test namespace, prefix
-- Empty lists
-- Empty string namespace
-- abc element in html namespace
-- body element in test namespace, prefix
-- getElementsByTagNameNS('http://www.w3.org/1999/xhtml', '*')
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
 dom/nodes/Element-insertAdjacentElement.html:
