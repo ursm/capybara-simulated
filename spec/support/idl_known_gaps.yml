@@ -68,8 +68,6 @@ Element:
   - setHTML
   - spatialNavigationSearch
   - startViewTransition
-Event:
-  - initEvent
 EventTarget:
   - when
 HTMLAnchorElement:

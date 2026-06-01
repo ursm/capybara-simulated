@@ -89,12 +89,6 @@ dom/events/Event-dispatch-throwing-multiple-globals.html: HARNESS_ERROR
 dom/events/Event-dispatch-throwing.html:
 - Throwing in event listener with a single listeners
 - Throwing in event listener with multiple listeners
-dom/events/Event-init-while-dispatching.html:
-- Calling initCustomEvent while dispatching.
-- Calling initEvent while dispatching.
-- Calling initKeyboardEvent while dispatching.
-- Calling initMouseEvent while dispatching.
-- Calling initUIEvent while dispatching.
 dom/events/Event-initEvent.html:
 - First parameter to initEvent should be mandatory.
 dom/events/Event-stopPropagation-cancel-bubbling.html:
