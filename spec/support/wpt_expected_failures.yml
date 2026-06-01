@@ -961,14 +961,9 @@ dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
 dom/nodes/Element-insertAdjacentElement.html:
 - Inserting to an invalid location should cause a Syntax Error exception
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
-dom/nodes/Element-matches-namespaced-elements.html:
-- has a namespace, *|, matches
-- has a namespace, *|, webkitMatchesSelector
 dom/nodes/Element-matches.html:
 - DIV Element.matches(null)
 - DIV Element.matches(undefined)
-- 'Detached Element.matches: Attribute presence selector, matching title attribute,
-  case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'Detached Element.matches: Attribute value selector, matching align attribute with
   value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'Detached Element.matches: Invalid character: <'
@@ -977,14 +972,10 @@ dom/nodes/Element-matches.html:
 - 'Detached Element.matches: Invalid class: .5cm'
 - 'Detached Element.matches: Invalid class: .foo..quux'
 - 'Detached Element.matches: Relative selector: >*'
-- 'Fragment Element.matches: Attribute presence selector, matching title attribute,
-  case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'Fragment Element.matches: Attribute value selector, matching align attribute with
   value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.matches: :target pseudo-class selector, matching the element
   referenced by the URL fragment identifier (with no refNodes): :target'
-- 'In-document Element.matches: Attribute presence selector, matching title attribute,
-  case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'In-document Element.matches: Attribute value selector, matching align attribute
   with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.matches: Invalid character: <'
@@ -1007,8 +998,6 @@ dom/nodes/Element-setAttribute.html:
 dom/nodes/Element-webkitMatchesSelector.html:
 - DIV Element.webkitMatchesSelector(null)
 - DIV Element.webkitMatchesSelector(undefined)
-- 'Detached Element.webkitMatchesSelector: Attribute presence selector, matching title
-  attribute, case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'Detached Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'Detached Element.webkitMatchesSelector: Invalid character: <'
@@ -1017,14 +1006,10 @@ dom/nodes/Element-webkitMatchesSelector.html:
 - 'Detached Element.webkitMatchesSelector: Invalid class: .5cm'
 - 'Detached Element.webkitMatchesSelector: Invalid class: .foo..quux'
 - 'Detached Element.webkitMatchesSelector: Relative selector: >*'
-- 'Fragment Element.webkitMatchesSelector: Attribute presence selector, matching title
-  attribute, case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'Fragment Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.webkitMatchesSelector: :target pseudo-class selector, matching
   the element referenced by the URL fragment identifier (with no refNodes): :target'
-- 'In-document Element.webkitMatchesSelector: Attribute presence selector, matching
-  title attribute, case insensitivity (with no refNodes): #attr-presence [*|TiTlE]'
 - 'In-document Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.webkitMatchesSelector: Invalid character: <'
@@ -1125,8 +1110,6 @@ dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html:
 - Detached Element.querySelector null
 - Detached Element.querySelector undefined
-- 'Detached Element.querySelector: Attribute presence selector, matching title attribute,
-  case insensitivity: #attr-presence [*|TiTlE]'
 - 'Detached Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelector: Attribute whitespace-separated list selector, not
@@ -1136,12 +1119,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelector: Invalid class: ..test'
 - 'Detached Element.querySelector: Invalid class: .5cm'
 - 'Detached Element.querySelector: Invalid class: .foo..quux'
-- 'Detached Element.querySelector: Namespace selector, matching any elements in no
-  namespace only: #no-namespace |*'
-- 'Detached Element.querySelector: Namespace selector, matching div elements in no
-  namespace only: #no-namespace |div'
-- 'Detached Element.querySelector: Namespace selector, matching element with any namespace:
-  #any-namespace *|div'
 - 'Detached Element.querySelector: Relative selector: >*'
 - Detached Element.querySelectorAll null
 - Detached Element.querySelectorAll undefined
@@ -1149,8 +1126,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   elements: #pseudo-empty :empty'
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching empty
   p elements: #pseudo-empty p:empty'
-- 'Detached Element.querySelectorAll: Attribute presence selector, matching title
-  attribute, case insensitivity: #attr-presence [*|TiTlE]'
 - 'Detached Element.querySelectorAll: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelectorAll: Attribute whitespace-separated list selector,
@@ -1160,12 +1135,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelectorAll: Invalid class: ..test'
 - 'Detached Element.querySelectorAll: Invalid class: .5cm'
 - 'Detached Element.querySelectorAll: Invalid class: .foo..quux'
-- 'Detached Element.querySelectorAll: Namespace selector, matching any elements in
-  no namespace only: #no-namespace |*'
-- 'Detached Element.querySelectorAll: Namespace selector, matching div elements in
-  no namespace only: #no-namespace |div'
-- 'Detached Element.querySelectorAll: Namespace selector, matching element with any
-  namespace: #any-namespace *|div'
 - 'Detached Element.querySelectorAll: Relative selector: >*'
 - Document.querySelector null
 - Document.querySelector undefined
@@ -1173,8 +1142,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   elements: #head :link, #head :visited'
 - 'Document.querySelector: :target pseudo-class selector, matching the element referenced
   by the URL fragment identifier: :target'
-- 'Document.querySelector: Attribute presence selector, matching title attribute,
-  case insensitivity: #attr-presence [*|TiTlE]'
 - 'Document.querySelector: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelector: Attribute whitespace-separated list selector, not matching
@@ -1184,12 +1151,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Document.querySelector: Invalid class: ..test'
 - 'Document.querySelector: Invalid class: .5cm'
 - 'Document.querySelector: Invalid class: .foo..quux'
-- 'Document.querySelector: Namespace selector, matching any elements in no namespace
-  only: #no-namespace |*'
-- 'Document.querySelector: Namespace selector, matching div elements in no namespace
-  only: #no-namespace |div'
-- 'Document.querySelector: Namespace selector, matching element with any namespace:
-  #any-namespace *|div'
 - 'Document.querySelector: Relative selector: >*'
 - Document.querySelectorAll null
 - Document.querySelectorAll tree order
@@ -1202,8 +1163,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   no elements: #head :link, #head :visited'
 - 'Document.querySelectorAll: :target pseudo-class selector, matching the element
   referenced by the URL fragment identifier: :target'
-- 'Document.querySelectorAll: Attribute presence selector, matching title attribute,
-  case insensitivity: #attr-presence [*|TiTlE]'
 - 'Document.querySelectorAll: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelectorAll: Attribute whitespace-separated list selector, not matching
@@ -1213,12 +1172,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Document.querySelectorAll: Invalid class: ..test'
 - 'Document.querySelectorAll: Invalid class: .5cm'
 - 'Document.querySelectorAll: Invalid class: .foo..quux'
-- 'Document.querySelectorAll: Namespace selector, matching any elements in no namespace
-  only: #no-namespace |*'
-- 'Document.querySelectorAll: Namespace selector, matching div elements in no namespace
-  only: #no-namespace |div'
-- 'Document.querySelectorAll: Namespace selector, matching element with any namespace:
-  #any-namespace *|div'
 - 'Document.querySelectorAll: Relative selector: >*'
 - 'Empty Element.querySelector: Invalid character: <'
 - 'Empty Element.querySelector: Invalid character: >'
@@ -1236,8 +1189,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - Fragment.querySelector undefined
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelector: Attribute presence selector, matching title attribute,
-  case insensitivity: #attr-presence [*|TiTlE]'
 - 'Fragment.querySelector: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelector: Attribute whitespace-separated list selector, not matching
@@ -1247,12 +1198,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelector: Invalid class: ..test'
 - 'Fragment.querySelector: Invalid class: .5cm'
 - 'Fragment.querySelector: Invalid class: .foo..quux'
-- 'Fragment.querySelector: Namespace selector, matching any elements in no namespace
-  only: #no-namespace |*'
-- 'Fragment.querySelector: Namespace selector, matching div elements in no namespace
-  only: #no-namespace |div'
-- 'Fragment.querySelector: Namespace selector, matching element with any namespace:
-  #any-namespace *|div'
 - 'Fragment.querySelector: Relative selector: >*'
 - Fragment.querySelectorAll null
 - Fragment.querySelectorAll undefined
@@ -1262,8 +1207,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   #pseudo-empty p:empty'
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelectorAll: Attribute presence selector, matching title attribute,
-  case insensitivity: #attr-presence [*|TiTlE]'
 - 'Fragment.querySelectorAll: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelectorAll: Attribute whitespace-separated list selector, not matching
@@ -1273,19 +1216,11 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelectorAll: Invalid class: ..test'
 - 'Fragment.querySelectorAll: Invalid class: .5cm'
 - 'Fragment.querySelectorAll: Invalid class: .foo..quux'
-- 'Fragment.querySelectorAll: Namespace selector, matching any elements in no namespace
-  only: #no-namespace |*'
-- 'Fragment.querySelectorAll: Namespace selector, matching div elements in no namespace
-  only: #no-namespace |div'
-- 'Fragment.querySelectorAll: Namespace selector, matching element with any namespace:
-  #any-namespace *|div'
 - 'Fragment.querySelectorAll: Relative selector: >*'
 - In-document Element.querySelector null
 - In-document Element.querySelector undefined
 - 'In-document Element.querySelector: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
-- 'In-document Element.querySelector: Attribute presence selector, matching title
-  attribute, case insensitivity: #attr-presence [*|TiTlE]'
 - 'In-document Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - 'In-document Element.querySelector: Attribute whitespace-separated list selector,
@@ -1295,12 +1230,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelector: Invalid class: ..test'
 - 'In-document Element.querySelector: Invalid class: .5cm'
 - 'In-document Element.querySelector: Invalid class: .foo..quux'
-- 'In-document Element.querySelector: Namespace selector, matching any elements in
-  no namespace only: #no-namespace |*'
-- 'In-document Element.querySelector: Namespace selector, matching div elements in
-  no namespace only: #no-namespace |div'
-- 'In-document Element.querySelector: Namespace selector, matching element with any
-  namespace: #any-namespace *|div'
 - 'In-document Element.querySelector: Relative selector: >*'
 - In-document Element.querySelectorAll null
 - In-document Element.querySelectorAll undefined
@@ -1310,8 +1239,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   p elements: #pseudo-empty p:empty'
 - 'In-document Element.querySelectorAll: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
-- 'In-document Element.querySelectorAll: Attribute presence selector, matching title
-  attribute, case insensitivity: #attr-presence [*|TiTlE]'
 - 'In-document Element.querySelectorAll: Attribute value selector, matching align
   attribute with value, unclosed bracket: #attr-value [align="center"'
 - 'In-document Element.querySelectorAll: Attribute whitespace-separated list selector,
@@ -1321,12 +1248,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelectorAll: Invalid class: ..test'
 - 'In-document Element.querySelectorAll: Invalid class: .5cm'
 - 'In-document Element.querySelectorAll: Invalid class: .foo..quux'
-- 'In-document Element.querySelectorAll: Namespace selector, matching any elements
-  in no namespace only: #no-namespace |*'
-- 'In-document Element.querySelectorAll: Namespace selector, matching div elements
-  in no namespace only: #no-namespace |div'
-- 'In-document Element.querySelectorAll: Namespace selector, matching element with
-  any namespace: #any-namespace *|div'
 - 'In-document Element.querySelectorAll: Relative selector: >*'
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '"eof\\" should never match with "#eof\\"'
