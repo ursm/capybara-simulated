@@ -570,20 +570,7 @@ dom/nodes/MutationObserver-characterData.html:
 - 'characterData Comment: data mutations'
 - 'characterData ProcessingInstruction: data mutations'
 dom/nodes/MutationObserver-childList.html:
-- 'childList Node.appendChild: fragment addition mutations'
-- 'childList Node.appendChild: fragment removal mutations'
-- 'childList Node.appendChild: removal and addition mutations'
-- 'childList Node.insertBefore: fragment addition mutations'
-- 'childList Node.insertBefore: fragment removal mutations'
-- 'childList Node.insertBefore: removal and addition mutations'
-- childList Node.normalize mutation
-- childList Node.normalize mutations
-- 'childList Node.replaceChild: internal replacement mutation'
 - 'childList Node.replaceChild: self internal replacement mutation'
-- 'childList Range.deleteContents: child and data removal mutation'
-- 'childList Range.deleteContents: child removal mutation'
-- 'childList Range.extractContents: child and data removal mutation'
-- 'childList Range.extractContents: child removal mutation'
 - 'childList Range.surroundContents: children removal and addition mutation'
 dom/nodes/MutationObserver-cross-realm-callback-report-exception.html: HARNESS_ERROR
 dom/nodes/MutationObserver-document.html:
