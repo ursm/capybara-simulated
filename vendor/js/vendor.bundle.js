@@ -2554,7 +2554,7 @@ var __csimVendor = (() => {
   __name(is2, "is");
   var dist_default2 = selectAll;
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/index.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/index.js
   var src_exports = {};
   __export(src_exports, {
     AXES: () => AXES,
@@ -2577,7 +2577,7 @@ var __csimVendor = (() => {
     tokenize: () => tokenize
   });
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/errors.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/errors.js
   var XPathSyntaxError = class extends Error {
     static {
       __name(this, "XPathSyntaxError");
@@ -2598,7 +2598,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/lexer.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/lexer.js
   var T = {
     LPAREN: "LPAREN",
     RPAREN: "RPAREN",
@@ -2925,7 +2925,7 @@ var __csimVendor = (() => {
   }
   __name(readName, "readName");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/parser.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/parser.js
   var AXES = /* @__PURE__ */ new Set([
     "ancestor",
     "ancestor-or-self",
@@ -3195,7 +3195,7 @@ var __csimVendor = (() => {
   }
   __name(parse3, "parse");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/types.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/types.js
   var NodeSet = class {
     static {
       __name(this, "NodeSet");
@@ -3305,7 +3305,7 @@ var __csimVendor = (() => {
   }
   __name(expandExponential, "expandExponential");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/compare.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/compare.js
   var EQ_TESTS = {
     "=": /* @__PURE__ */ __name((x, y) => x === y, "="),
     "!=": /* @__PURE__ */ __name((x, y) => x !== y, "!=")
@@ -3374,8 +3374,18 @@ var __csimVendor = (() => {
     return [toNumber(value, adapter)];
   }
   __name(numericValues, "numericValues");
+  function compareValueLiteral(op, value, literal) {
+    if (op === "=" || op === "!=") {
+      const equal = typeof literal === "number" ? stringToNumber(value) === literal : value === literal;
+      return op === "=" ? equal : !equal;
+    }
+    const a = stringToNumber(value);
+    const b = typeof literal === "number" ? literal : stringToNumber(literal);
+    return REL_TESTS[op](a, b);
+  }
+  __name(compareValueLiteral, "compareValueLiteral");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/node-types.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/node-types.js
   var ELEMENT = 1;
   var ATTRIBUTE = 2;
   var TEXT = 3;
@@ -3385,7 +3395,7 @@ var __csimVendor = (() => {
   var XML_NS = "http://www.w3.org/XML/1998/namespace";
   var XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/axes.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/axes.js
   function previousSibling(node, adapter) {
     if (adapter.previousSibling) return adapter.previousSibling(node);
     const parent = adapter.parent(node);
@@ -3490,7 +3500,7 @@ var __csimVendor = (() => {
   }
   __name(axisNodes, "axisNodes");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/nodetest.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/nodetest.js
   function principalType(axis) {
     return axis === "attribute" ? ATTRIBUTE : ELEMENT;
   }
@@ -3507,6 +3517,15 @@ var __csimVendor = (() => {
     return true;
   }
   __name(asciiEqualsIgnoreCase, "asciiEqualsIgnoreCase");
+  function asciiLower(s) {
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      out += c >= 65 && c <= 90 ? String.fromCharCode(c + 32) : s[i];
+    }
+    return out;
+  }
+  __name(asciiLower, "asciiLower");
   function resolvePrefix(resolver, prefix) {
     if (prefix === "xml") return XML_NS;
     if (!resolver) return null;
@@ -3558,6 +3577,20 @@ var __csimVendor = (() => {
     return ns === uri && local === nodeTest.local;
   }
   __name(matchesNodeTest, "matchesNodeTest");
+  function attributeValue(node, nameTest, adapter, resolver, html) {
+    if (adapter.nodeType(node) !== ELEMENT) return void 0;
+    let namespaceURI = null;
+    if (nameTest.prefix != null) {
+      namespaceURI = resolvePrefix(resolver, nameTest.prefix);
+      if (namespaceURI == null) {
+        throw new XPathTypeError(`unresolved namespace prefix '${nameTest.prefix}'`);
+      }
+    }
+    const local = html && nameTest.prefix == null ? asciiLower(nameTest.local) : nameTest.local;
+    const value = adapter.getAttribute(node, namespaceURI, local);
+    return value == null ? void 0 : value;
+  }
+  __name(attributeValue, "attributeValue");
   function documentNodeOf(node, adapter) {
     return adapter.nodeType(node) === DOCUMENT ? node : adapter.ownerDocument(node);
   }
@@ -3568,7 +3601,7 @@ var __csimVendor = (() => {
   }
   __name(isHtmlDocument, "isHtmlDocument");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/functions.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/functions.js
   function arity(name, args, min, max = min) {
     if (args.length < min || args.length > max) {
       const range = min === max ? `${min}` : `${min}-${max}`;
@@ -3780,9 +3813,18 @@ var __csimVendor = (() => {
     }, "round")
   };
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/context.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/context.js
   function makeRootContext(node, adapter, { resolver = null, functions = coreFunctions } = {}) {
-    return { node, position: 1, size: 1, adapter, resolver, functions, cache: /* @__PURE__ */ new Map() };
+    return {
+      node,
+      position: 1,
+      size: 1,
+      adapter,
+      resolver,
+      functions,
+      cache: /* @__PURE__ */ new Map(),
+      html: isHtmlDocument(node, adapter)
+    };
   }
   __name(makeRootContext, "makeRootContext");
   function withNode(ctx, node, position, size) {
@@ -3793,12 +3835,13 @@ var __csimVendor = (() => {
       adapter: ctx.adapter,
       resolver: ctx.resolver,
       functions: ctx.functions,
-      cache: ctx.cache
+      cache: ctx.cache,
+      html: ctx.html
     };
   }
   __name(withNode, "withNode");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/evaluate.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/evaluate.js
   function evaluate(ast, ctx) {
     switch (ast.type) {
       case "Literal":
@@ -3837,25 +3880,71 @@ var __csimVendor = (() => {
       return toBoolean(evaluate(ast.left, ctx)) && toBoolean(evaluate(ast.right, ctx));
     }
     if (op === "union") {
-      const left2 = evaluate(ast.left, ctx);
-      const right2 = evaluate(ast.right, ctx);
-      if (!isNodeSet(left2) || !isNodeSet(right2)) {
+      const left = evaluate(ast.left, ctx);
+      const right = evaluate(ast.right, ctx);
+      if (!isNodeSet(left) || !isNodeSet(right)) {
         throw new XPathTypeError("union operand is not a node-set");
       }
-      return unionNodeSets(left2, right2);
+      return unionNodeSets(left, right);
     }
-    const left = evaluate(ast.left, ctx);
-    const right = evaluate(ast.right, ctx);
-    if (op === "=" || op === "!=") {
-      return compareEquality(op, left, right, ctx.adapter);
-    }
-    if (op === "<" || op === "<=" || op === ">" || op === ">=") {
-      return compareRelational(op, left, right, ctx.adapter);
+    if (op === "=" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+      const fast = tryAttributeComparison(ast, ctx);
+      if (fast !== null) return fast;
+      const left = evaluate(ast.left, ctx);
+      const right = evaluate(ast.right, ctx);
+      return op === "=" || op === "!=" ? compareEquality(op, left, right, ctx.adapter) : compareRelational(op, left, right, ctx.adapter);
     }
     const arith = ARITHMETIC[op];
-    return arith(toNumber(left, ctx.adapter), toNumber(right, ctx.adapter));
+    return arith(toNumber(evaluate(ast.left, ctx), ctx.adapter), toNumber(evaluate(ast.right, ctx), ctx.adapter));
   }
   __name(evaluateBinary, "evaluateBinary");
+  var FLIP_REL = {
+    "<": ">",
+    ">": "<",
+    "<=": ">=",
+    ">=": "<="
+  };
+  function isSelfNodeStep(step) {
+    return step.axis === "self" && step.nodeTest.kind === "type" && step.nodeTest.name === "node" && step.predicates.length === 0;
+  }
+  __name(isSelfNodeStep, "isSelfNodeStep");
+  function singleRelativeStep(ast) {
+    if (ast.type !== "Path" || ast.root != null) return null;
+    const { steps } = ast;
+    if (steps.length === 1) return steps[0];
+    if (steps.length === 2 && isSelfNodeStep(steps[0])) return steps[1];
+    return null;
+  }
+  __name(singleRelativeStep, "singleRelativeStep");
+  function simpleAttributeNameTest(ast) {
+    const step = singleRelativeStep(ast);
+    if (step === null || step.axis !== "attribute" || step.predicates.length !== 0) return null;
+    const test = step.nodeTest;
+    return test.kind === "name" && test.local !== "*" ? test : null;
+  }
+  __name(simpleAttributeNameTest, "simpleAttributeNameTest");
+  function constantOperand(ast) {
+    if (ast.type === "Literal") return ast.value;
+    if (ast.type === "Number") return ast.value;
+    return void 0;
+  }
+  __name(constantOperand, "constantOperand");
+  function tryAttributeComparison(ast, ctx) {
+    let nameTest = simpleAttributeNameTest(ast.left);
+    let literal = nameTest === null ? void 0 : constantOperand(ast.right);
+    let attributeOnLeft = true;
+    if (nameTest === null || literal === void 0) {
+      nameTest = simpleAttributeNameTest(ast.right);
+      literal = nameTest === null ? void 0 : constantOperand(ast.left);
+      attributeOnLeft = false;
+    }
+    if (nameTest === null || literal === void 0) return null;
+    const value = attributeValue(ctx.node, nameTest, ctx.adapter, ctx.resolver, ctx.html);
+    if (value === void 0) return false;
+    const op = !attributeOnLeft && FLIP_REL[ast.op] ? FLIP_REL[ast.op] : ast.op;
+    return compareValueLiteral(op, value, literal);
+  }
+  __name(tryAttributeComparison, "tryAttributeComparison");
   function unionNodeSets(a, b) {
     const seen = new Set(a.nodes);
     const nodes = a.nodes.slice();
@@ -3876,7 +3965,7 @@ var __csimVendor = (() => {
       const cached = ctx.cache.get(ast);
       if (cached && cached.doc === doc) return cached.value;
     }
-    const html = isHtmlDocument(ctx.node, adapter);
+    const { html } = ctx;
     let current;
     if (ast.root == null) {
       current = [ctx.node];
@@ -3966,10 +4055,13 @@ var __csimVendor = (() => {
   }
   __name(existsBoolean, "existsBoolean");
   function pathExists(ast, ctx, html) {
-    if (ast.root == null && ast.steps.length === 1) {
-      const step = ast.steps[0];
-      if (step.axis === "self" && step.predicates.length === 0) {
+    const step = singleRelativeStep(ast);
+    if (step !== null && step.predicates.length === 0) {
+      if (step.axis === "self") {
         return matchesNodeTest(ctx.node, step.nodeTest, "self", ctx.adapter, ctx.resolver, html);
+      }
+      if (step.axis === "attribute" && step.nodeTest.kind === "name" && step.nodeTest.local !== "*") {
+        return attributeValue(ctx.node, step.nodeTest, ctx.adapter, ctx.resolver, html) !== void 0;
       }
     }
     return evaluatePath(ast, ctx).size > 0;
@@ -3981,8 +4073,7 @@ var __csimVendor = (() => {
       throw new XPathTypeError("predicate applied to a non-node-set value");
     }
     const ordered = value.ordered(ctx.adapter).slice();
-    const html = isHtmlDocument(ctx.node, ctx.adapter);
-    return new NodeSet(applyPredicates(ordered, ast.predicates, ctx, html), true);
+    return new NodeSet(applyPredicates(ordered, ast.predicates, ctx, ctx.html), true);
   }
   __name(evaluateFilter, "evaluateFilter");
   function evaluateFunction(ast, ctx) {
@@ -3998,7 +4089,7 @@ var __csimVendor = (() => {
   }
   __name(evaluateFunction, "evaluateFunction");
 
-  // node_modules/.pnpm/xpathway@1.0.1/node_modules/xpathway/src/api.js
+  // node_modules/.pnpm/xpathway@1.0.2/node_modules/xpathway/src/api.js
   var ANY_TYPE = 0;
   var NUMBER_TYPE = 1;
   var STRING_TYPE = 2;
