@@ -671,13 +671,6 @@ dom/nodes/remove-and-adopt-thcrash.html:
   doesn't crash.
 dom/nodes/remove-next-sibling-during-replace-with.html:
 - remove-next-sibling-during-replace-with
-dom/nodes/remove-unscopable.html:
-- after() should be unscopable
-- append() should be unscopable
-- before() should be unscopable
-- prepend() should be unscopable
-- remove() should be unscopable
-- replaceWith() should be unscopable
 dom/nodes/rootNode.html:
 - getRootNode() must return context object's shadow-including root if options's composed
   is true, and context object's root otherwise
