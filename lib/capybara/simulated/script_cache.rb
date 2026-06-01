@@ -37,7 +37,14 @@ module Capybara
 
       class << self
         def dir = ENV['CSIM_SCRIPT_CACHE_DIR'] || DEFAULT_DIR
-        def enabled? = !ENV['CSIM_SCRIPT_CACHE'].to_s.casecmp('off').zero?
+        # `V8Runtime#call` drains `warm_pending!` after EVERY host-fn call (finds,
+        # polls, dispatch), so this is one of the hottest Ruby methods — memoize
+        # the env decision instead of re-reading ENV + allocating a string per
+        # call (the var is fixed per process).
+        def enabled?
+          return @enabled unless @enabled.nil?
+          @enabled = !ENV['CSIM_SCRIPT_CACHE'].to_s.casecmp('off').zero?
+        end
 
         def lookup(sha, version_tag, kind: :script)
           return nil unless enabled?
