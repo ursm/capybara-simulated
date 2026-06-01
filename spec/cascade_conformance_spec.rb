@@ -88,16 +88,14 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<div class="p"><span id="t">x</span></div>',
       expect: { 't' => false } },
 
-    # KNOWN BUG (pre-existing, Chromium-confirmed): `visibility` inherits, but a
-    # descendant's `visibility: visible` re-shows it under a `visibility: hidden`
-    # ancestor. isVisibleNodeImpl / __csimVisible treat ANY visibility:hidden
-    # ancestor as fatal (correct for display:none, wrong for visibility). Real
-    # Chromium: el.checkVisibility({visibilityProperty:true}) === true here.
+    # `visibility` inherits, but a descendant's `visibility: visible` re-shows it
+    # under a `visibility: hidden` ancestor (Chromium-confirmed). Resolved by
+    # visibilityHidden's nearest-explicit-ancestor walk, separate from the
+    # unconditional display-side ancestor walk.
     { name: 'visibility child overrides parent hidden',
       css:  '.p { visibility: hidden } .v { visibility: visible }',
       body: '<div class="p"><span class="v" id="t">x</span></div>',
-      expect: { 't' => true },
-      pending: 'visibility:visible descendant override not yet honoured (ancestor-walk treats any visibility:hidden ancestor as fatal)' },
+      expect: { 't' => true } },
 
     { name: 'descendant combinator',
       css:  '.a .b { display: none }',
