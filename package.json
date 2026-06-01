@@ -5,12 +5,13 @@
   "scripts": {
     "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --keep-names --global-name=__csimVendor --outfile=vendor/js/vendor.bundle.js",
     "build:bridge": "esbuild lib/capybara/simulated/js/src/bridge.entry.js --bundle --format=iife --keep-names --outfile=lib/capybara/simulated/js/bridge.bundle.js",
-    "build":        "pnpm run build:vendor && pnpm run build:bridge",
-    "gen:idl":      "node script/gen_idl_surface.mjs",
-    "vendor:wpt":   "node script/vendor_wpt.mjs"
+    "build": "pnpm run build:vendor && pnpm run build:bridge",
+    "gen:idl": "node script/gen_idl_surface.mjs",
+    "vendor:wpt": "node script/vendor_wpt.mjs"
   },
   "dependencies": {
     "css-select": "^7.0.0",
+    "css-tree": "^3.2.1",
     "css-what": "^8.0.0",
     "xpathway": "^1.0.2"
   },

@@ -16,5 +16,21 @@ import * as cssWhat   from 'css-what';
 // wgxpath blob. Only needed when rebuilding this bundle — the gem ships the
 // pre-built output.
 import * as xpathway  from 'xpathway';
+// css-tree: CSS parser (stylesheets + selectors + specificity). Backs the real
+// in-V8 cascade engine (visibility resolution) — css-select still does matching;
+// css-tree provides clean specificity (distinguishes `#x` from `[id=x]`, which
+// css-what blurs) and `<style>`/`@layer`/`@media`/nesting parse.
+//
+// Import the parser / generator / walker SUBPATHS, not the `css-tree` barrel:
+// the barrel builds the full syntax including the value-validation **lexer**
+// (mdn-data property grammar, ~60% of css-tree's minified weight) which we never
+// use — we only parse/walk/generate. `import * from 'css-tree'` can't tree-shake
+// the lexer out (the default `parse` is bound to the full syntax). The subpath
+// defaults are `createParser(parserConfig)` / `createGenerator` / `createWalker`
+// — the exact same parse/generate/walk the barrel exposes, minus the lexer.
+import cssTreeParse    from 'css-tree/parser';
+import cssTreeGenerate from 'css-tree/generator';
+import cssTreeWalk     from 'css-tree/walker';
+const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeWalk };
 
-export { cssSelect, cssWhat, xpathway };
+export { cssSelect, cssWhat, xpathway, cssTree };
