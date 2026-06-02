@@ -156,6 +156,13 @@ module Capybara
         max_ms.nil? ? vm.call('__drainTimers') : vm.call('__drainTimers', max_ms.to_i)
       end
 
+      # One event-loop step; returns `{ 'fired', 'gen', 'dirtied' }` (see
+      # V8Runtime#run_loop_step). `dirtied` = settleGen changed during the step.
+      def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
+        r = vm.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen)
+        r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
+      end
+
       # `iters` is ignored — `drain_jobs!` already loops to queue-empty,
       # so further rounds drain nothing extra. The arity matches
       # `V8Runtime#drain_microtasks` so `Browser#settle` can call either

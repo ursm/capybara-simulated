@@ -1651,8 +1651,11 @@ module Capybara
           effective_step = step_ms || ((now - (@last_tick_ts || now)) * 1000).to_i.clamp(0, MAX_TICK_MS)
           @last_tick_ts = now
           if @timers_active && effective_step > 0
-            fired = @runtime.drain_timers(effective_step).to_i
-            @find_cache_dirty = true if fired > 0
+            r = @runtime.run_loop_step(effective_step)
+            # `dirtied` (settleGen changed) catches a render-phase rAF / microtask-
+            # delivered MutationObserver that mutated the DOM without firing a timer
+            # (fired == 0) — a fired-count-only test would leave a stale find cache.
+            @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
           end
           # Pull any pending Worker / EventSource messages into JS
           # state. Without this, `evaluate_script` after kicking off

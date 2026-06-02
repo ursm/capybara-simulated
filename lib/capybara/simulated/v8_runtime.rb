@@ -205,6 +205,16 @@ module Capybara
         max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
+      # One event-loop step (task → microtask-checkpoint → render). Returns the
+      # `{ 'fired', 'gen', 'dirtied' }` hash — `dirtied` (settleGen changed during
+      # the step) is the authoritative find-cache-invalidation signal, since a
+      # render-phase rAF / microtask-delivered MutationObserver can mutate the DOM
+      # without firing a timer (fired == 0).
+      def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
+        r = ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen)
+        r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
+      end
+
       # mini_racer drains microtasks at every `eval` boundary, so an
       # empty `eval('0')` is the cheapest way to advance one round of
       # chained `await`/`.then` queues. `settle` calls this in a loop
