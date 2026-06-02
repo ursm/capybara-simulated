@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   css-select@7.0.0: 93e85b409ab078491850a9f5ef5fd93f5c1c877b1bbac136ab3690b4d6ddf579
-  css-tree@3.2.1: 815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4
+  css-tree@3.2.1: adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8
   css-what@8.0.0: 8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d
 
 importers:
@@ -18,7 +18,7 @@ importers:
         version: 7.0.0(patch_hash=93e85b409ab078491850a9f5ef5fd93f5c1c877b1bbac136ab3690b4d6ddf579)
       css-tree:
         specifier: ^3.2.1
-        version: 3.2.1(patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4)
+        version: 3.2.1(patch_hash=adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8)
       css-what:
         specifier: ^8.0.0
         version: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
@@ -350,7 +350,7 @@ snapshots:
       domutils: 4.0.2
       nth-check: 3.0.1
 
-  css-tree@3.2.1(patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4):
+  css-tree@3.2.1(patch_hash=adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8):
     dependencies:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
