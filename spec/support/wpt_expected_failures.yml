@@ -957,7 +957,6 @@ domparsing/DOMParser-parseFromString-xml.html: HARNESS_ERROR
 domparsing/XMLSerializer-serializeToString.html: HARNESS_ERROR
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
-- Simple test with paragraphs
 domparsing/domparser-spurious-attributes.html:
 - Using ">" and "\r" in an attribute creates no unexpected attributes.
 - Using ">" and HTML entities in an attribute creates no unexpected attributes.
@@ -972,13 +971,6 @@ domparsing/innerhtml-03.xhtml:
 domparsing/innerhtml-05.xhtml: HARNESS_ERROR
 domparsing/innerhtml-07.html:
 - 'innerHTML and string conversion: undefined.'
-domparsing/innerhtml-li-autoclosing.html:
-- Adjacent empty li elements in ol produce siblings.
-- Adjacent empty li elements in ul produce siblings.
-- Adjacent li elements produce siblings when ul is nested in div.
-- Adjacent li elements with attributes produce siblings.
-- Adjacent li elements with text content produce siblings.
-- Three adjacent li elements produce siblings.
 domparsing/innerhtml-mxss.sub.html:
 - 'href after setter: 1680'
 - 'href after setter: 2000'
