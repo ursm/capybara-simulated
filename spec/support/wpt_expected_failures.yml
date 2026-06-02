@@ -314,8 +314,6 @@ dom/nodes/Element-getElementsByTagName.html:
 dom/nodes/Element-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
 dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
-dom/nodes/Element-insertAdjacentElement.html:
-- Inserting to an invalid location should cause a Syntax Error exception
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
 - DIV Element.matches no parameter
@@ -470,8 +468,6 @@ dom/nodes/attributes.html:
 - toggleAttribute should set the first attribute with the given name
 dom/nodes/insert-adjacent.html:
 - invalid object argument insertAdjacentElement
-- invalid syntax for insertAdjacentElement
-- invalid syntax for insertAdjacentText
 dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.html:
 - When adding a script+form in a fragment and the form matches an associated element,
   the script that checks whether the button is associated to the form should run after
@@ -1003,72 +999,7 @@ domparsing/innerhtml-mxss.sub.html:
 - 'href before setter: 205f'
 - 'href before setter: 3000'
 domparsing/insert_adjacent_html-xhtml.xhtml:
-- Afterbegin content again, with next sibling
-- Afterbegin content without next sibling
-- Afterbegin content2 test again, now that there's a next sibling
-- Afterbegin content2 without next sibling
-- BeforeEnd content again, with next sibling
-- BeforeEnd content without next sibling
-- BeforeEnd content2 test again, now that there's a next sibling
-- BeforeEnd content2 without next sibling
-- Should not run script when appending things which have descendant <script> inserted
-  via insertAdjacentHTML
-- Should throw when inserting with invalid position string
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (comments)
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (elements)
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (text)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (comments)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (elements)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (text)
-- afterend child node not in tree but has parent
-- afterend content again, with next sibling
-- afterend content without next sibling
-- afterend content2 test again, now that there's a next sibling
-- afterend content2 without next sibling
-- beforeBegin content again, with next sibling
-- beforeBegin content without next sibling
-- beforeBegin content2 test again, now that there's a next sibling
-- beforeBegin content2 without next sibling
 - insertAdjacentHTML in HTML
-domparsing/insert_adjacent_html.html:
-- Afterbegin content again, with next sibling
-- Afterbegin content without next sibling
-- Afterbegin content2 test again, now that there's a next sibling
-- Afterbegin content2 without next sibling
-- BeforeEnd content again, with next sibling
-- BeforeEnd content without next sibling
-- BeforeEnd content2 test again, now that there's a next sibling
-- BeforeEnd content2 without next sibling
-- Should not run script when appending things which have descendant <script> inserted
-  via insertAdjacentHTML
-- Should throw when inserting with invalid position string
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (comments)
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (elements)
-- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
-  and afterend (text)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (comments)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (elements)
-- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
-  afterend (text)
-- afterend child node not in tree but has parent
-- afterend content again, with next sibling
-- afterend content without next sibling
-- afterend content2 test again, now that there's a next sibling
-- afterend content2 without next sibling
-- beforeBegin content again, with next sibling
-- beforeBegin content without next sibling
-- beforeBegin content2 test again, now that there's a next sibling
-- beforeBegin content2 without next sibling
 domparsing/outerhtml-01.html:
 - 'outerHTML: child of #document'
 domparsing/outerhtml-02.html:
