@@ -1391,6 +1391,854 @@ domparsing/tentative/stream-insertion-logic.html: HARNESS_ERROR
 domparsing/tentative/stream-positional.html: HARNESS_ERROR
 domparsing/xmldomparser.html:
 - XML Dom Parse readyState Test
+encoding/api-replacement-encodings.any.js: HARNESS_ERROR
+encoding/big5-encoder.html:
+- 'big5 encoder: A Plane 2 character whose low 16 bits match a BMP character that
+  has a lower pointer'
+- 'big5 encoder: A duplicate-mapped code point that prefers the highest pointer in
+  the encoder'
+- 'big5 encoder: Euro; the highest-pointer character before a range of 30 unmapped
+  pointers'
+- 'big5 encoder: Highest-pointer BMP character excluded from encoder'
+- 'big5 encoder: Highest-pointer character excluded from encoder'
+- 'big5 encoder: Lowest-pointer character included in encoder'
+- 'big5 encoder: The canonical BMP test character that is not in the index'
+- 'big5 encoder: The canonical astral test character that is not in the index'
+- 'big5 encoder: The highest-pointer character before a range of 41 unmapped pointers'
+- 'big5 encoder: The last character in the index'
+- 'big5 encoder: The lowest-pointer character after the range of 30 unmapped pointers'
+- 'big5 encoder: The lowest-pointer character after the range of 41 unmapped pointers'
+encoding/bom-handling.html:
+- document.characterSet should match the BOM
+encoding/encodeInto.any.js:
+- 'Invalid encodeInto() destination: ArrayBuffer'
+- 'Invalid encodeInto() destination: BigInt64Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: BigInt64Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: BigUint64Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: BigUint64Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: DataView, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: DataView, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Float16Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Float16Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Float32Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Float32Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Float64Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Float64Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Int16Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Int16Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Int32Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Int32Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Int8Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Int8Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Uint16Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Uint16Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Uint32Array, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Uint32Array, backed by: SharedArrayBuffer'
+- 'Invalid encodeInto() destination: Uint8ClampedArray, backed by: ArrayBuffer'
+- 'Invalid encodeInto() destination: Uint8ClampedArray, backed by: SharedArrayBuffer'
+- encodeInto() and a detached output buffer
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 0, filler
+  0
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 0, filler
+  128
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 0, filler
+  random
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 4, filler
+  0
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 4, filler
+  128
+- encodeInto() into ArrayBuffer with A and destination length 10, offset 4, filler
+  random
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 0, filler
+  0
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 0, filler
+  128
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 0, filler
+  random
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 4, filler
+  0
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 4, filler
+  128
+- encodeInto() into ArrayBuffer with AU+df06 and destination length 4, offset 4, filler
+  random
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 0, filler
+  0
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 0, filler
+  128
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 0, filler
+  random
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 4, filler
+  0
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 4, filler
+  128
+- encodeInto() into ArrayBuffer with Hi and destination length 0, offset 4, filler
+  random
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 0, filler 0
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 0, filler 128
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 0, filler random
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 4, filler 0
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 4, filler 128
+- encodeInto() into ArrayBuffer with U+d834AU+df06A¥Hi and destination length 10,
+  offset 4, filler random
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 0, filler
+  0
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 0, filler
+  128
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 0, filler
+  random
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 4, filler
+  0
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 4, filler
+  128
+- encodeInto() into ArrayBuffer with ¥¥ and destination length 4, offset 4, filler
+  random
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler 0"
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler 128"
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler random"
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler 0"
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler 128"
+- "encodeInto() into ArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler random"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  0, filler 0"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  0, filler 128"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  0, filler random"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  4, filler 0"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  4, filler 128"
+- "encodeInto() into ArrayBuffer with \U0001D306A and destination length 3, offset
+  4, filler random"
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 0,
+  filler 0
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 0,
+  filler 128
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 0,
+  filler random
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 4,
+  filler 0
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 4,
+  filler 128
+- encodeInto() into SharedArrayBuffer with A and destination length 10, offset 4,
+  filler random
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  0, filler 0
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  0, filler 128
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  0, filler random
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  4, filler 0
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  4, filler 128
+- encodeInto() into SharedArrayBuffer with AU+df06 and destination length 4, offset
+  4, filler random
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 0,
+  filler 0
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 0,
+  filler 128
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 0,
+  filler random
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 4,
+  filler 0
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 4,
+  filler 128
+- encodeInto() into SharedArrayBuffer with Hi and destination length 0, offset 4,
+  filler random
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 0, filler 0
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 0, filler 128
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 0, filler random
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 4, filler 0
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 4, filler 128
+- encodeInto() into SharedArrayBuffer with U+d834AU+df06A¥Hi and destination length
+  10, offset 4, filler random
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 0,
+  filler 0
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 0,
+  filler 128
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 0,
+  filler random
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 4,
+  filler 0
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 4,
+  filler 128
+- encodeInto() into SharedArrayBuffer with ¥¥ and destination length 4, offset 4,
+  filler random
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler 0"
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler 128"
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  0, filler random"
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler 0"
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler 128"
+- "encodeInto() into SharedArrayBuffer with \U0001D306 and destination length 4, offset
+  4, filler random"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 0, filler 0"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 0, filler 128"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 0, filler random"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 4, filler 0"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 4, filler 128"
+- "encodeInto() into SharedArrayBuffer with \U0001D306A and destination length 3,
+  offset 4, filler random"
+encoding/idlharness.any.js: HARNESS_ERROR
+encoding/iso-2022-jp-decoder.any.js:
+- 'iso-2022-jp decoder: ASCII ESC, character'
+- 'iso-2022-jp decoder: Double ASCII ESC, character'
+- 'iso-2022-jp decoder: Double multibyte ESC'
+- 'iso-2022-jp decoder: Double multibyte ESC #2, character'
+- 'iso-2022-jp decoder: Double multibyte ESC, character'
+- 'iso-2022-jp decoder: Error ESC'
+- 'iso-2022-jp decoder: Error ESC, character'
+- 'iso-2022-jp decoder: Katakana ESC, SO / SI'
+- 'iso-2022-jp decoder: Katakana ESC, character'
+- 'iso-2022-jp decoder: Katakana ESC, character, Katakana ESC, character'
+- 'iso-2022-jp decoder: Katakana ESC, error ESC #2, character'
+- 'iso-2022-jp decoder: Katakana ESC, error ESC, character'
+- 'iso-2022-jp decoder: Katakana ESC, multibyte ESC, character'
+- 'iso-2022-jp decoder: Multibyte ESC #2, character'
+- 'iso-2022-jp decoder: Multibyte ESC, character'
+- 'iso-2022-jp decoder: Multibyte ESC, error ESC #2, character'
+- 'iso-2022-jp decoder: Multibyte ESC, error ESC, character'
+- 'iso-2022-jp decoder: Multibyte ESC, lead error byte'
+- 'iso-2022-jp decoder: Multibyte ESC, single byte, multibyte ESC, character'
+- 'iso-2022-jp decoder: Multibyte ESC, trail error byte'
+- 'iso-2022-jp decoder: Roman ESC, SO / SI'
+- 'iso-2022-jp decoder: Roman ESC, characters'
+- 'iso-2022-jp decoder: Roman ESC, error ESC, Katakana ESC'
+- 'iso-2022-jp decoder: SO / SI'
+- 'iso-2022-jp decoder: character, ASCII ESC'
+- 'iso-2022-jp decoder: character, ASCII ESC, character'
+- 'iso-2022-jp decoder: character, Katakana ESC'
+- 'iso-2022-jp decoder: character, Multibyte ESC'
+- 'iso-2022-jp decoder: character, Multibyte ESC #2'
+- 'iso-2022-jp decoder: character, Roman ESC'
+- 'iso-2022-jp decoder: character, error ESC'
+- 'iso-2022-jp decoder: character, error ESC #2'
+- 'iso-2022-jp decoder: character, error ESC #3'
+encoding/iso-2022-jp-encoder.html:
+- 'iso-2022-jp encoder: Katakana'
+- 'iso-2022-jp encoder: Katakana SO/SI ESC'
+- 'iso-2022-jp encoder: Katakana U+FFFD'
+- 'iso-2022-jp encoder: Roman SO/SI ESC'
+- 'iso-2022-jp encoder: Roman U+FFFD'
+- 'iso-2022-jp encoder: SO/SI ESC'
+- 'iso-2022-jp encoder: U+FFFD'
+- 'iso-2022-jp encoder: basics'
+- 'iso-2022-jp encoder: jis0208'
+- 'iso-2022-jp encoder: jis0208 SO/SI ESC'
+- 'iso-2022-jp encoder: jis0208 U+FFFD'
+encoding/legacy-mb-japanese/euc-jp/eucjp-decode-cseucpkdfmtjapanese.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-decode-errors.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-decode-x-euc-jp.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-decode.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-encode-href-errors-han.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-encode-href-errors-hangul.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-encode-href-errors-misc.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/euc-jp/eucjp-encode-href.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-decode-csiso2022jp.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-decode-errors.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-decode.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-form-errors-stateful.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-href-errors-han.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-href-errors-hangul.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-href-errors-misc.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-href.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-csshiftjis.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-errors.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-ms932.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-ms_kanji.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-shift-jis.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-sjis.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-windows-31j.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode-x-sjis.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-decode.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-encode-href-errors-han.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-encode-href-errors-hangul.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-encode-href-errors-misc.html: HARNESS_ERROR
+encoding/legacy-mb-japanese/shift_jis/sjis-encode-href.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-cseuckr.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-csksc56011987.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-errors.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-iso-ir-149.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-korean.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-ks_c_5601-1987.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-ks_c_5601-1989.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-ksc5601.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-ksc_5601.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode-windows-949.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-decode.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-encode-href-errors-han.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-encode-href-errors-misc.html: HARNESS_ERROR
+encoding/legacy-mb-korean/euc-kr/euckr-encode-href.html: HARNESS_ERROR
+encoding/legacy-mb-schinese/gb18030/gb18030-decoder.any.js:
+- 'gb18030 decoder: GB18030-2022 1'
+- 'gb18030 decoder: GB18030-2022 10'
+- 'gb18030 decoder: GB18030-2022 11'
+- 'gb18030 decoder: GB18030-2022 12'
+- 'gb18030 decoder: GB18030-2022 13'
+- 'gb18030 decoder: GB18030-2022 14'
+- 'gb18030 decoder: GB18030-2022 15'
+- 'gb18030 decoder: GB18030-2022 16'
+- 'gb18030 decoder: GB18030-2022 17'
+- 'gb18030 decoder: GB18030-2022 18'
+- 'gb18030 decoder: GB18030-2022 19'
+- 'gb18030 decoder: GB18030-2022 2'
+- 'gb18030 decoder: GB18030-2022 20'
+- 'gb18030 decoder: GB18030-2022 21'
+- 'gb18030 decoder: GB18030-2022 22'
+- 'gb18030 decoder: GB18030-2022 23'
+- 'gb18030 decoder: GB18030-2022 24'
+- 'gb18030 decoder: GB18030-2022 25'
+- 'gb18030 decoder: GB18030-2022 26'
+- 'gb18030 decoder: GB18030-2022 27'
+- 'gb18030 decoder: GB18030-2022 28'
+- 'gb18030 decoder: GB18030-2022 29'
+- 'gb18030 decoder: GB18030-2022 3'
+- 'gb18030 decoder: GB18030-2022 30'
+- 'gb18030 decoder: GB18030-2022 31'
+- 'gb18030 decoder: GB18030-2022 32'
+- 'gb18030 decoder: GB18030-2022 33'
+- 'gb18030 decoder: GB18030-2022 34'
+- 'gb18030 decoder: GB18030-2022 35'
+- 'gb18030 decoder: GB18030-2022 36'
+- 'gb18030 decoder: GB18030-2022 4'
+- 'gb18030 decoder: GB18030-2022 5'
+- 'gb18030 decoder: GB18030-2022 6'
+- 'gb18030 decoder: GB18030-2022 7'
+- 'gb18030 decoder: GB18030-2022 8'
+- 'gb18030 decoder: GB18030-2022 9'
+- 'gb18030 decoder: euro'
+- 'gb18030 decoder: four bytes 0xFE 0x39 0xFE 0x39'
+- 'gb18030 decoder: legacy ICU special case 1'
+- 'gb18030 decoder: legacy ICU special case 2'
+- 'gb18030 decoder: legacy ICU special case 3'
+- 'gb18030 decoder: pointer 1237575'
+- 'gb18030 decoder: pointer 1237576'
+- 'gb18030 decoder: pointer 189000'
+- 'gb18030 decoder: pointer 189999'
+- 'gb18030 decoder: pointer 39419'
+- 'gb18030 decoder: pointer 39420'
+- 'gb18030 decoder: pointer 7457'
+- 'gb18030 decoder: pointer 7458'
+- 'gb18030 decoder: pointer 7459'
+- 'gb18030 decoder: three bytes 0x81 0x30 0xFE'
+- 'gb18030 decoder: two bytes 0x81 0x30'
+- 'gb18030 decoder: two bytes 0x81 0x40'
+- 'gb18030 decoder: two bytes 0x81 0x7e'
+- 'gb18030 decoder: two bytes 0x81 0x80'
+- 'gb18030 decoder: two bytes 0x81 0xFE'
+- 'gb18030 decoder: two bytes 0x81 0xFF'
+- 'gb18030 decoder: two bytes 0xFE 0x40'
+- 'gb18030 decoder: two bytes 0xFE 0xFE'
+- 'gb18030 decoder: two bytes 0xFE 0xFF'
+- 'gb18030 decoder: undefined'
+encoding/legacy-mb-schinese/gb18030/gb18030-encoder.html:
+- 'gb18030 encoder: Euro'
+- 'gb18030 encoder: GB18030-2022 1'
+- 'gb18030 encoder: GB18030-2022 10'
+- 'gb18030 encoder: GB18030-2022 11'
+- 'gb18030 encoder: GB18030-2022 12'
+- 'gb18030 encoder: GB18030-2022 13'
+- 'gb18030 encoder: GB18030-2022 14'
+- 'gb18030 encoder: GB18030-2022 15'
+- 'gb18030 encoder: GB18030-2022 16'
+- 'gb18030 encoder: GB18030-2022 17'
+- 'gb18030 encoder: GB18030-2022 18'
+- 'gb18030 encoder: GB18030-2022 19'
+- 'gb18030 encoder: GB18030-2022 2'
+- 'gb18030 encoder: GB18030-2022 20'
+- 'gb18030 encoder: GB18030-2022 21'
+- 'gb18030 encoder: GB18030-2022 22'
+- 'gb18030 encoder: GB18030-2022 23'
+- 'gb18030 encoder: GB18030-2022 24'
+- 'gb18030 encoder: GB18030-2022 25'
+- 'gb18030 encoder: GB18030-2022 26'
+- 'gb18030 encoder: GB18030-2022 27'
+- 'gb18030 encoder: GB18030-2022 28'
+- 'gb18030 encoder: GB18030-2022 29'
+- 'gb18030 encoder: GB18030-2022 3'
+- 'gb18030 encoder: GB18030-2022 30'
+- 'gb18030 encoder: GB18030-2022 31'
+- 'gb18030 encoder: GB18030-2022 32'
+- 'gb18030 encoder: GB18030-2022 33'
+- 'gb18030 encoder: GB18030-2022 34'
+- 'gb18030 encoder: GB18030-2022 35'
+- 'gb18030 encoder: GB18030-2022 36'
+- 'gb18030 encoder: GB18030-2022 4'
+- 'gb18030 encoder: GB18030-2022 5'
+- 'gb18030 encoder: GB18030-2022 6'
+- 'gb18030 encoder: GB18030-2022 7'
+- 'gb18030 encoder: GB18030-2022 8'
+- 'gb18030 encoder: GB18030-2022 9'
+- 'gb18030 encoder: PUA'
+- 'gb18030 encoder: PUA #2'
+- 'gb18030 encoder: PUA #3'
+- 'gb18030 encoder: Ranges pointer special case'
+- 'gb18030 encoder: character'
+- 'gb18030 encoder: legacy ICU special case 1'
+- 'gb18030 encoder: legacy ICU special case 2'
+- 'gb18030 encoder: legacy ICU special case 3'
+- 'gb18030 encoder: poo'
+encoding/legacy-mb-schinese/gbk/gbk-decoder.any.js:
+- 'gbk pointer: 23766'
+- 'gbk pointer: 23770'
+- 'gbk pointer: 23771'
+- 'gbk pointer: 23772'
+- 'gbk pointer: 23773'
+- 'gbk pointer: 23774'
+- 'gbk pointer: 23776'
+- 'gbk pointer: 23777'
+- 'gbk pointer: 23778'
+- 'gbk pointer: 23779'
+- 'gbk pointer: 23780'
+- 'gbk pointer: 23781'
+- 'gbk pointer: 23782'
+- 'gbk pointer: 23784'
+- 'gbk pointer: 23785'
+- 'gbk pointer: 23786'
+- 'gbk pointer: 23787'
+- 'gbk pointer: 23790'
+- 'gbk pointer: 23791'
+- 'gbk pointer: 23792'
+- 'gbk pointer: 23793'
+- 'gbk pointer: 23796'
+- 'gbk pointer: 23797'
+- 'gbk pointer: 23798'
+- 'gbk pointer: 23799'
+- 'gbk pointer: 23800'
+- 'gbk pointer: 23801'
+- 'gbk pointer: 23802'
+- 'gbk pointer: 23803'
+- 'gbk pointer: 23805'
+- 'gbk pointer: 23806'
+- 'gbk pointer: 23807'
+- 'gbk pointer: 23808'
+- 'gbk pointer: 23809'
+- 'gbk pointer: 23810'
+- 'gbk pointer: 23811'
+- 'gbk pointer: 23813'
+- 'gbk pointer: 23814'
+- 'gbk pointer: 23815'
+- 'gbk pointer: 23816'
+- 'gbk pointer: 23817'
+- 'gbk pointer: 23818'
+- 'gbk pointer: 23819'
+- 'gbk pointer: 23820'
+- 'gbk pointer: 23821'
+- 'gbk pointer: 23822'
+- 'gbk pointer: 23823'
+- 'gbk pointer: 23824'
+- 'gbk pointer: 23825'
+- 'gbk pointer: 23826'
+- 'gbk pointer: 23827'
+- 'gbk pointer: 23828'
+- 'gbk pointer: 23831'
+- 'gbk pointer: 23832'
+- 'gbk pointer: 23833'
+- 'gbk pointer: 23834'
+- 'gbk pointer: 23835'
+- 'gbk pointer: 23836'
+- 'gbk pointer: 23837'
+- 'gbk pointer: 23838'
+- 'gbk pointer: 23839'
+- 'gbk pointer: 23840'
+- 'gbk pointer: 23841'
+- 'gbk pointer: 23842'
+- 'gbk pointer: 23843'
+- 'gbk pointer: 23844'
+- 'gbk pointer: 6432'
+- 'gbk pointer: 7533'
+- 'gbk pointer: 7536'
+- 'gbk pointer: 7672'
+- 'gbk pointer: 7673'
+- 'gbk pointer: 7674'
+- 'gbk pointer: 7675'
+- 'gbk pointer: 7676'
+- 'gbk pointer: 7677'
+- 'gbk pointer: 7678'
+- 'gbk pointer: 7679'
+- 'gbk pointer: 7680'
+- 'gbk pointer: 7681'
+- 'gbk pointer: 7682'
+- 'gbk pointer: 7683'
+- 'gbk pointer: 7684'
+encoding/legacy-mb-schinese/gbk/gbk-encoder.html:
+- 'gbk encoder: Euro'
+- 'gbk encoder: GB18030-2022 1'
+- 'gbk encoder: GB18030-2022 10'
+- 'gbk encoder: GB18030-2022 11'
+- 'gbk encoder: GB18030-2022 12'
+- 'gbk encoder: GB18030-2022 13'
+- 'gbk encoder: GB18030-2022 14'
+- 'gbk encoder: GB18030-2022 15'
+- 'gbk encoder: GB18030-2022 16'
+- 'gbk encoder: GB18030-2022 17'
+- 'gbk encoder: GB18030-2022 18'
+- 'gbk encoder: GB18030-2022 19'
+- 'gbk encoder: GB18030-2022 2'
+- 'gbk encoder: GB18030-2022 20'
+- 'gbk encoder: GB18030-2022 21'
+- 'gbk encoder: GB18030-2022 22'
+- 'gbk encoder: GB18030-2022 23'
+- 'gbk encoder: GB18030-2022 24'
+- 'gbk encoder: GB18030-2022 25'
+- 'gbk encoder: GB18030-2022 26'
+- 'gbk encoder: GB18030-2022 27'
+- 'gbk encoder: GB18030-2022 28'
+- 'gbk encoder: GB18030-2022 29'
+- 'gbk encoder: GB18030-2022 3'
+- 'gbk encoder: GB18030-2022 30'
+- 'gbk encoder: GB18030-2022 31'
+- 'gbk encoder: GB18030-2022 32'
+- 'gbk encoder: GB18030-2022 33'
+- 'gbk encoder: GB18030-2022 34'
+- 'gbk encoder: GB18030-2022 35'
+- 'gbk encoder: GB18030-2022 36'
+- 'gbk encoder: GB18030-2022 4'
+- 'gbk encoder: GB18030-2022 5'
+- 'gbk encoder: GB18030-2022 6'
+- 'gbk encoder: GB18030-2022 7'
+- 'gbk encoder: GB18030-2022 8'
+- 'gbk encoder: GB18030-2022 9'
+- 'gbk encoder: PUA'
+- 'gbk encoder: PUA #2'
+- 'gbk encoder: U+10FFFF'
+- 'gbk encoder: character'
+- 'gbk encoder: legacy ICU special case 1'
+- 'gbk encoder: legacy ICU special case 2'
+- 'gbk encoder: legacy ICU special case 3'
+- 'gbk encoder: legacy WebKit case 1'
+- 'gbk encoder: legacy WebKit case 2'
+- 'gbk encoder: legacy WebKit case 3'
+- 'gbk encoder: poo'
+encoding/legacy-mb-tchinese/big5/big5-decode-big5-hkscs.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode-cn-big5.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode-csbig5.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode-errors.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode-extra.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode-x-x-big5.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-decode.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-enc-ascii.html:
+- 'big5 encoder: test for ASCII codepoint 0x25 %'
+encoding/legacy-mb-tchinese/big5/big5-encode-href-errors-han.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-encode-href-errors-hangul.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-encode-href-errors-misc.html: HARNESS_ERROR
+encoding/legacy-mb-tchinese/big5/big5-encode-href.html: HARNESS_ERROR
+encoding/remove-only-one-bom.html: HARNESS_ERROR
+encoding/replacement-encodings.any.js: HARNESS_ERROR
+encoding/single-byte-decoder.window.js: HARNESS_ERROR
+encoding/sniffing.html:
+- No (UTF-8) sniffing allowed
+encoding/streams/backpressure.any.js:
+- additional writes should wait for backpressure to be relieved for class TextDecoderStream
+- additional writes should wait for backpressure to be relieved for class TextEncoderStream
+- write() should not complete until read relieves backpressure for TextDecoderStream
+- write() should not complete until read relieves backpressure for TextEncoderStream
+encoding/streams/decode-attributes.any.js:
+- a throwing fatal member should cause the constructor to throw
+- a throwing ignoreBOM member should cause the constructor to throw
+- constructing with a non-stringifiable encoding should throw
+- constructing with an invalid encoding should throw
+- encoding attribute should have correct value for 'ascii'
+- encoding attribute should have correct value for 'iso-8859-2'
+- encoding attribute should have correct value for 'unicode-1-1-utf-8'
+- encoding attribute should have correct value for 'utf-16'
+- setting fatal to '' should set the attribute to false
+- setting fatal to '' should set the attribute to true
+- setting fatal to '0' should set the attribute to false
+- setting fatal to '1' should set the attribute to true
+- setting fatal to '[object Object]' should set the attribute to true
+- setting fatal to 'false' should set the attribute to false
+- setting fatal to 'null' should set the attribute to false
+- setting fatal to 'true' should set the attribute to true
+- setting fatal to 'undefined' should set the attribute to false
+- setting fatal to 'yes' should set the attribute to true
+- setting ignoreBOM to '' should set the attribute to false
+- setting ignoreBOM to '' should set the attribute to true
+- setting ignoreBOM to '0' should set the attribute to false
+- setting ignoreBOM to '1' should set the attribute to true
+- setting ignoreBOM to '[object Object]' should set the attribute to true
+- setting ignoreBOM to 'false' should set the attribute to false
+- setting ignoreBOM to 'null' should set the attribute to false
+- setting ignoreBOM to 'true' should set the attribute to true
+- setting ignoreBOM to 'undefined' should set the attribute to false
+- setting ignoreBOM to 'yes' should set the attribute to true
+encoding/streams/decode-bad-chunks.any.js:
+- chunk of type array should error the stream
+- chunk of type null should error the stream
+- chunk of type numeric should error the stream
+- chunk of type object, not BufferSource should error the stream
+- chunk of type undefined should error the stream
+encoding/streams/decode-ignore-bom.any.js:
+- ignoreBOM should work for encoding utf-16be, split at character 0
+- ignoreBOM should work for encoding utf-16be, split at character 1
+- ignoreBOM should work for encoding utf-16be, split at character 2
+- ignoreBOM should work for encoding utf-16be, split at character 3
+- ignoreBOM should work for encoding utf-16le, split at character 0
+- ignoreBOM should work for encoding utf-16le, split at character 1
+- ignoreBOM should work for encoding utf-16le, split at character 2
+- ignoreBOM should work for encoding utf-16le, split at character 3
+- ignoreBOM should work for encoding utf-8, split at character 0
+- ignoreBOM should work for encoding utf-8, split at character 1
+- ignoreBOM should work for encoding utf-8, split at character 2
+- ignoreBOM should work for encoding utf-8, split at character 3
+encoding/streams/decode-incomplete-input.any.js:
+- incomplete input with error mode "fatal" should error the stream
+- incomplete input with error mode "replacement" should end with a replacement character
+encoding/streams/decode-non-utf8.any.js:
+- TextDecoderStream should be able to decode ISO-2022-JP
+- TextDecoderStream should be able to decode ISO-8859-14
+- TextDecoderStream should be able to decode Shift_JIS
+- TextDecoderStream should be able to decode UTF-16BE
+- TextDecoderStream should be able to decode UTF-16LE
+- TextDecoderStream should be able to decode invalid sequences in ISO-2022-JP
+- TextDecoderStream should be able to decode invalid sequences in Shift_JIS
+- TextDecoderStream should be able to decode invalid sequences in UTF-16BE
+- TextDecoderStream should be able to decode invalid sequences in UTF-16LE
+- TextDecoderStream should be able to reject invalid sequences in ISO-2022-JP
+- TextDecoderStream should be able to reject invalid sequences in Shift_JIS
+- TextDecoderStream should be able to reject invalid sequences in UTF-16BE
+- TextDecoderStream should be able to reject invalid sequences in UTF-16LE
+encoding/streams/decode-split-character.any.js:
+- a code point should be emitted as soon as all bytes are available
+- a code point split between chunks should not be emitted until all bytes are available;
+  split point = 2
+- a code point split between chunks should not be emitted until all bytes are available;
+  split point = 3
+- a code point split between chunks should not be emitted until all bytes are available;
+  split point = 4
+- a code point split between chunks should not be emitted until all bytes are available;
+  split point = 5
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 1
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 2
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 3
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 4
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 5
+- an empty chunk inside a code point split between chunks should not change the output;
+  split point = 6
+encoding/streams/decode-utf8.any.js: HARNESS_ERROR
+encoding/streams/encode-bad-chunks.any.js:
+- a chunk that cannot be converted to a string should error the streams
+- input of type array should be converted correctly to string
+- input of type null should be converted correctly to string
+- input of type numeric should be converted correctly to string
+- input of type object should be converted correctly to string
+- input of type undefined should be converted correctly to string
+encoding/streams/encode-utf8.any.js:
+- a character following one split between chunks should be correctly encoded
+- a character split between chunks should be correctly encoded
+- a leading empty chunk should be ignored
+- a leading surrogate chunk should be carried past empty chunks
+- a leading surrogate chunk should error when it is clear it didn't form a pair
+- a non-terminal unpaired leading surrogate should immediately be replaced
+- a plain ASCII chunk should be converted
+- a stream ending in a leading surrogate should emit a replacement character as a
+  final chunk
+- a terminal unpaired trailing surrogate should immediately be replaced
+- a trailing empty chunk should be ignored
+- an empty string should result in no output chunk
+- an unmatched surrogate at the end of a chunk followed by a plane 1 character split
+  into two chunks should result in the encoded plane 1 character appearing in the
+  last output chunk
+- an unmatched surrogate at the end of a chunk followed by an ascii character in the
+  next chunk should be replaced with the replacement character at the start of the
+  next output chunk
+- an unmatched surrogate at the end of a chunk followed by an astral character in
+  the next chunk should be replaced with the replacement character at the start of
+  the next output chunk
+- characters in the ISO-8859-1 range should be encoded correctly
+- encoding one string of UTF-8 should give one complete chunk
+- two consecutive astral characters each split down the middle should be correctly
+  reassembled
+- two consecutive astral characters each split down the middle with an invalid surrogate
+  in the middle should be correctly encoded
+- two leading chunks should result in two replacement characters
+encoding/streams/invalid-realm.window.js:
+- 'TextDecoderStream: close in detached realm should succeed'
+- 'TextDecoderStream: write in detached realm should succeed'
+- 'TextEncoderStream: close in detached realm should succeed'
+- 'TextEncoderStream: write in detached realm should succeed'
+encoding/streams/readable-writable-properties.any.js:
+- TextDecoderStream readable and writable properties must pass brand checks
+- TextEncoderStream readable and writable properties must pass brand checks
+encoding/streams/realms.window.js: HARNESS_ERROR
+encoding/textdecoder-arguments.any.js:
+- TextDecoder decode() with array buffer detached during arg conversion
+- TextDecoder decode() with explicit undefined
+- TextDecoder decode() with undefined and options
+- TextDecoder decode() with undefined and undefined
+encoding/textdecoder-copy.any.js:
+- Modify buffer after passing it in (ArrayBuffer)
+- Modify buffer after passing it in (SharedArrayBuffer)
+encoding/textdecoder-eof.any.js:
+- TextDecoder end-of-queue handling
+- 'TextDecoder end-of-queue handling using stream: true'
+encoding/textdecoder-fatal-single-byte.any.js: HARNESS_ERROR
+encoding/textdecoder-fatal-streaming.any.js:
+- Fatal flag, non-streaming cases
+- Fatal flag, streaming cases
+encoding/textdecoder-fatal.any.js:
+- 'Fatal flag: utf-16le - truncated code unit'
+- 'Fatal flag: utf-8 - lead surrogate'
+- 'Fatal flag: utf-8 - overlong U+0000 - 2 bytes'
+- 'Fatal flag: utf-8 - overlong U+0000 - 3 bytes'
+- 'Fatal flag: utf-8 - overlong U+0000 - 4 bytes'
+- 'Fatal flag: utf-8 - overlong U+007F - 2 bytes'
+- 'Fatal flag: utf-8 - overlong U+007F - 3 bytes'
+- 'Fatal flag: utf-8 - overlong U+007F - 4 bytes'
+- 'Fatal flag: utf-8 - overlong U+07FF - 3 bytes'
+- 'Fatal flag: utf-8 - overlong U+07FF - 4 bytes'
+- 'Fatal flag: utf-8 - overlong U+FFFF - 4 bytes'
+- 'Fatal flag: utf-8 - surrogate pair'
+- 'Fatal flag: utf-8 - trail surrogate'
+encoding/textdecoder-labels.any.js: HARNESS_ERROR
+encoding/textdecoder-mistakes.any.js:
+- 'BOM splitting / repeats: utf-16be'
+- 'BOM splitting / repeats: utf-16le'
+- 'BOM splitting / repeats: utf-8'
+- Concatenating two ISO-2022-JP outputs is not always valid
+- 'Fast path misdetection: ascii'
+- 'Fast path misdetection: latin1'
+- 'Fast path misdetection: windows-1250'
+- 'Fast path misdetection: windows-1253'
+- 'Fast path misdetection: windows-1254'
+- 'Fast path misdetection: windows-1255'
+- 'Fast path misdetection: windows-1257'
+- 'Fast path misdetection: windows-1258'
+- 'Fast path misdetection: windows-874'
+- 'Invalid Unicode input is replaced: utf-16be'
+- 'Invalid Unicode input is replaced: utf-16le'
+- 'Invalid Unicode input is replaced: utf-8'
+- 'Replacement, push back ASCII characters: big5'
+- 'Replacement, push back ASCII characters: euc-jp'
+- 'Replacement, push back ASCII characters: euc-kr'
+- 'Replacement, push back ASCII characters: gb18030'
+- 'Replacement, push back ASCII characters: gbk'
+- 'Replacement, push back ASCII characters: iso-2022-jp'
+- 'Replacement, push back ASCII characters: shift_jis'
+- 'Sticky fatal BOM: utf-16be'
+- 'Sticky fatal BOM: utf-16le'
+- 'Sticky multibyte state: euc-jp'
+- 'Sticky multibyte state: gb18030'
+- 'Sticky multibyte state: gbk'
+- 'Sticky multibyte state: iso-2022-jp'
+- 'WPT mislabels: euc-jp'
+- 'WPT mislabels: iso-2022-jp'
+- 'WPT mislabels: shift_jis'
+- 'fatal stream: iso-2022-jp'
+- 'fatal stream: utf-16be'
+- 'fatal stream: utf-16le'
+- 'fatal stream: utf-8'
+- gb18030 version and ranges
+- gbk version and ranges
+- 'labels: invalid non-ascii'
+- 'selected single-byte: iso-8859-16'
+- 'selected single-byte: iso-8859-8-i'
+- 'selected single-byte: koi8-u'
+- 'selected single-byte: macintosh'
+- 'selected single-byte: windows-1250'
+- 'selected single-byte: windows-1251'
+- 'selected single-byte: windows-1253'
+- 'selected single-byte: windows-1254'
+- 'selected single-byte: windows-1255'
+- 'selected single-byte: windows-1257'
+- 'selected single-byte: windows-1258'
+- 'selected single-byte: windows-874'
+- 'selected single-byte: x-mac-cyrillic'
+- 'specific: x-user-defined'
+- 'stream: big5'
+- 'stream: euc-jp'
+- 'stream: euc-kr'
+- 'stream: gb18030'
+- 'stream: gbk'
+- 'stream: iso-2022-jp'
+- 'stream: shift_jis'
+- 'stream: utf-8'
+- utf-16be does not produce more chars than truncated
+- utf-16le does not produce more chars than truncated
+- 'windows-1252 does not contain unmapped chars: ascii'
+- 'windows-1252 does not contain unmapped chars: latin1'
+- 'windows-1252 maps bytes outside of latin1: ascii'
+- 'windows-1252 maps bytes outside of latin1: latin1'
+encoding/textdecoder-streaming.any.js:
+- 'Streaming decode: UTF-8 chunk tests (ArrayBuffer)'
+- 'Streaming decode: UTF-8 chunk tests (SharedArrayBuffer)'
+- 'Streaming decode: utf-16be, 1 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16be, 1 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16be, 2 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16be, 2 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16be, 3 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16be, 3 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16be, 4 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16be, 4 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16be, 5 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16be, 5 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16le, 1 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16le, 1 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16le, 2 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16le, 2 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16le, 3 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16le, 3 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16le, 4 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16le, 4 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-16le, 5 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-16le, 5 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-8, 1 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-8, 1 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-8, 2 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-8, 2 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-8, 3 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-8, 3 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-8, 4 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-8, 4 byte window (SharedArrayBuffer)'
+- 'Streaming decode: utf-8, 5 byte window (ArrayBuffer)'
+- 'Streaming decode: utf-8, 5 byte window (SharedArrayBuffer)'
+encoding/textdecoder-utf16-surrogates.any.js:
+- utf-16le - lone surrogate lead
+- utf-16le - lone surrogate lead (fatal flag set)
+- utf-16le - lone surrogate trail
+- utf-16le - lone surrogate trail (fatal flag set)
+- utf-16le - swapped surrogate pair
+- utf-16le - swapped surrogate pair (fatal flag set)
+- utf-16le - unmatched surrogate lead
+- utf-16le - unmatched surrogate lead (fatal flag set)
+- utf-16le - unmatched surrogate trail
+- utf-16le - unmatched surrogate trail (fatal flag set)
+encoding/textencoder-constructor-non-utf.any.js: HARNESS_ERROR
+encoding/unsupported-encodings.any.js: HARNESS_ERROR
+encoding/utf-32-from-win1252.html: HARNESS_ERROR
+encoding/utf-32.html: HARNESS_ERROR
 url/a-element-origin-xhtml.xhtml:
 - "Parsing origin: <\t   :foo.com   \n> against <http://example.org/foo/bar>"
 - "Parsing origin: <  \t> against <http://example.org/foo/bar>"

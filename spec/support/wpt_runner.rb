@@ -90,7 +90,7 @@ module WptRunner
   # testharness.js. Reference / manual / support / resources files are not
   # tests and are skipped. Files on the skip list (driver crashers — see
   # `skip`) are excluded here so they neither run nor need an allowlist entry.
-  TREES = '{dom,domparsing,url}'
+  TREES = '{dom,domparsing,url,encoding}'
 
   def test_files
     @test_files ||= begin
@@ -102,11 +102,11 @@ module WptRunner
         File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
       }
       # `.any.js` / `.window.js` multi-global tests (run via the synthesized
-      # window-variant wrapper, see `app` / `any_js_wrapper`). Scoped to url/ for
-      # now — the dom/ `.any.js` set includes synchronous-infinite-loop crashers
-      # that hang the V8 call (no virtual-clock timeout catches them); bringing
-      # those in needs the skip-list triage first.
-      js = Dir.glob("url/**/*.{any,window}.js", base: ROOT).reject {|rel|
+      # window-variant wrapper, see `app` / `any_js_wrapper`). Scoped to url/ +
+      # encoding/ for now — the dom/ `.any.js` set includes synchronous-infinite-
+      # loop crashers that hang the V8 call (no virtual-clock timeout catches
+      # them); bringing those in needs the skip-list triage first.
+      js = Dir.glob("{url,encoding}/**/*.{any,window}.js", base: ROOT).reject {|rel|
         (rel.split('/') & %w[support resources]).any? || skip.key?(rel)
       }
       (html + js).sort
