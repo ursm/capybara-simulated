@@ -6,21 +6,41 @@ for the Rack response side. The codebase has a few load-bearing rules;
 deviations have repeatedly cost us regressions or paint us into a
 corner.
 
-## 1. Real-browser test parity is the bar
+## 1. Spec conformance is the bar; real-browser behavior is how we check it
 
-Any test that passes in a real browser must pass here too, with the
-single exception of tests that fundamentally require a layout engine
-(visual hit-testing, `getBoundingClientRect` truthiness, viewport-clip
-visibility, `display: contents` / table layout edge cases, …). Those
-are out of scope.
+This driver exists to run real app suites in-process, so it has to
+behave like a real browser. The **primary, objective correctness bar is
+spec conformance**, measured by the vendored web-platform-tests gate
+(`spec/wpt_spec.rb` — the same tests Chromium / Firefox hold themselves
+to). Fix the spec contract and every library built on it works for free.
 
-Everything else — DOM semantics, event ordering, form serialization,
-custom-element lifecycle, MutationObserver delivery, lifecycle events
-— must match. If a test works in cuprite/selenium against the same
-HTML and JS, the failure is on us.
+The app suites (Avo / Discourse / Forem / Redmine / Mastodon) are the
+**integration check and regression early-warning** — they catch
+real-world breakage WPT can't: library interaction, ordering across many
+APIs, the actual workflows the driver exists for. But they are **not a
+frozen-behavior contract**. Keeping every existing app test green with no
+changes is *not* a goal. When spec conformance conflicts with a behavior
+an app test happened to rely on, favor the spec: make the driver
+spec-correct and update the test. Do **not** grow a driver hack to
+preserve a quirk (that's rule 2), and don't spend effort chasing
+driver-dependent edge cases just to lift a green count.
 
-A green CI count is not the goal: it's the floor. A failing
-real-browser-equivalent test is a driver bug, not a test problem.
+This is what lets us make foundational pieces more spec-faithful even
+when it shifts app-test timing — e.g. moving the timer / event-loop model
+from the pragmatic wall-sync clock toward a real HTML event loop (task
+queues + microtask checkpoints + spec timer ordering).
+
+Out of scope — a failure here is **not** a driver bug: anything that
+fundamentally needs a layout engine (visual hit-testing,
+`getBoundingClientRect` truthiness, viewport-clip visibility,
+`display: contents` / table layout), a real async runtime / streams, or
+IDNA / Unicode-host tables. These are tracked as allowlisted or skipped
+in the WPT gate, not chased.
+
+Caveat: "spec-correct" still means "what real browsers actually do."
+Where the spec is silent or browsers diverge from it, match Chromium /
+Firefox observable behavior (rule 2). A behavior real browsers *do* have,
+that an app depends on, is in scope and must work.
 
 ## 2. No library-shaped hacks
 
