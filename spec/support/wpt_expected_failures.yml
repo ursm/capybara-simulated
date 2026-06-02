@@ -1390,26 +1390,5 @@ domparsing/tentative/stream-html.html:
 - writing numbers to streamHTML()
 domparsing/tentative/stream-insertion-logic.html: HARNESS_ERROR
 domparsing/tentative/stream-positional.html: HARNESS_ERROR
-domparsing/xml-parse-serialize-roundtrip.html:
-- 'DOMParser and XMLSerializer should round trip with CDATA sections: large CDATA'
-- 'DOMParser and XMLSerializer should round trip with CDATA sections: multiple CDATAs'
-domparsing/xml-serialization.xhtml:
-- 'Comment: containing --'
-- 'Comment: containing -->'
-- 'Comment: ending with -'
-- 'Comment: starting with -'
-- 'DocumentType: ''APOSTROPHE'' (U+0027)'
-- 'DocumentType: ''APOSTROPHE'' (U+0027) and ''QUOTATION MARK'' (U+0022)'
-- 'DocumentType: ''QUOTATION MARK'' (U+0022)'
-- 'DocumentType: empty public and system id'
-- 'DocumentType: empty public id'
-- 'DocumentType: empty system id'
-- 'DocumentType: non-empty public and system id'
-- 'Element: href attributes are not percent-encoded'
-- 'Element: query parts in href attributes are not percent-encoded'
-- 'ProcessingInstruction: empty data'
-- 'ProcessingInstruction: non-empty data'
-- 'ProcessingInstruction: target contains a ''COLON'' (U+003A)'
-- 'ProcessingInstruction: target contains xml'
 domparsing/xmldomparser.html:
 - XML Dom Parse readyState Test
