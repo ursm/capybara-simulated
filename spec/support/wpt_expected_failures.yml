@@ -442,10 +442,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Detached Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - Detached Element.querySelectorAll no parameter
-- 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching all empty
-  elements: #pseudo-empty :empty'
-- 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching empty
-  p elements: #pseudo-empty p:empty'
 - 'Detached Element.querySelectorAll: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - Document.querySelector no parameter
@@ -457,10 +453,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - Document.querySelectorAll no parameter
 - Document.querySelectorAll tree order
-- 'Document.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
-  #pseudo-empty :empty'
-- 'Document.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
-  #pseudo-empty p:empty'
 - 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
   no elements: #head :link, #head :visited'
 - 'Document.querySelectorAll: :target pseudo-class selector, matching the element
@@ -473,10 +465,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelector: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - Fragment.querySelectorAll no parameter
-- 'Fragment.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
-  #pseudo-empty :empty'
-- 'Fragment.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
-  #pseudo-empty p:empty'
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
 - 'Fragment.querySelectorAll: Attribute value selector, matching align attribute with
@@ -487,10 +475,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - In-document Element.querySelectorAll no parameter
-- 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching all
-  empty elements: #pseudo-empty :empty'
-- 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching empty
-  p elements: #pseudo-empty p:empty'
 - 'In-document Element.querySelectorAll: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
 - 'In-document Element.querySelectorAll: Attribute value selector, matching align

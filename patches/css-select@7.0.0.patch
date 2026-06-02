@@ -14,3 +14,37 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..91755cc38ed4e498c0c63abe58b8467b
              return boolbase.falseFunc;
          }
          const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
+diff --git a/dist/pseudo-selectors/pseudos.js b/dist/pseudo-selectors/pseudos.js
+index 0790e2aaa067b1e1bdc13724838185d2c011083c..88e6c628fc46f66864c9bd86d8023f30bfede1f4 100644
+--- a/dist/pseudo-selectors/pseudos.js
++++ b/dist/pseudo-selectors/pseudos.js
+@@ -1,22 +1,15 @@
+-/**
+- * CSS limits the characters considered as whitespace to space, tab & line
+- * feed. We add carriage returns as htmlparser2 doesn't normalize them to
+- * line feeds.
+- * @see {@link https://www.w3.org/TR/css-text-3/#white-space}
+- */
+-const isDocumentWhiteSpace = /^[ \t\r\n]*$/;
+ // While filters are precompiled, pseudos get called when they are needed
+ /** Runtime pseudo selector implementations. */
+ export const pseudos = {
+     empty(element, { adapter }) {
+         const children = adapter.getChildren(element);
+-        return (
+-        // First, make sure the tag does not have any element children.
+-        children.every((element) => !adapter.isTag(element)) &&
+-            // Then, check that the text content is only whitespace.
+-            children.every((element) => 
+-            // FIXME: `getText` call is potentially expensive.
+-            isDocumentWhiteSpace.test(adapter.getText(element))));
++        // Per Selectors §:empty, an element is :empty iff it has no element
++        // children and no child text node with data — comments and PIs (whose
++        // `getText` is "") don't count, but a whitespace-only text node DOES
++        // (every browser disqualifies `<p> </p>`). The previous test treated
++        // whitespace-only text as empty, which no browser does. Short-circuiting
++        // on `isTag` also skips the FIXME'd `getText` call for element children.
++        return children.every((child) => !adapter.isTag(child) && adapter.getText(child) === "");
+     },
+     "first-child"(element, { adapter, equals }) {
+         if (adapter.prevElementSibling) {
