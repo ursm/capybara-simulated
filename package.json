@@ -3,7 +3,7 @@
   "private": true,
   "description": "Build-time bundling for vendored JS deps and the bridge. The gem ships the pre-built bundles (`vendor/js/vendor.bundle.js`, `lib/capybara/simulated/js/bridge.bundle.js`); npm is needed only when updating them.",
   "scripts": {
-    "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --keep-names --minify --global-name=__csimVendor --alias:tr46=./vendor/src/tr46-ascii.js --outfile=vendor/js/vendor.bundle.js",
+    "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --keep-names --minify --global-name=__csimVendor --alias:tr46=./vendor/src/tr46-ascii.js --alias:@exodus/bytes/whatwg.js=./vendor/src/exodus-bytes-utf8.js --alias:@exodus/bytes/encoding.js=./vendor/src/exodus-bytes-utf8.js --outfile=vendor/js/vendor.bundle.js",
     "build:bridge": "esbuild lib/capybara/simulated/js/src/bridge.entry.js --bundle --format=iife --keep-names --outfile=lib/capybara/simulated/js/bridge.bundle.js",
     "build": "pnpm run build:vendor && pnpm run build:bridge",
     "gen:idl": "node script/gen_idl_surface.mjs",
@@ -18,6 +18,7 @@
   "devDependencies": {
     "@webref/idl": "^3.79.0",
     "esbuild": "^0.27.0",
+    "url-polyfill": "^1.1.14",
     "whatwg-url": "^16.0.1"
   }
 }
