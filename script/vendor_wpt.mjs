@@ -8,8 +8,14 @@
 //
 // What it vendors, all at one pinned commit:
 //   - resources/testharness.js          (upstream harness, unmodified)
-//   - dom/**                            (every blob: tests + their support
+//   - <test trees>/**                   (every blob: tests + their support
 //                                        files, so local includes resolve)
+//   - common/**                         (support-only: `/common/*.js` helpers
+//                                        like sab.js / subset-tests.js that
+//                                        `.any.js` tests pull in by absolute
+//                                        path; served but NOT scanned for tests
+//                                        — the runner's own TREES list controls
+//                                        which trees become test files)
 //
 // It deliberately does NOT vendor resources/testharnessreport.js — ours lives
 // at spec/wpt/resources/testharnessreport.js (committed, hand-written: it
@@ -36,6 +42,10 @@ const REF = process.env.WPT_REF || PINNED;
 // Top-level directories to vendor whole. `resources` is fetched selectively
 // (just the harness) below — the rest of resources/ is large and unneeded.
 const TREES = ['dom', 'domparsing', 'url', 'encoding'];
+
+// Support-only trees: vendored whole so absolute-path includes (`/common/…`)
+// resolve at serve time, but the runner does NOT scan them for test files.
+const SUPPORT_TREES = ['common'];
 
 const CONCURRENCY = 24;
 
@@ -98,13 +108,13 @@ async function main() {
   console.error(`Vendoring web-platform-tests @ ${sha}`);
 
   // Clean the vendored trees (but keep our committed resources/testharnessreport.js).
-  for (const tree of TREES) {
+  for (const tree of [...TREES, ...SUPPORT_TREES]) {
     await rm(join(OUT, tree), { recursive: true, force: true });
   }
   await rm(join(OUT, 'resources', 'testharness.js'), { force: true });
 
   const paths = [];
-  for (const tree of TREES) {
+  for (const tree of [...TREES, ...SUPPORT_TREES]) {
     const blobs = await listBlobs(sha, tree);
     console.error(`  ${tree}: ${blobs.length} blobs`);
     paths.push(...blobs);
@@ -116,7 +126,8 @@ async function main() {
 
   await writeFile(
     join(OUT, 'WPT_VERSION'),
-    `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}, resources/testharness.js\n`
+    `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}` +
+      `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js\n`
   );
   console.error(`Done. Pinned SHA written to spec/wpt/WPT_VERSION.`);
   console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_spec.rb  # refresh the allowlist`);

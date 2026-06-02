@@ -97,7 +97,7 @@ module WptRunner
       html = Dir.glob("#{TREES}/**/*.{html,xhtml,xht}", base: ROOT).reject {|rel|
         rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
           (rel.split('/') & %w[support resources reftest]).any? ||
-          skip.key?(rel)
+          skipped?(rel)
       }.select {|rel|
         File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
       }
@@ -107,7 +107,7 @@ module WptRunner
       # loop crashers that hang the V8 call (no virtual-clock timeout catches
       # them); bringing those in needs the skip-list triage first.
       js = Dir.glob("{url,encoding}/**/*.{any,window}.js", base: ROOT).reject {|rel|
-        (rel.split('/') & %w[support resources]).any? || skip.key?(rel)
+        (rel.split('/') & %w[support resources]).any? || skipped?(rel)
       }
       (html + js).sort
     end
@@ -142,6 +142,18 @@ module WptRunner
   # backlog). Maps relpath => reason. Shrinking it means fixing a driver crash.
   def skip
     @skip ||= File.exist?(SKIP_PATH) ? (YAML.safe_load_file(SKIP_PATH) || {}) : {}
+  end
+
+  # Skip-list keys ending in `/` are directory prefixes — they skip a
+  # whole subtree in one entry (used for structural non-goals like the
+  # legacy multi-byte encoding trees, which are thousands of exhaustive
+  # data-driven subtests we deliberately don't decode).
+  def skip_prefixes
+    @skip_prefixes ||= skip.keys.select {|k| k.end_with?('/') }
+  end
+
+  def skipped?(rel)
+    skip.key?(rel) || skip_prefixes.any? {|p| rel.start_with?(p) }
   end
 
   # Run one test file. Returns a Hash:

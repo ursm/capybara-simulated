@@ -454,12 +454,55 @@ module Capybara
           }
           nil
         })
+        # Small bodies normally run JS-side via `(0, eval)(body)` — fast,
+        # no Ruby↔V8 boundary. But `(0, eval)` block-scopes a script's
+        # top-level `const`/`let`/`class` to the eval, so they vanish
+        # instead of landing in the realm's *shared* global lexical
+        # environment where a later `<script>` would see them. Real
+        # browsers (and our big-body `compile().run` path above) keep
+        # them. The shape that needs this is a leading lexical
+        # declaration: `<script>const CFG=…</script><script>…use CFG…` and
+        # every WPT helper pulled in via `// META: script=` that starts
+        # `const TABLE = […]` (sab.js's `createBuffer`, encodings.js's
+        # `encodings_table`, …). So route ONLY scripts whose first real
+        # statement is a top-level `const`/`let`/`class` through `ctx.eval`
+        # (a top-level V8 script → shared lexical env); everything else
+        # (IIFEs, `var`/`function` — which already leak to globalThis
+        # under `(0, eval)` — and plain calls) stays on the fast path. A
+        # later `(0, eval)` script can READ those bindings from the global
+        # lexical environment fine; only DEFINING them needed the
+        # real-script path. No bytecode cache here — the SHA + compile +
+        # dispose is the part that regressed tiny-script-heavy suites
+        # (Redmine 56→224 s); plain `ctx.eval` is rendezvous-cheap, and
+        # the leading-lexical gate keeps the boundary off the hot path for
+        # the ~95% of inline scripts that don't lead with a declaration.
+        # Limitation: a top-level `const` that is NOT the first statement
+        # (after other top-level code) won't be shared — rare, and the
+        # WPT helper corpus + the `<script>const CFG…` pattern both lead
+        # with the declaration.
+        # NOTE: do NOT wrap in `safe_call`. A JS throw from `c.eval`
+        # raises MiniRacer::RuntimeError, which mini_racer re-raises as a
+        # JS exception at the call site — so bridge.entry.js's
+        # `try { __csim_runScript(…) } catch (e)` sees it and runs its
+        # normal path (console diagnostic, `_ok=false`, fire the script
+        # `error` event), exactly as the old JS-side `(0, eval)` did and
+        # as the QuickJS runner does. Swallowing here would turn a
+        # throwing leading-`const` inline script into a silent `load`.
+        c.attach('__csim_runScriptEval', ->(label, body) {
+          c.eval("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
+          nil
+        })
         c.eval(<<~JS)
           (function () {
             const cached    = globalThis.__csim_runScriptCached;
+            const runEval   = globalThis.__csim_runScriptEval;
             const threshold = #{threshold};
+            // Leading top-level lexical declaration, after optional BOM /
+            // whitespace / line+block comments / a "use strict" prologue.
+            const LEADS_LEXICAL = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*(?:["']use strict["'];?\\s*)?(?:export\\s+)?(?:const|let|class)[\\s{\\[]/;
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
+              if (LEADS_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
               (0, eval)(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();
