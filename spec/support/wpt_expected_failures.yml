@@ -287,7 +287,6 @@ dom/nodes/Document-getElementById.html: HARNESS_ERROR
 dom/nodes/Document-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Document-getElementsByTagName.html:
-- HTML element with uppercase tagName never matches in HTML Documents
 - Interfaces
 - Shouldn't be able to set unsigned properties on a HTMLCollection (non-strict mode)
 - Shouldn't be able to set unsigned properties on a HTMLCollection (strict mode)
@@ -310,7 +309,6 @@ dom/nodes/Element-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html: HARNESS_ERROR
 dom/nodes/Element-getElementsByTagName.html:
-- HTML element with uppercase tagName never matches in HTML Documents
 - Should be able to set expando shadowing a proto prop (item)
 - Should be able to set expando shadowing a proto prop (namedItem)
 - Shouldn't be able to set unsigned properties on a HTMLCollection (non-strict mode)
@@ -651,10 +649,6 @@ dom/nodes/attributes.html:
 - getAttributeNames tests
 - setAttribute should set the first attribute with the given name
 - toggleAttribute should set the first attribute with the given name
-dom/nodes/case.html:
-- getElementsByTagName ABC
-- getElementsByTagName Abc
-- getElementsByTagName abc
 dom/nodes/insert-adjacent.html:
 - invalid object argument insertAdjacentElement
 - invalid syntax for insertAdjacentElement
