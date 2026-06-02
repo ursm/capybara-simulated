@@ -39,9 +39,16 @@ const REPO = 'web-platform-tests/wpt';
 const PINNED = '34637df05a42cefd99ecc38e6602f7f64e4c1648';
 const REF = process.env.WPT_REF || PINNED;
 
-// Top-level directories to vendor whole. `resources` is fetched selectively
-// (just the harness) below — the rest of resources/ is large and unneeded.
-const TREES = ['dom', 'domparsing', 'url', 'encoding'];
+// Directories to vendor whole and scan for tests. Top-level trees plus a couple
+// of narrow html/ SUBTREES (the full html/ tree is thousands of mostly
+// layout-dependent files; we want only the layout-free event-loop oracle:
+// timers + microtask-queuing). `resources` is fetched selectively (just the
+// harness) below — the rest of resources/ is large and unneeded.
+const TREES = [
+  'dom', 'domparsing', 'url', 'encoding',
+  'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
+  'html/webappapis/microtask-queuing'  // queueMicrotask + microtask-checkpoint ordering
+];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
 // resolve at serve time, but the runner does NOT scan them for test files.

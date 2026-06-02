@@ -1683,6 +1683,17 @@ encoding/textdecoder-utf16-surrogates.any.js:
 - utf-16le - unmatched surrogate trail (fatal flag set)
 encoding/utf-32-from-win1252.html: HARNESS_ERROR
 encoding/utf-32.html: HARNESS_ERROR
+html/webappapis/microtask-queuing/queue-microtask-cross-realm-callback-report-exception.html: HARNESS_ERROR
+html/webappapis/microtask-queuing/queue-microtask-exceptions.any.js: HARNESS_ERROR
+html/webappapis/microtask-queuing/queue-microtask.any.js:
+- It interleaves with promises as expected
+- It throws when given non-functions
+html/webappapis/microtask-queuing/queue-microtask.window.js: HARNESS_ERROR
+html/webappapis/timers/evil-spec-example.any.js: HARNESS_ERROR
+html/webappapis/timers/setinterval-cross-realm-callback-report-exception.html: HARNESS_ERROR
+html/webappapis/timers/settimeout-cross-realm-callback-report-exception.html: HARNESS_ERROR
+html/webappapis/timers/type-long-setinterval.any.js: HARNESS_ERROR
+html/webappapis/timers/type-long-settimeout.any.js: HARNESS_ERROR
 url/a-element-origin-xhtml.xhtml:
 - "Parsing origin: <\t   :foo.com   \n> against <http://example.org/foo/bar>"
 - "Parsing origin: <  \t> against <http://example.org/foo/bar>"

@@ -90,7 +90,16 @@ module WptRunner
   # testharness.js. Reference / manual / support / resources files are not
   # tests and are skipped. Files on the skip list (driver crashers — see
   # `skip`) are excluded here so they neither run nor need an allowlist entry.
-  TREES = '{dom,domparsing,url,encoding}'
+  # Top-level trees + the narrow html/ event-loop oracle subtrees (timers +
+  # microtask-queuing — the only layout-free slices of html/ we vendor; see
+  # script/vendor_wpt.mjs).
+  TREES = '{dom,domparsing,url,encoding,html/webappapis/timers,html/webappapis/microtask-queuing}'
+
+  # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
+  # event-loop oracle (all time-probed crasher-free). The dom/ `.any.js` set is
+  # still excluded — it has synchronous-infinite-loop crashers that hang the V8
+  # call (no virtual-clock timeout catches them) and needs skip-list triage first.
+  JS_TREES = '{url,encoding,html/webappapis/timers,html/webappapis/microtask-queuing}'
 
   def test_files
     @test_files ||= begin
@@ -102,11 +111,8 @@ module WptRunner
         File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
       }
       # `.any.js` / `.window.js` multi-global tests (run via the synthesized
-      # window-variant wrapper, see `app` / `any_js_wrapper`). Scoped to url/ +
-      # encoding/ for now — the dom/ `.any.js` set includes synchronous-infinite-
-      # loop crashers that hang the V8 call (no virtual-clock timeout catches
-      # them); bringing those in needs the skip-list triage first.
-      js = Dir.glob("{url,encoding}/**/*.{any,window}.js", base: ROOT).reject {|rel|
+      # window-variant wrapper, see `app` / `any_js_wrapper`); scope = JS_TREES.
+      js = Dir.glob("#{JS_TREES}/**/*.{any,window}.js", base: ROOT).reject {|rel|
         (rel.split('/') & %w[support resources]).any? || skipped?(rel)
       }
       (html + js).sort
