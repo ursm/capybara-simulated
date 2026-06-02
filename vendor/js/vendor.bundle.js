@@ -963,7 +963,7 @@ var __csimVendor = (() => {
   }
   __name(falseFunc, "falseFunc");
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/index.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/index.js
   var dist_exports = {};
   __export(dist_exports, {
     AttributeAction: () => AttributeAction,
@@ -974,7 +974,7 @@ var __csimVendor = (() => {
     stringify: () => stringify
   });
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/types.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/types.js
   var SelectorType;
   (function(SelectorType2) {
     SelectorType2["Attribute"] = "attribute";
@@ -1007,9 +1007,9 @@ var __csimVendor = (() => {
     AttributeAction2["Start"] = "start";
   })(AttributeAction || (AttributeAction = {}));
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/parse.js
-  var reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}\s?|.)|[\w\u00B0-\uFFFF-])+/;
-  var reEscape = /\\([\da-f]{1,6}\s?|(\s)|.)/gi;
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/parse.js
+  var reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}(?:\r\n|\s)?|.|$)|[\w\u00B0-\uFFFF-])+/i;
+  var reEscape = /\\([\da-f]{1,6}(?:\r\n|\s)?|(\s)|.|$)/gi;
   var CharCode;
   (function(CharCode2) {
     CharCode2[CharCode2["LeftParenthesis"] = 40] = "LeftParenthesis";
@@ -1088,6 +1088,7 @@ var __csimVendor = (() => {
   __name(isTraversal, "isTraversal");
   var stripQuotesFromPseudos = /* @__PURE__ */ new Set(["contains", "icontains"]);
   function funescape(_, escaped, escapedWhitespace) {
+    if (escaped === "") return "\uFFFD";
     const codePoint = Number.parseInt(escaped, 16);
     if (Number.isNaN(codePoint) || escapedWhitespace)
       return escaped;
@@ -1427,7 +1428,7 @@ var __csimVendor = (() => {
   }
   __name(parseSelector, "parseSelector");
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a/node_modules/css-what/dist/stringify.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/stringify.js
   var attribValueChars = ["\\", '"'];
   var pseudoValueChars = [...attribValueChars, "(", ")"];
   var charsToEscapeInAttributeValue = new Set(attribValueChars.map((c) => c.charCodeAt(0)));

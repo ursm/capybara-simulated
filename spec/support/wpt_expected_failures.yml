@@ -612,10 +612,6 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'In-document Element.querySelectorAll: Invalid class: .foo..quux'
 - 'In-document Element.querySelectorAll: Relative selector: >*'
 dom/nodes/ParentNode-querySelector-escapes.html:
-- '"eof\\" should never match with "#eof\\"'
-- '"eof�" should match with "#eof\\"'
-- '"hello" should match with "#hel\\6C o"'
-- '"spaces" should match with "#spac\\65\r\ns"'
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
 dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR

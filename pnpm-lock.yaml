@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  css-what@8.0.0: 9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a
+  css-what@8.0.0: 97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91
 
 importers:
 
@@ -19,7 +19,7 @@ importers:
         version: 3.2.1
       css-what:
         specifier: ^8.0.0
-        version: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
+        version: 8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91)
       xpathway:
         specifier: ^1.0.3
         version: 1.0.3
@@ -343,7 +343,7 @@ snapshots:
   css-select@7.0.0:
     dependencies:
       boolbase: 2.0.0
-      css-what: 8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a)
+      css-what: 8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91)
       domhandler: 6.0.1
       domutils: 4.0.2
       nth-check: 3.0.1
@@ -353,7 +353,7 @@ snapshots:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
 
-  css-what@8.0.0(patch_hash=9d7de52d0c35cef07f106951f275312a1a656a432429eb261560463984af218a): {}
+  css-what@8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91): {}
 
   dom-serializer@3.1.1:
     dependencies:

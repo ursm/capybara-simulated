@@ -1,8 +1,17 @@
 diff --git a/dist/parse.js b/dist/parse.js
-index f598b5c129a91c1f047f1312710793aa85211cb1..18e3c7e51f469ede37094473951cb9ffe70e960c 100644
+index f598b5c129a91c1f047f1312710793aa85211cb1..e188709f5f593672c06d7661d2d113efef92297f 100644
 --- a/dist/parse.js
 +++ b/dist/parse.js
-@@ -92,15 +92,16 @@ export function isTraversal(selector) {
+@@ -1,6 +1,6 @@
+ import { AttributeAction, SelectorType, } from "./types.js";
+-const reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}\s?|.)|[\w\u00B0-\uFFFF-])+/;
+-const reEscape = /\\([\da-f]{1,6}\s?|(\s)|.)/gi;
++const reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}(?:\r\n|\s)?|.|$)|[\w\u00B0-\uFFFF-])+/i;
++const reEscape = /\\([\da-f]{1,6}(?:\r\n|\s)?|(\s)|.|$)/gi;
+ var CharCode;
+ (function (CharCode) {
+     CharCode[CharCode["LeftParenthesis"] = 40] = "LeftParenthesis";
+@@ -92,15 +92,18 @@ export function isTraversal(selector) {
  const stripQuotesFromPseudos = new Set(["contains", "icontains"]);
  // Unescape function taken from https://github.com/jquery/sizzle/blob/master/src/sizzle.js#L152
  function funescape(_, escaped, escapedWhitespace) {
@@ -15,6 +24,8 @@ index f598b5c129a91c1f047f1312710793aa85211cb1..18e3c7e51f469ede37094473951cb9ff
 -                String.fromCharCode(high + 0x1_00_00)
 -            : // Supplemental Plane codepoint (surrogate pair)
 -                String.fromCharCode((high >> 10) | 0xd8_00, (high & 0x3_ff) | 0xdc_00);
++    // A backslash at EOF (empty escape) yields U+FFFD per CSS.
++    if (escaped === "") return "\uFFFD";
 +    const codePoint = Number.parseInt(escaped, 16);
 +    // NaN means non-codepoint (a `\<char>` literal escape).
 +    if (Number.isNaN(codePoint) || escapedWhitespace)
