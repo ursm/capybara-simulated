@@ -322,8 +322,7 @@ dom/nodes/Element-insertAdjacentElement.html:
 - Inserting to an invalid location should cause a Syntax Error exception
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
-- DIV Element.matches(null)
-- DIV Element.matches(undefined)
+- DIV Element.matches no parameter
 - 'Detached Element.matches: Attribute value selector, matching align attribute with
   value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'Fragment Element.matches: Attribute value selector, matching align attribute with
@@ -332,10 +331,8 @@ dom/nodes/Element-matches.html:
   referenced by the URL fragment identifier (with no refNodes): :target'
 - 'In-document Element.matches: Attribute value selector, matching align attribute
   with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- NULL Element.matches(null)
-- NULL Element.matches(undefined)
-- UNDEFINED Element.matches(null)
-- UNDEFINED Element.matches(undefined)
+- NULL Element.matches no parameter
+- UNDEFINED Element.matches no parameter
 dom/nodes/Element-removeAttribute.html:
 - removeAttribute should remove the first attribute, irrespective of namespace, when
   the first attribute is in a namespace
@@ -344,8 +341,7 @@ dom/nodes/Element-removeAttribute.html:
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-webkitMatchesSelector.html:
-- DIV Element.webkitMatchesSelector(null)
-- DIV Element.webkitMatchesSelector(undefined)
+- DIV Element.webkitMatchesSelector no parameter
 - 'Detached Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'Fragment Element.webkitMatchesSelector: Attribute value selector, matching align
@@ -354,10 +350,8 @@ dom/nodes/Element-webkitMatchesSelector.html:
   the element referenced by the URL fragment identifier (with no refNodes): :target'
 - 'In-document Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- NULL Element.webkitMatchesSelector(null)
-- NULL Element.webkitMatchesSelector(undefined)
-- UNDEFINED Element.webkitMatchesSelector(null)
-- UNDEFINED Element.webkitMatchesSelector(undefined)
+- NULL Element.webkitMatchesSelector no parameter
+- UNDEFINED Element.webkitMatchesSelector no parameter
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
 dom/nodes/MutationObserver-callback-arguments.html:
 - Callback is invoked with |this| value of MutationObserver and two arguments
@@ -444,14 +438,12 @@ dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html:
-- Detached Element.querySelector null
-- Detached Element.querySelector undefined
+- Detached Element.querySelector no parameter
 - 'Detached Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelector: Attribute whitespace-separated list selector, not
   matching class attribute with empty value: #attr-whitespace [class~=""]'
-- Detached Element.querySelectorAll null
-- Detached Element.querySelectorAll undefined
+- Detached Element.querySelectorAll no parameter
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching all empty
   elements: #pseudo-empty :empty'
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching empty
@@ -460,8 +452,7 @@ dom/nodes/ParentNode-querySelector-All.html:
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelectorAll: Attribute whitespace-separated list selector,
   not matching class attribute with empty value: #attr-whitespace [class~=""]'
-- Document.querySelector null
-- Document.querySelector undefined
+- Document.querySelector no parameter
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
   elements: #head :link, #head :visited'
 - 'Document.querySelector: :target pseudo-class selector, matching the element referenced
@@ -470,9 +461,8 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelector: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- Document.querySelectorAll null
+- Document.querySelectorAll no parameter
 - Document.querySelectorAll tree order
-- Document.querySelectorAll undefined
 - 'Document.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
   #pseudo-empty :empty'
 - 'Document.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
@@ -485,16 +475,14 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelectorAll: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- Fragment.querySelector null
-- Fragment.querySelector undefined
+- Fragment.querySelector no parameter
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
 - 'Fragment.querySelector: Attribute value selector, matching align attribute with
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelector: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- Fragment.querySelectorAll null
-- Fragment.querySelectorAll undefined
+- Fragment.querySelectorAll no parameter
 - 'Fragment.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
   #pseudo-empty :empty'
 - 'Fragment.querySelectorAll: :empty pseudo-class selector, matching empty p elements:
@@ -505,16 +493,14 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelectorAll: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- In-document Element.querySelector null
-- In-document Element.querySelector undefined
+- In-document Element.querySelector no parameter
 - 'In-document Element.querySelector: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
 - 'In-document Element.querySelector: Attribute value selector, matching align attribute
   with value, unclosed bracket: #attr-value [align="center"'
 - 'In-document Element.querySelector: Attribute whitespace-separated list selector,
   not matching class attribute with empty value: #attr-whitespace [class~=""]'
-- In-document Element.querySelectorAll null
-- In-document Element.querySelectorAll undefined
+- In-document Element.querySelectorAll no parameter
 - 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching all
   empty elements: #pseudo-empty :empty'
 - 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching empty
