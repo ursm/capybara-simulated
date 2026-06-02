@@ -963,7 +963,7 @@ var __csimVendor = (() => {
   }
   __name(falseFunc, "falseFunc");
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/index.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d/node_modules/css-what/dist/index.js
   var dist_exports = {};
   __export(dist_exports, {
     AttributeAction: () => AttributeAction,
@@ -974,7 +974,7 @@ var __csimVendor = (() => {
     stringify: () => stringify
   });
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/types.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d/node_modules/css-what/dist/types.js
   var SelectorType;
   (function(SelectorType2) {
     SelectorType2["Attribute"] = "attribute";
@@ -1007,7 +1007,7 @@ var __csimVendor = (() => {
     AttributeAction2["Start"] = "start";
   })(AttributeAction || (AttributeAction = {}));
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/parse.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d/node_modules/css-what/dist/parse.js
   var reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}(?:\r\n|\s)?|.|$)|[\w\u00B0-\uFFFF-])+/i;
   var reEscape = /\\([\da-f]{1,6}(?:\r\n|\s)?|(\s)|.|$)/gi;
   var CharCode;
@@ -1288,11 +1288,10 @@ var __csimVendor = (() => {
                 selectorIndex += // Skip next character if it is escaped
                 selector2.charCodeAt(selectorIndex) === CharCode.BackSlash ? 2 : 1;
               }
-              if (selector2.charCodeAt(selectorIndex) !== quote) {
-                throw new Error("Attribute value didn't end");
-              }
               value = unescapeCSS(selector2.slice(sectionStart, selectorIndex));
-              selectorIndex += 1;
+              if (selectorIndex < selector2.length) {
+                selectorIndex += 1;
+              }
             } else {
               const valueStart = selectorIndex;
               while (selectorIndex < selector2.length && !isWhitespace(selector2.charCodeAt(selectorIndex)) && selector2.charCodeAt(selectorIndex) !== CharCode.RightSquareBracket) {
@@ -1316,10 +1315,12 @@ var __csimVendor = (() => {
               }
             }
           }
-          if (selector2.charCodeAt(selectorIndex) !== CharCode.RightSquareBracket) {
-            throw new Error("Attribute selector didn't terminate");
+          if (selectorIndex < selector2.length) {
+            if (selector2.charCodeAt(selectorIndex) !== CharCode.RightSquareBracket) {
+              throw new Error("Attribute selector didn't terminate");
+            }
+            selectorIndex += 1;
           }
-          selectorIndex += 1;
           const attributeSelector = {
             type: SelectorType.Attribute,
             name: name50,
@@ -1428,7 +1429,7 @@ var __csimVendor = (() => {
   }
   __name(parseSelector, "parseSelector");
 
-  // node_modules/.pnpm/css-what@8.0.0_patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91/node_modules/css-what/dist/stringify.js
+  // node_modules/.pnpm/css-what@8.0.0_patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d/node_modules/css-what/dist/stringify.js
   var attribValueChars = ["\\", '"'];
   var pseudoValueChars = [...attribValueChars, "(", ")"];
   var charsToEscapeInAttributeValue = new Set(attribValueChars.map((c) => c.charCodeAt(0)));
@@ -5262,7 +5263,7 @@ var __csimVendor = (() => {
   }
   __name(createEvaluator, "createEvaluator");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/utils/List.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/utils/List.js
   var releasedCursors = null;
   var List = class _List {
     static {
@@ -5604,7 +5605,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/utils/create-custom-error.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/utils/create-custom-error.js
   function createCustomError(name50, message) {
     const error = Object.create(SyntaxError.prototype);
     const errorStack = new Error();
@@ -5619,7 +5620,7 @@ var __csimVendor = (() => {
   }
   __name(createCustomError, "createCustomError");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/parser/SyntaxError.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/parser/SyntaxError.js
   var MAX_LINE_LENGTH = 100;
   var OFFSET_CORRECTION = 60;
   var TAB_REPLACEMENT = "    ";
@@ -5673,7 +5674,7 @@ var __csimVendor = (() => {
   }
   __name(SyntaxError2, "SyntaxError");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/types.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/types.js
   var EOF = 0;
   var Ident = 1;
   var Function = 2;
@@ -5701,7 +5702,7 @@ var __csimVendor = (() => {
   var RightCurlyBracket = 24;
   var Comment2 = 25;
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/char-code-definitions.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/char-code-definitions.js
   var EOF2 = 0;
   function isDigit2(code2) {
     return code2 >= 48 && code2 <= 57;
@@ -5812,7 +5813,7 @@ var __csimVendor = (() => {
   }
   __name(charCodeCategory, "charCodeCategory");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/utils.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/utils.js
   function getCharCode(source, offset) {
     return offset < source.length ? source.charCodeAt(offset) : 0;
   }
@@ -5970,7 +5971,7 @@ var __csimVendor = (() => {
   }
   __name(decodeEscaped, "decodeEscaped");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/names.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/names.js
   var names_default = [
     "EOF-token",
     "ident-token",
@@ -6000,7 +6001,7 @@ var __csimVendor = (() => {
     "comment-token"
   ];
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/adopt-buffer.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/adopt-buffer.js
   var MIN_SIZE = 16 * 1024;
   function adoptBuffer(buffer = null, size) {
     if (buffer === null || buffer.length < size) {
@@ -6010,7 +6011,7 @@ var __csimVendor = (() => {
   }
   __name(adoptBuffer, "adoptBuffer");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/OffsetToLocation.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/OffsetToLocation.js
   var N = 10;
   var F = 12;
   var R = 13;
@@ -6090,7 +6091,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/TokenStream.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/TokenStream.js
   var OFFSET_MASK = 16777215;
   var TYPE_SHIFT = 24;
   var BLOCK_OPEN_TOKEN = 1;
@@ -6359,7 +6360,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/tokenizer/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/tokenizer/index.js
   function tokenize2(source, onToken) {
     function getCharCode2(offset2) {
       return offset2 < sourceLength ? source.charCodeAt(offset2) : 0;
@@ -6665,7 +6666,7 @@ var __csimVendor = (() => {
   }
   __name(tokenize2, "tokenize");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/parser/sequence.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/parser/sequence.js
   function readSequence(recognizer) {
     const children = this.createList();
     let space = false;
@@ -6701,7 +6702,7 @@ var __csimVendor = (() => {
   }
   __name(readSequence, "readSequence");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/parser/create.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/parser/create.js
   var NOOP = /* @__PURE__ */ __name(() => {
   }, "NOOP");
   var EXCLAMATIONMARK = 33;
@@ -7015,7 +7016,7 @@ var __csimVendor = (() => {
   }
   __name(createParser, "createParser");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/scope/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/scope/index.js
   var scope_exports = {};
   __export(scope_exports, {
     AtrulePrelude: () => atrulePrelude_default,
@@ -7023,7 +7024,7 @@ var __csimVendor = (() => {
     Value: () => value_default
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/scope/default.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/scope/default.js
   var NUMBERSIGN2 = 35;
   var ASTERISK = 42;
   var PLUSSIGN = 43;
@@ -7072,12 +7073,12 @@ var __csimVendor = (() => {
   }
   __name(defaultRecognizer, "defaultRecognizer");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/scope/atrulePrelude.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/scope/atrulePrelude.js
   var atrulePrelude_default = {
     getNode: defaultRecognizer
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/scope/selector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/scope/selector.js
   var NUMBERSIGN3 = 35;
   var AMPERSAND = 38;
   var ASTERISK2 = 42;
@@ -7148,7 +7149,7 @@ var __csimVendor = (() => {
     getNode
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/function/expression.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/function/expression.js
   function expression_default() {
     return this.createSingleNodeList(
       this.Raw(null, false)
@@ -7156,7 +7157,7 @@ var __csimVendor = (() => {
   }
   __name(expression_default, "default");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/function/var.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/function/var.js
   function var_default() {
     const children = this.createList();
     this.skipSC();
@@ -7184,7 +7185,7 @@ var __csimVendor = (() => {
   }
   __name(var_default, "default");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/scope/value.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/scope/value.js
   function isPlusMinusOperator(node) {
     return node !== null && node.type === "Operator" && (node.value[node.value.length - 1] === "-" || node.value[node.value.length - 1] === "+");
   }
@@ -7203,7 +7204,7 @@ var __csimVendor = (() => {
     "var": var_default
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/container.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/container.js
   var nonContainerNameKeywords = /* @__PURE__ */ new Set(["none", "and", "not", "or"]);
   var container_default = {
     parse: {
@@ -7224,7 +7225,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/font-face.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/font-face.js
   var font_face_default = {
     parse: {
       prelude: null,
@@ -7234,7 +7235,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/import.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/import.js
   function parseWithFallback(parse53, fallback) {
     return this.parseWithFallback(
       () => {
@@ -7309,7 +7310,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/layer.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/layer.js
   var layer_default = {
     parse: {
       prelude() {
@@ -7323,7 +7324,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/media.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/media.js
   var media_default = {
     parse: {
       prelude() {
@@ -7337,7 +7338,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/nest.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/nest.js
   var nest_default = {
     parse: {
       prelude() {
@@ -7351,7 +7352,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/page.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/page.js
   var page_default = {
     parse: {
       prelude() {
@@ -7365,7 +7366,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/scope.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/scope.js
   var scope_default = {
     parse: {
       prelude() {
@@ -7379,7 +7380,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/starting-style.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/starting-style.js
   var starting_style_default = {
     parse: {
       prelude: null,
@@ -7389,7 +7390,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/supports.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/supports.js
   var supports_default = {
     parse: {
       prelude() {
@@ -7403,7 +7404,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/atrule/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/atrule/index.js
   var atrule_default = {
     container: container_default,
     "font-face": font_face_default,
@@ -7417,7 +7418,7 @@ var __csimVendor = (() => {
     supports: supports_default
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/pseudo/lang.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/pseudo/lang.js
   function parseLanguageRangeList() {
     const children = this.createList();
     this.skipSC();
@@ -7443,7 +7444,7 @@ var __csimVendor = (() => {
   }
   __name(parseLanguageRangeList, "parseLanguageRangeList");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/pseudo/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/pseudo/index.js
   var selectorList = {
     parse() {
       return this.createSingleNodeList(
@@ -7494,7 +7495,7 @@ var __csimVendor = (() => {
     "host-context": selector
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/index-parse.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/index-parse.js
   var index_parse_exports = {};
   __export(index_parse_exports, {
     AnPlusB: () => parse4,
@@ -7548,7 +7549,7 @@ var __csimVendor = (() => {
     WhiteSpace: () => parse52
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/AnPlusB.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/AnPlusB.js
   var AnPlusB_exports = {};
   __export(AnPlusB_exports, {
     generate: () => generate2,
@@ -7761,7 +7762,7 @@ var __csimVendor = (() => {
   }
   __name(generate2, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Atrule.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Atrule.js
   var Atrule_exports = {};
   __export(Atrule_exports, {
     generate: () => generate3,
@@ -7845,7 +7846,7 @@ var __csimVendor = (() => {
   }
   __name(generate3, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/AtrulePrelude.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/AtrulePrelude.js
   var AtrulePrelude_exports = {};
   __export(AtrulePrelude_exports, {
     generate: () => generate4,
@@ -7886,7 +7887,7 @@ var __csimVendor = (() => {
   }
   __name(generate4, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/AttributeSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/AttributeSelector.js
   var AttributeSelector_exports = {};
   __export(AttributeSelector_exports, {
     generate: () => generate5,
@@ -7979,7 +7980,9 @@ var __csimVendor = (() => {
         this.skipSC();
       }
     }
-    this.eat(RightSquareBracket);
+    if (!this.eof) {
+      this.eat(RightSquareBracket);
+    }
     return {
       type: "AttributeSelector",
       loc: this.getLocation(start, this.tokenStart),
@@ -8004,7 +8007,7 @@ var __csimVendor = (() => {
   }
   __name(generate5, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Block.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Block.js
   var Block_exports = {};
   __export(Block_exports, {
     generate: () => generate6,
@@ -8092,7 +8095,7 @@ var __csimVendor = (() => {
   }
   __name(generate6, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Brackets.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Brackets.js
   var Brackets_exports = {};
   __export(Brackets_exports, {
     generate: () => generate7,
@@ -8126,7 +8129,7 @@ var __csimVendor = (() => {
   }
   __name(generate7, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/CDC.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/CDC.js
   var CDC_exports = {};
   __export(CDC_exports, {
     generate: () => generate8,
@@ -8150,7 +8153,7 @@ var __csimVendor = (() => {
   }
   __name(generate8, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/CDO.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/CDO.js
   var CDO_exports = {};
   __export(CDO_exports, {
     generate: () => generate9,
@@ -8174,7 +8177,7 @@ var __csimVendor = (() => {
   }
   __name(generate9, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/ClassSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/ClassSelector.js
   var ClassSelector_exports = {};
   __export(ClassSelector_exports, {
     generate: () => generate10,
@@ -8202,7 +8205,7 @@ var __csimVendor = (() => {
   }
   __name(generate10, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Combinator.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Combinator.js
   var Combinator_exports = {};
   __export(Combinator_exports, {
     generate: () => generate11,
@@ -8255,7 +8258,7 @@ var __csimVendor = (() => {
   }
   __name(generate11, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Comment.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Comment.js
   var Comment_exports = {};
   __export(Comment_exports, {
     generate: () => generate12,
@@ -8288,7 +8291,7 @@ var __csimVendor = (() => {
   }
   __name(generate12, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Condition.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Condition.js
   var Condition_exports = {};
   __export(Condition_exports, {
     generate: () => generate13,
@@ -8393,7 +8396,7 @@ var __csimVendor = (() => {
   }
   __name(generate13, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Declaration.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Declaration.js
   var Declaration_exports = {};
   __export(Declaration_exports, {
     generate: () => generate14,
@@ -8403,7 +8406,7 @@ var __csimVendor = (() => {
     walkContext: () => walkContext4
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/utils/names.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/utils/names.js
   var HYPHENMINUS3 = 45;
   function isCustomProperty(str, offset) {
     offset = offset || 0;
@@ -8411,7 +8414,7 @@ var __csimVendor = (() => {
   }
   __name(isCustomProperty, "isCustomProperty");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Declaration.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Declaration.js
   var EXCLAMATIONMARK2 = 33;
   var NUMBERSIGN4 = 35;
   var DOLLARSIGN2 = 36;
@@ -8537,7 +8540,7 @@ var __csimVendor = (() => {
   }
   __name(getImportant, "getImportant");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/DeclarationList.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/DeclarationList.js
   var DeclarationList_exports = {};
   __export(DeclarationList_exports, {
     generate: () => generate15,
@@ -8595,7 +8598,7 @@ var __csimVendor = (() => {
   }
   __name(generate15, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Dimension.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Dimension.js
   var Dimension_exports = {};
   __export(Dimension_exports, {
     generate: () => generate16,
@@ -8624,7 +8627,7 @@ var __csimVendor = (() => {
   }
   __name(generate16, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Feature.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Feature.js
   var Feature_exports = {};
   __export(Feature_exports, {
     generate: () => generate17,
@@ -8707,7 +8710,7 @@ var __csimVendor = (() => {
   }
   __name(generate17, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/FeatureFunction.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/FeatureFunction.js
   var FeatureFunction_exports = {};
   __export(FeatureFunction_exports, {
     generate: () => generate18,
@@ -8765,7 +8768,7 @@ var __csimVendor = (() => {
   }
   __name(generate18, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/FeatureRange.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/FeatureRange.js
   var FeatureRange_exports = {};
   __export(FeatureRange_exports, {
     generate: () => generate19,
@@ -8875,7 +8878,7 @@ var __csimVendor = (() => {
   }
   __name(generate19, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Function.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Function.js
   var Function_exports = {};
   __export(Function_exports, {
     generate: () => generate20,
@@ -8914,7 +8917,7 @@ var __csimVendor = (() => {
   }
   __name(generate20, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/GeneralEnclosed.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/GeneralEnclosed.js
   var GeneralEnclosed_exports = {};
   __export(GeneralEnclosed_exports, {
     generate: () => generate21,
@@ -8972,7 +8975,7 @@ var __csimVendor = (() => {
   }
   __name(generate21, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Hash.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Hash.js
   var Hash_exports = {};
   __export(Hash_exports, {
     generate: () => generate22,
@@ -9001,7 +9004,7 @@ var __csimVendor = (() => {
   }
   __name(generate22, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Identifier.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Identifier.js
   var Identifier_exports = {};
   __export(Identifier_exports, {
     generate: () => generate23,
@@ -9026,7 +9029,7 @@ var __csimVendor = (() => {
   }
   __name(generate23, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/IdSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/IdSelector.js
   var IdSelector_exports = {};
   __export(IdSelector_exports, {
     generate: () => generate24,
@@ -9053,7 +9056,7 @@ var __csimVendor = (() => {
   }
   __name(generate24, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Layer.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Layer.js
   var Layer_exports = {};
   __export(Layer_exports, {
     generate: () => generate25,
@@ -9085,7 +9088,7 @@ var __csimVendor = (() => {
   }
   __name(generate25, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/LayerList.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/LayerList.js
   var LayerList_exports = {};
   __export(LayerList_exports, {
     generate: () => generate26,
@@ -9123,7 +9126,7 @@ var __csimVendor = (() => {
   }
   __name(generate26, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/MediaQuery.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/MediaQuery.js
   var MediaQuery_exports = {};
   __export(MediaQuery_exports, {
     generate: () => generate27,
@@ -9209,7 +9212,7 @@ var __csimVendor = (() => {
   }
   __name(generate27, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/MediaQueryList.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/MediaQueryList.js
   var MediaQueryList_exports = {};
   __export(MediaQueryList_exports, {
     generate: () => generate28,
@@ -9245,7 +9248,7 @@ var __csimVendor = (() => {
   }
   __name(generate28, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/NestingSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/NestingSelector.js
   var NestingSelector_exports = {};
   __export(NestingSelector_exports, {
     generate: () => generate29,
@@ -9270,7 +9273,7 @@ var __csimVendor = (() => {
   }
   __name(generate29, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Nth.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Nth.js
   var Nth_exports = {};
   __export(Nth_exports, {
     generate: () => generate30,
@@ -9318,7 +9321,7 @@ var __csimVendor = (() => {
   }
   __name(generate30, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Number.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Number.js
   var Number_exports = {};
   __export(Number_exports, {
     generate: () => generate31,
@@ -9343,7 +9346,7 @@ var __csimVendor = (() => {
   }
   __name(generate31, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Operator.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Operator.js
   var Operator_exports = {};
   __export(Operator_exports, {
     generate: () => generate32,
@@ -9370,7 +9373,7 @@ var __csimVendor = (() => {
   }
   __name(generate32, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Parentheses.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Parentheses.js
   var Parentheses_exports = {};
   __export(Parentheses_exports, {
     generate: () => generate33,
@@ -9404,7 +9407,7 @@ var __csimVendor = (() => {
   }
   __name(generate33, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Percentage.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Percentage.js
   var Percentage_exports = {};
   __export(Percentage_exports, {
     generate: () => generate34,
@@ -9429,7 +9432,7 @@ var __csimVendor = (() => {
   }
   __name(generate34, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/PseudoClassSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/PseudoClassSelector.js
   var PseudoClassSelector_exports = {};
   __export(PseudoClassSelector_exports, {
     generate: () => generate35,
@@ -9489,7 +9492,7 @@ var __csimVendor = (() => {
   }
   __name(generate35, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/PseudoElementSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/PseudoElementSelector.js
   var PseudoElementSelector_exports = {};
   __export(PseudoElementSelector_exports, {
     generate: () => generate36,
@@ -9551,7 +9554,7 @@ var __csimVendor = (() => {
   }
   __name(generate36, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Ratio.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Ratio.js
   var Ratio_exports = {};
   __export(Ratio_exports, {
     generate: () => generate37,
@@ -9605,7 +9608,7 @@ var __csimVendor = (() => {
   }
   __name(generate37, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Raw.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Raw.js
   var Raw_exports = {};
   __export(Raw_exports, {
     generate: () => generate38,
@@ -9647,7 +9650,7 @@ var __csimVendor = (() => {
   }
   __name(generate38, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Rule.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Rule.js
   var Rule_exports = {};
   __export(Rule_exports, {
     generate: () => generate39,
@@ -9699,7 +9702,7 @@ var __csimVendor = (() => {
   }
   __name(generate39, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Scope.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Scope.js
   var Scope_exports = {};
   __export(Scope_exports, {
     generate: () => generate40,
@@ -9763,7 +9766,7 @@ var __csimVendor = (() => {
   }
   __name(generate40, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Selector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Selector.js
   var Selector_exports = {};
   __export(Selector_exports, {
     generate: () => generate41,
@@ -9800,7 +9803,7 @@ var __csimVendor = (() => {
   }
   __name(generate41, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/SelectorList.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/SelectorList.js
   var SelectorList_exports = {};
   __export(SelectorList_exports, {
     generate: () => generate42,
@@ -9839,7 +9842,7 @@ var __csimVendor = (() => {
   }
   __name(generate42, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/String.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/String.js
   var String_exports = {};
   __export(String_exports, {
     generate: () => generate43,
@@ -9848,7 +9851,7 @@ var __csimVendor = (() => {
     structure: () => structure42
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/utils/string.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/utils/string.js
   var REVERSE_SOLIDUS = 92;
   var QUOTATION_MARK = 34;
   var APOSTROPHE = 39;
@@ -9916,7 +9919,7 @@ var __csimVendor = (() => {
   }
   __name(encode, "encode");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/String.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/String.js
   var name42 = "String";
   var structure42 = {
     value: String
@@ -9934,7 +9937,7 @@ var __csimVendor = (() => {
   }
   __name(generate43, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/StyleSheet.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/StyleSheet.js
   var StyleSheet_exports = {};
   __export(StyleSheet_exports, {
     generate: () => generate44,
@@ -10007,7 +10010,7 @@ var __csimVendor = (() => {
   }
   __name(generate44, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/SupportsDeclaration.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/SupportsDeclaration.js
   var SupportsDeclaration_exports = {};
   __export(SupportsDeclaration_exports, {
     generate: () => generate45,
@@ -10041,7 +10044,7 @@ var __csimVendor = (() => {
   }
   __name(generate45, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/TypeSelector.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/TypeSelector.js
   var TypeSelector_exports = {};
   __export(TypeSelector_exports, {
     generate: () => generate46,
@@ -10086,7 +10089,7 @@ var __csimVendor = (() => {
   }
   __name(generate46, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/UnicodeRange.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/UnicodeRange.js
   var UnicodeRange_exports = {};
   __export(UnicodeRange_exports, {
     generate: () => generate47,
@@ -10195,7 +10198,7 @@ var __csimVendor = (() => {
   }
   __name(generate47, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Url.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Url.js
   var Url_exports = {};
   __export(Url_exports, {
     generate: () => generate48,
@@ -10204,7 +10207,7 @@ var __csimVendor = (() => {
     structure: () => structure47
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/utils/url.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/utils/url.js
   var SPACE = 32;
   var REVERSE_SOLIDUS2 = 92;
   var QUOTATION_MARK2 = 34;
@@ -10278,7 +10281,7 @@ var __csimVendor = (() => {
   }
   __name(encode2, "encode");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Url.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Url.js
   var name47 = "Url";
   var structure47 = {
     value: String
@@ -10317,7 +10320,7 @@ var __csimVendor = (() => {
   }
   __name(generate48, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/Value.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/Value.js
   var Value_exports = {};
   __export(Value_exports, {
     generate: () => generate49,
@@ -10344,7 +10347,7 @@ var __csimVendor = (() => {
   }
   __name(generate49, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/WhiteSpace.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/WhiteSpace.js
   var WhiteSpace_exports = {};
   __export(WhiteSpace_exports, {
     generate: () => generate50,
@@ -10371,7 +10374,7 @@ var __csimVendor = (() => {
   }
   __name(generate50, "generate");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/config/parser.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/config/parser.js
   var parser_default = {
     parseContext: {
       default: "StyleSheet",
@@ -10413,10 +10416,10 @@ var __csimVendor = (() => {
     node: index_parse_exports
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/parser/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/parser/index.js
   var parser_default2 = createParser(parser_default);
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/generator/sourceMap.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/generator/sourceMap.js
   var import_source_map_generator = __toESM(require_source_map_generator(), 1);
   var trackNodes = /* @__PURE__ */ new Set(["Atrule", "Selector", "Declaration"]);
   function generateSourceMap(handlers) {
@@ -10496,7 +10499,7 @@ var __csimVendor = (() => {
   }
   __name(generateSourceMap, "generateSourceMap");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/generator/token-before.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/generator/token-before.js
   var token_before_exports = {};
   __export(token_before_exports, {
     safe: () => safe,
@@ -10629,7 +10632,7 @@ var __csimVendor = (() => {
   var spec = createMap(specPairs);
   var safe = createMap(safePairs);
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/generator/create.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/generator/create.js
   var REVERSESOLIDUS = 92;
   function processChildren(node, delimeter) {
     if (typeof delimeter === "function") {
@@ -10713,7 +10716,7 @@ var __csimVendor = (() => {
   }
   __name(createGenerator, "createGenerator");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/index-generate.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/index-generate.js
   var index_generate_exports = {};
   __export(index_generate_exports, {
     AnPlusB: () => generate2,
@@ -10767,15 +10770,15 @@ var __csimVendor = (() => {
     WhiteSpace: () => generate50
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/config/generator.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/config/generator.js
   var generator_default = {
     node: index_generate_exports
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/generator/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/generator/index.js
   var generator_default2 = createGenerator(generator_default);
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/walker/create.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/walker/create.js
   var { hasOwnProperty: hasOwnProperty2 } = Object.prototype;
   var noop = /* @__PURE__ */ __name(function() {
   }, "noop");
@@ -11017,7 +11020,7 @@ var __csimVendor = (() => {
   }
   __name(createWalker, "createWalker");
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/node/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/node/index.js
   var node_exports = {};
   __export(node_exports, {
     AnPlusB: () => AnPlusB_exports,
@@ -11071,12 +11074,12 @@ var __csimVendor = (() => {
     WhiteSpace: () => WhiteSpace_exports
   });
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/syntax/config/walker.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/syntax/config/walker.js
   var walker_default = {
     node: node_exports
   };
 
-  // node_modules/.pnpm/css-tree@3.2.1/node_modules/css-tree/lib/walker/index.js
+  // node_modules/.pnpm/css-tree@3.2.1_patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4/node_modules/css-tree/lib/walker/index.js
   var walker_default2 = createWalker(walker_default);
 
   // vendor/src/vendor.entry.js

@@ -1,0 +1,17 @@
+diff --git a/lib/syntax/node/AttributeSelector.js b/lib/syntax/node/AttributeSelector.js
+index 8578dada082a25b1ff3fee8412a36270d1d40c06..3f147c1c6c3ff1ac1ae58f548d1fd5c933ec0028 100644
+--- a/lib/syntax/node/AttributeSelector.js
++++ b/lib/syntax/node/AttributeSelector.js
+@@ -118,7 +118,11 @@ export function parse() {
+         }
+     }
+ 
+-    this.eat(RightSquareBracket);
++    // CSS Syntax: a `[…` block left open at EOF is a parse error that closes
++    // the block, so `[a="b"` parses as `[a="b"]` — recover instead of erroring.
++    if (!this.eof) {
++        this.eat(RightSquareBracket);
++    }
+ 
+     return {
+         type: 'AttributeSelector',

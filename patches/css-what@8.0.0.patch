@@ -1,5 +1,5 @@
 diff --git a/dist/parse.js b/dist/parse.js
-index f598b5c129a91c1f047f1312710793aa85211cb1..e188709f5f593672c06d7661d2d113efef92297f 100644
+index f598b5c129a91c1f047f1312710793aa85211cb1..a9a25f569337af1e5845a5d2bf41ae5c004a65b1 100644
 --- a/dist/parse.js
 +++ b/dist/parse.js
 @@ -1,6 +1,6 @@
@@ -39,3 +39,43 @@ index f598b5c129a91c1f047f1312710793aa85211cb1..e188709f5f593672c06d7661d2d113ef
  }
  function unescapeCSS(cssString) {
      return cssString.replace(reEscape, funescape);
+@@ -320,11 +323,14 @@ function parseSelector(subselects, selector, selectorIndex) {
+                                     ? 2
+                                     : 1;
+                         }
+-                        if (selector.charCodeAt(selectorIndex) !== quote) {
+-                            throw new Error("Attribute value didn't end");
+-                        }
+                         value = unescapeCSS(selector.slice(sectionStart, selectorIndex));
+-                        selectorIndex += 1;
++                        // CSS Syntax: a string left open at EOF is a parse error
++                        // that closes the string — recover with what was
++                        // collected instead of throwing. Otherwise consume the
++                        // closing quote.
++                        if (selectorIndex < selector.length) {
++                            selectorIndex += 1;
++                        }
+                     }
+                     else {
+                         const valueStart = selectorIndex;
+@@ -357,11 +363,16 @@ function parseSelector(subselects, selector, selectorIndex) {
+                         }
+                     }
+                 }
+-                if (selector.charCodeAt(selectorIndex) !==
+-                    CharCode.RightSquareBracket) {
+-                    throw new Error("Attribute selector didn't terminate");
++                // CSS Syntax: a `[…` block left open at EOF is a parse error
++                // that closes the block — recover instead of throwing. A
++                // non-`]` character before EOF is still a genuine error.
++                if (selectorIndex < selector.length) {
++                    if (selector.charCodeAt(selectorIndex) !==
++                        CharCode.RightSquareBracket) {
++                        throw new Error("Attribute selector didn't terminate");
++                    }
++                    selectorIndex += 1;
+                 }
+-                selectorIndex += 1;
+                 const attributeSelector = {
+                     type: SelectorType.Attribute,
+                     name,

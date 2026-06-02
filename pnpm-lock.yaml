@@ -6,7 +6,8 @@ settings:
 
 patchedDependencies:
   css-select@7.0.0: 93e85b409ab078491850a9f5ef5fd93f5c1c877b1bbac136ab3690b4d6ddf579
-  css-what@8.0.0: 97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91
+  css-tree@3.2.1: 815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4
+  css-what@8.0.0: 8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d
 
 importers:
 
@@ -17,10 +18,10 @@ importers:
         version: 7.0.0(patch_hash=93e85b409ab078491850a9f5ef5fd93f5c1c877b1bbac136ab3690b4d6ddf579)
       css-tree:
         specifier: ^3.2.1
-        version: 3.2.1
+        version: 3.2.1(patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4)
       css-what:
         specifier: ^8.0.0
-        version: 8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91)
+        version: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
       xpathway:
         specifier: ^1.0.3
         version: 1.0.3
@@ -344,17 +345,17 @@ snapshots:
   css-select@7.0.0(patch_hash=93e85b409ab078491850a9f5ef5fd93f5c1c877b1bbac136ab3690b4d6ddf579):
     dependencies:
       boolbase: 2.0.0
-      css-what: 8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91)
+      css-what: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
       domhandler: 6.0.1
       domutils: 4.0.2
       nth-check: 3.0.1
 
-  css-tree@3.2.1:
+  css-tree@3.2.1(patch_hash=815076d806522c85822ee571849fef1c4bfd07dba223f6500bdba1b7a33654b4):
     dependencies:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
 
-  css-what@8.0.0(patch_hash=97a47647cdaf6af05ae9a169ff1fdd0c50c32dbdc606e7d1837845997f62ef91): {}
+  css-what@8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d): {}
 
   dom-serializer@3.1.1:
     dependencies:

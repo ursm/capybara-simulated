@@ -6,4 +6,5 @@ minimumReleaseAgeExclude:
   - xpathway
 patchedDependencies:
   css-select@7.0.0: patches/css-select@7.0.0.patch
+  css-tree@3.2.1: patches/css-tree@3.2.1.patch
   css-what@8.0.0: patches/css-what@8.0.0.patch

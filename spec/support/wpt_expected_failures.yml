@@ -323,14 +323,8 @@ dom/nodes/Element-insertAdjacentElement.html:
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
 - DIV Element.matches no parameter
-- 'Detached Element.matches: Attribute value selector, matching align attribute with
-  value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'Fragment Element.matches: Attribute value selector, matching align attribute with
-  value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.matches: :target pseudo-class selector, matching the element
   referenced by the URL fragment identifier (with no refNodes): :target'
-- 'In-document Element.matches: Attribute value selector, matching align attribute
-  with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - NULL Element.matches no parameter
 - UNDEFINED Element.matches no parameter
 dom/nodes/Element-removeAttribute.html:
@@ -342,14 +336,8 @@ dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-webkitMatchesSelector.html:
 - DIV Element.webkitMatchesSelector no parameter
-- 'Detached Element.webkitMatchesSelector: Attribute value selector, matching align
-  attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'Fragment Element.webkitMatchesSelector: Attribute value selector, matching align
-  attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.webkitMatchesSelector: :target pseudo-class selector, matching
   the element referenced by the URL fragment identifier (with no refNodes): :target'
-- 'In-document Element.webkitMatchesSelector: Attribute value selector, matching align
-  attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - NULL Element.webkitMatchesSelector no parameter
 - UNDEFINED Element.webkitMatchesSelector no parameter
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
@@ -439,46 +427,30 @@ dom/nodes/ParentNode-children.html:
 dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html:
 - Detached Element.querySelector no parameter
-- 'Detached Element.querySelector: Attribute value selector, matching align attribute
-  with value, unclosed bracket: #attr-value [align="center"'
 - Detached Element.querySelectorAll no parameter
-- 'Detached Element.querySelectorAll: Attribute value selector, matching align attribute
-  with value, unclosed bracket: #attr-value [align="center"'
 - Document.querySelector no parameter
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
   elements: #head :link, #head :visited'
 - 'Document.querySelector: :target pseudo-class selector, matching the element referenced
   by the URL fragment identifier: :target'
-- 'Document.querySelector: Attribute value selector, matching align attribute with
-  value, unclosed bracket: #attr-value [align="center"'
 - Document.querySelectorAll no parameter
 - Document.querySelectorAll tree order
 - 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
   no elements: #head :link, #head :visited'
 - 'Document.querySelectorAll: :target pseudo-class selector, matching the element
   referenced by the URL fragment identifier: :target'
-- 'Document.querySelectorAll: Attribute value selector, matching align attribute with
-  value, unclosed bracket: #attr-value [align="center"'
 - Fragment.querySelector no parameter
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelector: Attribute value selector, matching align attribute with
-  value, unclosed bracket: #attr-value [align="center"'
 - Fragment.querySelectorAll no parameter
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
-- 'Fragment.querySelectorAll: Attribute value selector, matching align attribute with
-  value, unclosed bracket: #attr-value [align="center"'
 - In-document Element.querySelector no parameter
 - 'In-document Element.querySelector: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
-- 'In-document Element.querySelector: Attribute value selector, matching align attribute
-  with value, unclosed bracket: #attr-value [align="center"'
 - In-document Element.querySelectorAll no parameter
 - 'In-document Element.querySelectorAll: :target pseudo-class selector, matching the
   element referenced by the URL fragment identifier: :target'
-- 'In-document Element.querySelectorAll: Attribute value selector, matching align
-  attribute with value, unclosed bracket: #attr-value [align="center"'
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
