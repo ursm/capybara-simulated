@@ -626,8 +626,6 @@ dom/ranges/Range-comparePoint-2.html:
 - Range.comparePoint 2
 dom/ranges/Range-constructor.html:
 - Range constructor test
-dom/ranges/Range-detach.html:
-- Range.detach
 dom/ranges/Range-extractContents-dynamic-end.html:
 - Range.extractContents should not extract out-of-bounds nodes if end container is
   removed during iframe unload
@@ -958,40 +956,8 @@ domparsing/DOMParser-parseFromString-xml-parsererror.html: HARNESS_ERROR
 domparsing/DOMParser-parseFromString-xml.html: HARNESS_ERROR
 domparsing/XMLSerializer-serializeToString.html: HARNESS_ERROR
 domparsing/createContextualFragment.html:
-- " and <body> must work the same, 1"
-- " and <body> must work the same, 2"
-- " in a different namespace shouldn't be special"
-- "<script>s should be run when appended to the document (but not before)"
-- 'Don''t auto-create <body> when applied to '
 - Implicit <body> creation
-- Must not throw INVALID_STATE_ERR for a detached node.
-- Namespace generally shouldn't matter
-- Non-Element parent should not be special
-- SVG namespace shouldn't be special
 - Simple test with paragraphs
-- Text nodes shouldn't be special
-- createContextualFragment should work even when the context is <area>
-- createContextualFragment should work even when the context is <base>
-- createContextualFragment should work even when the context is <basefont>
-- createContextualFragment should work even when the context is <bgsound>
-- createContextualFragment should work even when the context is <br>
-- createContextualFragment should work even when the context is <col>
-- createContextualFragment should work even when the context is <embed>
-- createContextualFragment should work even when the context is <frame>
-- createContextualFragment should work even when the context is <hr>
-- createContextualFragment should work even when the context is <image>
-- createContextualFragment should work even when the context is <img>
-- createContextualFragment should work even when the context is <input>
-- createContextualFragment should work even when the context is <keygen>
-- createContextualFragment should work even when the context is <link>
-- createContextualFragment should work even when the context is <menuitem>
-- createContextualFragment should work even when the context is <meta>
-- createContextualFragment should work even when the context is <param>
-- createContextualFragment should work even when the context is <source>
-- createContextualFragment should work even when the context is <track>
-- createContextualFragment should work even when the context is <wbr>
-- null should be stringified
-- undefined should be stringified
 domparsing/domparser-spurious-attributes.html:
 - Using ">" and "\r" in an attribute creates no unexpected attributes.
 - Using ">" and HTML entities in an attribute creates no unexpected attributes.
