@@ -1,0 +1,16 @@
+diff --git a/dist/attributes.js b/dist/attributes.js
+index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..91755cc38ed4e498c0c63abe58b8467bf60f9815 100644
+--- a/dist/attributes.js
++++ b/dist/attributes.js
+@@ -117,7 +117,10 @@ export const attributeRules = {
+     element(next, data, options) {
+         const { adapter } = options;
+         const { name, value } = data;
+-        if (whitespaceRe.test(value)) {
++        // Per Selectors §6.3.2, `[attr~=val]` with an empty `val` (or a `val`
++        // containing whitespace, which can never be a single token) matches
++        // nothing — same empty-value short-circuit `^=`/`$=`/`*=` already have.
++        if (value === "" || whitespaceRe.test(value)) {
+             return boolbase.falseFunc;
+         }
+         const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");

@@ -941,7 +941,7 @@ var __csimVendor = (() => {
     xpathway: () => src_exports
   });
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/index.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/index.js
   var dist_exports5 = {};
   __export(dist_exports5, {
     _compileUnsafe: () => _compileUnsafe,
@@ -2392,7 +2392,7 @@ var __csimVendor = (() => {
   }
   __name(prevElementSibling, "prevElementSibling");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/attributes.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/attributes.js
   var reChars = /[-[\]{}()*+?.,\\^$|#\s]/g;
   var whitespaceRe = /\s/;
   function escapeRegex(value) {
@@ -2485,7 +2485,7 @@ var __csimVendor = (() => {
     element(next, data, options) {
       const { adapter } = options;
       const { name: name50, value } = data;
-      if (whitespaceRe.test(value)) {
+      if (value === "" || whitespaceRe.test(value)) {
         return falseFunc;
       }
       const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
@@ -2561,7 +2561,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/querying.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/helpers/querying.js
   function findAll2(query, nodes, options) {
     const { adapter, xmlMode = false } = options;
     const result = [];
@@ -2641,7 +2641,7 @@ var __csimVendor = (() => {
   }
   __name(getElementParent, "getElementParent");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/aliases.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/pseudo-selectors/aliases.js
   var textControl = "input:is([type=text i],[type=search i],[type=url i],[type=tel i],[type=email i],[type=password i],[type=date i],[type=month i],[type=week i],[type=time i],[type=datetime-local i],[type=number i])";
   var aliases = {
     // Links
@@ -2774,7 +2774,7 @@ var __csimVendor = (() => {
   }
   __name(nthCheck, "nthCheck");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/cache.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/helpers/cache.js
   function cacheParentResults(next, { adapter, cacheResults }, matches) {
     if (cacheResults === false || typeof WeakMap === "undefined") {
       return (element) => next(element) && matches(element);
@@ -2806,14 +2806,14 @@ var __csimVendor = (() => {
   }
   __name(cacheParentResults, "cacheParentResults");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/options.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/helpers/options.js
   function copyOptions(options) {
     const { context: _, rootFunc: __, ...copied } = options;
     return copied;
   }
   __name(copyOptions, "copyOptions");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/filters.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/pseudo-selectors/filters.js
   function extendedFilter(tag, range) {
     if (range[0] !== "*" && range[0] !== tag[0])
       return false;
@@ -2944,7 +2944,7 @@ var __csimVendor = (() => {
   }
   __name(dynamicStatePseudo, "dynamicStatePseudo");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/pseudos.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/pseudo-selectors/pseudos.js
   var isDocumentWhiteSpace = /^[ \t\r\n]*$/;
   var pseudos = {
     empty(element, { adapter }) {
@@ -3023,7 +3023,7 @@ var __csimVendor = (() => {
   }
   __name(verifyPseudoArguments, "verifyPseudoArguments");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/helpers/selectors.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/helpers/selectors.js
   function isTraversal2(token) {
     return token.type === "_flexibleDescendant" || isTraversal(token);
   }
@@ -3110,7 +3110,7 @@ var __csimVendor = (() => {
   }
   __name(includesScopePseudo, "includesScopePseudo");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/subselects.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/pseudo-selectors/subselects.js
   var PLACEHOLDER_ELEMENT = {};
   function hasDependsOnCurrentElement(selector2) {
     return selector2.some((sel) => sel.length > 0 && (isTraversal2(sel[0]) || sel.some(includesScopePseudo)));
@@ -3165,7 +3165,7 @@ var __csimVendor = (() => {
     }
   };
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/pseudo-selectors/index.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/pseudo-selectors/index.js
   function compilePseudoSelector(next, selector2, options, context, compileToken2) {
     const { name: name50, data } = selector2;
     if (Array.isArray(data)) {
@@ -3199,7 +3199,7 @@ var __csimVendor = (() => {
   }
   __name(compilePseudoSelector, "compilePseudoSelector");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/general.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/general.js
   function compileGeneralSelector(next, selector2, options, context, compileToken2, hasExpensiveSubselector) {
     const { adapter, equals, cacheResults } = options;
     switch (selector2.type) {
@@ -3338,7 +3338,7 @@ var __csimVendor = (() => {
   }
   __name(compileGeneralSelector, "compileGeneralSelector");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/compile.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/compile.js
   var DESCENDANT_TOKEN = { type: SelectorType.Descendant };
   var FLEXIBLE_DESCENDANT_TOKEN = {
     type: "_flexibleDescendant"
@@ -3411,7 +3411,7 @@ var __csimVendor = (() => {
   }
   __name(or, "or");
 
-  // node_modules/.pnpm/css-select@7.0.0/node_modules/css-select/dist/index.js
+  // node_modules/.pnpm/css-select@7.0.0_patch_hash=e1cde47cdcac56eabfe91d81f32c36a75d4ca8fb67969e74307d435665275589/node_modules/css-select/dist/index.js
   var defaultEquals = /* @__PURE__ */ __name((a, b) => a === b, "defaultEquals");
   var defaultOptions = {
     adapter: { ...dist_exports3, isTag: isTag2 },
