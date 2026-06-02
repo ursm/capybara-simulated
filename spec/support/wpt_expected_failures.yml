@@ -1687,7 +1687,6 @@ html/webappapis/microtask-queuing/queue-microtask-cross-realm-callback-report-ex
 html/webappapis/microtask-queuing/queue-microtask-exceptions.any.js: HARNESS_ERROR
 html/webappapis/microtask-queuing/queue-microtask.any.js:
 - It interleaves with promises as expected
-- It throws when given non-functions
 html/webappapis/microtask-queuing/queue-microtask.window.js: HARNESS_ERROR
 html/webappapis/timers/setinterval-cross-realm-callback-report-exception.html: HARNESS_ERROR
 html/webappapis/timers/settimeout-cross-realm-callback-report-exception.html: HARNESS_ERROR
