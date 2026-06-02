@@ -64,6 +64,13 @@ module WptRunner
           label = req.params['label'].to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;')
           next [200, {'content-type' => 'text/html'}, [%{<!doctype html><meta charset="#{label}">}]]
         end
+        # `.any.js` / `.window.js` multi-global tests ship only the JS source; WPT
+        # generates the per-global HTML wrapper at serve time. Synthesize the
+        # window-variant wrapper (`X.any.html` ← `X.any.js`) on request: testharness
+        # + report + each `// META: script=` dep + the test source.
+        if (m = path.match(%r{\A(/.+\.(?:any|window))\.html\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
+          next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_wrapper("#{m[1].sub(%r{\A/}, '')}.js")]]
+        end
         file = File.expand_path(File.join(WptRunner::ROOT, path))
         unless file.start_with?(WptRunner::ROOT + '/') && File.file?(file)
           next [404, {'content-type' => 'text/plain'}, ['not found']]
@@ -83,14 +90,49 @@ module WptRunner
   # testharness.js. Reference / manual / support / resources files are not
   # tests and are skipped. Files on the skip list (driver crashers — see
   # `skip`) are excluded here so they neither run nor need an allowlist entry.
+  TREES = '{dom,domparsing,url}'
+
   def test_files
-    @test_files ||= Dir.glob('{dom,domparsing}/**/*.{html,xhtml,xht}', base: ROOT).reject {|rel|
-      rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
-        (rel.split('/') & %w[support resources reftest]).any? ||
-        skip.key?(rel)
-    }.select {|rel|
-      File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
-    }.sort
+    @test_files ||= begin
+      html = Dir.glob("#{TREES}/**/*.{html,xhtml,xht}", base: ROOT).reject {|rel|
+        rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
+          (rel.split('/') & %w[support resources reftest]).any? ||
+          skip.key?(rel)
+      }.select {|rel|
+        File.read(File.join(ROOT, rel)).include?('/resources/testharness.js')
+      }
+      # `.any.js` / `.window.js` multi-global tests (run via the synthesized
+      # window-variant wrapper, see `app` / `any_js_wrapper`). Scoped to url/ for
+      # now — the dom/ `.any.js` set includes synchronous-infinite-loop crashers
+      # that hang the V8 call (no virtual-clock timeout catches them); bringing
+      # those in needs the skip-list triage first.
+      js = Dir.glob("url/**/*.{any,window}.js", base: ROOT).reject {|rel|
+        (rel.split('/') & %w[support resources]).any? || skip.key?(rel)
+      }
+      (html + js).sort
+    end
+  end
+
+  # Synthesize the window-variant HTML wrapper for a `.any.js` / `.window.js`
+  # test: testharness + report, each `// META: script=…` dependency (resolved
+  # relative to the test file, or absolute from the WPT root), then the test
+  # source itself. Mirrors what wptserve generates.
+  def any_js_wrapper(js_rel)
+    src  = File.read(File.join(ROOT, js_rel))
+    dir  = File.dirname(js_rel)
+    deps = src.each_line.take_while {|l| l.start_with?('//') || l.strip.empty? }
+              .filter_map {|l| l[%r{//\s*META:\s*script=(\S+)}, 1] }
+    tags = deps.map {|d|
+      url = d.start_with?('/') ? d : File.expand_path(d, '/' + dir)   # resolve relative to the test's dir
+      %{<script src="#{url}"></script>}
+    }
+    <<~HTML
+      <!doctype html><meta charset="utf-8">
+      <script src="/resources/testharness.js"></script>
+      <script src="/resources/testharnessreport.js"></script>
+      #{tags.join("\n")}
+      <script src="/#{js_rel}"></script>
+    HTML
   end
 
   # Files excluded from the run entirely because they crash or pathologically
@@ -107,7 +149,9 @@ module WptRunner
   #   { completed: false, error: "…" | nil }               # never completed
   def run(rel)
     s = session
-    s.visit "/#{rel}"
+    # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper.
+    visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
+    s.visit "/#{visit}"
     # The driver doesn't auto-fire window 'load'; testharness completes its
     # sync tests off that event (then a setTimeout(0) sets `all_loaded`).
     s.evaluate_script("window.dispatchEvent(new Event('load'))")

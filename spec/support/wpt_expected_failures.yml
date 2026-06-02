@@ -1391,3 +1391,524 @@ domparsing/tentative/stream-insertion-logic.html: HARNESS_ERROR
 domparsing/tentative/stream-positional.html: HARNESS_ERROR
 domparsing/xmldomparser.html:
 - XML Dom Parse readyState Test
+url/a-element-origin-xhtml.xhtml:
+- "Parsing origin: <\t   :foo.com   \n> against <http://example.org/foo/bar>"
+- "Parsing origin: <  \t> against <http://example.org/foo/bar>"
+- 'Parsing origin: < foo.com  > against <http://example.org/foo/bar>'
+- 'Parsing origin: <#/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#;?> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#> against <test:test>'
+- 'Parsing origin: <#> against <test:test?test>'
+- 'Parsing origin: <#\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#i> against <sc:///pa/pa>'
+- 'Parsing origin: <#i> against <sc://ho/pa>'
+- 'Parsing origin: <#i> against <sc:/pa/pa>'
+- 'Parsing origin: <#i> against <sc:sd/sd>'
+- 'Parsing origin: <#i> against <sc:sd>'
+- 'Parsing origin: <#x:y> against <about:blank>'
+- 'Parsing origin: <#x> against <about:blank>'
+- 'Parsing origin: <#x> against <mailto:x@x.com>'
+- 'Parsing origin: <#x> against <sc://ñ>'
+- 'Parsing origin: <#β> against <http://example.org/foo/bar>'
+- 'Parsing origin: <../i> against <sc:///pa/pa>'
+- 'Parsing origin: <../i> against <sc://ho/pa>'
+- 'Parsing origin: <../i> against <sc:/pa/pa>'
+- 'Parsing origin: </:23> against <http://example.org/foo/bar>'
+- 'Parsing origin: </> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a%2fc> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/ /c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/%2f/c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/b/c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </i> against <sc:///pa/pa>'
+- 'Parsing origin: </i> against <sc://ho/pa>'
+- 'Parsing origin: </i> against <sc:/pa/pa>'
+- 'Parsing origin: </some/path> against <http://user:pass@example.org:21/smth>'
+- 'Parsing origin: </some/path> against <http://user@example.org/smth>'
+- 'Parsing origin: <:#> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:23> against <http://example.org/foo/bar>'
+- 'Parsing origin: <::23> against <http://example.org/foo/bar>'
+- 'Parsing origin: <::> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:a> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:foo.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:foo.com\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <> against <http://example.org/foo/bar>'
+- 'Parsing origin: <> against <http://user:pass@example.org:21/smth>'
+- 'Parsing origin: <?> against <http://example.org/foo/bar>'
+- 'Parsing origin: <??a=b&c=d> against <http://example.org/foo/bar>'
+- 'Parsing origin: <?a=b&c=d> against <http://example.org/foo/bar>'
+- 'Parsing origin: <?i> against <sc:///pa/pa>'
+- 'Parsing origin: <?i> against <sc://ho/pa>'
+- 'Parsing origin: <?i> against <sc:/pa/pa>'
+- 'Parsing origin: <?x> against <sc://ñ>'
+- 'Parsing origin: <[61:24:74]:98> against <http://example.org/foo/bar>'
+- 'Parsing origin: <\x> against <http://example.org/foo/bar>'
+- 'Parsing origin: <foo://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>'
+- 'Parsing origin: <ftp://%e2%98%83> against <about:blank>'
+- "Parsing origin: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
+- 'Parsing origin: <http://www.foo。bar.com> against <http://other.com/>'
+- 'Parsing origin: <http://你好你好> against <http://other.com/>'
+- 'Parsing origin: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
+- 'Parsing origin: <http://Ｇｏ.com> against <http://other.com/>'
+- 'Parsing origin: <http:/> against <http://example.com/>'
+- 'Parsing origin: <http:/example.com/> against <about:blank>'
+- 'Parsing origin: <http:/example.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http::@c:29> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:[61:27]/:foo> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:example.com/> against <about:blank>'
+- 'Parsing origin: <http:example.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:foo.com> against <http://example.org/foo/bar>'
+- 'Parsing origin: <https://%e2%98%83> against <about:blank>'
+- 'Parsing origin: <https://a%C2%ADb/> against <about:blank>'
+- 'Parsing origin: <https://faß.ExAmPlE/> against <about:blank>'
+- 'Parsing origin: <i> against <sc:///pa/pa>'
+- 'Parsing origin: <i> against <sc://ho/pa>'
+- 'Parsing origin: <i> against <sc:/pa/pa>'
+- 'Parsing origin: <wss://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>'
+- 'Parsing origin: <x> against <sc://ñ>'
+url/a-element-origin.html:
+- "Parsing origin: <\t   :foo.com   \n> against <http://example.org/foo/bar>"
+- "Parsing origin: <  \t> against <http://example.org/foo/bar>"
+- 'Parsing origin: < foo.com  > against <http://example.org/foo/bar>'
+- 'Parsing origin: <#/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#;?> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#> against <test:test>'
+- 'Parsing origin: <#> against <test:test?test>'
+- 'Parsing origin: <#\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <#i> against <sc:///pa/pa>'
+- 'Parsing origin: <#i> against <sc://ho/pa>'
+- 'Parsing origin: <#i> against <sc:/pa/pa>'
+- 'Parsing origin: <#i> against <sc:sd/sd>'
+- 'Parsing origin: <#i> against <sc:sd>'
+- 'Parsing origin: <#x:y> against <about:blank>'
+- 'Parsing origin: <#x> against <about:blank>'
+- 'Parsing origin: <#x> against <mailto:x@x.com>'
+- 'Parsing origin: <#x> against <sc://ñ>'
+- 'Parsing origin: <#β> against <http://example.org/foo/bar>'
+- 'Parsing origin: <../i> against <sc:///pa/pa>'
+- 'Parsing origin: <../i> against <sc://ho/pa>'
+- 'Parsing origin: <../i> against <sc:/pa/pa>'
+- 'Parsing origin: </:23> against <http://example.org/foo/bar>'
+- 'Parsing origin: </> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a%2fc> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/ /c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/%2f/c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </a/b/c> against <http://example.org/foo/bar>'
+- 'Parsing origin: </i> against <sc:///pa/pa>'
+- 'Parsing origin: </i> against <sc://ho/pa>'
+- 'Parsing origin: </i> against <sc:/pa/pa>'
+- 'Parsing origin: </some/path> against <http://user:pass@example.org:21/smth>'
+- 'Parsing origin: </some/path> against <http://user@example.org/smth>'
+- 'Parsing origin: <:#> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:23> against <http://example.org/foo/bar>'
+- 'Parsing origin: <::23> against <http://example.org/foo/bar>'
+- 'Parsing origin: <::> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:a> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:foo.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <:foo.com\> against <http://example.org/foo/bar>'
+- 'Parsing origin: <> against <http://example.org/foo/bar>'
+- 'Parsing origin: <> against <http://user:pass@example.org:21/smth>'
+- 'Parsing origin: <?> against <http://example.org/foo/bar>'
+- 'Parsing origin: <??a=b&c=d> against <http://example.org/foo/bar>'
+- 'Parsing origin: <?a=b&c=d> against <http://example.org/foo/bar>'
+- 'Parsing origin: <?i> against <sc:///pa/pa>'
+- 'Parsing origin: <?i> against <sc://ho/pa>'
+- 'Parsing origin: <?i> against <sc:/pa/pa>'
+- 'Parsing origin: <?x> against <sc://ñ>'
+- 'Parsing origin: <[61:24:74]:98> against <http://example.org/foo/bar>'
+- 'Parsing origin: <\x> against <http://example.org/foo/bar>'
+- 'Parsing origin: <foo://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>'
+- 'Parsing origin: <ftp://%e2%98%83> against <about:blank>'
+- "Parsing origin: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
+- 'Parsing origin: <http://www.foo。bar.com> against <http://other.com/>'
+- 'Parsing origin: <http://你好你好> against <http://other.com/>'
+- 'Parsing origin: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
+- 'Parsing origin: <http://Ｇｏ.com> against <http://other.com/>'
+- 'Parsing origin: <http:/> against <http://example.com/>'
+- 'Parsing origin: <http:/example.com/> against <about:blank>'
+- 'Parsing origin: <http:/example.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http::@c:29> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:[61:27]/:foo> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:example.com/> against <about:blank>'
+- 'Parsing origin: <http:example.com/> against <http://example.org/foo/bar>'
+- 'Parsing origin: <http:foo.com> against <http://example.org/foo/bar>'
+- 'Parsing origin: <https://%e2%98%83> against <about:blank>'
+- 'Parsing origin: <https://a%C2%ADb/> against <about:blank>'
+- 'Parsing origin: <https://faß.ExAmPlE/> against <about:blank>'
+- 'Parsing origin: <i> against <sc:///pa/pa>'
+- 'Parsing origin: <i> against <sc://ho/pa>'
+- 'Parsing origin: <i> against <sc:/pa/pa>'
+- 'Parsing origin: <wss://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>'
+- 'Parsing origin: <x> against <sc://ñ>'
+url/a-element-xhtml.xhtml:
+- Loading data…
+url/a-element.html:
+- Loading data…
+url/data-uri-fragment.html: HARNESS_ERROR
+url/idlharness.any.js: HARNESS_ERROR
+url/javascript-urls.window.js: HARNESS_ERROR
+url/percent-encoding.window.js:
+- "Input \x0EA with encoding big5"
+- "Input \x0EA with encoding iso-2022-jp"
+- "Input \x0EA with encoding utf-8"
+- Input ¢ with encoding iso-8859-2
+- Input ¢ with encoding utf-8
+- Input á| with encoding utf-8
+- Input † with encoding big5
+- Input † with encoding euc-kr
+- Input † with encoding utf-8
+- Input † with encoding windows-1252
+- Input ‾\ with encoding iso-2022-jp
+- Input ‾\ with encoding utf-8
+- Input − with encoding shift_jis
+- Input − with encoding utf-8
+- Input  with encoding gb18030
+- Input  with encoding utf-8
+url/url-constructor.any.js:
+- Loading data…
+url/url-origin.any.js:
+- 'Origin parsing: <foo://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> without base'
+- 'Origin parsing: <ftp://%e2%98%83> without base'
+- "Origin parsing: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
+- 'Origin parsing: <http://www.foo。bar.com> against <http://other.com/>'
+- 'Origin parsing: <http://你好你好> against <http://other.com/>'
+- 'Origin parsing: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
+- 'Origin parsing: <http://Ｇｏ.com> against <http://other.com/>'
+- 'Origin parsing: <https://%e2%98%83> without base'
+- 'Origin parsing: <https://a%C2%ADb/> without base'
+- 'Origin parsing: <https://faß.ExAmPlE/> without base'
+- 'Origin parsing: <wss://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> without base'
+url/url-searchparams.any.js:
+- URL.searchParams and URL.search setters, update propagation
+- URL.searchParams setter, invalid values
+- URL.searchParams updating, clearing
+url/url-setters-a-area.window.js:
+- Loading data…
+url/url-setters-stripping.any.js:
+- Setting hash with leading U+0000 (https:)
+- Setting hash with leading U+0000 (wpt++:)
+- Setting hash with leading U+0009 (https:)
+- Setting hash with leading U+0009 (wpt++:)
+- Setting hash with leading U+000A (https:)
+- Setting hash with leading U+000A (wpt++:)
+- Setting hash with leading U+000D (https:)
+- Setting hash with leading U+000D (wpt++:)
+- Setting hash with leading U+001F (https:)
+- Setting hash with leading U+001F (wpt++:)
+- Setting hash with middle U+0000 (https:)
+- Setting hash with middle U+0000 (wpt++:)
+- Setting hash with middle U+0009 (https:)
+- Setting hash with middle U+0009 (wpt++:)
+- Setting hash with middle U+000A (https:)
+- Setting hash with middle U+000A (wpt++:)
+- Setting hash with middle U+000D (https:)
+- Setting hash with middle U+000D (wpt++:)
+- Setting hash with middle U+001F (https:)
+- Setting hash with middle U+001F (wpt++:)
+- Setting hash with trailing U+0000 (https:)
+- Setting hash with trailing U+0000 (wpt++:)
+- Setting hash with trailing U+0009 (https:)
+- Setting hash with trailing U+0009 (wpt++:)
+- Setting hash with trailing U+000A (https:)
+- Setting hash with trailing U+000A (wpt++:)
+- Setting hash with trailing U+000D (https:)
+- Setting hash with trailing U+000D (wpt++:)
+- Setting hash with trailing U+001F (https:)
+- Setting hash with trailing U+001F (wpt++:)
+- Setting host with leading U+0000 (https:)
+- Setting host with leading U+0000 (wpt++:)
+- Setting host with leading U+0009 (https:)
+- Setting host with leading U+0009 (wpt++:)
+- Setting host with leading U+000A (https:)
+- Setting host with leading U+000A (wpt++:)
+- Setting host with leading U+000D (https:)
+- Setting host with leading U+000D (wpt++:)
+- Setting host with leading U+001F (https:)
+- Setting host with leading U+001F (wpt++:)
+- Setting host with middle U+0000 (https:)
+- Setting host with middle U+0000 (wpt++:)
+- Setting host with middle U+0009 (https:)
+- Setting host with middle U+0009 (wpt++:)
+- Setting host with middle U+000A (https:)
+- Setting host with middle U+000A (wpt++:)
+- Setting host with middle U+000D (https:)
+- Setting host with middle U+000D (wpt++:)
+- Setting host with middle U+001F (https:)
+- Setting host with middle U+001F (wpt++:)
+- Setting host with trailing U+0000 (https:)
+- Setting host with trailing U+0000 (wpt++:)
+- Setting host with trailing U+0009 (https:)
+- Setting host with trailing U+0009 (wpt++:)
+- Setting host with trailing U+000A (https:)
+- Setting host with trailing U+000A (wpt++:)
+- Setting host with trailing U+000D (https:)
+- Setting host with trailing U+000D (wpt++:)
+- Setting host with trailing U+001F (https:)
+- Setting host with trailing U+001F (wpt++:)
+- Setting hostname with leading U+0000 (https:)
+- Setting hostname with leading U+0000 (wpt++:)
+- Setting hostname with leading U+0009 (https:)
+- Setting hostname with leading U+0009 (wpt++:)
+- Setting hostname with leading U+000A (https:)
+- Setting hostname with leading U+000A (wpt++:)
+- Setting hostname with leading U+000D (https:)
+- Setting hostname with leading U+000D (wpt++:)
+- Setting hostname with leading U+001F (https:)
+- Setting hostname with leading U+001F (wpt++:)
+- Setting hostname with middle U+0000 (https:)
+- Setting hostname with middle U+0000 (wpt++:)
+- Setting hostname with middle U+0009 (https:)
+- Setting hostname with middle U+0009 (wpt++:)
+- Setting hostname with middle U+000A (https:)
+- Setting hostname with middle U+000A (wpt++:)
+- Setting hostname with middle U+000D (https:)
+- Setting hostname with middle U+000D (wpt++:)
+- Setting hostname with middle U+001F (https:)
+- Setting hostname with middle U+001F (wpt++:)
+- Setting hostname with trailing U+0000 (https:)
+- Setting hostname with trailing U+0000 (wpt++:)
+- Setting hostname with trailing U+0009 (https:)
+- Setting hostname with trailing U+0009 (wpt++:)
+- Setting hostname with trailing U+000A (https:)
+- Setting hostname with trailing U+000A (wpt++:)
+- Setting hostname with trailing U+000D (https:)
+- Setting hostname with trailing U+000D (wpt++:)
+- Setting hostname with trailing U+001F (https:)
+- Setting hostname with trailing U+001F (wpt++:)
+- Setting password with leading U+0000 (https:)
+- Setting password with leading U+0000 (wpt++:)
+- Setting password with leading U+0009 (https:)
+- Setting password with leading U+0009 (wpt++:)
+- Setting password with leading U+000A (https:)
+- Setting password with leading U+000A (wpt++:)
+- Setting password with leading U+000D (https:)
+- Setting password with leading U+000D (wpt++:)
+- Setting password with leading U+001F (https:)
+- Setting password with leading U+001F (wpt++:)
+- Setting password with middle U+0000 (https:)
+- Setting password with middle U+0000 (wpt++:)
+- Setting password with middle U+0009 (https:)
+- Setting password with middle U+0009 (wpt++:)
+- Setting password with middle U+000A (https:)
+- Setting password with middle U+000A (wpt++:)
+- Setting password with middle U+000D (https:)
+- Setting password with middle U+000D (wpt++:)
+- Setting password with middle U+001F (https:)
+- Setting password with middle U+001F (wpt++:)
+- Setting password with trailing U+0000 (https:)
+- Setting password with trailing U+0000 (wpt++:)
+- Setting password with trailing U+0009 (https:)
+- Setting password with trailing U+0009 (wpt++:)
+- Setting password with trailing U+000A (https:)
+- Setting password with trailing U+000A (wpt++:)
+- Setting password with trailing U+000D (https:)
+- Setting password with trailing U+000D (wpt++:)
+- Setting password with trailing U+001F (https:)
+- Setting password with trailing U+001F (wpt++:)
+- Setting pathname with leading U+0000 (https:)
+- Setting pathname with leading U+0000 (wpt++:)
+- Setting pathname with leading U+0009 (https:)
+- Setting pathname with leading U+0009 (wpt++:)
+- Setting pathname with leading U+000A (https:)
+- Setting pathname with leading U+000A (wpt++:)
+- Setting pathname with leading U+000D (https:)
+- Setting pathname with leading U+000D (wpt++:)
+- Setting pathname with leading U+001F (https:)
+- Setting pathname with leading U+001F (wpt++:)
+- Setting pathname with middle U+0000 (https:)
+- Setting pathname with middle U+0000 (wpt++:)
+- Setting pathname with middle U+0009 (https:)
+- Setting pathname with middle U+0009 (wpt++:)
+- Setting pathname with middle U+000A (https:)
+- Setting pathname with middle U+000A (wpt++:)
+- Setting pathname with middle U+000D (https:)
+- Setting pathname with middle U+000D (wpt++:)
+- Setting pathname with middle U+001F (https:)
+- Setting pathname with middle U+001F (wpt++:)
+- Setting pathname with trailing U+0000 (https:)
+- Setting pathname with trailing U+0000 (wpt++:)
+- Setting pathname with trailing U+0009 (https:)
+- Setting pathname with trailing U+0009 (wpt++:)
+- Setting pathname with trailing U+000A (https:)
+- Setting pathname with trailing U+000A (wpt++:)
+- Setting pathname with trailing U+000D (https:)
+- Setting pathname with trailing U+000D (wpt++:)
+- Setting pathname with trailing U+001F (https:)
+- Setting pathname with trailing U+001F (wpt++:)
+- Setting port with leading U+0000 (https:)
+- Setting port with leading U+0000 (wpt++:)
+- Setting port with leading U+0009 (https:)
+- Setting port with leading U+0009 (wpt++:)
+- Setting port with leading U+000A (https:)
+- Setting port with leading U+000A (wpt++:)
+- Setting port with leading U+000D (https:)
+- Setting port with leading U+000D (wpt++:)
+- Setting port with leading U+001F (https:)
+- Setting port with leading U+001F (wpt++:)
+- Setting port with middle U+0000 (https:)
+- Setting port with middle U+0000 (wpt++:)
+- Setting port with middle U+0009 (https:)
+- Setting port with middle U+0009 (wpt++:)
+- Setting port with middle U+000A (https:)
+- Setting port with middle U+000A (wpt++:)
+- Setting port with middle U+000D (https:)
+- Setting port with middle U+000D (wpt++:)
+- Setting port with middle U+001F (https:)
+- Setting port with middle U+001F (wpt++:)
+- Setting port with trailing U+0000 (https:)
+- Setting port with trailing U+0000 (wpt++:)
+- Setting port with trailing U+0009 (https:)
+- Setting port with trailing U+0009 (wpt++:)
+- Setting port with trailing U+000A (https:)
+- Setting port with trailing U+000A (wpt++:)
+- Setting port with trailing U+000D (https:)
+- Setting port with trailing U+000D (wpt++:)
+- Setting port with trailing U+001F (https:)
+- Setting port with trailing U+001F (wpt++:)
+- Setting protocol with U+0000 before inserted colon (https:)
+- Setting protocol with U+0000 before inserted colon (wpt++:)
+- Setting protocol with U+0009 before inserted colon (https:)
+- Setting protocol with U+0009 before inserted colon (wpt++:)
+- Setting protocol with U+000A before inserted colon (https:)
+- Setting protocol with U+000A before inserted colon (wpt++:)
+- Setting protocol with U+000D before inserted colon (https:)
+- Setting protocol with U+000D before inserted colon (wpt++:)
+- Setting protocol with U+001F before inserted colon (https:)
+- Setting protocol with U+001F before inserted colon (wpt++:)
+- Setting protocol with leading U+0000 (https:)
+- Setting protocol with leading U+0000 (wpt++:)
+- Setting protocol with leading U+0009 (https:)
+- Setting protocol with leading U+0009 (wpt++:)
+- Setting protocol with leading U+000A (https:)
+- Setting protocol with leading U+000A (wpt++:)
+- Setting protocol with leading U+000D (https:)
+- Setting protocol with leading U+000D (wpt++:)
+- Setting protocol with leading U+001F (https:)
+- Setting protocol with leading U+001F (wpt++:)
+- Setting search with leading U+0000 (https:)
+- Setting search with leading U+0000 (wpt++:)
+- Setting search with leading U+0009 (https:)
+- Setting search with leading U+0009 (wpt++:)
+- Setting search with leading U+000A (https:)
+- Setting search with leading U+000A (wpt++:)
+- Setting search with leading U+000D (https:)
+- Setting search with leading U+000D (wpt++:)
+- Setting search with leading U+001F (https:)
+- Setting search with leading U+001F (wpt++:)
+- Setting search with middle U+0000 (https:)
+- Setting search with middle U+0000 (wpt++:)
+- Setting search with middle U+0009 (https:)
+- Setting search with middle U+0009 (wpt++:)
+- Setting search with middle U+000A (https:)
+- Setting search with middle U+000A (wpt++:)
+- Setting search with middle U+000D (https:)
+- Setting search with middle U+000D (wpt++:)
+- Setting search with middle U+001F (https:)
+- Setting search with middle U+001F (wpt++:)
+- Setting search with trailing U+0000 (https:)
+- Setting search with trailing U+0000 (wpt++:)
+- Setting search with trailing U+0009 (https:)
+- Setting search with trailing U+0009 (wpt++:)
+- Setting search with trailing U+000A (https:)
+- Setting search with trailing U+000A (wpt++:)
+- Setting search with trailing U+000D (https:)
+- Setting search with trailing U+000D (wpt++:)
+- Setting search with trailing U+001F (https:)
+- Setting search with trailing U+001F (wpt++:)
+- Setting username with leading U+0000 (https:)
+- Setting username with leading U+0000 (wpt++:)
+- Setting username with leading U+0009 (https:)
+- Setting username with leading U+0009 (wpt++:)
+- Setting username with leading U+000A (https:)
+- Setting username with leading U+000A (wpt++:)
+- Setting username with leading U+000D (https:)
+- Setting username with leading U+000D (wpt++:)
+- Setting username with leading U+001F (https:)
+- Setting username with leading U+001F (wpt++:)
+- Setting username with middle U+0000 (https:)
+- Setting username with middle U+0000 (wpt++:)
+- Setting username with middle U+0009 (https:)
+- Setting username with middle U+0009 (wpt++:)
+- Setting username with middle U+000A (https:)
+- Setting username with middle U+000A (wpt++:)
+- Setting username with middle U+000D (https:)
+- Setting username with middle U+000D (wpt++:)
+- Setting username with middle U+001F (https:)
+- Setting username with middle U+001F (wpt++:)
+- Setting username with trailing U+0000 (https:)
+- Setting username with trailing U+0000 (wpt++:)
+- Setting username with trailing U+0009 (https:)
+- Setting username with trailing U+0009 (wpt++:)
+- Setting username with trailing U+000A (https:)
+- Setting username with trailing U+000A (wpt++:)
+- Setting username with trailing U+000D (https:)
+- Setting username with trailing U+000D (wpt++:)
+- Setting username with trailing U+001F (https:)
+- Setting username with trailing U+001F (wpt++:)
+url/url-setters.any.js:
+- Loading data…
+url/urlencoded-parser.any.js:
+- 'URLSearchParams constructed with: %=a'
+- 'URLSearchParams constructed with: %C2'
+- 'URLSearchParams constructed with: %C2x'
+- 'URLSearchParams constructed with: %FE%FF'
+- 'URLSearchParams constructed with: %FF%FE'
+- 'URLSearchParams constructed with: %a=a'
+- 'URLSearchParams constructed with: %a_=a'
+- 'URLSearchParams constructed with: &'
+- 'URLSearchParams constructed with: &&&a=b&&&&c=d&'
+- 'URLSearchParams constructed with: &a'
+- 'URLSearchParams constructed with: _charset_=windows-1252&test=%C2x'
+- 'URLSearchParams constructed with: a&'
+- 'URLSearchParams constructed with: a=b&c=d&'
+- 'URLSearchParams constructed with: b=%%2a'
+- 'URLSearchParams constructed with: b=%2%2af%2a'
+- 'URLSearchParams constructed with: b=%2sf%2a'
+- 'URLSearchParams constructed with: id=0&value=%'
+url/urlsearchparams-constructor.any.js:
+- Construct with 2 unpaired surrogates (no trailing)
+- Construct with 3 unpaired surrogates (no leading)
+- Construct with array with two keys
+- Construct with object with NULL, non-ASCII, and surrogate keys
+- Constructor with sequence of sequences of strings
+- Custom [Symbol.iterator]
+- URLSearchParams constructor, DOMException as argument
+- URLSearchParams constructor, string.
+url/urlsearchparams-delete.any.js:
+- Changing the query of a URL with an opaque path with trailing spaces
+- Changing the query of a URL with an opaque path with trailing spaces and a fragment
+- Deleting all params removes ? from URL
+- Two-argument delete()
+- Two-argument delete() respects undefined as second arg
+url/urlsearchparams-foreach.any.js:
+- For-of Check
+- delete current param during iteration
+- delete every param seen during iteration
+- delete next param during iteration
+url/urlsearchparams-has.any.js:
+- Two-argument has()
+- Two-argument has() respects undefined as second arg
+url/urlsearchparams-set.any.js:
+- Set basics
+url/urlsearchparams-sort.any.js:
+- 'URL parse and sort: bbb&bb&aaa&aa=x&aa=y'
+- 'URL parse and sort: z=b&a=b&z=a&a=a'
+- 'URL parse and sort: z=z&=f&=t&=x'
+- 'URL parse and sort: z=z&a=a&z=y&a=b&z=x&a=c&z=w&a=d&z=v&a=e&z=u&a=f&z=t&a=g'
+- 'URL parse and sort: é&e�&é'
+- "URL parse and sort: ﬃ&\U0001F308"
+- 'URL parse and sort: �=x&￼&�=a'
+url/urlsearchparams-stringifier.any.js:
+- Serialize %
+- Serialize space
+- URLSearchParams connected to URL
+- URLSearchParams.toString

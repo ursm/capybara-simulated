@@ -8,6 +8,31 @@
 #
 # Keep this list as short as possible: a crasher hides every subtest in the
 # file. Prefer fixing the driver over adding here.
+#
+# A second, narrow category also lives here: data-driven tests for a feature
+# that is a deliberate STRUCTURAL non-goal (IDNA / Unicode host names — our
+# vendored whatwg-url uses an ASCII-only tr46 shim, since test hosts are ASCII).
+# Those would otherwise dump thousands of never-fixable per-subtest entries into
+# the allowlist; skipping the whole file keeps the wrong-behaviour backlog
+# focused on things we could actually fix.
+
+"url/IdnaTestV2.any.js": >-
+  IDNA/Unicode-host conformance (~2300 data-driven cases). Out of scope: our
+  whatwg-url vendoring aliases tr46 to an ASCII-only shim (test hosts are ASCII).
+"url/IdnaTestV2-removed.any.js": >-
+  IDNA conformance (removed-codepoint cases). Out of scope — see IdnaTestV2.
+"url/toascii.window.js": >-
+  Host `domainToASCII`/IDNA conversion (~600 cases). Out of scope — ASCII-only
+  tr46 shim; see IdnaTestV2.
+
+"url/failure.html": >-
+  Pathologically slow (~195s for this one file — it dominated the whole suite
+  wall). It asserts a few hundred invalid URLs fail across several sinks (a/area/
+  base/iframe/script/img/…), and each invalid-URL sink trip drains the navigation/
+  fetch path (rack_fetch on a malformed URL raises URI::InvalidURIError per
+  attempt). HARNESS_ERROR regardless. Excluded until the malformed-URL nav/fetch
+  drain is made cheap; the actual URL-parse failure behaviour is already covered
+  by url-constructor.any.js (1 fail of thousands).
 
 "dom/events/Event-dispatch-bubbles-true.html": >-
   Cross-document event dispatch (the test clones documentElement into a fresh
