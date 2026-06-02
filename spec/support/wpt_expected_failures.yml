@@ -693,3 +693,834 @@ dom/window-extends-event-target.html:
 - EventTarget methods on Window instances are inherited from the EventTarget prototype
 - window.addEventListener respects custom `this`
 dom/xpath-result-single-node-value-nullable.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-encoding.html:
+- 'HTML: meta charset'
+domparsing/DOMParser-parseFromString-html.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-stylesheets.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-url-base-pushstate.html:
+- 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
+  method from this frame'
+- 'application/xhtml+xml invalid XML: created using a parser from this frame and the
+  method from the iframe'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  that frame'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  this frame'
+- 'application/xhtml+xml valid: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xhtml+xml valid: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'application/xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'application/xml valid: created using another iframe''s DOMParser from that frame'
+- 'application/xml valid: created using another iframe''s DOMParser from this frame'
+- 'image/svg+xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'image/svg+xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'image/svg+xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'image/svg+xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from that frame'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from this frame'
+- 'text/html valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/html valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/html valid: created using another iframe''s DOMParser from that frame'
+- 'text/html valid: created using another iframe''s DOMParser from this frame'
+- 'text/xml invalid XML: created using a parser from the iframe and the method from
+  this frame'
+- 'text/xml invalid XML: created using a parser from this frame and the method from
+  the iframe'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from that frame'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from this frame'
+- 'text/xml valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/xml valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/xml valid: created using another iframe''s DOMParser from that frame'
+- 'text/xml valid: created using another iframe''s DOMParser from this frame'
+domparsing/DOMParser-parseFromString-url-base.html:
+- 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
+  method from this frame'
+- 'application/xhtml+xml invalid XML: created using a parser from this frame and the
+  method from the iframe'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  that frame'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  this frame'
+- 'application/xhtml+xml valid: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xhtml+xml valid: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'application/xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'application/xml valid: created using another iframe''s DOMParser from that frame'
+- 'application/xml valid: created using another iframe''s DOMParser from this frame'
+- 'image/svg+xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'image/svg+xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'image/svg+xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'image/svg+xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from that frame'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from this frame'
+- 'text/html valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/html valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/html valid: created using another iframe''s DOMParser from that frame'
+- 'text/html valid: created using another iframe''s DOMParser from this frame'
+- 'text/xml invalid XML: created using a parser from the iframe and the method from
+  this frame'
+- 'text/xml invalid XML: created using a parser from this frame and the method from
+  the iframe'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from that frame'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from this frame'
+- 'text/xml valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/xml valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/xml valid: created using another iframe''s DOMParser from that frame'
+- 'text/xml valid: created using another iframe''s DOMParser from this frame'
+domparsing/DOMParser-parseFromString-url-moretests.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-url-pushstate.html:
+- 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
+  method from this frame'
+- 'application/xhtml+xml invalid XML: created using a parser from this frame and the
+  method from the iframe'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  that frame'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  this frame'
+- 'application/xhtml+xml valid: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xhtml+xml valid: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'application/xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'application/xml valid: created using another iframe''s DOMParser from that frame'
+- 'application/xml valid: created using another iframe''s DOMParser from this frame'
+- 'image/svg+xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'image/svg+xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'image/svg+xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'image/svg+xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from that frame'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from this frame'
+- 'text/html valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/html valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/html valid: created using another iframe''s DOMParser from that frame'
+- 'text/html valid: created using another iframe''s DOMParser from this frame'
+- 'text/xml invalid XML: created using a parser from the iframe and the method from
+  this frame'
+- 'text/xml invalid XML: created using a parser from this frame and the method from
+  the iframe'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from that frame'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from this frame'
+- 'text/xml valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/xml valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/xml valid: created using another iframe''s DOMParser from that frame'
+- 'text/xml valid: created using another iframe''s DOMParser from this frame'
+domparsing/DOMParser-parseFromString-url.html:
+- 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
+  method from this frame'
+- 'application/xhtml+xml invalid XML: created using a parser from this frame and the
+  method from the iframe'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  that frame'
+- 'application/xhtml+xml invalid XML: created using another iframe''s DOMParser from
+  this frame'
+- 'application/xhtml+xml valid: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xhtml+xml valid: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xhtml+xml valid: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'application/xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'application/xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'application/xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'application/xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'application/xml valid: created using another iframe''s DOMParser from that frame'
+- 'application/xml valid: created using another iframe''s DOMParser from this frame'
+- 'image/svg+xml invalid XML: created using a parser from the iframe and the method
+  from this frame'
+- 'image/svg+xml invalid XML: created using a parser from this frame and the method
+  from the iframe'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from that
+  frame'
+- 'image/svg+xml invalid XML: created using another iframe''s DOMParser from this
+  frame'
+- 'image/svg+xml valid: created using a parser from the iframe and the method from
+  this frame'
+- 'image/svg+xml valid: created using a parser from this frame and the method from
+  the iframe'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from that frame'
+- 'image/svg+xml valid: created using another iframe''s DOMParser from this frame'
+- 'text/html valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/html valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/html valid: created using another iframe''s DOMParser from that frame'
+- 'text/html valid: created using another iframe''s DOMParser from this frame'
+- 'text/xml invalid XML: created using a parser from the iframe and the method from
+  this frame'
+- 'text/xml invalid XML: created using a parser from this frame and the method from
+  the iframe'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from that frame'
+- 'text/xml invalid XML: created using another iframe''s DOMParser from this frame'
+- 'text/xml valid: created using a parser from the iframe and the method from this
+  frame'
+- 'text/xml valid: created using a parser from this frame and the method from the
+  iframe'
+- 'text/xml valid: created using another iframe''s DOMParser from that frame'
+- 'text/xml valid: created using another iframe''s DOMParser from this frame'
+domparsing/DOMParser-parseFromString-xml-doctype.html:
+- Doctype parsing of System Id must fail on ommitted value
+domparsing/DOMParser-parseFromString-xml-internal-subset.html:
+- Parsing and serialization of doctype internal subset
+domparsing/DOMParser-parseFromString-xml-parsererror.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-xml.html: HARNESS_ERROR
+domparsing/XMLSerializer-serializeToString.html: HARNESS_ERROR
+domparsing/createContextualFragment.html:
+- " and <body> must work the same, 1"
+- " and <body> must work the same, 2"
+- " in a different namespace shouldn't be special"
+- "<script>s should be run when appended to the document (but not before)"
+- 'Don''t auto-create <body> when applied to '
+- Implicit <body> creation
+- Must not throw INVALID_STATE_ERR for a detached node.
+- Namespace generally shouldn't matter
+- Non-Element parent should not be special
+- SVG namespace shouldn't be special
+- Simple test with paragraphs
+- Text nodes shouldn't be special
+- createContextualFragment should work even when the context is <area>
+- createContextualFragment should work even when the context is <base>
+- createContextualFragment should work even when the context is <basefont>
+- createContextualFragment should work even when the context is <bgsound>
+- createContextualFragment should work even when the context is <br>
+- createContextualFragment should work even when the context is <col>
+- createContextualFragment should work even when the context is <embed>
+- createContextualFragment should work even when the context is <frame>
+- createContextualFragment should work even when the context is <hr>
+- createContextualFragment should work even when the context is <image>
+- createContextualFragment should work even when the context is <img>
+- createContextualFragment should work even when the context is <input>
+- createContextualFragment should work even when the context is <keygen>
+- createContextualFragment should work even when the context is <link>
+- createContextualFragment should work even when the context is <menuitem>
+- createContextualFragment should work even when the context is <meta>
+- createContextualFragment should work even when the context is <param>
+- createContextualFragment should work even when the context is <source>
+- createContextualFragment should work even when the context is <track>
+- createContextualFragment should work even when the context is <wbr>
+- null should be stringified
+- undefined should be stringified
+domparsing/domparser-spurious-attributes.html:
+- Using ">" and "\r" in an attribute creates no unexpected attributes.
+- Using ">" and HTML entities in an attribute creates no unexpected attributes.
+domparsing/innerhtml-01.xhtml:
+- 'innerHTML in XHTML: getting while the document is in an invalid state'
+- 'innerHTML in XHTML: getting while the document is in an invalid state 1'
+domparsing/innerhtml-03.xhtml:
+- innerHTML in XHTML
+- innerHTML in XHTML 1
+- innerHTML in XHTML 3
+- innerHTML in XHTML 4
+domparsing/innerhtml-05.xhtml: HARNESS_ERROR
+domparsing/innerhtml-07.html:
+- 'innerHTML and string conversion: undefined.'
+domparsing/innerhtml-li-autoclosing.html:
+- Adjacent empty li elements in ol produce siblings.
+- Adjacent empty li elements in ul produce siblings.
+- Adjacent li elements produce siblings when ul is nested in div.
+- Adjacent li elements with attributes produce siblings.
+- Adjacent li elements with text content produce siblings.
+- Three adjacent li elements produce siblings.
+domparsing/innerhtml-mxss.sub.html:
+- 'href after setter: 1680'
+- 'href after setter: 2000'
+- 'href after setter: 2001'
+- 'href after setter: 2002'
+- 'href after setter: 2003'
+- 'href after setter: 2004'
+- 'href after setter: 2005'
+- 'href after setter: 2006'
+- 'href after setter: 2007'
+- 'href after setter: 2008'
+- 'href after setter: 2009'
+- 'href after setter: 200a'
+- 'href after setter: 2028'
+- 'href after setter: 205f'
+- 'href after setter: 3000'
+- 'href before setter: 1680'
+- 'href before setter: 2000'
+- 'href before setter: 2001'
+- 'href before setter: 2002'
+- 'href before setter: 2003'
+- 'href before setter: 2004'
+- 'href before setter: 2005'
+- 'href before setter: 2006'
+- 'href before setter: 2007'
+- 'href before setter: 2008'
+- 'href before setter: 2009'
+- 'href before setter: 200a'
+- 'href before setter: 2028'
+- 'href before setter: 205f'
+- 'href before setter: 3000'
+domparsing/insert_adjacent_html-xhtml.xhtml:
+- Afterbegin content again, with next sibling
+- Afterbegin content without next sibling
+- Afterbegin content2 test again, now that there's a next sibling
+- Afterbegin content2 without next sibling
+- BeforeEnd content again, with next sibling
+- BeforeEnd content without next sibling
+- BeforeEnd content2 test again, now that there's a next sibling
+- BeforeEnd content2 without next sibling
+- Should not run script when appending things which have descendant <script> inserted
+  via insertAdjacentHTML
+- Should throw when inserting with invalid position string
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (comments)
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (elements)
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (text)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (comments)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (elements)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (text)
+- afterend child node not in tree but has parent
+- afterend content again, with next sibling
+- afterend content without next sibling
+- afterend content2 test again, now that there's a next sibling
+- afterend content2 without next sibling
+- beforeBegin content again, with next sibling
+- beforeBegin content without next sibling
+- beforeBegin content2 test again, now that there's a next sibling
+- beforeBegin content2 without next sibling
+- insertAdjacentHTML in HTML
+domparsing/insert_adjacent_html.html:
+- Afterbegin content again, with next sibling
+- Afterbegin content without next sibling
+- Afterbegin content2 test again, now that there's a next sibling
+- Afterbegin content2 without next sibling
+- BeforeEnd content again, with next sibling
+- BeforeEnd content without next sibling
+- BeforeEnd content2 test again, now that there's a next sibling
+- BeforeEnd content2 without next sibling
+- Should not run script when appending things which have descendant <script> inserted
+  via insertAdjacentHTML
+- Should throw when inserting with invalid position string
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (comments)
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (elements)
+- When the parent node is a document, insertAdjacentHTML should throw for beforebegin
+  and afterend (text)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (comments)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (elements)
+- When the parent node is null, insertAdjacentHTML should throw for beforebegin and
+  afterend (text)
+- afterend child node not in tree but has parent
+- afterend content again, with next sibling
+- afterend content without next sibling
+- afterend content2 test again, now that there's a next sibling
+- afterend content2 without next sibling
+- beforeBegin content again, with next sibling
+- beforeBegin content without next sibling
+- beforeBegin content2 test again, now that there's a next sibling
+- beforeBegin content2 without next sibling
+domparsing/outerhtml-01.html:
+- 'outerHTML: child of #document'
+domparsing/outerhtml-02.html:
+- 'outerHTML and string conversion: null.'
+- 'outerHTML and string conversion: number.'
+- 'outerHTML and string conversion: toString.'
+- 'outerHTML and string conversion: undefined.'
+- 'outerHTML and string conversion: valueOf.'
+domparsing/style_attribute_html.html:
+- Parsing of initial style attribute
+- Parsing of invalid style attribute
+- Parsing of style attribute
+- Update style.backgroundColor
+domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
+- streamAfterHTML with trusted types and no default policy returns a WritableStream.
+- streamAppendHTML with trusted types and no default policy returns a WritableStream.
+- streamBeforeHTML with trusted types and no default policy returns a WritableStream.
+- streamHTML with trusted types and no default policy returns a WritableStream.
+- streamPrependHTML with trusted types and no default policy returns a WritableStream.
+domparsing/tentative/positional-methods-with-trusted-types.html: HARNESS_ERROR
+domparsing/tentative/positional-methods.html: HARNESS_ERROR
+domparsing/tentative/stream-append-html-unsafe.html:
+- Aborting streamAppendHTMLUnsafe()
+- Interleaved streamAppendHTMLUnsafe() writes
+- piping a response into streamAppendHTMLUnsafe()
+- streamAppendHTMLUnsafe into a ShadowRoot
+- streamAppendHTMLUnsafe into a template
+- streamAppendHTMLUnsafe should execute scripts when connected
+- streamAppendHTMLUnsafe should not execute scripts when disconnected
+- streamAppendHTMLUnsafe() can stream into <style>
+- streamAppendHTMLUnsafe() does not buffer until close()
+- writing a Symbol to streamAppendHTMLUnsafe()
+- writing a string to streamAppendHTMLUnsafe()
+- writing null or undefined to streamAppendHTMLUnsafe()
+- writing numbers to streamAppendHTMLUnsafe()
+domparsing/tentative/stream-append-html.html:
+- Aborting streamAppendHTML()
+- Interleaved streamAppendHTML() writes
+- piping a response into streamAppendHTML()
+- streamAppendHTML on ShadowRoot
+- streamAppendHTML on ShadowRoot uses safe sanitizer
+- streamAppendHTML should not execute scripts when connected
+- streamAppendHTML should pass sanitizer options
+- streamAppendHTML uses safe sanitizer
+- streamAppendHTML() can stream into <style>
+- streamAppendHTML() can stream into a non-empty <style>
+- streamAppendHTML() does not buffer until close()
+- streamAppendHTML() should append to existing content
+- writing a Symbol to streamAppendHTML()
+- writing a string to streamAppendHTML()
+- writing null or undefined to streamAppendHTML()
+- writing numbers to streamAppendHTML()
+domparsing/tentative/stream-html-custom-element.html: HARNESS_ERROR
+domparsing/tentative/stream-html-defer-async-script.html:
+- element.streamAppendHTMLUnsafe with defer/async scripts
+- element.streamHTMLUnsafe with defer/async scripts
+domparsing/tentative/stream-html-run-scripts-option.html:
+- 'element.streamAppendHTMLUnsafe with runScripts: false'
+- 'element.streamAppendHTMLUnsafe with runScripts: true'
+- 'element.streamHTMLUnsafe with runScripts: false'
+- 'element.streamHTMLUnsafe with runScripts: true'
+- 'shadowRoot.streamAppendHTMLUnsafe with runScripts: false'
+- 'shadowRoot.streamAppendHTMLUnsafe with runScripts: true'
+- 'shadowRoot.streamHTMLUnsafe with runScripts: false'
+- 'shadowRoot.streamHTMLUnsafe with runScripts: true'
+domparsing/tentative/stream-html-sanitizer-safe.html:
+- Comment.streamAfterHTML should use the safe sanitizer
+- Comment.streamAfterHTMLUnsafe should not use the safe sanitizer
+- Comment.streamBeforeHTML should use the safe sanitizer
+- Comment.streamBeforeHTMLUnsafe should not use the safe sanitizer
+- Comment.streamReplaceWithHTML should use the safe sanitizer
+- Comment.streamReplaceWithHTMLUnsafe should not use the safe sanitizer
+- Element.streamAfterHTML should use the safe sanitizer
+- Element.streamAfterHTMLUnsafe should not use the safe sanitizer
+- Element.streamAppendHTML should use the safe sanitizer
+- Element.streamAppendHTMLUnsafe should not use the safe sanitizer
+- Element.streamBeforeHTML should use the safe sanitizer
+- Element.streamBeforeHTMLUnsafe should not use the safe sanitizer
+- Element.streamHTML should use the safe sanitizer
+- Element.streamHTMLUnsafe should not use the safe sanitizer
+- Element.streamPrependHTML should use the safe sanitizer
+- Element.streamPrependHTMLUnsafe should not use the safe sanitizer
+- Element.streamReplaceWithHTML should use the safe sanitizer
+- Element.streamReplaceWithHTMLUnsafe should not use the safe sanitizer
+- ShadowRoot.streamAppendHTML should use the safe sanitizer
+- ShadowRoot.streamAppendHTMLUnsafe should not use the safe sanitizer
+- ShadowRoot.streamHTML should use the safe sanitizer
+- ShadowRoot.streamHTMLUnsafe should not use the safe sanitizer
+- ShadowRoot.streamPrependHTML should use the safe sanitizer
+- ShadowRoot.streamPrependHTMLUnsafe should not use the safe sanitizer
+- Text.streamAfterHTML should use the safe sanitizer
+- Text.streamAfterHTMLUnsafe should not use the safe sanitizer
+- Text.streamBeforeHTML should use the safe sanitizer
+- Text.streamBeforeHTMLUnsafe should not use the safe sanitizer
+- Text.streamReplaceWithHTML should use the safe sanitizer
+- Text.streamReplaceWithHTMLUnsafe should not use the safe sanitizer
+domparsing/tentative/stream-html-sanitizer.html:
+- element.streamAfterHTML with sanitizer should sanitize template contents
+- element.streamAfterHTML with sanitizer {attributes}
+- 'element.streamAfterHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamAfterHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamAfterHTML with sanitizer {elements}
+- element.streamAfterHTML with sanitizer {removeAttributes}
+- element.streamAfterHTML with sanitizer {removeElements}
+- element.streamAfterHTML with sanitizer {replaceWithChildrenElements}
+- element.streamAfterHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamAfterHTML: mutating the sanitizer while streaming does not effect
+  the originally given sanitizer'
+- 'element.streamAfterHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamAfterHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamAfterHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamAfterHTML: sanitizer takes effect after foster parenting'
+- 'element.streamAfterHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamAfterHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamAfterHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamAfterHTMLUnsafe with sanitizer {attributes}
+- 'element.streamAfterHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamAfterHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamAfterHTMLUnsafe with sanitizer {elements}
+- element.streamAfterHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamAfterHTMLUnsafe with sanitizer {removeElements}
+- element.streamAfterHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamAfterHTMLUnsafe with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamAfterHTMLUnsafe: mutating the sanitizer while streaming does not
+  effect the originally given sanitizer'
+- 'element.streamAfterHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamAfterHTMLUnsafe: sanitizer takes effect after adoption agency (1)'
+- 'element.streamAfterHTMLUnsafe: sanitizer takes effect after adoption agency (2)'
+- 'element.streamAfterHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamAfterHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamAfterHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamAppendHTML with sanitizer should sanitize template contents
+- element.streamAppendHTML with sanitizer {attributes}
+- 'element.streamAppendHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamAppendHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamAppendHTML with sanitizer {elements}
+- element.streamAppendHTML with sanitizer {removeAttributes}
+- element.streamAppendHTML with sanitizer {removeElements}
+- element.streamAppendHTML with sanitizer {replaceWithChildrenElements}
+- element.streamAppendHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamAppendHTML: mutating the sanitizer while streaming does not effect
+  the originally given sanitizer'
+- 'element.streamAppendHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamAppendHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamAppendHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamAppendHTML: sanitizer takes effect after foster parenting'
+- 'element.streamAppendHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamAppendHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamAppendHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamAppendHTMLUnsafe with sanitizer {attributes}
+- 'element.streamAppendHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamAppendHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamAppendHTMLUnsafe with sanitizer {elements}
+- element.streamAppendHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamAppendHTMLUnsafe with sanitizer {removeElements}
+- element.streamAppendHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamAppendHTMLUnsafe with sanitizer {replaceWithChildrenElements} and
+  text
+- 'element.streamAppendHTMLUnsafe: mutating the sanitizer while streaming does not
+  effect the originally given sanitizer'
+- 'element.streamAppendHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamAppendHTMLUnsafe: sanitizer takes effect after adoption agency (1)'
+- 'element.streamAppendHTMLUnsafe: sanitizer takes effect after adoption agency (2)'
+- 'element.streamAppendHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamAppendHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamAppendHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamBeforeHTML with sanitizer should sanitize template contents
+- element.streamBeforeHTML with sanitizer {attributes}
+- 'element.streamBeforeHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamBeforeHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamBeforeHTML with sanitizer {elements}
+- element.streamBeforeHTML with sanitizer {removeAttributes}
+- element.streamBeforeHTML with sanitizer {removeElements}
+- element.streamBeforeHTML with sanitizer {replaceWithChildrenElements}
+- element.streamBeforeHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamBeforeHTML: mutating the sanitizer while streaming does not effect
+  the originally given sanitizer'
+- 'element.streamBeforeHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamBeforeHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamBeforeHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamBeforeHTML: sanitizer takes effect after foster parenting'
+- 'element.streamBeforeHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamBeforeHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamBeforeHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamBeforeHTMLUnsafe with sanitizer {attributes}
+- 'element.streamBeforeHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamBeforeHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamBeforeHTMLUnsafe with sanitizer {elements}
+- element.streamBeforeHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamBeforeHTMLUnsafe with sanitizer {removeElements}
+- element.streamBeforeHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamBeforeHTMLUnsafe with sanitizer {replaceWithChildrenElements} and
+  text
+- 'element.streamBeforeHTMLUnsafe: mutating the sanitizer while streaming does not
+  effect the originally given sanitizer'
+- 'element.streamBeforeHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamBeforeHTMLUnsafe: sanitizer takes effect after adoption agency (1)'
+- 'element.streamBeforeHTMLUnsafe: sanitizer takes effect after adoption agency (2)'
+- 'element.streamBeforeHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamBeforeHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamBeforeHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamHTML with sanitizer should sanitize template contents
+- element.streamHTML with sanitizer {attributes}
+- 'element.streamHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamHTML with sanitizer {elements}
+- element.streamHTML with sanitizer {removeAttributes}
+- element.streamHTML with sanitizer {removeElements}
+- element.streamHTML with sanitizer {replaceWithChildrenElements}
+- element.streamHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamHTML: mutating the sanitizer while streaming does not effect the
+  originally given sanitizer'
+- 'element.streamHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamHTML: sanitizer takes effect after foster parenting'
+- 'element.streamHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamHTMLUnsafe with sanitizer {attributes}
+- 'element.streamHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamHTMLUnsafe with sanitizer {elements}
+- element.streamHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamHTMLUnsafe with sanitizer {removeElements}
+- element.streamHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamHTMLUnsafe with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamHTMLUnsafe: mutating the sanitizer while streaming does not effect
+  the originally given sanitizer'
+- 'element.streamHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamHTMLUnsafe: sanitizer takes effect after adoption agency (1)'
+- 'element.streamHTMLUnsafe: sanitizer takes effect after adoption agency (2)'
+- 'element.streamHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamPrependHTML with sanitizer should sanitize template contents
+- element.streamPrependHTML with sanitizer {attributes}
+- 'element.streamPrependHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamPrependHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamPrependHTML with sanitizer {elements}
+- element.streamPrependHTML with sanitizer {removeAttributes}
+- element.streamPrependHTML with sanitizer {removeElements}
+- element.streamPrependHTML with sanitizer {replaceWithChildrenElements}
+- element.streamPrependHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamPrependHTML: mutating the sanitizer while streaming does not effect
+  the originally given sanitizer'
+- 'element.streamPrependHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamPrependHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamPrependHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamPrependHTML: sanitizer takes effect after foster parenting'
+- 'element.streamPrependHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamPrependHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamPrependHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamPrependHTMLUnsafe with sanitizer {attributes}
+- 'element.streamPrependHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamPrependHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamPrependHTMLUnsafe with sanitizer {elements}
+- element.streamPrependHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamPrependHTMLUnsafe with sanitizer {removeElements}
+- element.streamPrependHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamPrependHTMLUnsafe with sanitizer {replaceWithChildrenElements} and
+  text
+- 'element.streamPrependHTMLUnsafe: mutating the sanitizer while streaming does not
+  effect the originally given sanitizer'
+- 'element.streamPrependHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamPrependHTMLUnsafe: sanitizer takes effect after adoption agency (1)'
+- 'element.streamPrependHTMLUnsafe: sanitizer takes effect after adoption agency (2)'
+- 'element.streamPrependHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamPrependHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamPrependHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamReplaceWithHTML with sanitizer should sanitize template contents
+- element.streamReplaceWithHTML with sanitizer {attributes}
+- 'element.streamReplaceWithHTML with sanitizer {element: [{attributes}]}'
+- 'element.streamReplaceWithHTML with sanitizer {element: [{removeAttributes}]}'
+- element.streamReplaceWithHTML with sanitizer {elements}
+- element.streamReplaceWithHTML with sanitizer {removeAttributes}
+- element.streamReplaceWithHTML with sanitizer {removeElements}
+- element.streamReplaceWithHTML with sanitizer {replaceWithChildrenElements}
+- element.streamReplaceWithHTML with sanitizer {replaceWithChildrenElements} and text
+- 'element.streamReplaceWithHTML: mutating the sanitizer while streaming does not
+  effect the originally given sanitizer'
+- 'element.streamReplaceWithHTML: sanitizer shouldn''t allow escaping template'
+- 'element.streamReplaceWithHTML: sanitizer takes effect after adoption agency (1)'
+- 'element.streamReplaceWithHTML: sanitizer takes effect after adoption agency (2)'
+- 'element.streamReplaceWithHTML: sanitizer takes effect after foster parenting'
+- 'element.streamReplaceWithHTML: sanitizer with foster parenting: removeElements'
+- 'element.streamReplaceWithHTML: sanitizer with foster parenting: replaceWithChildrenElements'
+- element.streamReplaceWithHTMLUnsafe with sanitizer should sanitize template contents
+- element.streamReplaceWithHTMLUnsafe with sanitizer {attributes}
+- 'element.streamReplaceWithHTMLUnsafe with sanitizer {element: [{attributes}]}'
+- 'element.streamReplaceWithHTMLUnsafe with sanitizer {element: [{removeAttributes}]}'
+- element.streamReplaceWithHTMLUnsafe with sanitizer {elements}
+- element.streamReplaceWithHTMLUnsafe with sanitizer {removeAttributes}
+- element.streamReplaceWithHTMLUnsafe with sanitizer {removeElements}
+- element.streamReplaceWithHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+- element.streamReplaceWithHTMLUnsafe with sanitizer {replaceWithChildrenElements}
+  and text
+- 'element.streamReplaceWithHTMLUnsafe: mutating the sanitizer while streaming does
+  not effect the originally given sanitizer'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer shouldn''t allow escaping template'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer takes effect after adoption agency
+  (1)'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer takes effect after adoption agency
+  (2)'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer takes effect after foster parenting'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer with foster parenting: removeElements'
+- 'element.streamReplaceWithHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
+domparsing/tentative/stream-html-script-safe.html: HARNESS_ERROR
+domparsing/tentative/stream-html-unsafe.html:
+- Aborting streamHTMLUnsafe()
+- Interleaved streamHTMLUnsafe() writes
+- piping a response into streamHTMLUnsafe()
+- streamHTMLUnsafe into a ShadowRoot
+- streamHTMLUnsafe into a template
+- streamHTMLUnsafe should execute scripts when connected
+- streamHTMLUnsafe should not execute scripts when disconnected
+- streamHTMLUnsafe() can stream into <style>
+- streamHTMLUnsafe() does not buffer until close()
+- streamHTMLUnsafe() should remove existing content immediately
+- writing a Symbol to streamHTMLUnsafe()
+- writing a string to streamHTMLUnsafe()
+- writing null or undefined to streamHTMLUnsafe()
+- writing numbers to streamHTMLUnsafe()
+domparsing/tentative/stream-html-with-declarative-shadow-root.html:
+- element.streamAfterHTML (sanitization===none)
+- element.streamAfterHTML (sanitization===remove-internal)
+- element.streamAfterHTML (sanitization===remove-shadow-root)
+- element.streamAfterHTMLUnsafe (sanitization===none)
+- element.streamAfterHTMLUnsafe (sanitization===remove-internal)
+- element.streamAfterHTMLUnsafe (sanitization===remove-shadow-root)
+- element.streamAppendHTML (sanitization===none)
+- element.streamAppendHTML (sanitization===remove-internal)
+- element.streamAppendHTML (sanitization===remove-shadow-root)
+- element.streamAppendHTMLUnsafe (sanitization===none)
+- element.streamAppendHTMLUnsafe (sanitization===remove-internal)
+- element.streamAppendHTMLUnsafe (sanitization===remove-shadow-root)
+- element.streamBeforeHTML (sanitization===none)
+- element.streamBeforeHTML (sanitization===remove-internal)
+- element.streamBeforeHTML (sanitization===remove-shadow-root)
+- element.streamBeforeHTMLUnsafe (sanitization===none)
+- element.streamBeforeHTMLUnsafe (sanitization===remove-internal)
+- element.streamBeforeHTMLUnsafe (sanitization===remove-shadow-root)
+- element.streamHTML (sanitization===none)
+- element.streamHTML (sanitization===remove-internal)
+- element.streamHTML (sanitization===remove-shadow-root)
+- element.streamHTMLUnsafe (sanitization===none)
+- element.streamHTMLUnsafe (sanitization===remove-internal)
+- element.streamHTMLUnsafe (sanitization===remove-shadow-root)
+- element.streamPrependHTML (sanitization===none)
+- element.streamPrependHTML (sanitization===remove-internal)
+- element.streamPrependHTML (sanitization===remove-shadow-root)
+- element.streamPrependHTMLUnsafe (sanitization===none)
+- element.streamPrependHTMLUnsafe (sanitization===remove-internal)
+- element.streamPrependHTMLUnsafe (sanitization===remove-shadow-root)
+- element.streamReplaceWithHTML (sanitization===none)
+- element.streamReplaceWithHTML (sanitization===remove-internal)
+- element.streamReplaceWithHTML (sanitization===remove-shadow-root)
+- element.streamReplaceWithHTMLUnsafe (sanitization===none)
+- element.streamReplaceWithHTMLUnsafe (sanitization===remove-internal)
+- element.streamReplaceWithHTMLUnsafe (sanitization===remove-shadow-root)
+domparsing/tentative/stream-html-with-trusted-types-error-in-policy.html: HARNESS_ERROR
+domparsing/tentative/stream-html-with-trusted-types-no-createParserOptions.html: HARNESS_ERROR
+domparsing/tentative/stream-html-with-trusted-types-no-policy.html:
+- Streaming with trusted types and no default policy does not throw for streamAfterHTML.
+- Streaming with trusted types and no default policy does not throw for streamAppendHTML.
+- Streaming with trusted types and no default policy does not throw for streamBeforeHTML.
+- Streaming with trusted types and no default policy does not throw for streamHTML.
+- Streaming with trusted types and no default policy does not throw for streamPrependHTML.
+domparsing/tentative/stream-html-with-trusted-types-pass-trusted.html: HARNESS_ERROR
+domparsing/tentative/stream-html-with-trusted-types-runScripts-cannot-be-turned-on.html: HARNESS_ERROR
+domparsing/tentative/stream-html-with-trusted-types-runScripts-off.html: HARNESS_ERROR
+domparsing/tentative/stream-html-with-trusted-types-sanitizer.html: HARNESS_ERROR
+domparsing/tentative/stream-html.html:
+- Aborting streamHTML()
+- Interleaved streamHTML() writes
+- piping a response into streamHTML()
+- streamHTML on ShadowRoot
+- streamHTML on ShadowRoot uses safe sanitizer
+- streamHTML should not execute scripts when connected
+- streamHTML should pass sanitizer options
+- streamHTML uses safe sanitizer
+- streamHTML() can stream into <style>
+- streamHTML() does not buffer until close()
+- streamHTML() should remove existing content immediately
+- writing a Symbol to streamHTML()
+- writing a string to streamHTML()
+- writing null or undefined to streamHTML()
+- writing numbers to streamHTML()
+domparsing/tentative/stream-insertion-logic.html: HARNESS_ERROR
+domparsing/tentative/stream-positional.html: HARNESS_ERROR
+domparsing/xml-parse-serialize-roundtrip.html:
+- 'DOMParser and XMLSerializer should round trip with CDATA sections: large CDATA'
+- 'DOMParser and XMLSerializer should round trip with CDATA sections: multiple CDATAs'
+domparsing/xml-serialization.xhtml:
+- 'Comment: containing --'
+- 'Comment: containing -->'
+- 'Comment: ending with -'
+- 'Comment: starting with -'
+- 'DocumentType: ''APOSTROPHE'' (U+0027)'
+- 'DocumentType: ''APOSTROPHE'' (U+0027) and ''QUOTATION MARK'' (U+0022)'
+- 'DocumentType: ''QUOTATION MARK'' (U+0022)'
+- 'DocumentType: empty public and system id'
+- 'DocumentType: empty public id'
+- 'DocumentType: empty system id'
+- 'DocumentType: non-empty public and system id'
+- 'Element: href attributes are not percent-encoded'
+- 'Element: query parts in href attributes are not percent-encoded'
+- 'ProcessingInstruction: empty data'
+- 'ProcessingInstruction: non-empty data'
+- 'ProcessingInstruction: target contains a ''COLON'' (U+003A)'
+- 'ProcessingInstruction: target contains xml'
+domparsing/xmldomparser.html:
+- XML Dom Parse readyState Test

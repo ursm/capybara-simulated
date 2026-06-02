@@ -84,7 +84,7 @@ module WptRunner
   # tests and are skipped. Files on the skip list (driver crashers — see
   # `skip`) are excluded here so they neither run nor need an allowlist entry.
   def test_files
-    @test_files ||= Dir.glob('dom/**/*.{html,xhtml,xht}', base: ROOT).reject {|rel|
+    @test_files ||= Dir.glob('{dom,domparsing}/**/*.{html,xhtml,xht}', base: ROOT).reject {|rel|
       rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
         (rel.split('/') & %w[support resources reftest]).any? ||
         skip.key?(rel)

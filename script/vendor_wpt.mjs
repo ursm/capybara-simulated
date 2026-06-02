@@ -35,7 +35,7 @@ const REF = process.env.WPT_REF || PINNED;
 
 // Top-level directories to vendor whole. `resources` is fetched selectively
 // (just the harness) below — the rest of resources/ is large and unneeded.
-const TREES = ['dom'];
+const TREES = ['dom', 'domparsing'];
 
 const CONCURRENCY = 24;
 
