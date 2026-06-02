@@ -54,7 +54,16 @@ module WptRunner
   def app
     @app ||= Rack::Builder.new {
       run lambda {|env|
-        path = Rack::Request.new(env).path_info
+        req  = Rack::Request.new(env)
+        path = req.path_info
+        # `encoding.py?label=X` — WPT's charset CGI. We don't run Python; emulate
+        # its one behaviour (echo the label into a `<meta charset>`), which is
+        # all the characterSet-normalization tests need. No byte decoding (the
+        # body is ASCII).
+        if path.end_with?('/encoding.py')
+          label = req.params['label'].to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;')
+          next [200, {'content-type' => 'text/html'}, [%{<!doctype html><meta charset="#{label}">}]]
+        end
         file = File.expand_path(File.join(WptRunner::ROOT, path))
         unless file.start_with?(WptRunner::ROOT + '/') && File.file?(file)
           next [404, {'content-type' => 'text/plain'}, ['not found']]
