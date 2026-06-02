@@ -326,24 +326,12 @@ dom/nodes/Element-matches.html:
 - DIV Element.matches(undefined)
 - 'Detached Element.matches: Attribute value selector, matching align attribute with
   value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'Detached Element.matches: Invalid character: <'
-- 'Detached Element.matches: Invalid character: >'
-- 'Detached Element.matches: Invalid class: ..test'
-- 'Detached Element.matches: Invalid class: .5cm'
-- 'Detached Element.matches: Invalid class: .foo..quux'
-- 'Detached Element.matches: Relative selector: >*'
 - 'Fragment Element.matches: Attribute value selector, matching align attribute with
   value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.matches: :target pseudo-class selector, matching the element
   referenced by the URL fragment identifier (with no refNodes): :target'
 - 'In-document Element.matches: Attribute value selector, matching align attribute
   with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'In-document Element.matches: Invalid character: <'
-- 'In-document Element.matches: Invalid character: >'
-- 'In-document Element.matches: Invalid class: ..test'
-- 'In-document Element.matches: Invalid class: .5cm'
-- 'In-document Element.matches: Invalid class: .foo..quux'
-- 'In-document Element.matches: Relative selector: >*'
 - NULL Element.matches(null)
 - NULL Element.matches(undefined)
 - UNDEFINED Element.matches(null)
@@ -360,24 +348,12 @@ dom/nodes/Element-webkitMatchesSelector.html:
 - DIV Element.webkitMatchesSelector(undefined)
 - 'Detached Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'Detached Element.webkitMatchesSelector: Invalid character: <'
-- 'Detached Element.webkitMatchesSelector: Invalid character: >'
-- 'Detached Element.webkitMatchesSelector: Invalid class: ..test'
-- 'Detached Element.webkitMatchesSelector: Invalid class: .5cm'
-- 'Detached Element.webkitMatchesSelector: Invalid class: .foo..quux'
-- 'Detached Element.webkitMatchesSelector: Relative selector: >*'
 - 'Fragment Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
 - 'In-document Element.webkitMatchesSelector: :target pseudo-class selector, matching
   the element referenced by the URL fragment identifier (with no refNodes): :target'
 - 'In-document Element.webkitMatchesSelector: Attribute value selector, matching align
   attribute with value, unclosed bracket (with no refNodes): #attr-value [align="center"'
-- 'In-document Element.webkitMatchesSelector: Invalid character: <'
-- 'In-document Element.webkitMatchesSelector: Invalid character: >'
-- 'In-document Element.webkitMatchesSelector: Invalid class: ..test'
-- 'In-document Element.webkitMatchesSelector: Invalid class: .5cm'
-- 'In-document Element.webkitMatchesSelector: Invalid class: .foo..quux'
-- 'In-document Element.webkitMatchesSelector: Relative selector: >*'
 - NULL Element.webkitMatchesSelector(null)
 - NULL Element.webkitMatchesSelector(undefined)
 - UNDEFINED Element.webkitMatchesSelector(null)
@@ -474,12 +450,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelector: Attribute whitespace-separated list selector, not
   matching class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Detached Element.querySelector: Invalid character: <'
-- 'Detached Element.querySelector: Invalid character: >'
-- 'Detached Element.querySelector: Invalid class: ..test'
-- 'Detached Element.querySelector: Invalid class: .5cm'
-- 'Detached Element.querySelector: Invalid class: .foo..quux'
-- 'Detached Element.querySelector: Relative selector: >*'
 - Detached Element.querySelectorAll null
 - Detached Element.querySelectorAll undefined
 - 'Detached Element.querySelectorAll: :empty pseudo-class selector, matching all empty
@@ -490,12 +460,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   with value, unclosed bracket: #attr-value [align="center"'
 - 'Detached Element.querySelectorAll: Attribute whitespace-separated list selector,
   not matching class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Detached Element.querySelectorAll: Invalid character: <'
-- 'Detached Element.querySelectorAll: Invalid character: >'
-- 'Detached Element.querySelectorAll: Invalid class: ..test'
-- 'Detached Element.querySelectorAll: Invalid class: .5cm'
-- 'Detached Element.querySelectorAll: Invalid class: .foo..quux'
-- 'Detached Element.querySelectorAll: Relative selector: >*'
 - Document.querySelector null
 - Document.querySelector undefined
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
@@ -506,12 +470,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelector: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Document.querySelector: Invalid character: <'
-- 'Document.querySelector: Invalid character: >'
-- 'Document.querySelector: Invalid class: ..test'
-- 'Document.querySelector: Invalid class: .5cm'
-- 'Document.querySelector: Invalid class: .foo..quux'
-- 'Document.querySelector: Relative selector: >*'
 - Document.querySelectorAll null
 - Document.querySelectorAll tree order
 - Document.querySelectorAll undefined
@@ -527,24 +485,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Document.querySelectorAll: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Document.querySelectorAll: Invalid character: <'
-- 'Document.querySelectorAll: Invalid character: >'
-- 'Document.querySelectorAll: Invalid class: ..test'
-- 'Document.querySelectorAll: Invalid class: .5cm'
-- 'Document.querySelectorAll: Invalid class: .foo..quux'
-- 'Document.querySelectorAll: Relative selector: >*'
-- 'Empty Element.querySelector: Invalid character: <'
-- 'Empty Element.querySelector: Invalid character: >'
-- 'Empty Element.querySelector: Invalid class: ..test'
-- 'Empty Element.querySelector: Invalid class: .5cm'
-- 'Empty Element.querySelector: Invalid class: .foo..quux'
-- 'Empty Element.querySelector: Relative selector: >*'
-- 'Empty Element.querySelectorAll: Invalid character: <'
-- 'Empty Element.querySelectorAll: Invalid character: >'
-- 'Empty Element.querySelectorAll: Invalid class: ..test'
-- 'Empty Element.querySelectorAll: Invalid class: .5cm'
-- 'Empty Element.querySelectorAll: Invalid class: .foo..quux'
-- 'Empty Element.querySelectorAll: Relative selector: >*'
 - Fragment.querySelector null
 - Fragment.querySelector undefined
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
@@ -553,12 +493,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelector: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Fragment.querySelector: Invalid character: <'
-- 'Fragment.querySelector: Invalid character: >'
-- 'Fragment.querySelector: Invalid class: ..test'
-- 'Fragment.querySelector: Invalid class: .5cm'
-- 'Fragment.querySelector: Invalid class: .foo..quux'
-- 'Fragment.querySelector: Relative selector: >*'
 - Fragment.querySelectorAll null
 - Fragment.querySelectorAll undefined
 - 'Fragment.querySelectorAll: :empty pseudo-class selector, matching all empty elements:
@@ -571,12 +505,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   value, unclosed bracket: #attr-value [align="center"'
 - 'Fragment.querySelectorAll: Attribute whitespace-separated list selector, not matching
   class attribute with empty value: #attr-whitespace [class~=""]'
-- 'Fragment.querySelectorAll: Invalid character: <'
-- 'Fragment.querySelectorAll: Invalid character: >'
-- 'Fragment.querySelectorAll: Invalid class: ..test'
-- 'Fragment.querySelectorAll: Invalid class: .5cm'
-- 'Fragment.querySelectorAll: Invalid class: .foo..quux'
-- 'Fragment.querySelectorAll: Relative selector: >*'
 - In-document Element.querySelector null
 - In-document Element.querySelector undefined
 - 'In-document Element.querySelector: :target pseudo-class selector, matching the
@@ -585,12 +513,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   with value, unclosed bracket: #attr-value [align="center"'
 - 'In-document Element.querySelector: Attribute whitespace-separated list selector,
   not matching class attribute with empty value: #attr-whitespace [class~=""]'
-- 'In-document Element.querySelector: Invalid character: <'
-- 'In-document Element.querySelector: Invalid character: >'
-- 'In-document Element.querySelector: Invalid class: ..test'
-- 'In-document Element.querySelector: Invalid class: .5cm'
-- 'In-document Element.querySelector: Invalid class: .foo..quux'
-- 'In-document Element.querySelector: Relative selector: >*'
 - In-document Element.querySelectorAll null
 - In-document Element.querySelectorAll undefined
 - 'In-document Element.querySelectorAll: :empty pseudo-class selector, matching all
@@ -603,12 +525,6 @@ dom/nodes/ParentNode-querySelector-All.html:
   attribute with value, unclosed bracket: #attr-value [align="center"'
 - 'In-document Element.querySelectorAll: Attribute whitespace-separated list selector,
   not matching class attribute with empty value: #attr-whitespace [class~=""]'
-- 'In-document Element.querySelectorAll: Invalid character: <'
-- 'In-document Element.querySelectorAll: Invalid character: >'
-- 'In-document Element.querySelectorAll: Invalid class: ..test'
-- 'In-document Element.querySelectorAll: Invalid class: .5cm'
-- 'In-document Element.querySelectorAll: Invalid class: .foo..quux'
-- 'In-document Element.querySelectorAll: Relative selector: >*'
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
