@@ -291,9 +291,35 @@ module Capybara
       # `MiniRacer::ScriptTerminatedError` on that one example.
       CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
 
+      # mini_racer's opt-in host namespace (ursm fork c2dd72d+):
+      # `Context.new(host_namespace: 'MiniRacer')` installs
+      # `globalThis.MiniRacer.drainMicrotasks()` — a native, rendezvous-free
+      # microtask checkpoint (MicrotasksScope::PerformCheckpoint, no Locker,
+      # termination left active). We point `__csim_yield` at it so dispatch.js's
+      # per-listener checkpoint (and the event-loop microcheck) run inline on the
+      # isolate thread instead of a double cross-thread round-trip. Feature-detected
+      # so older fork SHAs (no kwarg) still load → they fall back to the attached
+      # Context#perform_microtask_checkpoint.
+      HOST_NAMESPACE_NAME = 'MiniRacer'
+      # Behaviour-probe once (memoised): mini_racer's `initialize` is a `*args`
+      # splat so the kwarg isn't introspectable — build one throwaway default
+      # Context with the kwarg and confirm the namespace + method actually
+      # installed. Old fork SHAs raise on the unknown kwarg → false → fallback.
+      def self.host_namespace_supported?
+        return @host_namespace_supported if defined?(@host_namespace_supported)
+        @host_namespace_supported =
+          begin
+            MiniRacer::Context.new(host_namespace: HOST_NAMESPACE_NAME)
+              .eval("typeof globalThis.#{HOST_NAMESPACE_NAME} === 'object' && typeof globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks === 'function'") == true
+          rescue StandardError
+            false
+          end
+      end
+
       def build_ctx
         opts = { snapshot: @snapshot || self.class.snapshot }
         opts[:timeout] = CALL_TIMEOUT_MS if CALL_TIMEOUT_MS > 0
+        opts[:host_namespace] = HOST_NAMESPACE_NAME if self.class.host_namespace_supported?
         c = MiniRacer::Context.new(**opts)
         attach_host_fns(c)
         c.eval('__csim_installWorker();')
@@ -526,13 +552,18 @@ module Capybara
         # without rubyjs/mini_racer#418 falls back to a no-op, leaving
         # dispatch correct but losing the listener-interleaved
         # Backburner-style autorun drains.
-        body =
-          if c.respond_to?(:perform_microtask_checkpoint)
-            -> { c.perform_microtask_checkpoint; nil }
-          else
-            -> { nil }
-          end
-        c.attach('__csim_yield', body)
+        # Prefer the native in-isolate checkpoint (mini_racer host_namespace):
+        # alias `__csim_yield` to `globalThis.MiniRacer.drainMicrotasks` JS-side,
+        # so callers pay ~sub-µs instead of the attached-fn double cross-thread
+        # round-trip. Fall back to the attached Context#perform_microtask_checkpoint
+        # ('M' rendezvous) on older fork SHAs, or a no-op.
+        if c.eval("typeof globalThis.#{HOST_NAMESPACE_NAME} === 'object' && globalThis.#{HOST_NAMESPACE_NAME} !== null && typeof globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks === 'function'")
+          c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
+        elsif c.respond_to?(:perform_microtask_checkpoint)
+          c.attach('__csim_yield', -> { c.perform_microtask_checkpoint; nil })
+        else
+          c.attach('__csim_yield', -> { nil })
+        end
       end
 
       # Worker-isolate factory: fresh Context from the shared
@@ -541,7 +572,9 @@ module Capybara
       # Returns a uniform `WorkerRuntime` adapter that
       # `Browser#run_worker` drives.
       def self.build_worker(browser, post_back)
-        ctx = MiniRacer::Context.new(snapshot: snapshot)
+        wopts = { snapshot: snapshot }
+        wopts[:host_namespace] = HOST_NAMESPACE_NAME if host_namespace_supported?
+        ctx = MiniRacer::Context.new(**wopts)
         attach_host_fns(ctx, browser)
         ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
         # Worker's timer table is independent from main's; routing the
