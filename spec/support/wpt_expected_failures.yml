@@ -230,7 +230,6 @@ dom/nodes/Comment-constructor.html:
 - 'new Comment(): null'
 - 'new Comment(): prototype chain'
 dom/nodes/DOMImplementation-createHTMLDocument.html:
-- 'createHTMLDocument(): URL parsing'
 - 'createHTMLDocument(): document location getter is null'
 - 'createHTMLDocument(): metadata'
 dom/nodes/Document-URL.html:

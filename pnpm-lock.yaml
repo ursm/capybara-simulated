@@ -32,6 +32,9 @@ importers:
       esbuild:
         specifier: ^0.27.0
         version: 0.27.7
+      whatwg-url:
+        specifier: ^16.0.1
+        version: 16.0.1
 
 packages:
 
@@ -191,6 +194,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@exodus/bytes@1.15.1':
+    resolution: {integrity: sha512-S6mL0yNB/Abt9Ei4tq8gDhcczc4S3+vQ4ra7vxnAf+YHC02srtqxKKZghx2Dq6p0e66THKwR6r8N6P95wEty7Q==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    peerDependencies:
+      '@noble/hashes': ^1.8.0 || ^2.0.0
+    peerDependenciesMeta:
+      '@noble/hashes':
+        optional: true
+
   '@webref/idl@3.79.0':
     resolution: {integrity: sha512-4wZ6d0xY3JQZY1vHOCk8Z1jEPq9YVzds0VGAJtv6hJAwnxmePP20KQqETp7vXYvx/auqldLYTEHiAsAfosgMVQ==}
     peerDependencies:
@@ -244,13 +256,29 @@ packages:
     resolution: {integrity: sha512-GX0gsdbGVCgnRgbeGaubfjpBXyYRWOOCVeYh08bSQvDZqxz5ndXs1OTfAt/h36G1xvI94YIspsI0sVFqAV9+RQ==}
     engines: {node: '>=20.19.0'}
 
+  punycode@2.3.1:
+    resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+    engines: {node: '>=6'}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  tr46@6.0.0:
+    resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
+    engines: {node: '>=20'}
+
+  webidl-conversions@8.0.1:
+    resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
+    engines: {node: '>=20'}
+
   webidl2@24.5.0:
     resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
     engines: {node: '>= 18'}
+
+  whatwg-url@16.0.1:
+    resolution: {integrity: sha512-1to4zXBxmXHV3IiSSEInrreIlu02vUOvrhxJJH5vcxYTBDAx51cqZiKdyTxlecdKNSjj8EcxGBxNf6Vg+945gw==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
   xpathway@1.0.4:
     resolution: {integrity: sha512-Q6bNwst6gcxc3/H9KAL+Gy8TaQaP3x71WZwIS2Y5vC3NY5uAI4B9VmekBwP5ppV3iK5sDNjkt5tPrPp0/smlig==}
@@ -336,6 +364,8 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
+  '@exodus/bytes@1.15.1': {}
+
   '@webref/idl@3.79.0(webidl2@24.5.0)':
     dependencies:
       webidl2: 24.5.0
@@ -412,8 +442,24 @@ snapshots:
     dependencies:
       boolbase: 2.0.0
 
+  punycode@2.3.1: {}
+
   source-map-js@1.2.1: {}
 
+  tr46@6.0.0:
+    dependencies:
+      punycode: 2.3.1
+
+  webidl-conversions@8.0.1: {}
+
   webidl2@24.5.0: {}
+
+  whatwg-url@16.0.1:
+    dependencies:
+      '@exodus/bytes': 1.15.1
+      tr46: 6.0.0
+      webidl-conversions: 8.0.1
+    transitivePeerDependencies:
+      - '@noble/hashes'
 
   xpathway@1.0.4: {}

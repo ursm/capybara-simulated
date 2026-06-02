@@ -6,7 +6,6 @@ require 'securerandom'
 
 require_relative 'webauthn_state'
 
-require_relative 'url_shape'
 
 module Capybara
   module Simulated
@@ -112,7 +111,8 @@ module Capybara
         '__csim_btoa'         => ->(*a) { Base64.strict_encode64(a[0].to_s) },
         '__csim_utf8Encode'   => ->(*a) { a[0].to_s.b.bytes },
         '__csim_utf8Decode'   => ->(*a) { a[0].pack('C*').force_encoding('UTF-8') },
-        '__csim_parseUrl'     => ->(*a) { UrlShape.parse_for_js(a[0], a[1]) },
+        # `__csim_parseUrl` is defined in JS now (js/src/url-parse.js, backed by
+        # the vendored whatwg-url) — spec-correct + no V8↔Ruby boundary per parse.
         # Web Crypto SubtleCrypto.digest — algo is "SHA-1"/"SHA-256"/etc.
         # JS hands us the byte array; we return the digest as bytes.
         '__csim_subtleDigest' => lambda {|*a|

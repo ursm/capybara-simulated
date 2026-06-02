@@ -33,4 +33,17 @@ import cssTreeGenerate from 'css-tree/generator';
 import cssTreeWalk     from 'css-tree/walker';
 const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeWalk };
 
-export { cssSelect, cssWhat, xpathway, cssTree };
+// whatwg-url's URL state machine: the jsdom reference WHATWG URL parser (npm,
+// MIT). Backs `__csim_parseUrl` (the old Ruby `URI` delegation was RFC 3986,
+// ASCII-strict, NOT WHATWG) — so URL parsing is spec-correct AND in-VM (no
+// V8↔Ruby boundary per parse). We import the bare state machine, NOT the
+// `whatwg-url` barrel: the barrel's `URL` WebIDL wrapper pulls in
+// webidl-conversions/utils.js, which capture `ArrayBuffer.prototype.resizable` /
+// `SharedArrayBuffer` descriptors at load time — features mini_racer's hardened
+// V8 lacks, so they throw during snapshot build. The state machine needs none of
+// that (just tr46, aliased to an ASCII-only shim, and TextEncoder — stubbed in
+// snapshot_stubs.js). url-parse.js assembles the component shape from it exactly
+// as whatwg-url's URL-impl does.
+import * as urlEngine from 'whatwg-url/lib/url-state-machine.js';
+
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine };

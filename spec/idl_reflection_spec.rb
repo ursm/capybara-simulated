@@ -166,13 +166,10 @@ RSpec.describe 'WebIDL reflection behaviour' do
       )
     end
 
-    it 'exposes username/password as strings (userinfo decomposition is a known gap)' do
-      # `a.username` / `a.password` exist and answer '' for the overwhelmingly
-      # common no-userinfo URL. Full decomposition of `user:pw@` would require
-      # the anchor `href` resolver to preserve userinfo, which it currently
-      # strips (and which browsers themselves drop from navigation/fetch), so
-      # the pending case documents the limitation rather than touching the
-      # load-bearing href-resolution hot path for a deprecated URL feature.
+    it 'decomposes username/password from userinfo' do
+      # `a.username` / `a.password` are '' for the common no-userinfo URL and
+      # decompose `user:pw@` — the whatwg-url-backed parser preserves userinfo
+      # (the earlier Ruby `URI` shape stripped it).
       kinds = session.evaluate_script(<<~JS)
         const a = document.createElement('a');
         a.setAttribute('href', '/local');
@@ -180,7 +177,6 @@ RSpec.describe 'WebIDL reflection behaviour' do
       JS
       expect(kinds).to eq('u' => 'string', 'p' => 'string')
 
-      pending 'anchor href resolution strips userinfo'
       withinfo = session.evaluate_script(<<~JS)
         const a = document.createElement('a');
         a.setAttribute('href', 'https://user:pw@example.test/');
