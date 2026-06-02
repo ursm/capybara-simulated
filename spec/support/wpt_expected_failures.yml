@@ -6444,29 +6444,6 @@ url/percent-encoding.window.js:
 - Input  with encoding gb18030
 - Input  with encoding utf-8
 url/url-constructor.any.js:
-- 'Parsing: <#> against <http://example.org/foo/bar>'
-- 'Parsing: <#> against <test:test>'
-- 'Parsing: <#> against <test:test?test>'
-- 'Parsing: <#i> against <sc:/pa/pa>'
-- 'Parsing: <..//path> against <non-spec:/p>'
-- 'Parsing: <../i> against <sc:/pa/pa>'
-- 'Parsing: <../path> against <non-spec:/.//p>'
-- 'Parsing: </..//path> against <non-spec:/p>'
-- 'Parsing: </.//path> against <non-spec:/p>'
-- 'Parsing: </i> against <sc:/pa/pa>'
-- 'Parsing: <:#> against <http://example.org/foo/bar>'
-- 'Parsing: <> against <non-spec:/..//p>'
-- 'Parsing: <?> against <http://example.org/foo/bar>'
-- 'Parsing: <?i> against <sc:/pa/pa>'
-- 'Parsing: <C|#> against <file://host/dir/file>'
-- 'Parsing: <C|?> against <file://host/dir/file>'
-- 'Parsing: <a/..//path> against <non-spec:/p>'
-- 'Parsing: <abc:/rooted> against <abc://host/path>'
-- 'Parsing: <about:/../> without base'
-- 'Parsing: <c:/foo> against <http://example.org/foo/bar>'
-- 'Parsing: <data:/../> without base'
-- 'Parsing: <data:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <data:/example.com/> without base'
 - 'Parsing: <file://%C2%AD/p> without base'
 - 'Parsing: <file://a%C2%ADb/p> without base'
 - 'Parsing: <file://a­b/p> without base'
@@ -6475,15 +6452,9 @@ url/url-constructor.any.js:
 - 'Parsing: <file://xn--/p> without base'
 - 'Parsing: <file://­/p> without base'
 - 'Parsing: <foo://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> without base'
-- 'Parsing: <foo:/> against <http://example.org/foo/bar>'
-- 'Parsing: <foo:/bar.com/> against <http://example.org/foo/bar>'
 - 'Parsing: <ftp://%e2%98%83> without base'
 - 'Parsing: <ftp://example.com%80/> without base'
 - 'Parsing: <ftp://example.com%A0/> without base'
-- 'Parsing: <ftps:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <ftps:/example.com/> without base'
-- 'Parsing: <gopher:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <gopher:/example.com/> without base'
 - 'Parsing: <http://%ef%b7%90zyx.com> against <http://other.com/>'
 - 'Parsing: <http://%ef%bc%85%ef%bc%90%ef%bc%90.com> against <http://other.com/>'
 - 'Parsing: <http://%ef%bc%85%ef%bc%94%ef%bc%91.com> against <http://other.com/>'
@@ -6497,10 +6468,8 @@ url/url-constructor.any.js:
 - 'Parsing: <http://a.b.c.XN--pokxncvks> without base'
 - 'Parsing: <http://a.b.c.Xn--pokxncvks> without base'
 - 'Parsing: <http://a.b.c.xn--pokxncvks> without base'
-- 'Parsing: <http://example.org/test?#> without base'
 - 'Parsing: <http://example.org/test?%GH> without base'
 - 'Parsing: <http://www.foo。bar.com> against <http://other.com/>'
-- 'Parsing: <http://www.google.com/foo?bar=baz#> without base'
 - 'Parsing: <http://你好你好> against <http://other.com/>'
 - 'Parsing: <http://﷐zyx.com> against <http://other.com/>'
 - 'Parsing: <http://％００.com> against <http://other.com/>'
@@ -6516,36 +6485,10 @@ url/url-constructor.any.js:
 - 'Parsing: <https://example.com%80/> without base'
 - 'Parsing: <https://example.com%A0/> without base'
 - 'Parsing: <https://faß.ExAmPlE/> without base'
-- "Parsing: <https://x/?#\0y> without base"
-- "Parsing: <https://x/?#\uFFFFy> without base"
 - 'Parsing: <https://xn--/> without base'
 - 'Parsing: <https://­/> without base'
 - 'Parsing: <https://�> without base'
 - "Parsing: <https://\uFFFFy> without base"
-- 'Parsing: <i> against <sc:/pa/pa>'
-- 'Parsing: <javascript:/../> without base'
-- 'Parsing: <javascript:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <javascript:/example.com/> without base'
-- 'Parsing: <madeupscheme:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <madeupscheme:/example.com/> without base'
-- 'Parsing: <mailto:/../> without base'
-- 'Parsing: <mailto:/example.com/> against <http://example.org/foo/bar>'
-- 'Parsing: <mailto:/example.com/> without base'
-- 'Parsing: <non-spec:/..//> without base'
-- 'Parsing: <non-spec:/..//path> without base'
-- 'Parsing: <non-spec:/.//> without base'
-- 'Parsing: <non-spec:/.//path> without base'
-- 'Parsing: <non-spec:/a/..//> without base'
-- 'Parsing: <non-spec:/a/..//path> without base'
-- "Parsing: <non-spec:/test?a#b\0c> without base"
-- 'Parsing: <non-special:/\path> without base'
-- "Parsing: <non-special:x/?#\0y> without base"
-- "Parsing: <non-special:x/?#\uFFFFy> without base"
-- 'Parsing: <path> against <non-spec:/..//p>'
-- 'Parsing: <sc://#> without base'
-- 'Parsing: <sc://?> without base'
-- 'Parsing: <test-a-colon-slash-b.html> against <a:/b>'
-- 'Parsing: <test-a-colon-slash.html> against <a:/>'
 - 'Parsing: <wss://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> without base'
 url/url-origin.any.js:
 - 'Origin parsing: <foo://host/dir/? !"$%&''()*+,-./:;<=>?@[\]^_`{|}~> without base'
@@ -6562,7 +6505,6 @@ url/url-origin.any.js:
 url/url-searchparams.any.js:
 - URL.searchParams and URL.search setters, update propagation
 - URL.searchParams setter, invalid values
-- URL.searchParams updating, clearing
 url/url-setters-a-area.window.js:
 - "<a>: Setting <a://example.net>.protocol = '' The empty string is not a valid scheme.
   Setter leaves the URL unchanged."
@@ -6574,8 +6516,6 @@ url/url-setters-a-area.window.js:
 - "<a>: Setting <a://example.net>.protocol = 'bC0+-.'"
 - "<a>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected"
 - "<a>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected"
-- "<a>: Setting <a:/>.hash = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
-  Simple percent-encoding; tabs and newlines are removed"
 - "<a>: Setting <a:/>.pathname = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
   UTF-8 percent encoding with the default encode set. Tabs and newlines are removed."
 - "<a>: Setting <a:/>.search = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
@@ -6742,11 +6682,8 @@ url/url-setters-a-area.window.js:
 - "<a>: Setting <mailto:me@example.net>.protocol = 'http' Cannot-be-a-base URL doesn’t
   have a host, but URL in a special scheme must."
 - "<a>: Setting <non-spec:/.//>.pathname = 'p' Drop /. from path"
+- "<a>: Setting <non-spec:/.//p>.hostname = ''"
 - "<a>: Setting <non-spec:/.//p>.hostname = 'h' Drop /. from path"
-- "<a>: Setting <non-spec:/>.hash = 'a\0b' Percent-encode NULLs in fragment"
-- "<a>: Setting <non-spec:/>.pathname = '/..//p'"
-- "<a>: Setting <non-spec:/>.pathname = '/.//p' Serialize /. in path"
-- "<a>: Setting <non-spec:/>.pathname = '//p'"
 - "<a>: Setting <nonsense:///test>.protocol = 'https'"
 - "<a>: Setting <sc:///>.username = 'x'"
 - "<a>: Setting <sc://example.com/>.host = '///bad.com' Leading / is not stripped"
@@ -6779,9 +6716,6 @@ url/url-setters-a-area.window.js:
 - "<a>: Setting <ssh://me@example.net>.protocol = 'http' Can’t switch from non-special
   scheme to special"
 - "<a>: Setting <ssh://me@example.net>.protocol = 'https'"
-- "<a>: Setting <unix:/run/foo.socket>.password = 'secret' No host means no password"
-- "<a>: Setting <unix:/run/foo.socket>.username = 'me' No host means no username"
-- "<a>: Setting <unix:/run/foo.socket?timeout=10>.pathname = '/var/log/../run/bar.socket'"
 - "<a>: Setting <view-source+http://example.net/foo>.hostname = '' The empty host
   is OK for non-special schemes"
 - "<a>: Setting <view-source+http://example.net/home?lang=fr#nav>.pathname = '\\a\\%2E\\b\\%2e.\\c'
@@ -6806,8 +6740,6 @@ url/url-setters-a-area.window.js:
 - "<area>: Setting <a://example.net>.protocol = 'bC0+-.'"
 - "<area>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected"
 - "<area>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected"
-- "<area>: Setting <a:/>.hash = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
-  Simple percent-encoding; tabs and newlines are removed"
 - "<area>: Setting <a:/>.pathname = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
   UTF-8 percent encoding with the default encode set. Tabs and newlines are removed."
 - "<area>: Setting <a:/>.search = '\0\x01\t\n\r\x1F !\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~\x7F\x80\x81Éé'
@@ -6980,11 +6912,8 @@ url/url-setters-a-area.window.js:
 - "<area>: Setting <mailto:me@example.net>.protocol = 'http' Cannot-be-a-base URL
   doesn’t have a host, but URL in a special scheme must."
 - "<area>: Setting <non-spec:/.//>.pathname = 'p' Drop /. from path"
+- "<area>: Setting <non-spec:/.//p>.hostname = ''"
 - "<area>: Setting <non-spec:/.//p>.hostname = 'h' Drop /. from path"
-- "<area>: Setting <non-spec:/>.hash = 'a\0b' Percent-encode NULLs in fragment"
-- "<area>: Setting <non-spec:/>.pathname = '/..//p'"
-- "<area>: Setting <non-spec:/>.pathname = '/.//p' Serialize /. in path"
-- "<area>: Setting <non-spec:/>.pathname = '//p'"
 - "<area>: Setting <nonsense:///test>.protocol = 'https'"
 - "<area>: Setting <sc:///>.username = 'x'"
 - "<area>: Setting <sc://example.com/>.host = '///bad.com' Leading / is not stripped"
@@ -7017,9 +6946,6 @@ url/url-setters-a-area.window.js:
 - "<area>: Setting <ssh://me@example.net>.protocol = 'http' Can’t switch from non-special
   scheme to special"
 - "<area>: Setting <ssh://me@example.net>.protocol = 'https'"
-- "<area>: Setting <unix:/run/foo.socket>.password = 'secret' No host means no password"
-- "<area>: Setting <unix:/run/foo.socket>.username = 'me' No host means no username"
-- "<area>: Setting <unix:/run/foo.socket?timeout=10>.pathname = '/var/log/../run/bar.socket'"
 - "<area>: Setting <view-source+http://example.net/foo>.hostname = '' The empty host
   is OK for non-special schemes"
 - "<area>: Setting <view-source+http://example.net/home?lang=fr#nav>.pathname = '\\a\\%2E\\b\\%2e.\\c'
@@ -7562,11 +7488,11 @@ url/url-setters.any.js:
   no username'
 - 'URL: Setting <non-base:value>.port = ''12'''
 - 'URL: Setting <non-spec:/.//>.pathname = ''p'' Drop /. from path'
+- 'URL: Setting <non-spec:/.//p>.hostname = '''''
 - 'URL: Setting <non-spec:/.//p>.hostname = ''h'' Drop /. from path'
 - "URL: Setting <non-spec:/>.hash = 'a\0b' Percent-encode NULLs in fragment"
 - 'URL: Setting <non-spec:/>.pathname = ''/..//p'''
 - 'URL: Setting <non-spec:/>.pathname = ''/.//p'' Serialize /. in path'
-- 'URL: Setting <non-spec:/>.pathname = ''//p'''
 - 'URL: Setting <non-special://example.net:8080/path>.port = ''65536'' Port numbers
   are 16 bit integers, overflowing is an error'
 - 'URL: Setting <nonsense:///test>.protocol = ''https'''
@@ -7641,12 +7567,7 @@ url/urlencoded-parser.any.js:
 - 'URLSearchParams constructed with: %FF%FE'
 - 'URLSearchParams constructed with: %a=a'
 - 'URLSearchParams constructed with: %a_=a'
-- 'URLSearchParams constructed with: &'
-- 'URLSearchParams constructed with: &&&a=b&&&&c=d&'
-- 'URLSearchParams constructed with: &a'
 - 'URLSearchParams constructed with: _charset_=windows-1252&test=%C2x'
-- 'URLSearchParams constructed with: a&'
-- 'URLSearchParams constructed with: a=b&c=d&'
 - 'URLSearchParams constructed with: b=%%2a'
 - 'URLSearchParams constructed with: b=%2%2af%2a'
 - 'URLSearchParams constructed with: b=%2sf%2a'
@@ -7661,9 +7582,6 @@ url/urlsearchparams-constructor.any.js:
 - URLSearchParams constructor, DOMException as argument
 - URLSearchParams constructor, string.
 url/urlsearchparams-delete.any.js:
-- Changing the query of a URL with an opaque path with trailing spaces
-- Changing the query of a URL with an opaque path with trailing spaces and a fragment
-- Deleting all params removes ? from URL
 - Two-argument delete()
 - Two-argument delete() respects undefined as second arg
 url/urlsearchparams-foreach.any.js:
@@ -7676,16 +7594,6 @@ url/urlsearchparams-has.any.js:
 - Two-argument has() respects undefined as second arg
 url/urlsearchparams-set.any.js:
 - Set basics
-url/urlsearchparams-sort.any.js:
-- 'URL parse and sort: bbb&bb&aaa&aa=x&aa=y'
-- 'URL parse and sort: z=b&a=b&z=a&a=a'
-- 'URL parse and sort: z=z&=f&=t&=x'
-- 'URL parse and sort: z=z&a=a&z=y&a=b&z=x&a=c&z=w&a=d&z=v&a=e&z=u&a=f&z=t&a=g'
-- 'URL parse and sort: é&e�&é'
-- "URL parse and sort: ﬃ&\U0001F308"
-- 'URL parse and sort: �=x&￼&�=a'
 url/urlsearchparams-stringifier.any.js:
 - Serialize %
-- Serialize space
-- URLSearchParams connected to URL
 - URLSearchParams.toString
