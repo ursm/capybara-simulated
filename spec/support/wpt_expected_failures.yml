@@ -67,10 +67,6 @@ dom/collections/HTMLCollection-supported-property-names.html:
   added later
 - Trying to set an expando that shadows a named property that gets added later
 - Trying to set an expando that would shadow an already-existing named property
-dom/collections/namednodemap-supported-property-names.html:
-- Object.getOwnPropertyNames on NamedNodeMap
-- Object.getOwnPropertyNames on NamedNodeMap after attribute removal
-- Object.getOwnPropertyNames on NamedNodeMap of input
 dom/events/CustomEvent.html:
 - First parameter to initCustomEvent should be mandatory.
 - initCustomEvent's default parameter values.
@@ -464,18 +460,11 @@ dom/nodes/attributes.html:
 - First set attribute is returned with mapped attribute set first
 - First set attribute is returned with mapped attribute set later
 - Non-HTML element with upper-case attribute
-- Own property correctness with basic attributes
 - Own property correctness with namespaced attribute before same-name non-namespaced
   one
 - Own property correctness with non-namespaced attribute before same-name namespaced
   one
 - Own property correctness with two namespaced attributes with the same name-with-prefix
-- Own property names should include all qualified names for a non-HTML element in
-  an HTML document
-- Own property names should include all qualified names for an HTML element in a non-HTML
-  document
-- Own property names should only include all-lowercase qualified names for an HTML
-  element in an HTML document
 - getAttributeNames tests
 - setAttribute should set the first attribute with the given name
 - toggleAttribute should set the first attribute with the given name
