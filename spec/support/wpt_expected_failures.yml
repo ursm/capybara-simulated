@@ -323,8 +323,6 @@ dom/nodes/Element-insertAdjacentElement.html:
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
 - DIV Element.matches no parameter
-- 'In-document Element.matches: :target pseudo-class selector, matching the element
-  referenced by the URL fragment identifier (with no refNodes): :target'
 - NULL Element.matches no parameter
 - UNDEFINED Element.matches no parameter
 dom/nodes/Element-removeAttribute.html:
@@ -336,8 +334,6 @@ dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/Element-webkitMatchesSelector.html:
 - DIV Element.webkitMatchesSelector no parameter
-- 'In-document Element.webkitMatchesSelector: :target pseudo-class selector, matching
-  the element referenced by the URL fragment identifier (with no refNodes): :target'
 - NULL Element.webkitMatchesSelector no parameter
 - UNDEFINED Element.webkitMatchesSelector no parameter
 dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
@@ -431,14 +427,10 @@ dom/nodes/ParentNode-querySelector-All.html:
 - Document.querySelector no parameter
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
   elements: #head :link, #head :visited'
-- 'Document.querySelector: :target pseudo-class selector, matching the element referenced
-  by the URL fragment identifier: :target'
 - Document.querySelectorAll no parameter
 - Document.querySelectorAll tree order
 - 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
   no elements: #head :link, #head :visited'
-- 'Document.querySelectorAll: :target pseudo-class selector, matching the element
-  referenced by the URL fragment identifier: :target'
 - Fragment.querySelector no parameter
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
@@ -446,11 +438,7 @@ dom/nodes/ParentNode-querySelector-All.html:
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
 - In-document Element.querySelector no parameter
-- 'In-document Element.querySelector: :target pseudo-class selector, matching the
-  element referenced by the URL fragment identifier: :target'
 - In-document Element.querySelectorAll no parameter
-- 'In-document Element.querySelectorAll: :target pseudo-class selector, matching the
-  element referenced by the URL fragment identifier: :target'
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
