@@ -1826,10 +1826,6 @@ encoding/textdecoder-utf16-surrogates.any.js:
 encoding/utf-32-from-win1252.html: HARNESS_ERROR
 encoding/utf-32.html: HARNESS_ERROR
 html/webappapis/microtask-queuing/queue-microtask-cross-realm-callback-report-exception.html: HARNESS_ERROR
-html/webappapis/microtask-queuing/queue-microtask-exceptions.any.js: HARNESS_ERROR
-html/webappapis/microtask-queuing/queue-microtask.any.js:
-- It interleaves with promises as expected
-html/webappapis/microtask-queuing/queue-microtask.window.js: HARNESS_ERROR
 html/webappapis/timers/setinterval-cross-realm-callback-report-exception.html: HARNESS_ERROR
 html/webappapis/timers/settimeout-cross-realm-callback-report-exception.html: HARNESS_ERROR
 url/a-element-origin-xhtml.xhtml:
