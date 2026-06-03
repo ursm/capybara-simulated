@@ -24,6 +24,22 @@
   var W = globalThis;
   var D = function () { return W.document; };
 
+  // Every test_driver action is GENUINELY ASYNC in real testdriver — it posts a
+  // command to the automation backend and awaits a reply (a macrotask). We mirror
+  // that by resolving on a macrotask (setTimeout 0), NOT synchronously. This is
+  // load-bearing, not cosmetic: a test that awaits an action inside a loop —
+  // `while (input.scrollLeft === 0) { await test_driver.send_keys(el, ArrowRight) }`
+  // (input-text-scroll-…-arrow-keys.html) — must yield to the event loop each turn
+  // so the harness timeout timer can fire (the test is DESIGNED to fail-by-timeout
+  // when no scroll happens, which is our case: no layout → scrollLeft never moves).
+  // Resolving synchronously (Promise.resolve) instead keeps the loop in a tight
+  // MICROTASK self-spin that starves the macrotask queue / virtual clock, so the
+  // checkpoint never drains and the timeout never fires → V8 OOM. Deferring to a
+  // macrotask bounds the loop by the runner's drain budget and lets it complete.
+  function settled(value) {
+    return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, 0); });
+  }
+
   // ---- cancelable-when-passive --------------------------------------------
   // A trusted wheel / touchstart / touchmove event is cancelable iff some
   // listener on its propagation path is NON-passive. (The spec marks the event
@@ -179,7 +195,7 @@
       }
     }
     for (var j = 0; j < actions.length; j++) performAction(state, actions[j]);
-    return Promise.resolve();
+    return settled();
   }
 
   // ---- Actions builder (mirrors testdriver-actions.js shape) ---------------
@@ -238,12 +254,12 @@
     Actions: Actions,
     action_sequence: function (actions) { return action_sequence(actions); },
     click: function (element) {
-      try { if (element && typeof element.click === 'function') { element.click(); return Promise.resolve(); } } catch (e) {}
+      try { if (element && typeof element.click === 'function') { element.click(); return settled(); } } catch (e) {}
       var t = element || (D() && D().body);
       firePointer(t, 'pointerdown', 'mousedown');
       firePointer(t, 'pointerup', 'mouseup');
       dispatch(t, new W.MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-      return Promise.resolve();
+      return settled();
     },
     send_keys: function (element, keys) {
       try { if (element && typeof element.focus === 'function') element.focus(); } catch (e) {}
@@ -268,10 +284,10 @@
         }
         dispatch(element, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ch }));
       }
-      return Promise.resolve();
+      return settled();
     },
     // Gestures/state we can't meaningfully back — resolve so awaiting tests proceed.
-    bless: function (intent, fn) { try { return Promise.resolve(typeof fn === 'function' ? fn() : undefined); } catch (e) { return Promise.reject(e); } },
+    bless: function (intent, fn) { try { return settled(typeof fn === 'function' ? fn() : undefined); } catch (e) { return Promise.reject(e); } },
     set_test_context: function () {},
     set_timeout_multiplier: function () {},
     get_computed_label: function () { return Promise.resolve(''); },

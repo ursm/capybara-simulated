@@ -283,6 +283,7 @@ dom/events/remove-all-listeners.html:
 - Removing all listeners and then adding a new one should work.
 dom/events/scrolling/iframe-chains.html:
 - Wheel scroll in iframe chains to containing element.
+dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
 dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html: HARNESS_ERROR
 dom/events/scrolling/scroll-cross-origin-iframes.html: HARNESS_ERROR
 dom/events/scrolling/scroll-event-fired-to-element.html:
