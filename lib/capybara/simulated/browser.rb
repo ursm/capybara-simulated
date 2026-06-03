@@ -82,6 +82,10 @@ module Capybara
       TICK_STEP_MS = 50
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
+      # Per-`run_loop_step` task cap (its `maxIter`). Bounds a self-rescheduling
+      # timer/microtask storm so one settle iter returns to Ruby; large enough
+      # for the heaviest legit chain (Mastodon hydrate, Turbo stream batch).
+      SETTLE_MAX_ITER_TASKS = 256
       # Post-user-action virtual-clock advance. Default 0 — the
       # wall-sync model (each tick_real_time advances by the wall
       # ms elapsed since the last tick) lets Capybara's outer poll
@@ -1112,13 +1116,19 @@ module Capybara
         start_gen = @runtime.settle_gen
         prev_gen  = start_gen
         SETTLE_MAX_ITER.times do
-          @runtime.drain_microtasks(SETTLE_MICRO_DRAIN_PER_ITER)
           deliver_event_source_events
           deliver_worker_messages
           deliver_hijacked_fetches
           break if @runtime.settle_gen > start_gen
           break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending?
-          @runtime.drain_timers(SETTLE_DRAIN_MS) if @timers_active
+          # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
+          # pair: it fires due timers, runs a per-task microtask checkpoint (so
+          # chained .then / MutationObserver delivery interleave spec-correctly),
+          # and runs the render phase — bailing INTERNALLY on the first settleGen
+          # bump (yield_on_gen), which preserves the one-observable-boundary-per-poll
+          # contract. maxMs 0 when no timer is active just flushes microtasks +
+          # render for the work the deliveries above queued.
+          @runtime.run_loop_step(@timers_active ? SETTLE_DRAIN_MS : 0, SETTLE_MAX_ITER_TASKS, yield_on_gen: true)
           deliver_event_source_events
           deliver_worker_messages
           deliver_hijacked_fetches
