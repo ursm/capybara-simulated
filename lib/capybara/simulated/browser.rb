@@ -2956,6 +2956,21 @@ module Capybara
       # small (~10 retry intervals) so failing-assertion paths don't pay
       # for the wait.
       def boot_response_into_ctx(html)
+        # Before discarding the OUTGOING page's VM, flush its DUE-NOW init work so
+        # persistent side effects (localStorage / cookies) survive into the next
+        # page. forem's login redirect kicks off `fetchBaseData` — a
+        # `setTimeout(0)` (fetch.js) whose `.then` writes `current_user` to
+        # localStorage — but the interactive gen-yield `settle` bails on the first
+        # init mutation before that due-now fetch fires; without this flush the
+        # cache write is lost on rebuild and the next page (which reads it
+        # synchronously to reveal logged-in UI) renders as logged-out. `maxMs: 0`
+        # fires only ALREADY-due timers (the setTimeout(0) + its `.then` chain),
+        # NOT delayed timers — so the lazy wall-sync timer model is preserved (a
+        # freshly-loaded, not-yet-navigated-away page keeps its own pending
+        # setTimeout(0)s untouched; smoke_spec "queries DOM before advancing
+        # pending timers"). A real browser lets the outgoing page's in-flight init
+        # finish before the next document loads; this is the in-process analogue.
+        flush_outgoing_page_init if @timers_active
         @runtime.rebuild_ctx
         reset_timer_state
         opts = {
@@ -2978,6 +2993,31 @@ module Capybara
         opts['userAgent'] = @default_user_agent if @default_user_agent
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
+      end
+
+      # Run one due-now event-loop step on the OUTGOING page (see
+      # `boot_response_into_ctx`). The outgoing page's timers may call
+      # `location.* / history.* / reload`, which only STASH a Ruby-side intent —
+      # but we are navigating away, so those intents are moot and must NOT leak
+      # into the page we are about to load (otherwise the next find's
+      # `tick_real_time` would consume a stray `@pending_location` and navigate
+      # off the freshly-loaded page). Snapshot/restore the nav-intent slots to
+      # keep the flush transparent; swallow any throw so a flaky outgoing-page
+      # timer can't abort loading the next page (the page it would affect is
+      # being discarded on the very next line).
+      def flush_outgoing_page_init
+        saved_location = @pending_location
+        saved_reload   = @pending_reload
+        saved_traverse = @pending_history_traverse
+        begin
+          @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+        rescue StandardError
+          # Outgoing page is discarded next line; its flush error is moot.
+        ensure
+          @pending_location         = saved_location
+          @pending_reload           = saved_reload
+          @pending_history_traverse = saved_traverse
+        end
       end
 
       # `Content-Disposition: attachment` (or any explicit filename
