@@ -79,7 +79,9 @@ dom/events/Event-dispatch-handlers-changed.html:
 dom/events/Event-dispatch-on-disabled-elements.html: HARNESS_ERROR
 dom/events/Event-dispatch-order-at-target.html:
 - Listeners are invoked in correct order (AT_TARGET phase)
-dom/events/Event-dispatch-redispatch.html: HARNESS_ERROR
+dom/events/Event-dispatch-redispatch.html:
+- Redispatching DOMContentLoaded event after being dispatched
+- Redispatching mouseup event whose default action dispatches a click event
 dom/events/Event-dispatch-single-activation-behavior.html:
 - When clicking child <A></A> of parent <AREA></AREA>, only child should be activated.
 - When clicking child <A></A> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only
@@ -244,8 +246,10 @@ dom/events/EventListener-handleEvent.html:
 - performs `Get` every time event is dispatched
 - throws if `handleEvent` is falsy and not callable
 - throws if `handleEvent` is thruthy and not callable
-dom/events/EventListener-incumbent-global-1.sub.html: HARNESS_ERROR
-dom/events/EventListener-incumbent-global-2.sub.html: HARNESS_ERROR
+dom/events/EventListener-incumbent-global-1.sub.html:
+- Check the incumbent global EventListeners  are called with
+dom/events/EventListener-incumbent-global-2.sub.html:
+- Check the incumbent global EventListeners  are called with
 dom/events/EventListener-invoke-legacy.html: HARNESS_ERROR
 dom/events/EventListenerOptions-capture.html:
 - Capture boolean should be honored correctly
@@ -257,8 +261,10 @@ dom/events/EventTarget-this-of-listener.html:
 - dispatchEvent should invoke the current handleEvent method of the object
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
-dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
-dom/events/event-global-is-still-set-when-reporting-exception-onerror.html: HARNESS_ERROR
+dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
+- window.event is still set when 'beforeunload' result is coerced to string
+dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
+- window.onerror handler restores window.event after it reports an exception
 dom/events/event-global.html: HARNESS_ERROR
 dom/events/event-handler-attribute-replace-preserves-passive.html: HARNESS_ERROR
 dom/events/event-src-element-nullable.html: HARNESS_ERROR
@@ -270,46 +276,6 @@ dom/events/mouse-event-retarget.html:
 dom/events/no-focus-events-at-clicking-editable-content-in-link.html:
 - Click editable element in link
 - Click editable link
-dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-window.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-body.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-div.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-document.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-root.html: HARNESS_ERROR
-dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-window.html: HARNESS_ERROR
 dom/events/pointer-event-document-move.html:
 - Moving a node to new document should move the registered event listeners together
 dom/events/remove-all-listeners.html:
@@ -317,7 +283,6 @@ dom/events/remove-all-listeners.html:
 - Removing all listeners and then adding a new one should work.
 dom/events/scrolling/iframe-chains.html:
 - Wheel scroll in iframe chains to containing element.
-dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
 dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html: HARNESS_ERROR
 dom/events/scrolling/scroll-cross-origin-iframes.html: HARNESS_ERROR
 dom/events/scrolling/scroll-event-fired-to-element.html:
@@ -329,7 +294,8 @@ dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-after-snap.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html: HARNESS_ERROR
+dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
+- scrollend event fired after load for mandatory snap point
 dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html: HARNESS_ERROR
@@ -346,7 +312,8 @@ dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-fires-to-text-input.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html: HARNESS_ERROR
 dom/events/scrolling/wheel-event-composed.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html: HARNESS_ERROR
+dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
+- When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
 dom/events/scrolling/wheel-event-transactions-basic.html: HARNESS_ERROR
 dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html: HARNESS_ERROR
 dom/events/scrolling/wheel-event-transactions-target-display-change.html: HARNESS_ERROR
@@ -784,7 +751,6 @@ dom/ranges/tentative/OpaqueRange-supported-elements.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-unsupported-elements.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-update-event-order.html: HARNESS_ERROR
 dom/ranges/tentative/OpaqueRange-validation.html: HARNESS_ERROR
-dom/svg-insert-crash.html: HARNESS_ERROR
 dom/traversal/NodeFilter-constants.html:
 - Constants for whatToShow on NodeFilter interface object.
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
@@ -1098,7 +1064,8 @@ domparsing/innerhtml-03.xhtml:
 - innerHTML in XHTML 1
 - innerHTML in XHTML 3
 - innerHTML in XHTML 4
-domparsing/innerhtml-05.xhtml: HARNESS_ERROR
+domparsing/innerhtml-05.xhtml:
+- innerHTML in XHTML
 domparsing/innerhtml-07.html:
 - 'innerHTML and string conversion: undefined.'
 domparsing/innerhtml-mxss.sub.html:
@@ -1531,7 +1498,6 @@ encoding/bom-handling.html:
 encoding/encodeInto.any.js:
 - encodeInto() and a detached output buffer
 encoding/idlharness.any.js: HARNESS_ERROR
-encoding/remove-only-one-bom.html: HARNESS_ERROR
 encoding/replacement-encodings.any.js:
 - csiso2022kr - empty input decodes to empty output.
 - csiso2022kr - non-empty input decodes to one replacement character.
@@ -1696,7 +1662,6 @@ encoding/streams/invalid-realm.window.js:
 encoding/streams/readable-writable-properties.any.js:
 - TextDecoderStream readable and writable properties must pass brand checks
 - TextEncoderStream readable and writable properties must pass brand checks
-encoding/streams/realms.window.js: HARNESS_ERROR
 encoding/textdecoder-arguments.any.js:
 - TextDecoder decode() with array buffer detached during arg conversion
 - TextDecoder decode() with explicit undefined

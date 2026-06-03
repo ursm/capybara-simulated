@@ -80,3 +80,11 @@
   the driver's event path into unbounded recursion — "Maximum call stack size
   exceeded" repeated, ~90s wall before completing. Driver bug in cross-document
   dispatch; excluded until the recursion is bounded.
+
+"dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html": >-
+  Structural loop → V8 OOM. `while (input.scrollLeft === 0) { await
+  test_driver.send_keys(element, ArrowRight) }` spins until the caret scrolls the
+  input — which needs a layout engine (scrollLeft never changes here). Once the
+  testdriver shim makes send_keys actually fire, the loop never terminates and
+  allocates a key event per turn until V8 hits the heap limit (~4 GB). Out of
+  scope (no layout); the other scrolling/* tests complete-to-HE without looping.
