@@ -104,7 +104,22 @@ module Capybara
       # Host fns that route to pure stdlib — no Browser surface,
       # nothing to safe_call, no allocation needed for the wrap. Skip
       # the rescue overhead on every per-find / per-event invocation.
+      # Process-wide cascade-rule cache (mirrors the script bytecode cache). The
+      # built {hide, layout} rules are deterministic per (stylesheet-set,
+      # viewport), so the JS side caches the serialized rules keyed by a digest of
+      # the sheet sources and skips the ~12-15 ms css-tree parse + per-rule
+      # specificity + terminalKey rebuild on every per-visit VM rebuild. Lives in
+      # Ruby (not the VM) so it survives `rebuild_ctx`. Key space is tiny (one app
+      # ships one stylesheet set), so the map stays small; no eviction needed.
+      CASCADE_RULE_CACHE       = {}
+      CASCADE_RULE_CACHE_MUTEX = Mutex.new
+
       STDLIB_HOST_FNS = {
+        '__csimCascadeCacheGet' => ->(*a) { CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] } },
+        '__csimCascadeCachePut' => lambda {|*a|
+          CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] = a[1].to_s }
+          nil
+        },
         '__csim_randomUUID'   => ->(*_) { SecureRandom.uuid },
         '__csim_randomBytes'  => ->(*a) { SecureRandom.bytes(a[0].to_i).bytes },
         '__csim_atob'         => ->(*a) { Base64.decode64(a[0].to_s) },
