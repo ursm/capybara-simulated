@@ -2610,9 +2610,20 @@ module Capybara
         # relative imports; if the importer was an inline-script
         # pseudo-name (no scheme), fall through to the page URL.
         base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i
-        URI.join(base || @current_url || @default_host, url).to_s
-      rescue URI::InvalidURIError, URI::BadURIError
-        url
+        eff = base || @current_url || @default_host
+        # Memo of `URI.join(eff, url)` — a pure function of (effective base, url).
+        # A heavy ESM app re-resolves the same ~80 module specifiers against the
+        # same base on every visit (a fresh VM re-instantiates the whole module
+        # graph); Ruby's URI parser was a measured ~11% of per-visit wall. The
+        # Browser persists across a suite's visits, so this instance-level memo
+        # (same scope/threading assumptions as @importmap / @current_url) turns
+        # all but the first visit's resolves into hash hits.
+        cache = (@resolve_against_cache ||= {})
+        cache[[eff, url]] ||= begin
+          URI.join(eff, url).to_s
+        rescue URI::InvalidURIError, URI::BadURIError
+          url
+        end
       end
 
       MAX_FETCH_REDIRECTS = 20
