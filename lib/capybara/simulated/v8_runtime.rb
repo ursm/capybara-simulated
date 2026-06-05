@@ -384,8 +384,12 @@ module Capybara
 
       # Used-heap threshold (bytes) past which the warm path does a full isolate
       # rebuild instead of another realm swap, to bound the dynamic-import leak.
-      # 2 GB leaves generous headroom under the 4 GB old-space cap.
-      WARM_SWAP_WATERMARK_BYTES = (ENV['CSIM_WARM_SWAP_WATERMARK_MB'] || '2048').to_i * 1_000_000
+      # Lower is faster, not just safer: at 2 GB the bloated heap's GC pressure
+      # made the warm Discourse subset *slower* than cold (140 s vs 131 s),
+      # while 512 MB — more frequent but cheaper swaps, less GC pressure — ran it
+      # in 124 s (~5% under cold). Default 512 MB; the swap pops a pre-built
+      # isolate from the size-1 pool so it doesn't block the visit.
+      WARM_SWAP_WATERMARK_BYTES = (ENV['CSIM_WARM_SWAP_WATERMARK_MB'] || '512').to_i * 1_000_000
 
       # Batched ES-module graph loading (ursm mini_racer fork's
       # `Context#load_module_graph`): instead of a compile_module + instantiate
@@ -453,23 +457,27 @@ module Capybara
         c
       end
 
+      # Under warm-compile the steady-state visit path reuses the one warm
+      # isolate (reset_realm) and never checks out of the pool — but the
+      # heap-watermark swap DOES fall through to `checkout_ctx` ~once per N
+      # visits. So keep a single spare warm: the swap pops a pre-built isolate
+      # instantly + refills in the background instead of paying a synchronous
+      # `build_ctx` on the visit. Cold mode keeps the full POOL_SIZE for
+      # back-to-back visits.
+      def effective_pool_size
+        use_warm_compile? ? 1 : POOL_SIZE
+      end
+
       def refill_pool_async
-        # Under warm-compile the steady-state visit path swaps the realm on
-        # the one warm isolate and never checks out of the pool (measured: 0
-        # pool builds across a full suite). Pre-building POOL_SIZE spare
-        # isolates would just leave them idle for the process lifetime, so
-        # skip the pool entirely — `checkout_ctx` falls back to a synchronous
-        # `build_ctx` for the first context and for the rare reset_realm
-        # failure, which is all the warm path needs.
-        return if use_warm_compile?
+        target = effective_pool_size
         @pool_lock.synchronize {
           return if @refill_busy
-          return if @pool.size >= POOL_SIZE
+          return if @pool.size >= target
           @refill_busy = true
         }
         Thread.new do
           begin
-            until @pool.size >= POOL_SIZE
+            until @pool.size >= target
               c = build_ctx
               # Track pool entries so at_exit disposes them too —
               # pool members aren't currently checked out so they
