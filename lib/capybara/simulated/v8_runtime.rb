@@ -375,12 +375,14 @@ module Capybara
       # machine code survive, so a re-visited page skips cold module compile /
       # bytecode deserialize and re-tiers JIT faster. Closes the per-navigation
       # warmth gap with a real browser (which reuses one isolate and swaps the
-      # realm per navigation). Opt-in — at the suite level the saving dilutes to
-      # sub-noise because the cross-process bytecode cache already deserializes
-      # most cold visits, so this only earns its keep on heavy-boot SPAs (Ember
-      # / large React graphs) where per-visit compile dominates. Requires the
-      # ursm mini_racer fork's `Context#reset_realm`.
-      WARM_COMPILE_ENABLED = ENV['CSIM_WARM_COMPILE'] == '1'
+      # realm per navigation). On by default — measured a net win across the app
+      # suites (multi-visit apps ~30% under real Chrome, SPAs at parity; per-app
+      # cold→warm gain 3–11%, biggest on the server-rendered Redmine whose many
+      # full visits each re-compile). Set `CSIM_WARM_COMPILE=0` to opt out.
+      # Requires the ursm mini_racer fork's `Context#reset_realm` —
+      # `reset_realm_supported?` probes it and falls back to the cold per-visit
+      # rebuild on stock mini_racer / QuickJS, so default-on is safe everywhere.
+      WARM_COMPILE_ENABLED = ENV['CSIM_WARM_COMPILE'] != '0'
 
       # Used-heap threshold (bytes) past which the warm path does a full isolate
       # rebuild instead of another realm swap, to bound the dynamic-import leak.
@@ -398,8 +400,12 @@ module Capybara
       # `resolve:` / `fetch_batch:` once per graph *level*. The fork persists the
       # callbacks + a Context-lifetime URL→Module registry, so a later
       # `import()` reuses the same Module instance for an already-loaded URL
-      # (identity preserved — the thing that broke the earlier spike). Opt-in.
-      MODULE_GRAPH_ENABLED = ENV['CSIM_MODULE_GRAPH'] == '1'
+      # (identity preserved — the thing that broke the earlier spike). On by
+      # default (~4–5 ms/visit on heavy module graphs, zero regression across
+      # WPT / app suites). Set `CSIM_MODULE_GRAPH=0` to opt out;
+      # `load_module_graph_supported?` falls back to the per-module path on
+      # builds without the fork's `Context#load_module_graph`.
+      MODULE_GRAPH_ENABLED = ENV['CSIM_MODULE_GRAPH'] != '0'
 
       def self.load_module_graph_supported?
         return @load_module_graph_supported if defined?(@load_module_graph_supported)
