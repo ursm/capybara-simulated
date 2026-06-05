@@ -271,17 +271,7 @@ module Capybara
             @native_module_handles     = nil
             @native_module_handles_ctx = nil
             reseed_realm_js(@ctx)
-            # Heap-watermark swap: a warm isolate accumulates V8-internal
-            # dynamic-import continuation handles that survive the realm swap
-            # (~tens of MB/visit on apps doing per-visit `import()`), so a long
-            # suite OOMs. Once the isolate's used heap crosses the watermark,
-            # fall through to a full rebuild — disposing the bloated isolate
-            # reclaims *everything* (the one reliable reclaim) and the next
-            # visit starts on a fresh one. At a 2 GB watermark that's ~1 swap
-            # per ~70 visits, so ~99% of visits stay warm while the heap stays
-            # bounded well under the 4 GB cap (keeping GC pressure off the
-            # suite-timing measurement).
-            return @ctx unless warm_isolate_over_watermark?(@ctx)
+            return @ctx
           rescue StandardError => e
             @browser.log_console('warn', "warm-compile reset_realm failed, falling back to full rebuild: #{e.message}")
           end
@@ -384,15 +374,6 @@ module Capybara
       # rebuild on stock mini_racer / QuickJS, so default-on is safe everywhere.
       WARM_COMPILE_ENABLED = ENV['CSIM_WARM_COMPILE'] != '0'
 
-      # Used-heap threshold (bytes) past which the warm path does a full isolate
-      # rebuild instead of another realm swap, to bound the dynamic-import leak.
-      # Lower is faster, not just safer: at 2 GB the bloated heap's GC pressure
-      # made the warm Discourse subset *slower* than cold (140 s vs 131 s),
-      # while 512 MB — more frequent but cheaper swaps, less GC pressure — ran it
-      # in 124 s (~5% under cold). Default 512 MB; the swap pops a pre-built
-      # isolate from the size-1 pool so it doesn't block the visit.
-      WARM_SWAP_WATERMARK_BYTES = (ENV['CSIM_WARM_SWAP_WATERMARK_MB'] || '512').to_i * 1_000_000
-
       # Batched ES-module graph loading (ursm mini_racer fork's
       # `Context#load_module_graph`): instead of a compile_module + instantiate
       # round-trip per module (~2·N Ruby↔V8 rendezvous for an N-module graph),
@@ -444,14 +425,6 @@ module Capybara
       # the `@warm_compile` ivar directly.
       def use_warm_compile? = @warm_compile
 
-      # heap_stats is a cheap (~14 µs) rendezvous; reading it once per visit to
-      # gate the watermark swap is negligible next to the visit itself.
-      def warm_isolate_over_watermark?(c)
-        c.heap_stats[:used_heap_size].to_i >= WARM_SWAP_WATERMARK_BYTES
-      rescue StandardError
-        false
-      end
-
       def build_ctx
         opts = { snapshot: @snapshot || self.class.snapshot }
         opts[:timeout] = CALL_TIMEOUT_MS if CALL_TIMEOUT_MS > 0
@@ -463,12 +436,11 @@ module Capybara
       end
 
       # Under warm-compile the steady-state visit path reuses the one warm
-      # isolate (reset_realm) and never checks out of the pool — but the
-      # heap-watermark swap DOES fall through to `checkout_ctx` ~once per N
-      # visits. So keep a single spare warm: the swap pops a pre-built isolate
-      # instantly + refills in the background instead of paying a synchronous
-      # `build_ctx` on the visit. Cold mode keeps the full POOL_SIZE for
-      # back-to-back visits.
+      # isolate (reset_realm) and never checks out of the pool; a checkout only
+      # happens on the initial build or the rare reset_realm-failure fallback.
+      # Keep a single spare warm so that fallback pops a pre-built isolate
+      # instantly instead of paying a synchronous `build_ctx`. Cold mode keeps
+      # the full POOL_SIZE for back-to-back visits.
       def effective_pool_size
         use_warm_compile? ? 1 : POOL_SIZE
       end

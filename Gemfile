@@ -5,7 +5,7 @@ gemspec
 # JS engines: both installed in dev so the spec suite exercises both
 # (CSIM_JS_ENGINE=v8 / =quickjs). Downstream apps add whichever one
 # they want — neither is a hard dependency of the gem itself.
-gem 'mini_racer', git: 'https://github.com/ursm/mini_racer.git', branch: 'experimental/cached-data-and-module-api'
+gem 'mini_racer-csim', github: 'ursm/mini_racer', branch: 'csim', require: 'mini_racer'
 gem 'nokogiri'
 gem 'quickjs', '>= 0.18'
 

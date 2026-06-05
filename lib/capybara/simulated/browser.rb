@@ -283,8 +283,11 @@ module Capybara
       # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
       # wins on parallelism). Both gems are soft dependencies; pass nil
-      # to auto-select whichever is installed.
-      ENGINE_GEM = {v8: 'mini_racer', quickjs: 'quickjs'}.freeze
+      # to auto-select whichever is installed. The V8 engine ships under
+      # either `mini_racer` (upstream) or `mini_racer-csim` (the fork
+      # carrying reset_realm / the native module API) — both provide the
+      # same `MiniRacer` surface, so either gem name selects `:v8`.
+      ENGINE_GEM = {v8: %w[mini_racer mini_racer-csim], quickjs: %w[quickjs]}.freeze
       private_constant :ENGINE_GEM
 
       def build_runtime(engine)
@@ -305,8 +308,8 @@ module Capybara
       # JIT wins per-spec wall time, QuickJS second when only the
       # smaller-footprint engine is installed.
       private def detect_js_engine
-        JS_ENGINES.find {|e| Gem.loaded_specs.key?(ENGINE_GEM.fetch(e)) } ||
-          raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|g| "`gem '#{g}'`" }.join(' / ')} to your Gemfile")
+        JS_ENGINES.find {|e| ENGINE_GEM.fetch(e).any? {|g| Gem.loaded_specs.key?(g) } } ||
+          raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|gems| "`gem '#{gems.first}'`" }.join(' / ')} to your Gemfile")
       end
 
       # ── Capybara DSL surface ────────────────────────────────────
