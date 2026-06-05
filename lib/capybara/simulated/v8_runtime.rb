@@ -194,7 +194,7 @@ module Capybara
         # it persists across `reset_realm` (same isolate) and is cleared only on
         # a true rebuild (different isolate, cold compilation cache).
         @warm_compile         = WARM_COMPILE_ENABLED && self.class.reset_realm_supported?
-        @module_graph         = MODULE_GRAPH_ENABLED && self.class.load_module_graph_supported?
+        @module_graph         = self.class.load_module_graph_supported?
         @compiled_module_urls = {}
         refill_pool_async
       end
@@ -400,12 +400,11 @@ module Capybara
       # `resolve:` / `fetch_batch:` once per graph *level*. The fork persists the
       # callbacks + a Context-lifetime URL→Module registry, so a later
       # `import()` reuses the same Module instance for an already-loaded URL
-      # (identity preserved — the thing that broke the earlier spike). On by
-      # default (~4–5 ms/visit on heavy module graphs, zero regression across
-      # WPT / app suites). Set `CSIM_MODULE_GRAPH=0` to opt out;
-      # `load_module_graph_supported?` falls back to the per-module path on
-      # builds without the fork's `Context#load_module_graph`.
-      MODULE_GRAPH_ENABLED = ENV['CSIM_MODULE_GRAPH'] != '0'
+      # (identity preserved — the thing that broke the earlier spike).
+      # Unconditional (~4–5 ms/visit on heavy module graphs, zero regression
+      # across WPT / app suites, no failure mode) — gated only by
+      # `load_module_graph_supported?`, which falls back to the per-module path
+      # on builds without the fork's `Context#load_module_graph`.
 
       def self.load_module_graph_supported?
         return @load_module_graph_supported if defined?(@load_module_graph_supported)
