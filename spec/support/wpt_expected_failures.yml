@@ -278,9 +278,6 @@ dom/events/no-focus-events-at-clicking-editable-content-in-link.html:
 - Click editable link
 dom/events/pointer-event-document-move.html:
 - Moving a node to new document should move the registered event listeners together
-dom/events/remove-all-listeners.html:
-- Nested usage of once listeners should work.
-- Removing all listeners and then adding a new one should work.
 dom/events/scrolling/iframe-chains.html:
 - Wheel scroll in iframe chains to containing element.
 dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
