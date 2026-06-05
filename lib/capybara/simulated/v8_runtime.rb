@@ -271,7 +271,17 @@ module Capybara
             @native_module_handles     = nil
             @native_module_handles_ctx = nil
             reseed_realm_js(@ctx)
-            return @ctx
+            # Heap-watermark swap: a warm isolate accumulates V8-internal
+            # dynamic-import continuation handles that survive the realm swap
+            # (~tens of MB/visit on apps doing per-visit `import()`), so a long
+            # suite OOMs. Once the isolate's used heap crosses the watermark,
+            # fall through to a full rebuild — disposing the bloated isolate
+            # reclaims *everything* (the one reliable reclaim) and the next
+            # visit starts on a fresh one. At a 2 GB watermark that's ~1 swap
+            # per ~70 visits, so ~99% of visits stay warm while the heap stays
+            # bounded well under the 4 GB cap (keeping GC pressure off the
+            # suite-timing measurement).
+            return @ctx unless warm_isolate_over_watermark?(@ctx)
           rescue StandardError => e
             @browser.log_console('warn', "warm-compile reset_realm failed, falling back to full rebuild: #{e.message}")
           end
@@ -372,6 +382,11 @@ module Capybara
       # ursm mini_racer fork's `Context#reset_realm`.
       WARM_COMPILE_ENABLED = ENV['CSIM_WARM_COMPILE'] == '1'
 
+      # Used-heap threshold (bytes) past which the warm path does a full isolate
+      # rebuild instead of another realm swap, to bound the dynamic-import leak.
+      # 2 GB leaves generous headroom under the 4 GB old-space cap.
+      WARM_SWAP_WATERMARK_BYTES = (ENV['CSIM_WARM_SWAP_WATERMARK_MB'] || '2048').to_i * 1_000_000
+
       # Batched ES-module graph loading (ursm mini_racer fork's
       # `Context#load_module_graph`): instead of a compile_module + instantiate
       # round-trip per module (~2·N Ruby↔V8 rendezvous for an N-module graph),
@@ -419,6 +434,14 @@ module Capybara
       # Resolved once in `initialize`; the per-visit / per-module hot paths read
       # the `@warm_compile` ivar directly.
       def use_warm_compile? = @warm_compile
+
+      # heap_stats is a cheap (~14 µs) rendezvous; reading it once per visit to
+      # gate the watermark swap is negligible next to the visit itself.
+      def warm_isolate_over_watermark?(c)
+        c.heap_stats[:used_heap_size].to_i >= WARM_SWAP_WATERMARK_BYTES
+      rescue StandardError
+        false
+      end
 
       def build_ctx
         opts = { snapshot: @snapshot || self.class.snapshot }
