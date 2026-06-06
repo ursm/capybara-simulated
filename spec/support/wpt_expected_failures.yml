@@ -72,7 +72,25 @@ dom/events/CustomEvent.html:
 - initCustomEvent's default parameter values.
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
-dom/events/Event-dispatch-click.html: HARNESS_ERROR
+dom/events/Event-dispatch-click.html:
+- basic with dispatchEvent()
+- disabled checkbox should be checked from dispatchEvent(new MouseEvent("click"))
+- disabled checkbox should get legacy-canceled-activation behavior
+- disabled checkbox still has activation behavior
+- disabled checkbox still has activation behavior, part 2
+- disabled radio should be checked from dispatchEvent(new MouseEvent("click"))
+- disabled radio should get legacy-canceled-activation behavior
+- disabled radio still has activation behavior
+- disconnected checkbox should be checked from dispatchEvent(new MouseEvent('click'))
+- disconnected form should not submit
+- disconnected radio should be checked from dispatchEvent(new MouseEvent('click'))
+- event state during post-click handling
+- look at parents when event bubbles
+- pick the first with activation behavior <a href>
+- pick the first with activation behavior <input type=checkbox>
+- pick the first with activation behavior <input type=radio>
+- redispatch during post-click handling
+- submit button that morphed from checkbox should not activate
 dom/events/Event-dispatch-detached-input-and-change.html:
 - attached checkbox should emit input and change events on dispatchEvent(new MouseEvent('click')).
 - attached radio should emit input and change events on dispatchEvent(new MouseEvent('click')).
@@ -84,7 +102,15 @@ dom/events/Event-dispatch-detached-input-and-change.html:
 - detached radio should not emit input or change events on click().
 dom/events/Event-dispatch-handlers-changed.html:
 - " Dispatch additional events inside an event listener "
-dom/events/Event-dispatch-on-disabled-elements.html: HARNESS_ERROR
+dom/events/Event-dispatch-on-disabled-elements.html:
+- CSS Animation animationstart, animationiteration, animationend fire on disabled
+  form elements
+- CSS Animation's animationcancel event fires on disabled form elements
+- CSS Transitions transitioncancel event fires on disabled form elements
+- CSS Transitions transitionrun, transitionstart, transitionend events fire on disabled
+  form elements
+- Calling click() on disabled elements must not dispatch events.
+- Real clicks on disabled elements must not dispatch events.
 dom/events/Event-dispatch-order-at-target.html:
 - Listeners are invoked in correct order (AT_TARGET phase)
 dom/events/Event-dispatch-redispatch.html:
@@ -233,7 +259,11 @@ dom/events/Event-dispatch-single-activation-behavior.html:
   parent <INPUT type=radio></INPUT>, only child should be activated.
 - When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
   parent <LABEL><BUTTON type=button></BUTTON></LABEL>, only child should be activated.
-dom/events/Event-dispatch-throwing-multiple-globals.html: HARNESS_ERROR
+dom/events/Event-dispatch-throwing-multiple-globals.html:
+- exception thrown in event listener function should result in error event on listener's
+  global
+- exception thrown in event listener interface object should result in error event
+  on listener's global
 dom/events/Event-dispatch-throwing.html:
 - Throwing in event listener with a single listeners
 - Throwing in event listener with multiple listeners
@@ -258,7 +288,13 @@ dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
 - Check the incumbent global EventListeners  are called with
-dom/events/EventListener-invoke-legacy.html: HARNESS_ERROR
+dom/events/EventListener-invoke-legacy.html:
+- Legacy listener of animationend
+- Legacy listener of animationstart
+- Legacy listener of transitionend
+- Listener of animationend
+- Listener of animationstart
+- Listener of transitionend
 dom/events/EventListenerOptions-capture.html:
 - Capture boolean should be honored correctly
 - Supports capture option
@@ -273,7 +309,13 @@ dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
 - window.event is still set when 'beforeunload' result is coerced to string
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
-dom/events/event-global.html: HARNESS_ERROR
+dom/events/event-global.html:
+- window.event is set to the current event, which is the event passed to dispatch
+  (2)
+- window.event is undefined if the target is in a shadow tree (event dispatched inside
+  shadow tree)
+- window.event is undefined inside window.onerror if the target is in a shadow tree
+  (ErrorEvent dispatched inside shadow tree)
 dom/events/event-handler-attribute-replace-preserves-passive.html:
 - Replacing a wheel event handler attribute on body via setAttribute preserves its
   passive flag
@@ -281,7 +323,6 @@ dom/events/event-handler-attribute-replace-preserves-passive.html:
   its passive flag
 dom/events/focus-event-document-move.html:
 - Moving a node during mousedown should not crash
-dom/events/handler-count.html: HARNESS_ERROR
 dom/events/mouse-event-retarget.html:
 - offsetX is correctly adjusted
 dom/events/no-focus-events-at-clicking-editable-content-in-link.html:
@@ -292,49 +333,37 @@ dom/events/pointer-event-document-move.html:
 dom/events/scrolling/iframe-chains.html:
 - Wheel scroll in iframe chains to containing element.
 dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
-dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html: HARNESS_ERROR
-dom/events/scrolling/scroll-cross-origin-iframes.html: HARNESS_ERROR
+dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html:
+- Ensure that the scroll position is not lost when the local iframe is set to display:none
+  and shown again.
+- Ensure that the scroll position is not lost when the remote iframe is set to display:none
+  and shown again.
+dom/events/scrolling/scroll-cross-origin-iframes.html:
+- Verify sibling cross-origin iframes can wheel-scroll.
 dom/events/scrolling/scroll-event-fired-to-element.html:
 - scrollTop and scrollLeft when scrolling above maximum offset.
 dom/events/scrolling/scroll-event-fired-to-iframe.html:
 - scrollX and scrollY being set with the same value.
 - scrollX and scrollY when scrolling above maximum Scroll.
-dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html:
 - scrolling state is false at the end of the test
-dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-after-snap.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
 - scrollend event fired after load for mandatory snap point
-dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-to-document.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-to-window.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fires-on-visual-viewport.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fires-to-iframe-window.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-for-user-scroll.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-handler-content-attributes.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-fires-to-text-input.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html: HARNESS_ERROR
+dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html:
+- scrollend event is fired after repeated Page Down key presses reach the end of the
+  scroll region.
+dom/events/scrolling/scrollend-fires-to-text-input.html:
+- scrolled input field should receive scrollend when setting scrollLeft.
+- 'scrolled input field should receive scrollend with scrollBy({ behavior: ''instant''
+  }).'
+- 'scrolled input field should receive scrollend with scrollBy({ behavior: ''smooth''
+  }).'
+- 'scrolled input field should receive scrollend with scrollTo({ behavior: ''instant''
+  }).'
+- 'scrolled input field should receive scrollend with scrollTo({ behavior: ''smooth''
+  }).'
 dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 - When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
-dom/events/scrolling/wheel-event-transactions-basic.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-target-display-change.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-target-elements.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-target-move.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-target-removal.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-transactions-target-resize.html: HARNESS_ERROR
-dom/events/shadow-relatedTarget.html: HARNESS_ERROR
-dom/events/webkit-animation-end-event.html: HARNESS_ERROR
-dom/events/webkit-animation-iteration-event.html: HARNESS_ERROR
-dom/events/webkit-animation-start-event.html: HARNESS_ERROR
-dom/events/webkit-transition-end-event.html: HARNESS_ERROR
 dom/events/window-composed-path.html:
 - window target has an empty path after dispatch
 dom/historical.html:
@@ -362,7 +391,8 @@ dom/nodes/Document-constructor.html:
 - 'new Document(): metadata'
 dom/nodes/Document-contentType/contentType/contenttype_bmp.html:
 - BMP document.contentType === 'image/bmp'
-dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html: HARNESS_ERROR
+dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html:
+- Data URI document.contentType === 'text/html' when data URI MIME type is set
 dom/nodes/Document-contentType/contentType/contenttype_gif.html:
 - GIF document.contentType === 'image/gif'
 dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
@@ -425,7 +455,8 @@ dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
 dom/nodes/Element-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
-dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html: HARNESS_ERROR
+dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
+- Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/Element-getElementsByTagName.html:
 - Should be able to set expando shadowing a proto prop (item)
 - Should be able to set expando shadowing a proto prop (namedItem)
@@ -435,7 +466,6 @@ dom/nodes/Element-getElementsByTagName.html:
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Element-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
-dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
 - DIV Element.matches no parameter
 - NULL Element.matches no parameter
@@ -451,7 +481,11 @@ dom/nodes/Element-webkitMatchesSelector.html:
 - DIV Element.webkitMatchesSelector no parameter
 - NULL Element.webkitMatchesSelector no parameter
 - UNDEFINED Element.webkitMatchesSelector no parameter
-dom/nodes/MutationObserver-attributes.html: HARNESS_ERROR
+dom/nodes/MutationObserver-attributes.html:
+- 'attributes Element.attributes.value: same id mutation'
+- 'attributes Element.removeAttributeNS: removal mutation'
+- 'attributes Element.setAttributeNS: creation mutation'
+- 'attributes Element.setAttributeNS: prefixed attribute creation mutation'
 dom/nodes/MutationObserver-callback-arguments.html:
 - Callback is invoked with |this| value of MutationObserver and two arguments
 dom/nodes/MutationObserver-characterData.html:
@@ -460,12 +494,12 @@ dom/nodes/MutationObserver-characterData.html:
 dom/nodes/MutationObserver-childList.html:
 - 'childList Node.replaceChild: self internal replacement mutation'
 - 'childList Range.surroundContents: children removal and addition mutation'
-dom/nodes/MutationObserver-cross-realm-callback-report-exception.html: HARNESS_ERROR
 dom/nodes/MutationObserver-document.html:
 - parser insertion mutations
 - parser script insertion mutation
 - removal of parent during parsing
-dom/nodes/MutationObserver-inner-outer.html: HARNESS_ERROR
+dom/nodes/MutationObserver-inner-outer.html:
+- outerHTML mutation
 dom/nodes/MutationObserver-sanity.html:
 - Should throw if attributeFilter is present and attributes is false
 - Should throw if attributeOldValue is true and attributes is false
@@ -534,7 +568,6 @@ dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
-dom/nodes/ParentNode-querySelector-All-xht.xht: HARNESS_ERROR
 dom/nodes/ParentNode-querySelector-All.html:
 - Detached Element.querySelector no parameter
 - Detached Element.querySelectorAll no parameter
@@ -555,8 +588,21 @@ dom/nodes/ParentNode-querySelector-All.html:
 - In-document Element.querySelectorAll no parameter
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
-dom/nodes/ParentNode-querySelectors-namespaces.html: HARNESS_ERROR
-dom/nodes/ParentNode-replaceChildren.html: HARNESS_ERROR
+dom/nodes/ParentNode-querySelectors-namespaces.html:
+- querySelectorAll must work with namespace attribute selectors on SVG
+dom/nodes/ParentNode-replaceChildren.html:
+- DocumentFragment.replaceChildren() should move nodes in the right order
+- Element.replaceChildren() should move nodes in the right order
+- If node is a DocumentFragment with an element and parent is a document with another
+  element, then throw a HierarchyRequestError DOMException.
+- If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError
+  DOMException.
+- If node is a doctype and parent is a document with another doctype, then throw a
+  HierarchyRequestError DOMException.
+- If node is an Element and parent is a document with another element, then throw
+  a HierarchyRequestError DOMException.
+- There should be MutationRecords for the nodes removed from another parent node.
+- There should be a MutationRecord for the node removed from another parent node.
 dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 - ProcessingInstruction numeric escapes
 dom/nodes/Text-constructor.html:
@@ -645,17 +691,29 @@ dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html:
   fragment should not run
 dom/nodes/moveBefore/child-style-preserve.html:
 - child-style-preserve
-dom/nodes/moveBefore/continue-css-animation-left.html: HARNESS_ERROR
-dom/nodes/moveBefore/continue-css-animation-transform.html: HARNESS_ERROR
-dom/nodes/moveBefore/continue-css-transition-left-pseudo.html: HARNESS_ERROR
-dom/nodes/moveBefore/continue-css-transition-left.html: HARNESS_ERROR
-dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html: HARNESS_ERROR
-dom/nodes/moveBefore/continue-css-transition-transform.html: HARNESS_ERROR
-dom/nodes/moveBefore/css-animation-commit-styles.html: HARNESS_ERROR
-dom/nodes/moveBefore/css-transition-cross-document.html: HARNESS_ERROR
-dom/nodes/moveBefore/css-transition-cross-shadow.html: HARNESS_ERROR
-dom/nodes/moveBefore/css-transition-to-disconnected-document.html: HARNESS_ERROR
-dom/nodes/moveBefore/css-transition-trigger.html: HARNESS_ERROR
+dom/nodes/moveBefore/continue-css-animation-left.html:
+- Node.moveBefore should preserve CSS animation state (left)
+dom/nodes/moveBefore/continue-css-animation-transform.html:
+- Node.moveBefore should preserve CSS animation state (transform)
+dom/nodes/moveBefore/continue-css-transition-left-pseudo.html:
+- Node.moveBefore should preserve CSS transition state on pseudo-elements (left)
+dom/nodes/moveBefore/continue-css-transition-left.html:
+- Node.moveBefore should preserve CSS transition state (left)
+dom/nodes/moveBefore/continue-css-transition-transform-pseudo.html:
+- Node.moveBefore should preserve CSS transition state on pseudo-elements (transform)
+dom/nodes/moveBefore/continue-css-transition-transform.html:
+- Node.moveBefore should preserve CSS transition state (transform)
+dom/nodes/moveBefore/css-animation-commit-styles.html:
+- Calling commitStyles after Node.moveBefore should commit mid-transition value
+dom/nodes/moveBefore/css-transition-cross-document.html:
+- Moving a transition across documents should reset its state
+dom/nodes/moveBefore/css-transition-cross-shadow.html:
+- Moving an element with a transition across shadow boundaries preserves the transition
+dom/nodes/moveBefore/css-transition-to-disconnected-document.html:
+- Moving an element with a transition to a disconnected document should reset the
+  transitionm state
+dom/nodes/moveBefore/css-transition-trigger.html:
+- Node.moveBefore should trigger CSS transition state (left) if needed
 dom/nodes/moveBefore/custom-element-move-reactions.html:
 - Reactions to atomic move are called in order of element, not in order of operation
 - When connectedCallback is not defined, no crash
@@ -673,7 +731,12 @@ dom/nodes/moveBefore/fire-focusin-focusout.html:
 - Don't fire focusin/out when moving to the same parent
 - Don't fire focusin/out when reparenting an element that has focus within
 - Don't fire focusin/out when reparenting focused element directly
-dom/nodes/moveBefore/focus-preserve.html: HARNESS_ERROR
+dom/nodes/moveBefore/focus-preserve.html:
+- when reparenting a focused element into a hidden parent, reset the document focus
+- when reparenting a focused element into an inert parent, reset the document focus
+- when reparenting an ancestor of an focused element into a hidden parent, reset the
+  document focus
+- when reparenting an element, don't automatically reset the document focus
 dom/nodes/moveBefore/focus-within.html:
 - ":focus-within should be eventually up to date when moving to a subtree that would
   become inert via style"
@@ -682,24 +745,19 @@ dom/nodes/moveBefore/focus-within.html:
 - focus-within should be updated when reparenting focused element directly
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - Document#fullscreenElement
-dom/nodes/moveBefore/hover-style-update.html: HARNESS_ERROR
 dom/nodes/moveBefore/listed-form-element-reset.html:
 - Listed form element form owner is reset when a new form is moved closer before the
   listed element
-dom/nodes/moveBefore/live-range-updates.html: HARNESS_ERROR
 dom/nodes/moveBefore/modal-dialog.html:
 - when reparenting a modal dialog, the dialog should stay modal
 dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
 - moveBefore-from-light-to-shadow
-dom/nodes/moveBefore/moveBefore-id-map.html: HARNESS_ERROR
-dom/nodes/moveBefore/moveBefore-name-map.html: HARNESS_ERROR
 dom/nodes/moveBefore/moveBefore-option-recalc-style.html:
 - moveBefore() of an option element between two selects
 dom/nodes/moveBefore/moveBefore-selector-matching.html:
 - moveBefore() should invalidate target when descendant selector changes
 dom/nodes/moveBefore/moveBefore-shadow-inside.html:
 - moveBefore-shadow-inside
-dom/nodes/moveBefore/moveBefore-shadow-root.html: HARNESS_ERROR
 dom/nodes/moveBefore/moveBefore-size-query.html:
 - moveBefore() between different size containers invalidates target
 dom/nodes/moveBefore/mutation-observer.html:
@@ -712,14 +770,20 @@ dom/nodes/moveBefore/pointer-events.html:
 - Pointer capture should not be released when moving
 dom/nodes/moveBefore/popover-preserve.html:
 - when reparenting an open popover, it shouldn't be closed automatically
-dom/nodes/moveBefore/relevant-mutations.html: HARNESS_ERROR
+dom/nodes/moveBefore/relevant-mutations.html:
+- Moving <img> into a <picture> triggers a relevant mutation on the <img>, loading
+  <source>
+- Moving <source> out of <picture> triggers a relevant mutation on sibling <img>
 dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 - Option selectedness is updated on option and optgroup DOM moves
-dom/nodes/moveBefore/selection-preserve.html: HARNESS_ERROR
-dom/nodes/moveBefore/slotchange-events.html: HARNESS_ERROR
-dom/nodes/moveBefore/style-applies.html: HARNESS_ERROR
-dom/nodes/query-target-in-load-event.html: HARNESS_ERROR
+dom/nodes/moveBefore/slotchange-events.html:
+- Moving a slot runs the assign slottables algorithm
+- Moving a slottable into and out out of a custom element fires 'slotchange' event
+- Moving default content into a slot fires 'slotchange' event
+- Moving default content out of a slot fires 'slotchange' event
+dom/nodes/query-target-in-load-event.html:
+- document.querySelector(":target") must work when called in the window.load event
 dom/nodes/querySelector-mixed-case.html:
 - Mixed HTML/SVG/MathML tree with various mixed-case attributes
 dom/nodes/remove-and-adopt-thcrash.html:
@@ -730,7 +794,6 @@ dom/nodes/remove-next-sibling-during-replace-with.html:
 dom/nodes/rootNode.html:
 - getRootNode() must return context object's shadow-including root if options's composed
   is true, and context object's root otherwise
-dom/observable/tentative/idlharness.html: HARNESS_ERROR
 dom/ranges/Range-adopt-test.html:
 - 'Parentless range container moved to another document with appendChild: Removing
   the only element in the range must collapse the range'
@@ -757,24 +820,6 @@ dom/ranges/Range-intersectsNode-binding.html:
   a TypeError.
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
-dom/ranges/tentative/OpaqueRange-auto-disconnect.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-basic.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-disconnect.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-display-none.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-geometry-basic.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-geometry-complexity-and-visibility.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-highlight.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-highlightsFromPoint.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-interactive-basic.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-interactive-overlap-and-selection.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-offset.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-programmatic-updates.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-range-updates.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-supported-elements.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-unsupported-elements.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-update-event-order.html: HARNESS_ERROR
-dom/ranges/tentative/OpaqueRange-validation.html: HARNESS_ERROR
 dom/traversal/NodeFilter-constants.html:
 - Constants for whatToShow on NodeFilter interface object.
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
@@ -943,7 +988,8 @@ domparsing/DOMParser-parseFromString-url-base.html:
   iframe'
 - 'text/xml valid: created using another iframe''s DOMParser from that frame'
 - 'text/xml valid: created using another iframe''s DOMParser from this frame'
-domparsing/DOMParser-parseFromString-url-moretests.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-url-moretests.html:
+- 'DOMParser: Document''s url'
 domparsing/DOMParser-parseFromString-url-pushstate.html:
 - 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
   method from this frame'
@@ -1105,7 +1151,6 @@ domparsing/DOMParser-parseFromString-xml.html:
 - scripting must be disabled with type application/xml
 - scripting must be disabled with type image/svg+xml
 - scripting must be disabled with type text/xml
-domparsing/XMLSerializer-serializeToString.html: HARNESS_ERROR
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
 domparsing/domparser-spurious-attributes.html:
@@ -1175,7 +1220,6 @@ domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
 - streamBeforeHTML with trusted types and no default policy returns a WritableStream.
 - streamHTML with trusted types and no default policy returns a WritableStream.
 - streamPrependHTML with trusted types and no default policy returns a WritableStream.
-domparsing/tentative/positional-methods-with-trusted-types.html: HARNESS_ERROR
 domparsing/tentative/positional-methods.html:
 - 'Only unsafe variants should run scripts: Comment.afterHTML (Element) (runScripts=false)'
 - 'Only unsafe variants should run scripts: Comment.afterHTML (Element) (runScripts=true)'
@@ -1805,18 +1849,12 @@ domparsing/tentative/stream-html-with-declarative-shadow-root.html:
 - element.streamReplaceWithHTMLUnsafe (sanitization===none)
 - element.streamReplaceWithHTMLUnsafe (sanitization===remove-internal)
 - element.streamReplaceWithHTMLUnsafe (sanitization===remove-shadow-root)
-domparsing/tentative/stream-html-with-trusted-types-error-in-policy.html: HARNESS_ERROR
-domparsing/tentative/stream-html-with-trusted-types-no-createParserOptions.html: HARNESS_ERROR
 domparsing/tentative/stream-html-with-trusted-types-no-policy.html:
 - Streaming with trusted types and no default policy does not throw for streamAfterHTML.
 - Streaming with trusted types and no default policy does not throw for streamAppendHTML.
 - Streaming with trusted types and no default policy does not throw for streamBeforeHTML.
 - Streaming with trusted types and no default policy does not throw for streamHTML.
 - Streaming with trusted types and no default policy does not throw for streamPrependHTML.
-domparsing/tentative/stream-html-with-trusted-types-pass-trusted.html: HARNESS_ERROR
-domparsing/tentative/stream-html-with-trusted-types-runScripts-cannot-be-turned-on.html: HARNESS_ERROR
-domparsing/tentative/stream-html-with-trusted-types-runScripts-off.html: HARNESS_ERROR
-domparsing/tentative/stream-html-with-trusted-types-sanitizer.html: HARNESS_ERROR
 domparsing/tentative/stream-html.html:
 - Aborting streamHTML()
 - Interleaved streamHTML() writes
@@ -1968,7 +2006,6 @@ encoding/bom-handling.html:
 - document.characterSet should match the BOM
 encoding/encodeInto.any.js:
 - encodeInto() and a detached output buffer
-encoding/idlharness.any.js: HARNESS_ERROR
 encoding/replacement-encodings.any.js:
 - csiso2022kr - empty input decodes to empty output.
 - csiso2022kr - non-empty input decodes to one replacement character.
@@ -2268,9 +2305,6 @@ encoding/utf-32-from-win1252.html:
 encoding/utf-32.html:
 - Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
 - Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
-html/webappapis/microtask-queuing/queue-microtask-cross-realm-callback-report-exception.html: HARNESS_ERROR
-html/webappapis/timers/setinterval-cross-realm-callback-report-exception.html: HARNESS_ERROR
-html/webappapis/timers/settimeout-cross-realm-callback-report-exception.html: HARNESS_ERROR
 url/a-element-origin-xhtml.xhtml:
 - "Parsing origin: <\t   :foo.com   \n> against <http://example.org/foo/bar>"
 - "Parsing origin: <  \t> against <http://example.org/foo/bar>"
@@ -3323,9 +3357,16 @@ url/a-element.html:
 - 'Parsing: <urn://test:test> against <about:blank>'
 - 'Parsing: <x> against <sc://ñ>'
 - 'Parsing: <中/test.txt> against <http://www.example.com/test>'
-url/data-uri-fragment.html: HARNESS_ERROR
-url/idlharness.any.js: HARNESS_ERROR
-url/javascript-urls.window.js: HARNESS_ERROR
+url/data-uri-fragment.html:
+- Data URI parsing of fragments
+url/javascript-urls.window.js:
+- 'javascript: URL containing a JavaScript string split over path and query'
+- 'javascript: URL containing a JavaScript string split over path and query and has
+  a U+000A in scheme'
+- 'javascript: URL that fails to parse due to invalid host'
+- 'javascript: URL that fails to parse due to invalid host and has a U+0009 in scheme'
+- 'javascript: URL with extra slashes at the start'
+- 'javascript: URL without an opaque path'
 url/percent-encoding.window.js:
 - "Input \x0EA with encoding big5"
 - "Input \x0EA with encoding iso-2022-jp"

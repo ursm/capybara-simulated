@@ -26,17 +26,26 @@ module WptRunner
 
   # Per-file drain budget. We drain in small virtual-clock steps and stop the
   # instant the harness reports completion — so sync and quick-async tests pay
-  # almost nothing. Only files with a still-pending test pay the full budget,
-  # after which we call testharness's global `timeout()` to force every pending
-  # subtest to TIMEOUT and complete the file. This keeps a hung async test from
-  # draining its whole 10 s harness-timeout horizon (the difference between the
-  # suite running in seconds vs. minutes).
+  # almost nothing. A file with a still-pending test then gets its virtual clock
+  # jumped past testharness's own harness-timeout horizon, which fires the
+  # `setTimeout(tests.timeout, …)` testharness arms internally and completes the
+  # file with every pending subtest marked TIMEOUT. (The global `timeout()` is a
+  # no-op unless the file opted into `explicit_timeout`, so it can't be used to
+  # force this.) Big virtual jumps are ~free in wall-clock — they only run the
+  # few timers actually due — so the suite still runs in seconds.
   DRAIN_STEP_MS      = 250
-  DRAIN_STEPS        = 8   # 8 × 250 ms = 2 s virtual before forcing timeout
-  POST_TIMEOUT_STEPS = 3   # extra drains after timeout() so a multi-hop
-                           # completion lands without paying 8× on every
-                           # genuinely-stuck (HARNESS_ERROR) file
+  DRAIN_STEPS        = 8   # 8 × 250 ms = 2 s virtual before forcing the timeout
+  FORCE_TIMEOUT_MS   = 12_000  # > the 10 s normal harness timeout (+ margin)
+  LONG_TIMEOUT_MS    = 55_000  # cumulative ≈ 67 s > the 60 s `meta timeout=long`
+  POST_TIMEOUT_STEPS = 3   # let a completion that chains through a final
+                           # microtask / timer hop land after the jump
   DRAIN_ITER         = 5_000
+  # `__runLoopStep`'s per-call task cap pins the virtual clock to `limit` only
+  # when it runs out of *due* timers — if it hits the iter cap first it returns
+  # short of `limit`. The big force jumps must actually reach the harness-timeout
+  # horizon, so they get a cap large enough to walk a 1 ms-clamped setInterval
+  # across the whole 67 s (≈67 k firings) plus margin.
+  FORCE_DRAIN_ITER   = 100_000
 
   CONTENT_TYPES = {
     '.html' => 'text/html',
@@ -182,16 +191,21 @@ module WptRunner
     end
 
     if res.nil?
-      # Still-pending test(s): force every pending subtest to TIMEOUT so the
-      # harness completes and we get per-subtest results instead of nothing.
-      # Drain a few more steps (not one) so a completion that chains through
-      # several queued timer/microtask hops still lands here — otherwise a file
-      # could sit on the completed-vs-HARNESS_ERROR fence and flap.
-      s.evaluate_script("try { if (typeof timeout === 'function') timeout(); } catch (e) {}")
-      POST_TIMEOUT_STEPS.times do
-        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{DRAIN_STEP_MS}, #{DRAIN_ITER}) : null")
+      # Still-pending test(s): jump the virtual clock past testharness's harness
+      # timeout so its internal `setTimeout(tests.timeout, …)` fires, marking
+      # every pending subtest TIMEOUT and completing the file. Two cumulative
+      # jumps cover the 10 s normal and 60 s `<meta name=timeout content=long>`
+      # horizons; we stop at the first one that completes.
+      [FORCE_TIMEOUT_MS, LONG_TIMEOUT_MS].each do |jump|
+        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{jump}, #{FORCE_DRAIN_ITER}) : null")
         res = s.evaluate_script('globalThis.__wptResults')
         break unless res.nil?
+      end
+      # Let a completion that chains through a final microtask / timer hop land.
+      POST_TIMEOUT_STEPS.times do
+        break unless res.nil?
+        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{DRAIN_STEP_MS}, #{DRAIN_ITER}) : null")
+        res = s.evaluate_script('globalThis.__wptResults')
       end
     end
 
