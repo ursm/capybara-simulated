@@ -73,7 +73,15 @@ dom/events/CustomEvent.html:
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-click.html: HARNESS_ERROR
-dom/events/Event-dispatch-detached-input-and-change.html: HARNESS_ERROR
+dom/events/Event-dispatch-detached-input-and-change.html:
+- attached checkbox should emit input and change events on dispatchEvent(new MouseEvent('click')).
+- attached radio should emit input and change events on dispatchEvent(new MouseEvent('click')).
+- attached to shadow dom checkbox should emit input and change events on dispatchEvent(new
+  MouseEvent('click')).
+- attached to shadow dom radio should emit input and change events on dispatchEvent(new
+  MouseEvent('click')).
+- detached checkbox should not emit input or change events on click().
+- detached radio should not emit input or change events on click().
 dom/events/Event-dispatch-handlers-changed.html:
 - " Dispatch additional events inside an event listener "
 dom/events/Event-dispatch-on-disabled-elements.html: HARNESS_ERROR
@@ -266,8 +274,11 @@ dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
 dom/events/event-global.html: HARNESS_ERROR
-dom/events/event-handler-attribute-replace-preserves-passive.html: HARNESS_ERROR
-dom/events/event-src-element-nullable.html: HARNESS_ERROR
+dom/events/event-handler-attribute-replace-preserves-passive.html:
+- Replacing a wheel event handler attribute on body via setAttribute preserves its
+  passive flag
+- Replacing a wheel event handler attribute on document element via setAttribute preserves
+  its passive flag
 dom/events/focus-event-document-move.html:
 - Moving a node during mousedown should not crash
 dom/events/handler-count.html: HARNESS_ERROR
@@ -289,7 +300,8 @@ dom/events/scrolling/scroll-event-fired-to-iframe.html:
 - scrollX and scrollY being set with the same value.
 - scrollX and scrollY when scrolling above maximum Scroll.
 dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html: HARNESS_ERROR
-dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html: HARNESS_ERROR
+dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html:
+- scrolling state is false at the end of the test
 dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-after-snap.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
@@ -309,7 +321,6 @@ dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative
 dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-fires-to-text-input.html: HARNESS_ERROR
 dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html: HARNESS_ERROR
-dom/events/scrolling/wheel-event-composed.html: HARNESS_ERROR
 dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 - When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
 dom/events/scrolling/wheel-event-transactions-basic.html: HARNESS_ERROR
@@ -324,7 +335,8 @@ dom/events/webkit-animation-end-event.html: HARNESS_ERROR
 dom/events/webkit-animation-iteration-event.html: HARNESS_ERROR
 dom/events/webkit-animation-start-event.html: HARNESS_ERROR
 dom/events/webkit-transition-end-event.html: HARNESS_ERROR
-dom/events/window-composed-path.html: HARNESS_ERROR
+dom/events/window-composed-path.html:
+- window target has an empty path after dispatch
 dom/historical.html:
 - 'Node member must be removed: localName'
 - 'Node member must be removed: namespaceURI'
@@ -385,7 +397,11 @@ dom/nodes/Document-createTextNode.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
-dom/nodes/Document-getElementById.html: HARNESS_ERROR
+dom/nodes/Document-getElementById.html:
+- Calling document.getElementById with a null argument.
+- Calling document.getElementById with an undefined argument.
+- add id attribute via outerHTML
+- remove id attribute via outerHTML
 dom/nodes/Document-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Document-getElementsByTagName.html:
@@ -419,7 +435,6 @@ dom/nodes/Element-getElementsByTagName.html:
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Element-getElementsByTagNameNS.html:
 - getElementsByTagNameNS() should be a live collection
-dom/nodes/Element-hasAttributes.html: HARNESS_ERROR
 dom/nodes/Element-insertAdjacentText.html: HARNESS_ERROR
 dom/nodes/Element-matches.html:
 - DIV Element.matches no parameter
@@ -505,7 +520,6 @@ dom/nodes/Node-replaceChild.html:
   and comments should work.
 - Replacing the document element with a DocumentFragment containing a single element
   should work.
-- replaceChild should work in the presence of mutation events.
 dom/nodes/NodeList-static-length-getter-tampered-1.html:
 - NodeList (static collection) "length" getter tampered
 dom/nodes/NodeList-static-length-getter-tampered-2.html:
@@ -624,8 +638,13 @@ dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.
 - 'Node.appendChild: inserting three scripts from a document fragment'
 dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.html:
 - 'Node.appendChild: inserting three scripts from a div'
-dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html: HARNESS_ERROR
-dom/nodes/moveBefore/child-style-preserve.html: HARNESS_ERROR
+dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html:
+- A later-inserted script removed by an earlier-inserted script in the same append()
+  call should not run
+- A later-inserted script removed by an earlier-inserted script in the same document
+  fragment should not run
+dom/nodes/moveBefore/child-style-preserve.html:
+- child-style-preserve
 dom/nodes/moveBefore/continue-css-animation-left.html: HARNESS_ERROR
 dom/nodes/moveBefore/continue-css-animation-transform.html: HARNESS_ERROR
 dom/nodes/moveBefore/continue-css-transition-left-pseudo.html: HARNESS_ERROR
@@ -637,7 +656,14 @@ dom/nodes/moveBefore/css-transition-cross-document.html: HARNESS_ERROR
 dom/nodes/moveBefore/css-transition-cross-shadow.html: HARNESS_ERROR
 dom/nodes/moveBefore/css-transition-to-disconnected-document.html: HARNESS_ERROR
 dom/nodes/moveBefore/css-transition-trigger.html: HARNESS_ERROR
-dom/nodes/moveBefore/custom-element-move-reactions.html: HARNESS_ERROR
+dom/nodes/moveBefore/custom-element-move-reactions.html:
+- Reactions to atomic move are called in order of element, not in order of operation
+- When connectedCallback is not defined, no crash
+- When connectedMoveCallback is defined, it is called instead of disconnectedCallback/connectedCallback
+- When disconnectedCallback is not defined, no crash
+- the disconnected/connected callbacks should be called when no other callback is
+  defined
+- the element should stay connected during the callbacks
 dom/nodes/moveBefore/fieldset-child-blur-event.html:
 - The 'blur' event is not fired on children of HTMLFieldSetElement during moveBefore()
 dom/nodes/moveBefore/fire-focusin-focusout.html:
@@ -687,7 +713,6 @@ dom/nodes/moveBefore/pointer-events.html:
 dom/nodes/moveBefore/popover-preserve.html:
 - when reparenting an open popover, it shouldn't be closed automatically
 dom/nodes/moveBefore/relevant-mutations.html: HARNESS_ERROR
-dom/nodes/moveBefore/script-move-before.html: HARNESS_ERROR
 dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 - Option selectedness is updated on option and optgroup DOM moves
@@ -695,7 +720,8 @@ dom/nodes/moveBefore/selection-preserve.html: HARNESS_ERROR
 dom/nodes/moveBefore/slotchange-events.html: HARNESS_ERROR
 dom/nodes/moveBefore/style-applies.html: HARNESS_ERROR
 dom/nodes/query-target-in-load-event.html: HARNESS_ERROR
-dom/nodes/querySelector-mixed-case.html: HARNESS_ERROR
+dom/nodes/querySelector-mixed-case.html:
+- Mixed HTML/SVG/MathML tree with various mixed-case attributes
 dom/nodes/remove-and-adopt-thcrash.html:
 - Check that removing a node and then adopting its parent into a different window/document
   doesn't crash.
@@ -771,7 +797,6 @@ dom/traversal/TreeWalker-previousNodeLastChildReject.html:
 - Test that previousNode properly respects the filter.
 dom/traversal/TreeWalker-previousSiblingLastChildSkip.html:
 - Test that previousSibling properly respects the filter.
-dom/traversal/TreeWalker-realm.html: HARNESS_ERROR
 dom/traversal/TreeWalker-traversal-reject.html:
 - Testing nextNode
 - Testing previousNode
@@ -784,11 +809,14 @@ dom/traversal/TreeWalker-walking-outside-a-tree.html:
 dom/window-extends-event-target.html:
 - EventTarget methods on Window instances are inherited from the EventTarget prototype
 - window.addEventListener respects custom `this`
-dom/xpath-result-single-node-value-nullable.html: HARNESS_ERROR
 domparsing/DOMParser-parseFromString-encoding.html:
 - 'HTML: meta charset'
-domparsing/DOMParser-parseFromString-html.html: HARNESS_ERROR
-domparsing/DOMParser-parseFromString-stylesheets.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-html.html:
+- DOMParser should handle the content of <noembed> as raw text
+- DOMParser throws on an invalid enum value
+- Location value
+- Parsing of id attribute
+- compatMode
 domparsing/DOMParser-parseFromString-url-base-pushstate.html:
 - 'application/xhtml+xml invalid XML: created using a parser from the iframe and the
   method from this frame'
@@ -1046,8 +1074,37 @@ domparsing/DOMParser-parseFromString-xml-doctype.html:
 - Doctype parsing of System Id must fail on ommitted value
 domparsing/DOMParser-parseFromString-xml-internal-subset.html:
 - Parsing and serialization of doctype internal subset
-domparsing/DOMParser-parseFromString-xml-parsererror.html: HARNESS_ERROR
-domparsing/DOMParser-parseFromString-xml.html: HARNESS_ERROR
+domparsing/DOMParser-parseFromString-xml-parsererror.html:
+- ", 15<span"
+- ", 6</span>"
+- ", < span>2</span>"
+- ', <8:test xmlns:8="urn:x-test:test">16</8:test>'
+- ', <span ::="test">11</span>'
+- ', <span :test="testing">3</span>'
+- ', <span ="noattr">10</span>'
+- ", <span data-test=testing>14</span>"
+- ", <span novalue>9</span>"
+- ', <span x:test="testing">1</span>'
+- ', <span xmlns:="urn:x-test:test">12</span>'
+- ', <span xmlns:p1 xmlns:p2="urn:x-test:test"/>17'
+- ', <span xmlns:xmlns="">13</span>'
+- ", <span>5"
+- ", <span>7< /span>"
+- ", <span>8</ span>"
+- ", <span><em>4</span></em>"
+domparsing/DOMParser-parseFromString-xml.html:
+- Should parse correctly in type application/xhtml+xml
+- Should parse correctly in type application/xml
+- Should parse correctly in type image/svg+xml
+- Should parse correctly in type text/xml
+- Should return an error document for XML wellformedness errors in type application/xhtml+xml
+- Should return an error document for XML wellformedness errors in type application/xml
+- Should return an error document for XML wellformedness errors in type image/svg+xml
+- Should return an error document for XML wellformedness errors in type text/xml
+- scripting must be disabled with type application/xhtml+xml
+- scripting must be disabled with type application/xml
+- scripting must be disabled with type image/svg+xml
+- scripting must be disabled with type text/xml
 domparsing/XMLSerializer-serializeToString.html: HARNESS_ERROR
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
@@ -1119,7 +1176,293 @@ domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
 - streamHTML with trusted types and no default policy returns a WritableStream.
 - streamPrependHTML with trusted types and no default policy returns a WritableStream.
 domparsing/tentative/positional-methods-with-trusted-types.html: HARNESS_ERROR
-domparsing/tentative/positional-methods.html: HARNESS_ERROR
+domparsing/tentative/positional-methods.html:
+- 'Only unsafe variants should run scripts: Comment.afterHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.afterHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.afterHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.afterHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (Element)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (Element)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.afterHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.afterHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.afterHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.afterHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.appendHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.appendHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.appendHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.appendHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.beforeHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.beforeHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.beforeHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.beforeHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.prependHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.prependHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.prependHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.prependHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (Element)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (Element)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML (Element)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML (Element)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+  (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+  (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+  (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+  (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML (Element)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML (Element)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML (ShadowRoot)
+  (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+  (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+  (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+  (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+  (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+  (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+  (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+  (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+  (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+  (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+  (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+  (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+  (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.afterHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.afterHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.afterHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.afterHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.beforeHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.beforeHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.beforeHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.beforeHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTML (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTML (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTML (ShadowRoot) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTML (ShadowRoot) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (Element) (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (Element) (runScripts=true)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=false)'
+- 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (ShadowRoot)
+  (runScripts=true)'
+- 'Position check: Comment.afterHTML (Element)'
+- 'Position check: Comment.afterHTML (ShadowRoot)'
+- 'Position check: Comment.afterHTMLUnsafe (Element)'
+- 'Position check: Comment.afterHTMLUnsafe (ShadowRoot)'
+- 'Position check: Comment.beforeHTML (Element)'
+- 'Position check: Comment.beforeHTML (ShadowRoot)'
+- 'Position check: Comment.beforeHTMLUnsafe (Element)'
+- 'Position check: Comment.beforeHTMLUnsafe (ShadowRoot)'
+- 'Position check: Comment.replaceWithHTML (Element)'
+- 'Position check: Comment.replaceWithHTML (ShadowRoot)'
+- 'Position check: Comment.replaceWithHTMLUnsafe (Element)'
+- 'Position check: Comment.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Position check: Element.afterHTML (Element)'
+- 'Position check: Element.afterHTML (ShadowRoot)'
+- 'Position check: Element.afterHTMLUnsafe (Element)'
+- 'Position check: Element.afterHTMLUnsafe (ShadowRoot)'
+- 'Position check: Element.appendHTML (Element)'
+- 'Position check: Element.appendHTML (ShadowRoot)'
+- 'Position check: Element.appendHTMLUnsafe (Element)'
+- 'Position check: Element.appendHTMLUnsafe (ShadowRoot)'
+- 'Position check: Element.beforeHTML (Element)'
+- 'Position check: Element.beforeHTML (ShadowRoot)'
+- 'Position check: Element.beforeHTMLUnsafe (Element)'
+- 'Position check: Element.beforeHTMLUnsafe (ShadowRoot)'
+- 'Position check: Element.prependHTML (Element)'
+- 'Position check: Element.prependHTML (ShadowRoot)'
+- 'Position check: Element.prependHTMLUnsafe (Element)'
+- 'Position check: Element.prependHTMLUnsafe (ShadowRoot)'
+- 'Position check: Element.replaceWithHTML (Element)'
+- 'Position check: Element.replaceWithHTML (ShadowRoot)'
+- 'Position check: Element.replaceWithHTMLUnsafe (Element)'
+- 'Position check: Element.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Position check: ProcessingInstruction.afterHTML (Element)'
+- 'Position check: ProcessingInstruction.afterHTML (ShadowRoot)'
+- 'Position check: ProcessingInstruction.afterHTMLUnsafe (Element)'
+- 'Position check: ProcessingInstruction.afterHTMLUnsafe (ShadowRoot)'
+- 'Position check: ProcessingInstruction.beforeHTML (Element)'
+- 'Position check: ProcessingInstruction.beforeHTML (ShadowRoot)'
+- 'Position check: ProcessingInstruction.beforeHTMLUnsafe (Element)'
+- 'Position check: ProcessingInstruction.beforeHTMLUnsafe (ShadowRoot)'
+- 'Position check: ProcessingInstruction.replaceWithHTML (Element)'
+- 'Position check: ProcessingInstruction.replaceWithHTML (ShadowRoot)'
+- 'Position check: ProcessingInstruction.replaceWithHTMLUnsafe (Element)'
+- 'Position check: ProcessingInstruction.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Position check: Text.afterHTML (Element)'
+- 'Position check: Text.afterHTML (ShadowRoot)'
+- 'Position check: Text.afterHTMLUnsafe (Element)'
+- 'Position check: Text.afterHTMLUnsafe (ShadowRoot)'
+- 'Position check: Text.beforeHTML (Element)'
+- 'Position check: Text.beforeHTML (ShadowRoot)'
+- 'Position check: Text.beforeHTMLUnsafe (Element)'
+- 'Position check: Text.beforeHTMLUnsafe (ShadowRoot)'
+- 'Position check: Text.replaceWithHTML (Element)'
+- 'Position check: Text.replaceWithHTML (ShadowRoot)'
+- 'Position check: Text.replaceWithHTMLUnsafe (Element)'
+- 'Position check: Text.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.afterHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.afterHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.afterHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.afterHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.beforeHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.beforeHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.beforeHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.beforeHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.replaceWithHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.replaceWithHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Comment.replaceWithHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Comment.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.afterHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Element.afterHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.afterHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Element.afterHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.appendHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Element.appendHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.appendHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Element.appendHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.beforeHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Element.beforeHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.beforeHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Element.beforeHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.prependHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Element.prependHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.prependHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Element.prependHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.replaceWithHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Element.replaceWithHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Element.replaceWithHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Element.replaceWithHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTML (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTMLUnsafe
+  (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTMLUnsafe
+  (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTML (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTMLUnsafe
+  (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTMLUnsafe
+  (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTML
+  (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTML
+  (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTMLUnsafe
+  (Element)'
+- 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTMLUnsafe
+  (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.afterHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Text.afterHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.afterHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Text.afterHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.beforeHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Text.beforeHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.beforeHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Text.beforeHTMLUnsafe (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.replaceWithHTML (Element)'
+- 'Sanitizer should remove forbidden elements: Text.replaceWithHTML (ShadowRoot)'
+- 'Sanitizer should remove forbidden elements: Text.replaceWithHTMLUnsafe (Element)'
+- 'Sanitizer should remove forbidden elements: Text.replaceWithHTMLUnsafe (ShadowRoot)'
+- afterHTML fail silently if parent is a Document
+- afterHTML fail silently if parent is a DocumentFragment
+- afterHTMLUnsafe fail silently if parent is a Document
+- afterHTMLUnsafe fail silently if parent is a DocumentFragment
+- beforeHTML fail silently if parent is a Document
+- beforeHTML fail silently if parent is a DocumentFragment
+- beforeHTMLUnsafe fail silently if parent is a Document
+- beforeHTMLUnsafe fail silently if parent is a DocumentFragment
+- replaceWithHTML fail silently if parent is a Document
+- replaceWithHTML fail silently if parent is a DocumentFragment
+- replaceWithHTMLUnsafe fail silently if parent is a Document
+- replaceWithHTMLUnsafe fail silently if parent is a DocumentFragment
 domparsing/tentative/stream-append-html-unsafe.html:
 - Aborting streamAppendHTMLUnsafe()
 - Interleaved streamAppendHTMLUnsafe() writes
@@ -1151,7 +1494,11 @@ domparsing/tentative/stream-append-html.html:
 - writing a string to streamAppendHTML()
 - writing null or undefined to streamAppendHTML()
 - writing numbers to streamAppendHTML()
-domparsing/tentative/stream-html-custom-element.html: HARNESS_ERROR
+domparsing/tentative/stream-html-custom-element.html:
+- streamAppendHTMLUnsafe should trigger CE reactions
+- streamAppendHTMLUnsafe should use scoped custom element registry
+- streamHTMLUnsafe should trigger CE reactions
+- streamHTMLUnsafe should use scoped custom element registry
 domparsing/tentative/stream-html-defer-async-script.html:
 - element.streamAppendHTMLUnsafe with defer/async scripts
 - element.streamHTMLUnsafe with defer/async scripts
@@ -1406,7 +1753,6 @@ domparsing/tentative/stream-html-sanitizer.html:
 - 'element.streamReplaceWithHTMLUnsafe: sanitizer takes effect after foster parenting'
 - 'element.streamReplaceWithHTMLUnsafe: sanitizer with foster parenting: removeElements'
 - 'element.streamReplaceWithHTMLUnsafe: sanitizer with foster parenting: replaceWithChildrenElements'
-domparsing/tentative/stream-html-script-safe.html: HARNESS_ERROR
 domparsing/tentative/stream-html-unsafe.html:
 - Aborting streamHTMLUnsafe()
 - Interleaved streamHTMLUnsafe() writes
@@ -1487,8 +1833,135 @@ domparsing/tentative/stream-html.html:
 - writing a string to streamHTML()
 - writing null or undefined to streamHTML()
 - writing numbers to streamHTML()
-domparsing/tentative/stream-insertion-logic.html: HARNESS_ERROR
-domparsing/tentative/stream-positional.html: HARNESS_ERROR
+domparsing/tentative/stream-insertion-logic.html:
+- streamAfterHTML with a ref_node at end
+- streamAfterHTML with a ref_node in the middle
+- streamAfterHTMLUnsafe with a ref_node at end
+- streamAfterHTMLUnsafe with a ref_node in the middle
+- streamAppendHTML without a ref node
+- streamAppendHTMLUnsafe without a ref node
+- streamBeforeHTML in a ShadowRoot
+- streamBeforeHTML should reject if ref node is no longer child of the same parent
+- streamBeforeHTML should reject if ref node is removed
+- streamBeforeHTML with a comment ref_node
+- streamBeforeHTML with a ref_node at end
+- streamBeforeHTML with a ref_node at start
+- streamBeforeHTML with a ref_node in the middle
+- streamBeforeHTML with a text ref_node
+- streamBeforeHTMLUnsafe in a ShadowRoot
+- streamBeforeHTMLUnsafe should reject if ref node is no longer child of the same
+  parent
+- streamBeforeHTMLUnsafe should reject if ref node is removed
+- streamBeforeHTMLUnsafe with a comment ref_node
+- streamBeforeHTMLUnsafe with a ref_node at end
+- streamBeforeHTMLUnsafe with a ref_node at start
+- streamBeforeHTMLUnsafe with a ref_node in the middle
+- streamBeforeHTMLUnsafe with a text ref_node
+- streamPrependHTML in a ShadowRoot
+- streamPrependHTML should reject if ref node is no longer child of the same parent
+- streamPrependHTML should reject if ref node is removed
+- streamPrependHTML with a comment ref_node
+- streamPrependHTML with a ref_node at start
+- streamPrependHTML with a text ref_node
+- streamPrependHTML without a ref node
+- streamPrependHTMLUnsafe in a ShadowRoot
+- streamPrependHTMLUnsafe should reject if ref node is no longer child of the same
+  parent
+- streamPrependHTMLUnsafe should reject if ref node is removed
+- streamPrependHTMLUnsafe with a comment ref_node
+- streamPrependHTMLUnsafe with a ref_node at start
+- streamPrependHTMLUnsafe with a text ref_node
+- streamPrependHTMLUnsafe without a ref node
+- streamReplaceWithHTML in a ShadowRoot
+- streamReplaceWithHTML should reject if ref node is no longer child of the same parent
+- streamReplaceWithHTML should reject if ref node is removed
+- streamReplaceWithHTML with a comment ref_node
+- streamReplaceWithHTML with a ref_node at end
+- streamReplaceWithHTML with a ref_node at start
+- streamReplaceWithHTML with a ref_node in the middle
+- streamReplaceWithHTML with a text ref_node
+- streamReplaceWithHTMLUnsafe in a ShadowRoot
+- streamReplaceWithHTMLUnsafe should reject if ref node is no longer child of the
+  same parent
+- streamReplaceWithHTMLUnsafe should reject if ref node is removed
+- streamReplaceWithHTMLUnsafe with a comment ref_node
+- streamReplaceWithHTMLUnsafe with a ref_node at end
+- streamReplaceWithHTMLUnsafe with a ref_node at start
+- streamReplaceWithHTMLUnsafe with a ref_node in the middle
+- streamReplaceWithHTMLUnsafe with a text ref_node
+domparsing/tentative/stream-positional.html:
+- streamAfterHTML throw if parent is a Document
+- streamAfterHTML throw if parent is a DocumentFragment
+- streamAfterHTML({"runScripts":false}) should not run scripts
+- streamAfterHTML({"runScripts":true}) should not run scripts
+- streamAfterHTML({}) with <p>A</p> and <p>B</p>
+- streamAfterHTML({}) with <p>A</p> and B
+- streamAfterHTML({}) with A and <p>B</p>
+- streamAfterHTML({}) with A and B
+- streamAfterHTMLUnsafe throw if parent is a Document
+- streamAfterHTMLUnsafe throw if parent is a DocumentFragment
+- streamAfterHTMLUnsafe({"runScripts":false}) should not run scripts
+- streamAfterHTMLUnsafe({"runScripts":true}) should run scripts
+- streamAfterHTMLUnsafe({}) with <p>A</p> and <p>B</p>
+- streamAfterHTMLUnsafe({}) with <p>A</p> and B
+- streamAfterHTMLUnsafe({}) with A and <p>B</p>
+- streamAfterHTMLUnsafe({}) with A and B
+- streamAppendHTML({"runScripts":false}) should not run scripts
+- streamAppendHTML({"runScripts":true}) should not run scripts
+- streamAppendHTML({}) with <p>A</p> and <p>B</p>
+- streamAppendHTML({}) with <p>A</p> and B
+- streamAppendHTML({}) with A and <p>B</p>
+- streamAppendHTML({}) with A and B
+- streamAppendHTMLUnsafe({"runScripts":false}) should not run scripts
+- streamAppendHTMLUnsafe({"runScripts":true}) should run scripts
+- streamAppendHTMLUnsafe({}) with <p>A</p> and <p>B</p>
+- streamAppendHTMLUnsafe({}) with <p>A</p> and B
+- streamAppendHTMLUnsafe({}) with A and <p>B</p>
+- streamAppendHTMLUnsafe({}) with A and B
+- streamBeforeHTML throw if parent is a Document
+- streamBeforeHTML throw if parent is a DocumentFragment
+- streamBeforeHTML({"runScripts":false}) should not run scripts
+- streamBeforeHTML({"runScripts":true}) should not run scripts
+- streamBeforeHTML({}) with <p>A</p> and <p>B</p>
+- streamBeforeHTML({}) with <p>A</p> and B
+- streamBeforeHTML({}) with A and <p>B</p>
+- streamBeforeHTML({}) with A and B
+- streamBeforeHTMLUnsafe throw if parent is a Document
+- streamBeforeHTMLUnsafe throw if parent is a DocumentFragment
+- streamBeforeHTMLUnsafe({"runScripts":false}) should not run scripts
+- streamBeforeHTMLUnsafe({"runScripts":true}) should run scripts
+- streamBeforeHTMLUnsafe({}) with <p>A</p> and <p>B</p>
+- streamBeforeHTMLUnsafe({}) with <p>A</p> and B
+- streamBeforeHTMLUnsafe({}) with A and <p>B</p>
+- streamBeforeHTMLUnsafe({}) with A and B
+- streamPrependHTML({"runScripts":false}) should not run scripts
+- streamPrependHTML({"runScripts":true}) should not run scripts
+- streamPrependHTML({}) with <p>A</p> and <p>B</p>
+- streamPrependHTML({}) with <p>A</p> and B
+- streamPrependHTML({}) with A and <p>B</p>
+- streamPrependHTML({}) with A and B
+- streamPrependHTMLUnsafe({"runScripts":false}) should not run scripts
+- streamPrependHTMLUnsafe({"runScripts":true}) should run scripts
+- streamPrependHTMLUnsafe({}) with <p>A</p> and <p>B</p>
+- streamPrependHTMLUnsafe({}) with <p>A</p> and B
+- streamPrependHTMLUnsafe({}) with A and <p>B</p>
+- streamPrependHTMLUnsafe({}) with A and B
+- streamReplaceWithHTML throw if parent is a Document
+- streamReplaceWithHTML throw if parent is a DocumentFragment
+- streamReplaceWithHTML({"runScripts":false}) should not run scripts
+- streamReplaceWithHTML({"runScripts":true}) should not run scripts
+- streamReplaceWithHTML({}) with <p>A</p> and <p>B</p>
+- streamReplaceWithHTML({}) with <p>A</p> and B
+- streamReplaceWithHTML({}) with A and <p>B</p>
+- streamReplaceWithHTML({}) with A and B
+- streamReplaceWithHTMLUnsafe throw if parent is a Document
+- streamReplaceWithHTMLUnsafe throw if parent is a DocumentFragment
+- streamReplaceWithHTMLUnsafe({"runScripts":false}) should not run scripts
+- streamReplaceWithHTMLUnsafe({"runScripts":true}) should run scripts
+- streamReplaceWithHTMLUnsafe({}) with <p>A</p> and <p>B</p>
+- streamReplaceWithHTMLUnsafe({}) with <p>A</p> and B
+- streamReplaceWithHTMLUnsafe({}) with A and <p>B</p>
+- streamReplaceWithHTMLUnsafe({}) with A and B
 domparsing/xmldomparser.html:
 - XML Dom Parse readyState Test
 encoding/bom-handling.html:
@@ -1786,8 +2259,15 @@ encoding/textdecoder-utf16-surrogates.any.js:
 - utf-16le - unmatched surrogate lead (fatal flag set)
 - utf-16le - unmatched surrogate trail
 - utf-16le - unmatched surrogate trail (fatal flag set)
-encoding/utf-32-from-win1252.html: HARNESS_ERROR
-encoding/utf-32.html: HARNESS_ERROR
+encoding/utf-32-from-win1252.html:
+- Expect resources/utf-32-big-endian-bom.html to parse as windows-1252
+- Expect resources/utf-32-big-endian-nobom.html to parse as windows-1252
+- Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
+- Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
+- Expect resources/utf-32-little-endian-nobom.html to parse as windows-1252
+encoding/utf-32.html:
+- Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
+- Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
 html/webappapis/microtask-queuing/queue-microtask-cross-realm-callback-report-exception.html: HARNESS_ERROR
 html/webappapis/timers/setinterval-cross-realm-callback-report-exception.html: HARNESS_ERROR
 html/webappapis/timers/settimeout-cross-realm-callback-report-exception.html: HARNESS_ERROR
