@@ -35,10 +35,20 @@ module Capybara
     # `stored_at`/`max_age` pair — that just means freshness is computed
     # against a transient mix, never corrupted.
     class AssetCache
-      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :must_revalidate, :immutable, keyword_init: true) do
+      Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :no_cache, :immutable, keyword_init: true) do
+        # `must-revalidate` (RFC 9111 §5.2.2.2) only forbids reusing a
+        # response *once it has become stale* without revalidation — it
+        # does NOT force revalidation while the entry is still fresh, and
+        # this cache never serves a stale entry without revalidating
+        # anyway (lookup falls through to a conditional re-dispatch). So
+        # `must-revalidate` has no effect on freshness here. Only
+        # `no-cache` (§5.2.2.4), which requires validation before EVERY
+        # use, blocks a fresh entry. Conflating the two made Vite/Rails
+        # assets (`max-age=2419200, must-revalidate`) revalidate on every
+        # fetch instead of being served fresh like a real browser does.
         def fresh?(now = Time.now)
           return false unless max_age
-          return false if must_revalidate
+          return false if no_cache
           (now - stored_at) < max_age
         end
       end
@@ -94,7 +104,7 @@ module Capybara
           body:            body,
           stored_at:       Time.now,
           max_age:         max_age || (fingerprinted ? 365 * 24 * 3600 : nil),
-          must_revalidate: (cc[:no_cache] || cc[:must_revalidate]) && !fingerprinted,
+          no_cache:        cc[:no_cache] && !fingerprinted,
           immutable:       cc[:immutable] == true || fingerprinted
         )
       end
@@ -112,9 +122,15 @@ module Capybara
       def refresh(entry, new_headers)
         h  = ensure_lowercase(new_headers)
         cc = parse_cache_control(h['cache-control'])
-        entry.stored_at       = Time.now
-        entry.max_age         = freshness_seconds(cc, h) || entry.max_age
-        entry.must_revalidate = cc[:no_cache] || cc[:must_revalidate]
+        entry.stored_at = Time.now
+        entry.max_age   = freshness_seconds(cc, h) || entry.max_age
+        # RFC 9111 §4.3.4: a 304 UPDATES stored header fields with the ones
+        # it carries; it does not delete them. A bare 304 (no Cache-Control —
+        # the common ETag / Last-Modified revalidation) must therefore PRESERVE
+        # the stored no-cache flag, otherwise a `no-cache` resource would stop
+        # revalidating after its first 304 and start serving fresh. Only a 304
+        # that actually resends Cache-Control re-derives it.
+        entry.no_cache  = h['cache-control'] ? (cc[:no_cache] && !entry.immutable) : entry.no_cache
         entry
       end
 
@@ -162,10 +178,12 @@ module Capybara
           case m[:key].downcase
           when 'no-store'         then out[:no_store]         = true
           when 'no-cache'         then out[:no_cache]         = true
-          when 'must-revalidate'  then out[:must_revalidate]  = true
           when 'immutable'        then out[:immutable]        = true
           when 'max-age'          then out[:max_age]          = m[:val].to_i if m[:val]
-          when 's-maxage'         then out[:max_age]        ||= m[:val].to_i if m[:val]
+          # `s-maxage` applies to SHARED caches only (RFC 9111 §5.2.2.10); a
+          # browser is a private cache and MUST ignore it — otherwise an
+          # `s-maxage=N` response with no `max-age` would be served fresh for
+          # N instead of revalidated, diverging from a real browser.
           end
         }
         out
