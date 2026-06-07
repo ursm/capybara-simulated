@@ -56,15 +56,6 @@ module Capybara
       # RFC 9111 §3: status codes cacheable by default.
       CACHEABLE_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
 
-      # A 20+ hex run in the path means the URL itself is the content
-      # digest (`/extra-locales/<sha1>/en/main.js`,
-      # `/theme-javascripts/<sha1>.js`, Rails fingerprinted assets).
-      # The response can't vary without the URL changing, so we treat
-      # such entries as immutable even when the host sends `no-store` —
-      # Discourse's locale/theme endpoints do this defensively, paying
-      # the per-test refetch cost a real browser amortises.
-      FINGERPRINTED_URL = %r{/[0-9a-f]{20,}(?:[./]|\z)}.freeze
-
       # `Vary` fields we can safely ignore because Simulated never sends
       # the corresponding request header — the cached "no value" variant
       # is always applicable. `Accept-Encoding` is the common one Rails
@@ -78,11 +69,11 @@ module Capybara
       def lookup(url) = @entries[url]
       def clear      = @entries.clear
 
-      # Per-test reset path: keep `Cache-Control: immutable` entries
-      # (Rails-fingerprinted assets — the URL is content-addressable so
-      # a stale entry can't shadow a later test's response) and drop
-      # everything else. Across a Discourse 6-spec run this turns ~6 s
-      # of repeat module-source fetches into hash hits.
+      # Per-test reset path: keep entries the server marked
+      # `Cache-Control: immutable` (declared not to change for their
+      # freshness lifetime, so a kept entry can't shadow a later test's
+      # response) and drop everything else, so test-local DB state
+      # reaches the app on the next visit.
       def clear_volatile
         @entries.reject! {|_, e| e.immutable }
       end
@@ -92,20 +83,23 @@ module Capybara
         h = ensure_lowercase(headers)
         return unless vary_compatible?(h['vary'])
         cc = parse_cache_control(h['cache-control'])
-        fingerprinted = url.match?(FINGERPRINTED_URL)
-        return if cc[:no_store] && !fingerprinted
+        # Honour the server's explicit directives only (RFC 9111) — no
+        # URL-shape heuristic. `no-store` MUST NOT be stored (§5.2.2.5),
+        # full stop; whether a URL "looks fingerprinted" is a guess that
+        # can misfire and serve a genuinely no-store response stale.
+        return if cc[:no_store]
         max_age = freshness_seconds(cc, h)
-        # No freshness info and no validators → nothing useful to cache
-        # unless the URL itself is content-addressable.
-        return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil? && !fingerprinted
+        # Nothing useful to cache without a freshness signal or a
+        # validator to revalidate against.
+        return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil?
         @entries[url] = Entry.new(
-          status:          status,
-          headers:         h,
-          body:            body,
-          stored_at:       Time.now,
-          max_age:         max_age || (fingerprinted ? 365 * 24 * 3600 : nil),
-          no_cache:        cc[:no_cache] && !fingerprinted,
-          immutable:       cc[:immutable] == true || fingerprinted
+          status:    status,
+          headers:   h,
+          body:      body,
+          stored_at: Time.now,
+          max_age:   max_age,
+          no_cache:  cc[:no_cache],
+          immutable: cc[:immutable] == true
         )
       end
 
@@ -130,7 +124,7 @@ module Capybara
         # the stored no-cache flag, otherwise a `no-cache` resource would stop
         # revalidating after its first 304 and start serving fresh. Only a 304
         # that actually resends Cache-Control re-derives it.
-        entry.no_cache  = h['cache-control'] ? (cc[:no_cache] && !entry.immutable) : entry.no_cache
+        entry.no_cache  = h['cache-control'] ? cc[:no_cache] : entry.no_cache
         entry
       end
 
