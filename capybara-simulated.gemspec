@@ -31,18 +31,18 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'rack',     '>= 2.2'
 
   # JS engine is a soft dependency — add exactly one to your Gemfile.
-  # The engine is auto-selected based on which is loadable; `mini_racer`
-  # wins when both are present. Override explicitly with
+  # The engine is auto-selected based on which is loadable; `:v8` wins when
+  # both are present. Override explicitly with
   # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
   #
-  # The V8 engine comes from `mini_racer-csim`, a fork that adds the native
-  # ES Module API + cached_data + reset_realm surface upstream lacks — stock
-  # `mini_racer` 0.21.x does not expose `Context#compile_module` /
-  # `Context#dynamic_import_resolver=` / `Context#reset_realm` and will
-  # NoMethodError on the first `<script type="module">`. (The fork ships its
-  # library as `mini_racer`, so both gem names auto-select the `:v8` engine.)
+  # The V8 engine is `mini_racer-csim`, our fork of mini_racer that adds the
+  # native ES Module API + cached_data + reset_realm / realms surface upstream
+  # lacks. It lives under its own `MiniRacerCsim` namespace / `mini_racer_csim`
+  # require path, so it never collides with upstream `mini_racer` in the same
+  # bundle. Stock `mini_racer` is NOT a substitute (different namespace, and it
+  # lacks `compile_module` / `dynamic_import_resolver=` / `reset_realm`).
   #
-  #   gem 'mini_racer-csim', '>= 0.21.1' # V8 (JIT, fastest per spec)
-  #   gem 'quickjs',         '>= 0.18'   # QuickJS (interpreter, smaller per-VM
-  #                                      # footprint; wins on parallelism).
+  #   gem 'mini_racer-csim', '>= 0.21.1.2' # V8 (JIT, fastest per spec)
+  #   gem 'quickjs',         '>= 0.18'     # QuickJS (interpreter, smaller per-VM
+  #                                        # footprint; wins on parallelism).
 end
