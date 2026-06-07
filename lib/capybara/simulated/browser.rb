@@ -73,13 +73,35 @@ module Capybara
       # Capybara's outer synchronize gets one retry against the new
       # context.
       POST_NAV_POLL_GRACE_POLLS = 10
-      # Fallback fixed step when wall-elapsed is 0 ms (e.g. nested
-      # tick calls from the same Ruby boundary, or a brand-new
-      # session whose last_tick_ts has just been initialised). Kept
-      # tiny so a same-frame double-call doesn't accidentally fire
-      # debounces; the wall-sync path in `tick_real_time` is the
-      # main clock driver.
-      TICK_STEP_MS = 50
+      # Deterministic virtual-clock model (replaces the old wall-sync, where each
+      # tick advanced by REAL wall-elapsed and so coupled virtual time to JS/Ruby/GC
+      # speed — a faster `visible_text` shifted WHEN debounces fired, e.g. Avo
+      # actions_spec:464). Now each poll advances by a FIXED step; near-future
+      # timers on an otherwise-idle page are fast-forwarded to (horizon-gated).
+      #
+      # 100 ms is empirically the floor that lets a "commit debounce scheduled
+      # between two user actions" fire before the next action (Avo actions_spec:464's
+      # ~50-75 ms field-commit flips at step 10/50, fixed at >=75). Group-A
+      # transient-catch observability does NOT depend on this step — it comes from
+      # the `timer_wait_elapsed?` FREQUENCY gate (the first find after an action
+      # doesn't tick, so the pre-debounce state is observed regardless of step
+      # size), so a larger step completes Group-B without losing Group-A (verified
+      # green at 100 across gem 1579, WPT 660, Forem, Avo, :464 passing). Clamped
+      # >=1 so a `CSIM_POLL_TICK_STEP_MS=0` misconfig can't freeze the fixed-step path.
+      POLL_TICK_STEP_MS = [(ENV['CSIM_POLL_TICK_STEP_MS'] || '100').to_i, 1].max
+      # Horizon-gated fast-forward: when the page is observably idle (no timer due
+      # now, no background IO) but a timer is parked within this horizon, jump the
+      # virtual clock straight to it instead of waiting ~delay/step polls. A timer
+      # farther out (ahoy 1000 ms, session-timeout, analytics) is LEFT parked. 600
+      # clears every legit must-fire wait (Backburner/DTextField 500, refetch/chart
+      # <=200, image-grid 64) while staying BELOW ahoy's 1000. `=0` disables FF →
+      # pure deterministic fixed-step (the fallback model).
+      FF_HORIZON_MS = (ENV['CSIM_FF_HORIZON_MS'] || '600').to_i
+      # Transient guard: hold the page pre-debounce for this many consecutive idle
+      # polls before allowing a fast-forward, so "catch the DOM before the 200 ms
+      # debounce fires" tests (Discourse refetchForSearch / doubled-filter, Avo
+      # filters) still observe the intermediate state across several polls.
+      FF_TRANSIENT_GUARD_POLLS = (ENV['CSIM_FF_TRANSIENT_GUARD_POLLS'] || '6').to_i
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
       # Per-`run_loop_step` task cap (its `maxIter`). Bounds a self-rescheduling
@@ -101,11 +123,6 @@ module Capybara
       # the ~5-10 % wall on action-heavy suites where Capybara would
       # otherwise poll N times to catch a single debounce.
       USER_ACTION_DRAIN_MS = (ENV['CSIM_USER_ACTION_DRAIN_MS'] || '0').to_i
-      # Upper bound on a single tick's virtual advance. Prevents a
-      # long Ruby pause (asset compile, debugger break) from being
-      # replayed as one giant drain that fires every debounce in
-      # the queue at once.
-      MAX_TICK_MS = 1000
       # Per-iter microtask drain depth. mini_racer drains one round
       # per `eval` boundary, so this is the supported chained-await
       # depth before we punt to drain_timers and let the virtual clock
@@ -153,6 +170,11 @@ module Capybara
         @app                          = app
         @driver                       = driver
         @runtime                      = build_runtime(js_engine)
+        # Per-poll clock decisions cached at construction (CLAUDE.md rule 3 — the
+        # runtime type + env are fixed for the session): the wall-sync escape
+        # hatch and whether the runtime exposes the fast-forward timer query.
+        @clock_wall                   = !ENV['CSIM_CLOCK_WALL'].nil?
+        @runtime_supports_ff          = @runtime.respond_to?(:next_timer_delay_ms)
         @current_url                  = nil
         # Real browsers yield control between asynchronous URL
         # transitions (XHR-driven model loads, then `replaceWith` to a
@@ -280,14 +302,14 @@ module Capybara
       WORKER_TERMINATE_GRACE = 0.05
       private_constant :WORKER_POLL_INTERVAL, :WORKER_TERMINATE_GRACE
 
-      # `js_engine` picks the JS runtime: `:v8` (mini_racer, fastest
+      # `js_engine` picks the JS runtime: `:v8` (mini_racer-csim, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
       # wins on parallelism). Both gems are soft dependencies; pass nil
-      # to auto-select whichever is installed. The V8 engine ships under
-      # either `mini_racer` (upstream) or `mini_racer-csim` (the fork
-      # carrying reset_realm / the native module API) — both provide the
-      # same `MiniRacer` surface, so either gem name selects `:v8`.
-      ENGINE_GEM = {v8: %w[mini_racer mini_racer-csim], quickjs: %w[quickjs]}.freeze
+      # to auto-select whichever is installed. The V8 engine is
+      # `mini_racer-csim`, our fork of mini_racer carrying reset_realm /
+      # realms / the native module API under its own `MiniRacerCsim`
+      # namespace (so it never collides with upstream `mini_racer`).
+      ENGINE_GEM = {v8: %w[mini_racer-csim], quickjs: %w[quickjs]}.freeze
       private_constant :ENGINE_GEM
 
       def build_runtime(engine)
@@ -424,7 +446,7 @@ module Capybara
       # JS-side selector parser throws a `DOMException('csim: …',
       # 'SyntaxError')`. The JS engine surfaces it as a `…::SyntaxError`
       # (QuickJS via dynamic-named class) or, under mini_racer, a
-      # `MiniRacer::RuntimeError` whose message is `"SyntaxError: csim: …"`.
+      # `MiniRacerCsim::RuntimeError` whose message is `"SyntaxError: csim: …"`.
       # Match the `csim: ` marker anywhere in the message (it's no longer at
       # the start once the DOMException name is prefixed) or the class suffix,
       # so neither gem becomes a hard dependency.
@@ -1642,15 +1664,13 @@ module Capybara
       end
 
       # Advance the virtual JS clock and fire timers that came due.
-      # When `step_ms` is omitted, advance by the wall-clock ms
-      # elapsed since the last tick (clamped to MAX_TICK_MS) — this
-      # is the wall-sync model: Capybara polls every retry_interval
-      # ms of wall, each find here advances virtual by the same
-      # amount, and a 200 ms debounce naturally fires after 20 polls
-      # the way a real browser would observe it. Explicit `step_ms`
-      # is used by `SleepHook#advance_virtual_clock_ms` (from
-      # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout`
-      # to step a precise virtual duration.
+      # When `step_ms` is omitted, advance by `horizon_fast_forward_step` — a
+      # DETERMINISTIC step (never wall-derived, so per-poll JS/Ruby/GC cost can't
+      # shift when a timer fires): a fixed `POLL_TICK_STEP_MS` per poll, fast-
+      # forwarding straight to a near-future timer when the page is otherwise idle.
+      # Explicit `step_ms` is used by `SleepHook#advance_virtual_clock_ms` (from
+      # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
+      # precise virtual duration.
       def tick_real_time(step_ms: nil)
         return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
@@ -1661,8 +1681,11 @@ module Capybara
         @ticking = true
         begin
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          effective_step = step_ms || ((now - (@last_tick_ts || now)) * 1000).to_i.clamp(0, MAX_TICK_MS)
+          # Kept wall-anchored ONLY for `timer_wait_elapsed?` / FIND_PRE_TICK_MIN_S
+          # (gates tick FREQUENCY for the smoke first-find-no-fire contract); the
+          # step SIZE below is deterministic.
           @last_tick_ts = now
+          effective_step = step_ms || horizon_fast_forward_step
           if @timers_active && effective_step > 0
             r = @runtime.run_loop_step(effective_step)
             # `dirtied` (settleGen changed) catches a render-phase rAF / microtask-
@@ -1701,6 +1724,58 @@ module Capybara
         consume_pending_download
       end
 
+      # This tick's deterministic virtual-clock advance (ms). Default is the fixed
+      # `POLL_TICK_STEP_MS` — never wall-derived, so per-poll JS/Ruby/GC cost cannot
+      # shift WHEN a timer fires (the wall-sync↔perf coupling this replaces). When
+      # the page is observably idle (nothing runnable now, no background IO) but a
+      # near-future timer is parked within `FF_HORIZON_MS`, fast-forward straight to
+      # it — but only after the transient-guard window so pre-debounce states are
+      # still observed across several polls. `FF_HORIZON_MS=0` ⇒ pure fixed-step.
+      def horizon_fast_forward_step
+        # Escape hatch to the legacy wall-sync clock (virtual advance = real
+        # wall-elapsed per poll). The deterministic model decouples perf from
+        # timing but can't match a real browser's wall-proportional cadence for
+        # timing-fragile heavy-JS flows; `CSIM_CLOCK_WALL=1` restores wall-sync.
+        if @clock_wall
+          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          step = ((now - (@wall_clock_last || now)) * 1000).to_i.clamp(0, 1000)
+          @wall_clock_last = now
+          return step
+        end
+        # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
+        #     land before jumping the clock: advance one fixed step, reset the guard.
+        if worker_pending? || event_source_pending? || hijack_fetch_pending?
+          @ff_transient_polls = 0
+          return POLL_TICK_STEP_MS
+        end
+        # No fast-forward support on this runtime (e.g. a worker realm) → fixed step.
+        return POLL_TICK_STEP_MS unless @runtime_supports_ff
+        # ONE V8 crossing: `delay` = ms until the nearest timer; 0 = runnable now
+        # (a rAF or a due-now timer — equivalent to `has_ready_timer?`), -1 = none.
+        delay = @runtime.next_timer_delay_ms
+        # (2) Runnable now → fixed step, reset guard (not a quiet pre-debounce window).
+        if delay.zero?
+          @ff_transient_polls = 0
+          return POLL_TICK_STEP_MS
+        end
+        # (3) Nothing parked → nothing to fast-forward to.
+        return POLL_TICK_STEP_MS if delay.negative?
+        # (4) Beyond the horizon (ahoy 1000 / session-timeout / analytics): leave
+        #     parked, advance only at the fixed rate. Not a transient window.
+        if delay > FF_HORIZON_MS
+          @ff_transient_polls = 0
+          return POLL_TICK_STEP_MS
+        end
+        # (5) Near-future timer, page idle: hold the pre-debounce window for the
+        #     guard so transient-catch tests observe the intermediate state.
+        @ff_transient_polls = (@ff_transient_polls || 0) + 1
+        return POLL_TICK_STEP_MS if @ff_transient_polls < FF_TRANSIENT_GUARD_POLLS
+        # (6) Fast-forward: jump exactly to the next timer's due. `runLoopStepLocal`
+        #     breaks on strict `nextDue > limit`, so `limit = virtualNow + delay`
+        #     (== that timer's due) fires it — and ONLY it, not a timer 1 ms later.
+        delay
+      end
+
       def advance_virtual_clock_ms(ms)
         ms = ms.to_i
         tick_real_time(step_ms: ms) if ms > 0
@@ -1713,12 +1788,14 @@ module Capybara
       # every failing matcher through the full `default_max_wait_time`
       # retry loop.
       def reset_timer_state
-        @last_tick_ts      = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @timers_active     = false
-        @polling_grace     = nil
-        @last_polled_gen   = nil
-        @idle_settle_polls = 0
-        @context_gen      += 1
+        @last_tick_ts       = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        @wall_clock_last    = @last_tick_ts   # CSIM_CLOCK_WALL escape hatch: don't replay the prev page's gap
+        @timers_active      = false
+        @polling_grace      = nil
+        @last_polled_gen    = nil
+        @idle_settle_polls  = 0
+        @ff_transient_polls = 0
+        @context_gen       += 1
       end
 
       attr_reader :context_gen
@@ -2346,7 +2423,7 @@ module Capybara
       # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
       # row-major RGBA buffer. Returns `{width, height, refId}` — the
       # raw bytes land in the transfer-buffer registry so the JS side
-      # fetches them as a `Uint8Array` via `MiniRacer::Binary` rather
+      # fetches them as a `Uint8Array` via `MiniRacerCsim::Binary` rather
       # than building a 423 MB latin-1 + base64 intermediate for the
       # 8900×8900 frames Discourse uploads exercise. Optional
       # `max_w`/`max_h` lets the caller pre-shrink for cheap OCR-style
@@ -2439,7 +2516,7 @@ module Capybara
       def transfer_buffer_fetch_for_js(id)
         bytes = transfer_buffer_fetch(id)
         return nil unless bytes
-        return MiniRacer::Binary.new(bytes) if defined?(MiniRacer::Binary)
+        return MiniRacerCsim::Binary.new(bytes) if defined?(MiniRacerCsim::Binary)
         Base64.strict_encode64(bytes)
       end
 
@@ -2718,17 +2795,44 @@ module Capybara
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
       def response_hash(status, headers, body, url, redirected)
-        body_str = body.to_s
+        raw     = body.to_s
+        hdrs    = stringify(headers)
+        is_text = text_response?(hdrs)
         out = {
           'status'     => status,
-          'headers'    => stringify(headers),
-          'body'       => body_str,
+          'headers'    => hdrs,
+          # Text responses cross the mini_racer boundary as UTF-8, so a UTF-16 /
+          # BOM-prefixed body must be decoded here (JS only sees the resulting
+          # characters). Matches the encoding-sniff step of the HTML "decode"
+          # algorithm: a leading BOM selects the encoding and is itself removed.
+          'body'       => is_text ? decode_response_bom(raw) : raw,
           'url'        => url,
           'redirected' => redirected,
           'type'       => 'basic'
         }
-        out['body_b64'] = Base64.strict_encode64(body_str) unless text_response?(out['headers'])
+        out['body_b64'] = Base64.strict_encode64(raw) unless is_text
         out
+      end
+
+      # Strip + decode a single leading byte-order mark, mapping the body to a
+      # UTF-8 Ruby string. No BOM → return the bytes untouched (the hot path:
+      # just a 2–3 byte prefix check). One BOM is consumed; any further BOMs are
+      # ordinary U+FEFF characters in the decoded text (per spec the parser does
+      # not strip them again).
+      def decode_response_bom(s)
+        b = s.b
+        if b.start_with?("\xEF\xBB\xBF".b)
+          b.byteslice(3..).force_encoding(Encoding::UTF_8)
+        elsif b.start_with?("\xFF\xFE".b) || b.start_with?("\xFE\xFF".b)
+          # Generic UTF-16: the BOM picks endianness and is dropped by the decoder.
+          # Replace malformed units rather than raising (a truncated/odd-length
+          # body still yields readable UTF-8 instead of falling back to raw bytes).
+          b.force_encoding(Encoding::UTF_16).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+        else
+          s
+        end
+      rescue StandardError
+        s
       end
 
       def text_response?(headers)

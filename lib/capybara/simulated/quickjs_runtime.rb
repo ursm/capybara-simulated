@@ -180,6 +180,14 @@ module Capybara
         !!vm.call('__hasReadyTimer')
       end
 
+      # Delay (ms) until the nearest scheduled timer relative to the virtual
+      # clock, or -1 if none. Drives the horizon-gated fast-forward in
+      # `Browser#tick_real_time`.
+      def next_timer_delay_ms
+        return -1 if @vm.nil?
+        vm.call('__nextTimerDelay').to_i
+      end
+
       def reset_timers
         return if @vm.nil?
         vm.call('__resetTimers')

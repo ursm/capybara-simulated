@@ -11,7 +11,7 @@
 
 require 'digest'
 require 'fileutils'
-require 'mini_racer'
+require 'mini_racer_csim'
 require 'set'
 
 require_relative 'runtime_shared'
@@ -28,7 +28,7 @@ begin
   # bytecode cache blobs become process-local (V8 embeds isolate
   # state in `CreateCodeCache` under single-threaded). Always run
   # multi-threaded.
-  MiniRacer::Platform.set_flags!(stack_size: stack_kb)
+  MiniRacerCsim::Platform.set_flags!(stack_size: stack_kb)
   # Default V8 old-space cap is ~1.4 GB, which OOMs on workloads that
   # marshal large pixel buffers across postMessage (Discourse's
   # media-optimization-worker hands a 317 MB raw RGBA frame from an
@@ -36,7 +36,7 @@ begin
   # transfer; the encode chain peaks at ~1.4 GB by itself). Match
   # Discourse's own testem flag of 4 GB so the test fits.
   max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
-  MiniRacer::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
+  MiniRacerCsim::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
   # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
@@ -44,9 +44,9 @@ begin
   # install needed.) The log is per-isolate, so per-visit
   # `rebuild_ctx` produces one file per Context.
   if ENV['CSIM_V8_PROF'] == '1'
-    MiniRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
+    MiniRacerCsim::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
   end
-rescue MiniRacer::PlatformAlreadyInitialized
+rescue MiniRacerCsim::PlatformAlreadyInitialized
 end
 
 module Capybara
@@ -122,12 +122,12 @@ module Capybara
         cache_path = snapshot_cache_path
         if cache_path
           begin
-            return MiniRacer::Snapshot.load(File.binread(cache_path))
+            return MiniRacerCsim::Snapshot.load(File.binread(cache_path))
           rescue StandardError
             # Fall through to rebuild; cache may be corrupt.
           end
         end
-        snap = MiniRacer::Snapshot.new(RuntimeShared.snapshot_src)
+        snap = MiniRacerCsim::Snapshot.new(RuntimeShared.snapshot_src)
         # `warmup!` runs `SNAPSHOT_WARMUP` against the snapshot once
         # and rolls the resulting V8 bytecode-cache state back in, so
         # Contexts created from this snapshot inherit JIT-primed
@@ -140,7 +140,7 @@ module Capybara
         # accept (see the build_snapshot header rationale).
         bytes = snap.dump
         persist_snapshot_bytes(bytes, cache_path)
-        MiniRacer::Snapshot.load(bytes)
+        MiniRacerCsim::Snapshot.load(bytes)
       end
 
       def self.snapshot_cache_path
@@ -211,6 +211,10 @@ module Capybara
       # (function reference) rather than `eval` (string compile) — the
       # polling loop hits these every retry tick.
       def drain_timers(max_ms = nil)
+        # The bridge's `__drainTimers`/`__runLoopStep` step iframe realms' event
+        # loops themselves (timers.js `drainChildRealms`), so this one call covers
+        # child frames too — no separate Ruby-side fan-out (which would
+        # double-advance their clocks and fire intervals twice).
         max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
       end
 
@@ -220,8 +224,22 @@ module Capybara
       # render-phase rAF / microtask-delivered MutationObserver can mutate the DOM
       # without firing a timer (fired == 0).
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
+        # `__runLoopStep` steps child iframe realms itself (timers.js
+        # `drainChildRealms`), folding their fired/dirtied into the result.
         r = ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen)
         r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
+      end
+
+      # Per-iframe realms (mini_racer-csim Context#create_realm): a separate V8
+      # realm — own global + intrinsics (Function/Error/DOMParser/onerror) — per
+      # nested browsing context, so cross-realm tests behave per spec. Keyed by
+      # realm id; dropped on every ctx rebuild (the realms die with the isolate).
+      def frame_realms = (@frame_realms ||= {})
+
+      def dispose_frame_realms
+        return if @frame_realms.nil?
+        @frame_realms.each_value {|fr| fr.dispose rescue nil }
+        @frame_realms.clear
       end
 
       # mini_racer drains microtasks at every `eval` boundary, so an
@@ -244,6 +262,14 @@ module Capybara
         !!ctx.call('__hasReadyTimer')
       end
 
+      # Delay (ms) until the nearest scheduled timer relative to the virtual
+      # clock, or -1 if none. Drives the horizon-gated fast-forward in
+      # `Browser#tick_real_time`.
+      def next_timer_delay_ms
+        return -1 if @ctx.nil?
+        ctx.call('__nextTimerDelay').to_i
+      end
+
       def reset_timers
         return if @ctx.nil?
         ctx.call('__resetTimers')
@@ -256,6 +282,9 @@ module Capybara
       # warmup keeps the per-rebuild cost ~3 ms; jQuery / app-bundle
       # re-eval dominates after that.
       def rebuild_ctx
+        # Drop the previous page's iframe realms (a new visit = new nested
+        # browsing contexts). Safe here — we're between visits, not mid-callback.
+        dispose_frame_realms
         # Warm path: swap the realm on the existing isolate instead of
         # disposing it and checking out a fresh one. Keeps the compilation
         # cache + builtin code warm. The host fns rebind and the snapshot
@@ -331,7 +360,7 @@ module Capybara
       # `CSIM_V8_CALL_TIMEOUT_MS=30000` for long-running suites where
       # an occasional JS-side infinite loop would otherwise stall the
       # whole run; the timeout converts the hang into a
-      # `MiniRacer::ScriptTerminatedError` on that one example.
+      # `MiniRacerCsim::ScriptTerminatedError` on that one example.
       CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
 
       # mini_racer's opt-in host namespace (ursm fork c2dd72d+):
@@ -352,7 +381,7 @@ module Capybara
         return @host_namespace_supported if defined?(@host_namespace_supported)
         @host_namespace_supported =
           begin
-            MiniRacer::Context.new(host_namespace: HOST_NAMESPACE_NAME)
+            MiniRacerCsim::Context.new(host_namespace: HOST_NAMESPACE_NAME)
               .eval("typeof globalThis.#{HOST_NAMESPACE_NAME} === 'object' && typeof globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks === 'function'") == true
           rescue StandardError
             false
@@ -389,7 +418,7 @@ module Capybara
 
       def self.load_module_graph_supported?
         return @load_module_graph_supported if defined?(@load_module_graph_supported)
-        @load_module_graph_supported = MiniRacer::Context.method_defined?(:load_module_graph)
+        @load_module_graph_supported = MiniRacerCsim::Context.method_defined?(:load_module_graph)
       end
 
       # V8's bytecode-cache version tag (mini_racer exposes it when the build
@@ -397,7 +426,7 @@ module Capybara
       # V8 upgrade invalidates stale bytecode. Fixed per process → memoized.
       def self.cached_data_version_tag
         return @cached_data_version_tag if defined?(@cached_data_version_tag)
-        @cached_data_version_tag = (defined?(MiniRacer::V8_CACHED_DATA_VERSION_TAG) && MiniRacer::V8_CACHED_DATA_VERSION_TAG) || 0
+        @cached_data_version_tag = (defined?(MiniRacerCsim::V8_CACHED_DATA_VERSION_TAG) && MiniRacerCsim::V8_CACHED_DATA_VERSION_TAG) || 0
       end
 
       # Behaviour-probe `reset_realm` the same way as host_namespace: the method
@@ -409,7 +438,7 @@ module Capybara
         return @reset_realm_supported if defined?(@reset_realm_supported)
         @reset_realm_supported =
           begin
-            c = MiniRacer::Context.new
+            c = MiniRacerCsim::Context.new
             c.attach('__csim_probe', -> { 1 })
             c.eval('globalThis.__csim_probe_marker = 1;')
             c.reset_realm
@@ -429,7 +458,7 @@ module Capybara
         opts = { snapshot: @snapshot || self.class.snapshot }
         opts[:timeout] = CALL_TIMEOUT_MS if CALL_TIMEOUT_MS > 0
         opts[:host_namespace] = HOST_NAMESPACE_NAME if self.class.host_namespace_supported?
-        c = MiniRacer::Context.new(**opts)
+        c = MiniRacerCsim::Context.new(**opts)
         attach_host_fns(c)
         c.eval('__csim_installWorker();')
         c
@@ -472,6 +501,72 @@ module Capybara
         self.class.attach_host_fns(c, @browser)
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
+        attach_frame_realm_loader(c)
+      end
+
+      # The bridge calls `__csim_createFrameRealm(url, body, contentType)` (from
+      # `iframe.contentWindow`'s getter) to spin up a real per-iframe realm. This
+      # runs re-entrantly inside the main ctx's eval; `Context#create_realm` is
+      # re-entrancy-safe in mini_racer-csim. Returns the realm id (or nil if the
+      # build doesn't support realms — then the bridge keeps its same-realm
+      # fallback). The bridge maps `iframe.contentWindow` to
+      # `__mr_realmGlobal(id)`.
+      def attach_frame_realm_loader(c)
+        return unless c.respond_to?(:create_realm)
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type) }
+        })
+        # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
+        # the bridge calls this to tear down the superseded one so it doesn't
+        # linger in @frame_realms and get re-drained on every poll tick. Disposing
+        # a non-executing child realm mid-callback is safe in mini_racer-csim.
+        c.attach('__csim_disposeFrameRealm', ->(id) {
+          fr = frame_realms.delete(id)
+          fr.dispose rescue nil if fr
+          nil
+        })
+      end
+
+      # Build the iframe's realm: install the bridge (the realm boots from an
+      # empty global, so eval the snapshot source — ~5 ms, the isolate's compiled
+      # code is shared), re-seed the post-snapshot JS state, point it at its own
+      # URL with the top frame as parent/top, then load its document (running its
+      # scripts in the realm). Tracked for event-loop draining + teardown.
+      def create_frame_realm(parent_ctx, url, body, content_type)
+        realm = parent_ctx.create_realm
+        # A snapshot-built isolate replays the whole bridge into every new realm
+        # automatically, so the realm already has `document` / `DOMParser` / the
+        # event loop. Re-evaling the snapshot source then redefines snapshot
+        # globals (e.g. the `scrollX` accessor) and throws — re-entrantly, which
+        # crashes V8. Only eval the source on the bare no-snapshot dev ctx, where
+        # the realm boots empty. Host fns are inherited from the parent either way;
+        # `reseed_realm_js` re-points the post-snapshot realm state (`__csim_yield`).
+        has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
+        realm.eval(RuntimeShared.snapshot_src) unless has_bridge
+        reseed_realm_js(realm)
+        # Wire parent/top to the main realm (mini_racer-csim numbers it 0). No user
+        # data in this eval — only the literal realm id.
+        realm.eval(<<~JS)
+          if (typeof __mr_realmGlobal === 'function') {
+            var __topWin = __mr_realmGlobal(0);
+            globalThis.parent = __topWin; globalThis.top = __topWin;
+          }
+        JS
+        # Pass the URL + document body as call ARGUMENTS, not interpolated into an
+        # eval string: mini_racer marshals them losslessly, so arbitrary HTML /
+        # control bytes survive (Ruby's String#inspect is NOT a faithful JS string
+        # escaper — it mangles \a, \e, and binary bytes).
+        realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
+        realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        frame_realms[realm.id] = realm
+        realm.id
+      rescue StandardError => e
+        @browser.log_console('warn', "frame realm load failed: #{e.message}")
+        # A realm created before the failure (load threw) is untracked — not in
+        # frame_realms nor __csimChildRealmIds — so nothing would ever drain or
+        # dispose it. Tear it down here (safe: it's non-executing in the rescue).
+        realm.dispose rescue nil if realm
+        nil
       end
 
       def eval_esm_module(url, inline_src = nil)
@@ -525,11 +620,11 @@ module Capybara
           ScriptCache.queue_warm(c, sha, mod[:url], body, version, kind: :module) if !had_cache || mod[:cache_rejected]
         }
         nil
-      # `MiniRacer::Error` is the base of ParseError / RuntimeError and the
+      # `MiniRacerCsim::Error` is the base of ParseError / RuntimeError and the
       # graph-load errors; catch it all so a bad module under module-graph mode
       # logs to the JS console (like the per-module path) instead of escaping to
       # `safe_call` and surfacing only as a stderr warn.
-      rescue MiniRacer::Error => e
+      rescue MiniRacerCsim::Error => e
         @browser.log_console('error', "module graph error in #{entry_url}: #{e.message}")
         nil
       end
@@ -542,7 +637,7 @@ module Capybara
         url.to_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
       end
 
-      # MiniRacer::Module handles are bound to their Context; rebuild_ctx
+      # MiniRacerCsim::Module handles are bound to their Context; rebuild_ctx
       # invalidates them, so the cache is keyed off `@ctx.object_id` and
       # rebuilt lazily on first use after a rebuild.
       def native_module_handles
@@ -587,7 +682,7 @@ module Capybara
           @compiled_module_urls[url_s] = true if warm
         end
         cache[url] = m
-      rescue MiniRacer::ParseError => e
+      rescue MiniRacerCsim::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
         cache[url] = nil
       end
@@ -705,7 +800,7 @@ module Capybara
         # WPT helper corpus + the `<script>const CFG…` pattern both lead
         # with the declaration.
         # NOTE: do NOT wrap in `safe_call`. A JS throw from `c.eval`
-        # raises MiniRacer::RuntimeError, which mini_racer re-raises as a
+        # raises MiniRacerCsim::RuntimeError, which mini_racer re-raises as a
         # JS exception at the call site — so bridge.entry.js's
         # `try { __csim_runScript(…) } catch (e)` sees it and runs its
         # normal path (console diagnostic, `_ok=false`, fire the script
@@ -808,7 +903,7 @@ module Capybara
       def self.build_worker(browser, post_back)
         wopts = { snapshot: snapshot }
         wopts[:host_namespace] = HOST_NAMESPACE_NAME if host_namespace_supported?
-        ctx = MiniRacer::Context.new(**wopts)
+        ctx = MiniRacerCsim::Context.new(**wopts)
         attach_host_fns(ctx, browser)
         ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
         # Worker's timer table is independent from main's; routing the

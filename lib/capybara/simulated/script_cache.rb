@@ -13,7 +13,7 @@ module Capybara
     # recompile per visit to a deserialize + run path.
     #
     # Cross-process portability requires snapshot-bytes equality:
-    # `MiniRacer::Snapshot.new(source)` is non-deterministic, so the
+    # `MiniRacerCsim::Snapshot.new(source)` is non-deterministic, so the
     # blobs we produce here are only consumable by another process if
     # that process loads the SAME snapshot bytes via `Snapshot.load`.
     # `V8Runtime.build_snapshot` handles that side.
