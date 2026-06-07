@@ -58,6 +58,26 @@ module Capybara
       @@live_lock     = Mutex.new
       @@live          = []
 
+      # Cross-visit cache of ESM module sources keyed by URL → [sha, body,
+      # fresh_until]. `clear_volatile` drops cacheable bodies from the volatile
+      # asset cache every visit, so without this the loader re-fetches every
+      # module source from the server each visit JUST to recompute the SHA that
+      # keys the (disk-persisted, already-warm) bytecode cache.
+      #
+      # This deliberately SURVIVES the visit boundary (that is the point), so —
+      # unlike the volatile asset cache — `clear_volatile` does NOT bound it.
+      # Its safety rests on: (a) entries are stored only for responses the
+      # server marks durably cacheable (`Browser#module_source` returns a
+      # non-nil `fresh_until` — header-driven, not a URL-shape guess; no-store /
+      # no-cache / max-age=0 yield nil and are re-fetched), and only honoured
+      # while still fresh; and (b) these are ESM MODULES — content-stable app
+      # code served at content-hashed URLs, so a content change yields a new URL
+      # (cache miss), unlike a dynamic response whose body can change under a
+      # stable URL. Size-capped to bound process memory.
+      @@module_src      = {}
+      @@module_src_lock = Mutex.new
+      MODULE_SRC_MAX    = 4096
+
       at_exit do
         @@live_lock.synchronize {
           @@live.each {|c|
@@ -599,11 +619,18 @@ module Capybara
           },
           fetch_batch: ->(urls) {
             urls.map {|u|
-              src = browser.rack_fetch_body(u)
+              if (memo = module_src_get(u))
+                sha, body = memo
+                cached = ScriptCache.lookup(sha, version, kind: :module)
+                fetched[u] = [sha, body, !cached.nil?]
+                next [body, cached]
+              end
+              src, fresh_until = browser.module_source(u)
               next nil unless src
               body   = module_body(u, src)
               sha    = Digest::SHA256.hexdigest(body)
               cached = ScriptCache.lookup(sha, version, kind: :module)
+              module_src_put(u, sha, body, fresh_until) if fresh_until
               fetched[u] = [sha, body, !cached.nil?]
               [body, cached]
             }
@@ -627,6 +654,30 @@ module Capybara
       rescue MiniRacerCsim::Error => e
         @browser.log_console('error', "module graph error in #{entry_url}: #{e.message}")
         nil
+      end
+
+      # Returns the cached `[sha, body]` for a module URL while still fresh, or
+      # nil (dropping an expired entry). Cross-visit, in-process; see the
+      # `@@module_src` declaration for why this is safe and header-driven.
+      def module_src_get(url)
+        @@module_src_lock.synchronize {
+          v = @@module_src[url] or return nil
+          if Time.now < v[2]
+            [v[0], v[1]]
+          else
+            @@module_src.delete(url)
+            nil
+          end
+        }
+      end
+
+      def module_src_put(url, sha, body, fresh_until)
+        @@module_src_lock.synchronize {
+          # Bound memory: real suites touch a few hundred distinct module URLs,
+          # so this never trips in practice; a pathological run just re-warms.
+          @@module_src.clear if @@module_src.size >= MODULE_SRC_MAX
+          @@module_src[url] = [sha, body, fresh_until]
+        }
       end
 
       # A `.json` module is exposed as the default export of its parsed value;

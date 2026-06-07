@@ -1972,6 +1972,24 @@ module Capybara
         result['body'].to_s
       end
 
+      # For the ESM module loader: fetch a module source and report how long it
+      # stays safely reusable per its OWN response headers — as an absolute
+      # freshness deadline (Time), or nil when the response is not durably
+      # cacheable (no-store / no-cache / max-age=0 / dynamic with no freshness).
+      # This lets the loader persist module sources across visits and skip the
+      # round-trip next time, driven by the server's cache directives (RFC 9111
+      # §5.2.2 / §4.2.2 heuristic) — NOT a URL-shape guess. `clear_volatile`
+      # drops the body from the volatile asset cache per visit, but a module's
+      # bytecode (ScriptCache) and source are content-stable while fresh, so the
+      # loader's own cross-visit cache can hold them for `fresh_until`.
+      def module_source(url)
+        body = rack_fetch_body(url)
+        return [nil, nil] unless body
+        entry = @@asset_cache.lookup(url)
+        fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
+        [body, fresh_until]
+      end
+
       # Native ESM entry point. QuickJS uses its `vm.module_loader`;
       # V8 uses `Context#compile_module` + `Module#instantiate` /
       # `#evaluate` + `Context#dynamic_import_resolver=`. Both runtimes

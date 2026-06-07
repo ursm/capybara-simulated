@@ -146,7 +146,28 @@ module Capybara
       private
 
       def freshness_seconds(cc, headers)
-        cc[:max_age] || expires_to_max_age(headers['expires'], headers['date'])
+        cc[:max_age] || expires_to_max_age(headers['expires'], headers['date']) || heuristic_freshness(headers)
+      end
+
+      # RFC 9111 §4.2.2: a response with no explicit freshness (no max-age, no
+      # Expires) but a `Last-Modified` MAY be assigned a heuristic lifetime; the
+      # common browser choice is 10% of (now − Last-Modified), and browsers cap
+      # it (an old `Last-Modified` shouldn't grant years of freshness) — we cap
+      # at one day. Without this, a response carrying only `Last-Modified` is
+      # revalidated on every fetch, which is what a real browser AVOIDS for e.g.
+      # Discourse's content-hashed `/assets/*.js` (shipped with `Last-Modified`
+      # and no `Cache-Control`). In the volatile asset cache, cross-visit
+      # staleness is bounded by `clear_volatile` dropping non-immutable entries
+      # per visit; the ESM loader's cross-visit cache has its own argument (it
+      # only holds content-stable module code at content-hashed URLs — see
+      # `V8Runtime` `@@module_src`).
+      HEURISTIC_FRESHNESS_CAP = 24 * 60 * 60
+
+      def heuristic_freshness(headers)
+        lm = headers['last-modified'] or return nil
+        t  = (Time.httpdate(lm) rescue nil) or return nil
+        age = Time.now - t
+        age.positive? ? [(age * 0.1).to_i, HEURISTIC_FRESHNESS_CAP].min : nil
       end
 
       def vary_compatible?(vary)
