@@ -15,6 +15,12 @@ module Capybara
     # Not cached:
     #   - Non-GET methods
     #   - Responses with `Cache-Control: no-store`
+    #   - Responses with `Cache-Control: private` — per-user responses that a
+    #     SHARED cache MUST NOT store (RFC 9111 §5.2.2.7). This cache is
+    #     process-wide and shared across test sessions, so it is a shared
+    #     cache for that purpose. (Forem's `/async_info/base_data` etc. send
+    #     `max-age=0, private`; storing them only wastes memory on data that
+    #     is always revalidated.)
     #   - Responses with `Vary` listing anything other than `Accept-Encoding`
     #     (which we ignore because we never send it)
     #   - Responses with no freshness signal at all (no max-age, no Expires,
@@ -47,8 +53,14 @@ module Capybara
         # assets (`max-age=2419200, must-revalidate`) revalidate on every
         # fetch instead of being served fresh like a real browser does.
         def fresh?(now = Time.now)
-          return false unless max_age
           return false if no_cache
+          # `max-age=0` (or absent) means the response is stale on arrival —
+          # a cache MUST revalidate before reuse (RFC 9111 §5.2.1.1). Ruby's
+          # `0` is truthy, so the value must be guarded explicitly; without
+          # `positive?`, a `max-age=0, must-revalidate` response (e.g. Forem's
+          # per-user `/async_info/base_data`, `/notifications/counts`) would be
+          # treated as fresh and served stale instead of revalidated.
+          return false unless max_age&.positive?
           (now - stored_at) < max_age
         end
       end
@@ -88,6 +100,9 @@ module Capybara
         # full stop; whether a URL "looks fingerprinted" is a guess that
         # can misfire and serve a genuinely no-store response stale.
         return if cc[:no_store]
+        # `private` is a per-user response a shared cache MUST NOT store
+        # (§5.2.2.7); this process-wide cache is shared across sessions.
+        return if cc[:private]
         max_age = freshness_seconds(cc, h)
         # Nothing useful to cache without a freshness signal or a
         # validator to revalidate against.
@@ -172,6 +187,7 @@ module Capybara
           case m[:key].downcase
           when 'no-store'         then out[:no_store]         = true
           when 'no-cache'         then out[:no_cache]         = true
+          when 'private'          then out[:private]          = true
           when 'immutable'        then out[:immutable]        = true
           when 'max-age'          then out[:max_age]          = m[:val].to_i if m[:val]
           # `s-maxage` applies to SHARED caches only (RFC 9111 §5.2.2.10); a
