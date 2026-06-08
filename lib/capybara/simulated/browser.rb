@@ -1972,22 +1972,66 @@ module Capybara
         result['body'].to_s
       end
 
-      # For the ESM module loader: fetch a module source and report how long it
-      # stays safely reusable per its OWN response headers — as an absolute
-      # freshness deadline (Time), or nil when the response is not durably
-      # cacheable (no-store / no-cache / max-age=0 / dynamic with no freshness).
-      # This lets the loader persist module sources across visits and skip the
-      # round-trip next time, driven by the server's cache directives (RFC 9111
-      # §5.2.2 / §4.2.2 heuristic) — NOT a URL-shape guess. `clear_volatile`
-      # drops the body from the volatile asset cache per visit, but a module's
-      # bytecode (ScriptCache) and source are content-stable while fresh, so the
-      # loader's own cross-visit cache can hold them for `fresh_until`.
-      def module_source(url)
+      # Fetch a source body and report how long it stays safely reusable per its
+      # OWN response headers — an absolute freshness deadline (Time), or nil when
+      # the response is not durably cacheable (no-store / no-cache / max-age=0 /
+      # dynamic with no freshness). This lets a loader persist the body across
+      # visits and skip the round-trip next time, driven by the server's cache
+      # directives (RFC 9111 §5.2.2 / §4.2.2 heuristic) — NOT a URL-shape guess.
+      # `clear_volatile` drops the body from the volatile per-visit asset cache,
+      # but a content-hashed asset's source is content-stable while fresh, so a
+      # loader's own cross-visit cache can hold it for `fresh_until`. Used by both
+      # the ESM module loader (`@@module_src`, v8_runtime) and the external-asset
+      # cache (`external_asset_source`, scripts + stylesheets); name is generic.
+      def durable_source(url)
         body = rack_fetch_body(url)
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
         [body, fresh_until]
+      end
+
+      # Cross-visit cache of external asset bodies (classic `<script src>` bundles
+      # AND linked `<link rel=stylesheet>` CSS), url → [body, fresh_until]. The ESM
+      # loader already survives the visit boundary via `@@module_src` (v8_runtime);
+      # classic bundles and stylesheets had no equivalent, so a fresh VM per visit
+      # (`reset_page` → `clear_volatile`) re-fetched the same fingerprinted app
+      # assets (avo.base.js, avo.base.css, …) on every visit — a real browser
+      # HTTP-caches them once. Same safety as `@@module_src`: only responses the
+      # server marks durably cacheable (`fresh_until` from max-age) are stored, and
+      # these are content-stable assets at content-hashed URLs (a change yields a
+      # new URL = cache miss), so a stale body can't shadow a later test. Survives
+      # `clear_volatile` (that is the point); size-capped.
+      @@asset_src      = {}
+      @@asset_src_lock = Mutex.new
+      ASSET_SRC_MAX    = 4096
+
+      # Body of an external durably-cacheable asset (classic script or stylesheet),
+      # served from the cross-visit cache when still fresh, else fetched (which
+      # read-throughs the per-visit asset cache) and cached iff durably cacheable.
+      # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
+      # old `__rackFetch` branch did.
+      def external_asset_source(url)
+        key = resolve_against_current(url.to_s)
+        return nil unless key.is_a?(String)
+        @@asset_src_lock.synchronize do
+          if (e = @@asset_src[key])
+            return e[0] if e[1].nil? || Time.now < e[1]
+            @@asset_src.delete(key)
+          end
+        end
+        # `durable_source` already does the spec-compliant fetch + header-driven
+        # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
+        # re-deriving `fresh_until` here.
+        body, fresh_until = durable_source(key)
+        return nil unless body
+        if fresh_until
+          @@asset_src_lock.synchronize do
+            @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
+            @@asset_src[key] = [body, fresh_until]
+          end
+        end
+        body
       end
 
       # Native ESM entry point. QuickJS uses its `vm.module_loader`;

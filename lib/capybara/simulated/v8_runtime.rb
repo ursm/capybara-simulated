@@ -67,7 +67,7 @@ module Capybara
       # This deliberately SURVIVES the visit boundary (that is the point), so —
       # unlike the volatile asset cache — `clear_volatile` does NOT bound it.
       # Its safety rests on: (a) entries are stored only for responses the
-      # server marks durably cacheable (`Browser#module_source` returns a
+      # server marks durably cacheable (`Browser#durable_source` returns a
       # non-nil `fresh_until` — header-driven, not a URL-shape guess; no-store /
       # no-cache / max-age=0 yield nil and are re-fetched), and only honoured
       # while still fresh; and (b) these are ESM MODULES — content-stable app
@@ -625,7 +625,7 @@ module Capybara
                 fetched[u] = [sha, body, !cached.nil?]
                 next [body, cached]
               end
-              src, fresh_until = browser.module_source(u)
+              src, fresh_until = browser.durable_source(u)
               next nil unless src
               body   = module_body(u, src)
               sha    = Digest::SHA256.hexdigest(body)

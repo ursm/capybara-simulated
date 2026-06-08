@@ -42,6 +42,7 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4]) },
+        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0]) },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0]); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
@@ -114,10 +115,30 @@ module Capybara
       CASCADE_RULE_CACHE       = {}
       CASCADE_RULE_CACHE_MUTEX = Mutex.new
 
+      # Process-wide PER-SHEET parse cache (companion to CASCADE_RULE_CACHE). The
+      # built whole-cascade is cached above, but it misses whenever a page's inline
+      # `<style>` changes (Avo injects per-page styles), forcing a rebuild that
+      # re-parses every sheet — including unchanged linked bundles (avo.base.css).
+      # `parseSheet` is pure, so the JS side caches its serialized `{hide,layout}`
+      # keyed by (cssText hash, viewport) here, surviving the per-visit VM rebuild
+      # that wipes the in-VM `__sheetCache` — the CSS analogue of the JS bytecode
+      # cache. Keyed by content, so a content change yields a new key. Capped.
+      SHEET_PARSE_CACHE       = {}
+      SHEET_PARSE_CACHE_MUTEX = Mutex.new
+      SHEET_PARSE_CACHE_MAX   = 2048
+
       STDLIB_HOST_FNS = {
         '__csimCascadeCacheGet' => ->(*a) { CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] } },
         '__csimCascadeCachePut' => lambda {|*a|
           CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] = a[1].to_s }
+          nil
+        },
+        '__csimSheetCacheGet' => ->(*a) { SHEET_PARSE_CACHE_MUTEX.synchronize { SHEET_PARSE_CACHE[a[0].to_s] } },
+        '__csimSheetCachePut' => lambda {|*a|
+          SHEET_PARSE_CACHE_MUTEX.synchronize {
+            SHEET_PARSE_CACHE.clear if SHEET_PARSE_CACHE.size >= SHEET_PARSE_CACHE_MAX
+            SHEET_PARSE_CACHE[a[0].to_s] = a[1].to_s
+          }
           nil
         },
         '__csim_randomUUID'   => ->(*_) { SecureRandom.uuid },
