@@ -807,15 +807,24 @@ module Capybara
         # pay the rendezvous round-trip.
         c.attach('__csim_runScriptCached', ->(label, body) {
           RuntimeShared.safe_call {
-            sha    = Digest::SHA256.hexdigest(body)
+            # Trailing `;undefined` suppresses the script's COMPLETION VALUE so
+            # `script.run`'s return crosses the V8→Ruby boundary on the trivial
+            # ValueSerializer fast path. Without it, a large inline script ending
+            # in a jQuery-ish expression returns a `ce.fn.init` (array-like,
+            # non-cloneable) that drags through the safe_context deep-copy filter —
+            # pure waste, since the value is discarded (`nil` below). The SHA keys
+            # the bytecode cache on the COMPILED source, so the suffix must be
+            # hashed and fed to `queue_warm` too (else cached_data is rejected).
+            src    = "#{body}\n;undefined"
+            sha    = Digest::SHA256.hexdigest(src)
             cached = ScriptCache.lookup(sha, version_tag)
-            script = c.compile(body, filename: label.to_s, cached_data: cached)
+            script = c.compile(src, filename: label.to_s, cached_data: cached)
             $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
             # V8 forbids `produce_cache: true` from inside a host-fn
             # callback so we queue misses + rejects for top-level
             # produce via `ScriptCache.warm_pending!` after the
             # current `V8Runtime#call` returns.
-            ScriptCache.queue_warm(c, sha, label, body, version_tag) if cached.nil? || script.cache_rejected?
+            ScriptCache.queue_warm(c, sha, label, src, version_tag) if cached.nil? || script.cache_rejected?
             begin
               script.run
             ensure
@@ -859,7 +868,16 @@ module Capybara
         # as the QuickJS runner does. Swallowing here would turn a
         # throwing leading-`const` inline script into a silent `load`.
         c.attach('__csim_runScriptEval', ->(label, body) {
-          c.eval("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
+          # Trailing `;undefined` makes the script's COMPLETION VALUE undefined so
+          # `c.eval`'s return crosses the V8→Ruby boundary on the trivial
+          # ValueSerializer fast path. Without it, a leading-lexical inline script
+          # ending in a jQuery-ish expression (`const cfg=…; $(…)`) returns a
+          # `ce.fn.init` (array-like, non-cloneable) here, which falls into the
+          # safe_context deep-copy filter slow-path — pure waste, since the value
+          # is discarded (`nil` below). The `//# sourceURL` line is a comment and
+          # doesn't affect the completion value; lexical declarations persist as a
+          # side effect of eval, independent of the completion value.
+          c.eval("#{body}\n;undefined\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
           nil
         })
         install_run_script_dispatcher(c)
