@@ -31,7 +31,7 @@ escapes via screenshots and we don't try to simulate.
 
 ```ruby
 gem 'capybara-simulated', group: :test
-gem 'mini_racer-csim', '>= 0.21.1', group: :test  # JS engine — pick one
+gem 'mini_racer-csim', '>= 0.21.1.5', group: :test  # JS engine — pick one
 ```
 
 `bundle install`. The gem ships its JS bridge under
@@ -43,7 +43,7 @@ there's no Node toolchain at consume time.
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'mini_racer-csim', '>= 0.21.1'
+gem 'mini_racer-csim', '>= 0.21.1.5'
                           # V8 (JIT, fastest per spec) — default
 gem 'quickjs', '>= 0.18'  # QuickJS (interpreter, smaller per-VM RAM —
                           # wins when scaling parallel workers under

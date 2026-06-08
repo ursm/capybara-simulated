@@ -42,7 +42,7 @@ Gem::Specification.new do |spec|
   # bundle. Stock `mini_racer` is NOT a substitute (different namespace, and it
   # lacks `compile_module` / `dynamic_import_resolver=` / `reset_realm`).
   #
-  #   gem 'mini_racer-csim', '>= 0.21.1.2' # V8 (JIT, fastest per spec)
+  #   gem 'mini_racer-csim', '>= 0.21.1.5' # V8 (JIT, fastest per spec)
   #   gem 'quickjs',         '>= 0.18'     # QuickJS (interpreter, smaller per-VM
   #                                        # footprint; wins on parallelism).
 end

@@ -530,7 +530,7 @@ module Capybara
       # re-entrancy-safe in mini_racer-csim. Returns the realm id (or nil if the
       # build doesn't support realms — then the bridge keeps its same-realm
       # fallback). The bridge maps `iframe.contentWindow` to
-      # `__mr_realmGlobal(id)`.
+      # `MiniRacer.realmGlobal(id)`.
       def attach_frame_realm_loader(c)
         return unless c.respond_to?(:create_realm)
         c.attach('__csim_createFrameRealm', ->(url, body, content_type) {
@@ -567,8 +567,8 @@ module Capybara
         # Wire parent/top to the main realm (mini_racer-csim numbers it 0). No user
         # data in this eval — only the literal realm id.
         realm.eval(<<~JS)
-          if (typeof __mr_realmGlobal === 'function') {
-            var __topWin = __mr_realmGlobal(0);
+          if (globalThis.MiniRacer && typeof globalThis.MiniRacer.realmGlobal === 'function') {
+            var __topWin = globalThis.MiniRacer.realmGlobal(0);
             globalThis.parent = __topWin; globalThis.top = __topWin;
           }
         JS
