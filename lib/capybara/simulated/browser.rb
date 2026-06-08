@@ -188,6 +188,14 @@ module Capybara
         # would have observed.
         @recent_urls                  = []
         @recent_urls_last_push_at     = nil
+        # The URL the page was at when the current user-action drain began.
+        # It's the *starting point* of the action, not an intermediate the
+        # action transitioned through, so a pushState/replaceState back to a
+        # fresh URL during the drain (a Turbo Drive Visit triggered by the
+        # action) must NOT queue it into `@recent_urls` — otherwise a one-shot
+        # `current_url` read after the action returns the pre-action URL
+        # instead of the navigated-to one (Avo filter `encoded_filters`).
+        @action_url_baseline          = nil
         # The URL of the page that navigated to the current document —
         # HTTP `Referer` header on the response that loaded the page,
         # exposed to JS as `document.referrer`. Tracked by `navigate`
@@ -414,6 +422,12 @@ module Capybara
         old = @current_url
         return if old.nil? || old.to_s.empty?
         return if old.to_s == new_url.to_s
+        # The URL the action started from is the starting point, not an
+        # intermediate it walked through — don't surface it to a polling
+        # (or one-shot) `current_url` as a step. Genuine mid-action
+        # intermediates (a load to /wizard, *then* a replaceState to
+        # /wizard/steps/setup) differ from the baseline and still queue.
+        return if @action_url_baseline && old.to_s == @action_url_baseline.to_s
         @recent_urls << old.to_s
         @recent_urls.shift while @recent_urls.size > 8
         @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
@@ -613,6 +627,7 @@ module Capybara
       end
 
       def click(handle, keys = [], **opts)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -765,6 +780,7 @@ module Capybara
       end
 
       def set_value_with_events(handle, value)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -874,6 +890,7 @@ module Capybara
       end
 
       def right_click(handle, keys = [], **opts)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -904,6 +921,7 @@ module Capybara
       # `event.offsetY` to decide "above vs below"; without a layout
       # engine we report 0, which routes drops above the target.
       def drag_to(source_handle, target_handle, **_opts)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(source_handle)
@@ -926,6 +944,7 @@ module Capybara
       end
 
       def double_click(handle, keys = [], **opts)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -982,6 +1001,7 @@ module Capybara
       end
 
       def hover(handle)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -1016,6 +1036,7 @@ module Capybara
       # everything but the last entry is a modifier; the last entry
       # is the key being pressed (String char or Symbol special).
       def send_keys(handle, keys)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
@@ -1071,6 +1092,7 @@ module Capybara
       end
 
       def select_option(handle)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         @runtime.call('__csimSelectOption', handle)
@@ -1079,6 +1101,7 @@ module Capybara
       end
 
       def unselect_option(handle)
+        mark_action_baseline
         tick_real_time
         invalidate_find_cache
         # Single-select <select>s can't have a selection cleared per
@@ -1105,6 +1128,23 @@ module Capybara
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
         submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
+      end
+
+      # Pin the URL the page is at as a user action BEGINS — the FIRST line of
+      # every action entry (click / double_click / right_click / hover / set /
+      # send_keys / select / unselect). A Turbo Drive Visit the action triggers
+      # is async — its pushState may fire synchronously mid-action or in a LATER
+      # find-poll tick (the test's `wait_for_loaded`) — so `record_url_transition`
+      # uses this baseline to recognise the pre-action URL as the action's
+      # starting point, not a walkable intermediate, and skip queuing it. Set at
+      # action entry (NOT the tail drain, which runs after the pushState); must
+      # precede the action's first `tick_real_time` so a deferred prior-page
+      # timer firing in that tick is still measured against the pre-action URL.
+      # Persists until the next action (so the async case is covered) and is
+      # reset by `navigate` so a stale baseline can't leak across a document
+      # boundary.
+      def mark_action_baseline
+        @action_url_baseline = @current_url
       end
 
       # Every user-action entry point (set / send_keys / select / unselect)
@@ -3074,11 +3114,15 @@ module Capybara
         # at deeper depths don't replace the user-visible referrer.
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
-        # are stale once we cross a real document boundary.
+        # are stale once we cross a real document boundary. The pinned
+        # user-action baseline is likewise scoped to the prior document —
+        # drop it so it can't match (and wrongly suppress) a transition on
+        # the new page.
         if depth == 0
           @current_referer = referer.to_s
           @recent_urls.clear if @recent_urls
           @recent_urls_last_push_at = nil
+          @action_url_baseline = nil
         end
         # While navigate is in progress (and the loaded page's bootstrap
         # JS is running synchronously inside __csimLoadDocument), any
