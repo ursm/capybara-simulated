@@ -185,12 +185,16 @@ RSpec.describe 'WebIDL reflection behaviour' do
       expect(withinfo).to eq('u' => 'user', 'p' => 'pw')
     end
 
-    it 'returns empty strings (not throwing) when href is absent' do
+    it 'returns the null-url defaults (not throwing) when href is absent' do
+      # Per HTMLHyperlinkElementUtils, when the element's url is null the
+      # `protocol` getter returns ':' (matching real browsers:
+      # `document.createElement('a').protocol === ':'`); every other component
+      # returns ''.
       result = session.evaluate_script(<<~JS)
         const a = document.createElement('a');
         ({ protocol: a.protocol, hash: a.hash, search: a.search, host: a.host })
       JS
-      expect(result).to eq('protocol' => '', 'hash' => '', 'search' => '', 'host' => '')
+      expect(result).to eq('protocol' => ':', 'hash' => '', 'search' => '', 'host' => '')
     end
 
     it 'omits default ports' do
