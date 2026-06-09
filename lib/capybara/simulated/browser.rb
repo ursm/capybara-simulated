@@ -492,7 +492,19 @@ module Capybara
       def find_with_timer_fallback(kind, arg, ctx)
         tick_real_time if timer_wait_elapsed?
         result = cached_find(kind, arg, ctx) { yield }
-        return result unless empty_find_result?(result) && @timers_active
+        # An empty result is the wait-for-it case: Capybara is retrying for
+        # an element that hasn't appeared yet. Re-tick so the next poll
+        # observes anything an active timer OR a background-IO channel
+        # (Worker / EventSource / a held long-poll publish) is about to
+        # deliver. Gating on `@timers_active` alone misses the held-poll
+        # case — a MessageBus subscription waiting on a cross-session
+        # publish has NO pending JS timer (the re-poll only schedules after
+        # the current poll returns), so `@timers_active` is false while
+        # `hijack_fetch_pending?` is true. Without `async_io_pending?` here
+        # the delivered message never reaches the DOM during find-polling
+        # (only `evaluate_script`, which ticks unconditionally, would see
+        # it). Non-empty results keep the fast path — no extra tick.
+        return result unless empty_find_result?(result) && (@timers_active || async_io_pending?)
 
         tick_real_time
         return result unless @find_cache_dirty
