@@ -298,11 +298,6 @@ dom/nodes/MutationObserver-document.html:
 - removal of parent during parsing
 dom/nodes/MutationObserver-inner-outer.html:
 - outerHTML mutation
-dom/nodes/MutationObserver-sanity.html:
-- Should throw if attributeFilter is present and attributes is false
-- Should throw if attributeOldValue is true and attributes is false
-- Should throw if characterDataOldValue is true and characterData is false
-- Should throw if none of childList, attributes, characterData are true
 dom/nodes/Node-appendChild.html:
 - Adopting a non-orphan
 - Adopting an orphan
