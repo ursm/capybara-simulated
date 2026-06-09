@@ -26,46 +26,23 @@ dom/collections/HTMLCollection-as-prototype.html:
 - HTMLCollection as a prototype and setting own properties
 - HTMLCollection as a prototype should not allow getting .length on the base object
 dom/collections/HTMLCollection-delete.html:
-- Loose id
-- Loose name
-- Strict id
 - Strict name
 dom/collections/HTMLCollection-empty-name.html:
-- Empty string as a name for Document.getElementsByClassName
-- Empty string as a name for Document.getElementsByTagName
-- Empty string as a name for Document.getElementsByTagNameNS
 - Empty string as a name for Element.children
-- Empty string as a name for Element.getElementsByClassName
-- Empty string as a name for Element.getElementsByTagName
-- Empty string as a name for Element.getElementsByTagNameNS
 dom/collections/HTMLCollection-iterator.html:
 - HTMLCollection does not have iterable's entries method.
 - HTMLCollection does not have iterable's forEach method.
 - HTMLCollection does not have iterable's values method.
 dom/collections/HTMLCollection-own-props.html:
-- Setting array index while indexed property doesn't exist (loose)
-- Setting array index while indexed property doesn't exist (strict)
-- Setting array index while indexed property exists (loose)
-- Setting array index while indexed property exists (strict)
-- Setting non-array index while named property doesn't exist (loose)
-- Setting non-array index while named property doesn't exist (strict)
 - Setting non-array index while named property exists (loose)
 - Setting non-array index while named property exists (strict)
 dom/collections/HTMLCollection-supported-property-indices.html:
-- Handling of property names that look like integers around 2^31
 - Handling of property names that look like integers around 2^32
-- Handling of property names that look like negative integers
-- Handling of property names that look like small nonnegative integers
-- Trying to delete an indexed property name should never work
-- Trying to set an expando that would shadow an already-existing indexed property
 - Trying to set an expando with an indexed property name past the end of the list
 dom/collections/HTMLCollection-supported-property-names.html:
 - Object.getOwnPropertyNames on HTMLCollection
 - Object.getOwnPropertyNames on HTMLCollection with expando object
 - Object.getOwnPropertyNames on HTMLCollection with non-HTML namespace
-- Trying to set a non-configurable expando that shadows a named property that gets
-  added later
-- Trying to set an expando that shadows a named property that gets added later
 - Trying to set an expando that would shadow an already-existing named property
 dom/events/CustomEvent.html:
 - First parameter to initCustomEvent should be mandatory.
@@ -280,16 +257,8 @@ dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
-dom/nodes/Document-getElementsByClassName.html:
-- getElementsByClassName() should be a live collection
 dom/nodes/Document-getElementsByTagName.html:
-- Interfaces
-- Shouldn't be able to set unsigned properties on a HTMLCollection (non-strict mode)
-- Shouldn't be able to set unsigned properties on a HTMLCollection (strict mode)
-- getElementsByTagName() should be a live collection
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
-dom/nodes/Document-getElementsByTagNameNS.html:
-- getElementsByTagNameNS() should be a live collection
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
 dom/nodes/Element-children.html:
@@ -299,19 +268,10 @@ dom/nodes/Element-closest.html:
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
 dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
-dom/nodes/Element-getElementsByClassName.html:
-- getElementsByClassName() should be a live collection
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/Element-getElementsByTagName.html:
-- Should be able to set expando shadowing a proto prop (item)
-- Should be able to set expando shadowing a proto prop (namedItem)
-- Shouldn't be able to set unsigned properties on a HTMLCollection (non-strict mode)
-- Shouldn't be able to set unsigned properties on a HTMLCollection (strict mode)
-- getElementsByTagName() should be a live collection
 - hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
-dom/nodes/Element-getElementsByTagNameNS.html:
-- getElementsByTagNameNS() should be a live collection
 dom/nodes/Element-removeAttribute.html:
 - removeAttribute should remove the first attribute, irrespective of namespace, when
   the first attribute is in a namespace
