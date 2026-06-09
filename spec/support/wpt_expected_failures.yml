@@ -298,9 +298,6 @@ dom/nodes/MutationObserver-document.html:
 - removal of parent during parsing
 dom/nodes/MutationObserver-inner-outer.html:
 - outerHTML mutation
-dom/nodes/Node-appendChild.html:
-- Adopting a non-orphan
-- Adopting an orphan
 dom/nodes/Node-childNodes.html:
 - Node.childNodes on a Document.
 dom/nodes/Node-cloneNode-document-with-doctype.html:
@@ -318,7 +315,6 @@ dom/nodes/Node-lookupNamespaceURI.html:
 dom/nodes/Node-mutation-adoptNode.html:
 - Adopting an element into a different document update's the element's owner doc as
   well as the owner docs of it's attributes
-- simple append of foreign div with text
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
 dom/nodes/NodeList-static-length-getter-tampered-1.html:
