@@ -14,6 +14,42 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..91755cc38ed4e498c0c63abe58b8467b
              return boolbase.falseFunc;
          }
          const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
+diff --git a/dist/pseudo-selectors/aliases.js b/dist/pseudo-selectors/aliases.js
+index 8fb6633f09e40d21d668be06182a3868f0fc8dff..b2c7529cdf1c8b2a9933f4de70fbd076e793202c 100644
+--- a/dist/pseudo-selectors/aliases.js
++++ b/dist/pseudo-selectors/aliases.js
+@@ -10,7 +10,10 @@ const textControl = "input:is([type=text i],[type=search i],[type=url i],[type=t
+  */
+ export const aliases = {
+     // Links
+-    "any-link": ":is(a, area, link)[href]",
++    // csim patch: scope :any-link / :link to <a>/<area> only — browsers (and
++    // the WPT selectors suite) do NOT match <link href> with :link, despite the
++    // bare spec text. Without this `#head :link` wrongly matches a <link href>.
++    "any-link": ":is(a, area)[href]",
+     link: ":any-link:not(:visited)",
+     // Forms
+     // https://html.spec.whatwg.org/multipage/scripting.html#disabled-elements
+diff --git a/dist/pseudo-selectors/filters.js b/dist/pseudo-selectors/filters.js
+index 241517546e40497c1fa6005de6d779b97fba0d61..686db0da3e4cf5b86ed859bc39c57a0f57db58e4 100644
+--- a/dist/pseudo-selectors/filters.js
++++ b/dist/pseudo-selectors/filters.js
+@@ -98,9 +98,13 @@ export const filters = {
+     "nth-last-child": compileNth(true, false),
+     "nth-of-type": compileNth(false, true),
+     "nth-last-of-type": compileNth(true, true),
+-    // TODO determine the actual root element
++    // csim patch: `:root` matches ONLY the document's root element. The default
++    // "no element parent" test wrongly matches a DocumentFragment's top child;
++    // defer to `adapter.isDocumentRoot` when provided.
+     root(next, _rule, { adapter }) {
+-        return (element) => getElementParent(element, adapter) === null && next(element);
++        return (element) => (typeof adapter.isDocumentRoot === "function"
++            ? adapter.isDocumentRoot(element)
++            : getElementParent(element, adapter) === null) && next(element);
+     },
+     scope(next, rule, options, context) {
+         const { equals } = options;
 diff --git a/dist/pseudo-selectors/pseudos.js b/dist/pseudo-selectors/pseudos.js
 index 0790e2aaa067b1e1bdc13724838185d2c011083c..88e6c628fc46f66864c9bd86d8023f30bfede1f4 100644
 --- a/dist/pseudo-selectors/pseudos.js

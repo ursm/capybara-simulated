@@ -307,8 +307,6 @@ dom/nodes/Element-children.html:
 dom/nodes/Element-closest.html:
 - Element.closest with context node 'test11' and selector ':invalid'
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
-- Element.closest with context node 'test4' and selector ':scope'
-- Element.closest with context node 'test4' and selector 'select > :scope'
 dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
 dom/nodes/Element-getElementsByClassName.html:
@@ -400,15 +398,6 @@ dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
-dom/nodes/ParentNode-querySelector-All.html:
-- 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
-  elements: #head :link, #head :visited'
-- 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
-  no elements: #head :link, #head :visited'
-- 'Fragment.querySelector: :root pseudo-class selector, not matching document root
-  element: :root'
-- 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
-  element: :root'
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html:
