@@ -44,9 +44,6 @@ dom/collections/HTMLCollection-supported-property-names.html:
 - Object.getOwnPropertyNames on HTMLCollection with expando object
 - Object.getOwnPropertyNames on HTMLCollection with non-HTML namespace
 - Trying to set an expando that would shadow an already-existing named property
-dom/events/CustomEvent.html:
-- First parameter to initCustomEvent should be mandatory.
-- initCustomEvent's default parameter values.
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-click.html:
@@ -77,8 +74,6 @@ dom/events/Event-dispatch-detached-input-and-change.html:
   MouseEvent('click')).
 - detached checkbox should not emit input or change events on click().
 - detached radio should not emit input or change events on click().
-dom/events/Event-dispatch-handlers-changed.html:
-- " Dispatch additional events inside an event listener "
 dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Animation animationstart, animationiteration, animationend fire on disabled
   form elements
@@ -88,8 +83,6 @@ dom/events/Event-dispatch-on-disabled-elements.html:
   form elements
 - Calling click() on disabled elements must not dispatch events.
 - Real clicks on disabled elements must not dispatch events.
-dom/events/Event-dispatch-order-at-target.html:
-- Listeners are invoked in correct order (AT_TARGET phase)
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching DOMContentLoaded event after being dispatched
 - Redispatching mouseup event whose default action dispatches a click event
@@ -118,10 +111,6 @@ dom/events/Event-dispatch-throwing-multiple-globals.html:
 dom/events/Event-dispatch-throwing.html:
 - Throwing in event listener with a single listeners
 - Throwing in event listener with multiple listeners
-dom/events/Event-initEvent.html:
-- First parameter to initEvent should be mandatory.
-dom/events/Event-stopPropagation-cancel-bubbling.html:
-- Event-stopPropagation-cancel-bubbling
 dom/events/Event-timestamp-high-resolution.https.html:
 - Constructed GamepadEvent timestamp should be high resolution and have the same time
   origin as performance.now()
@@ -149,8 +138,6 @@ dom/events/EventListener-invoke-legacy.html:
 dom/events/EventListenerOptions-capture.html:
 - Capture boolean should be honored correctly
 - Supports capture option
-dom/events/EventTarget-dispatchEvent.html:
-- Capturing event listeners should be called before non-capturing ones
 dom/events/EventTarget-this-of-listener.html:
 - addEventListener should not require handleEvent to be defined on object listeners
 - dispatchEvent should invoke the current handleEvent method of the object
