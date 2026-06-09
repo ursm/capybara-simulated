@@ -422,22 +422,14 @@ dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html:
 dom/nodes/ParentNode-children.html:
 - ParentNode.children should be a live collection
 dom/nodes/ParentNode-querySelector-All.html:
-- Detached Element.querySelector no parameter
-- Detached Element.querySelectorAll no parameter
-- Document.querySelector no parameter
 - 'Document.querySelector: :link and :visited pseudo-class selectors, matching no
   elements: #head :link, #head :visited'
-- Document.querySelectorAll no parameter
 - 'Document.querySelectorAll: :link and :visited pseudo-class selectors, matching
   no elements: #head :link, #head :visited'
-- Fragment.querySelector no parameter
 - 'Fragment.querySelector: :root pseudo-class selector, not matching document root
   element: :root'
-- Fragment.querySelectorAll no parameter
 - 'Fragment.querySelectorAll: :root pseudo-class selector, not matching document root
   element: :root'
-- In-document Element.querySelector no parameter
-- In-document Element.querySelectorAll no parameter
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html:
