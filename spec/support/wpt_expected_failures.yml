@@ -116,10 +116,6 @@ dom/events/EventListener-handleEvent-cross-realm.html:
 - EventListener is cross-realm plain object with non-callable 'handleEvent' property
 - EventListener is cross-realm plain object with revoked Proxy as 'handleEvent' property
 - EventListener is cross-realm plain object without 'handleEvent' property
-dom/events/EventListener-handleEvent.html:
-- performs `Get` every time event is dispatched
-- throws if `handleEvent` is falsy and not callable
-- throws if `handleEvent` is thruthy and not callable
 dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
@@ -131,9 +127,6 @@ dom/events/EventListener-invoke-legacy.html:
 - Listener of animationend
 - Listener of animationstart
 - Listener of transitionend
-dom/events/EventTarget-this-of-listener.html:
-- addEventListener should not require handleEvent to be defined on object listeners
-- dispatchEvent should invoke the current handleEvent method of the object
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
