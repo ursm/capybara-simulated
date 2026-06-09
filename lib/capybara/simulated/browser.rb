@@ -780,7 +780,14 @@ module Capybara
         target = resolve_against_current(url)
         a = URI.parse(target)
         b = URI.parse(@current_url)
-        a.scheme == b.scheme && a.host == b.host && a.port == b.port && a.path == b.path && a.query == b.query && !a.fragment.nil?
+        # Same-document iff everything but the fragment matches AND the
+        # fragment actually changes — `a.fragment != b.fragment` covers
+        # both adding/changing a fragment and *clearing* one (target has
+        # no fragment while the current URL does, e.g. `location.hash =
+        # ''`). The old `!a.fragment.nil?` missed the clearing case, so a
+        # hash-reset turned into a full document reload.
+        a.scheme == b.scheme && a.host == b.host && a.port == b.port &&
+          a.path == b.path && a.query == b.query && a.fragment != b.fragment
       rescue URI::InvalidURIError
         false
       end
@@ -789,6 +796,15 @@ module Capybara
         return if @current_url.nil?
         new_url = resolve_against_current(url)
         @current_url = new_url
+        # JS-driven same-document fragment navigations (anchor clicks AND
+        # `location.hash`/`href`/`assign` sets) are now handled entirely in
+        # the VM by `tryFragmentNavigate` — they update the JS location and
+        # fire `hashchange` there and never round-trip through here. This
+        # path remains only as a defensive fallback for a fragment URL that
+        # reaches the Ruby navigate/pending drain by some other route; keep
+        # the VM's location object in sync so its `location.href` getter
+        # doesn't read stale.
+        @runtime.call('__csimUpdateLocation', new_url) if @runtime.respond_to?(:call)
       end
 
       def set_value_with_events(handle, value)
@@ -2975,7 +2991,16 @@ module Capybara
       def consume_pending_location
         return unless (url = @pending_location)
         @pending_location = nil
-        navigate(url)
+        # A `location.href`/`assign`/`hash` set to a same-document
+        # fragment (e.g. `location.hash = ''`) is NOT a document fetch —
+        # move the hash without rebuilding the VM, matching the anchor-
+        # click navigate branch. Without this a hash assignment reloaded
+        # the page, discarding all JS state.
+        if pure_fragment_navigation?(url)
+          update_current_hash(url)
+        else
+          navigate(url)
+        end
       end
       # Mirror of `location_assign`'s deferral for `location.reload()`:
       # the JS call lands here from `__locationReload`; running
