@@ -50,11 +50,8 @@ dom/events/Event-dispatch-click.html:
 - basic with dispatchEvent()
 - disabled checkbox should be checked from dispatchEvent(new MouseEvent("click"))
 - disabled checkbox should get legacy-canceled-activation behavior
-- disabled checkbox still has activation behavior
-- disabled checkbox still has activation behavior, part 2
 - disabled radio should be checked from dispatchEvent(new MouseEvent("click"))
 - disabled radio should get legacy-canceled-activation behavior
-- disabled radio still has activation behavior
 - disconnected checkbox should be checked from dispatchEvent(new MouseEvent('click'))
 - disconnected form should not submit
 - disconnected radio should be checked from dispatchEvent(new MouseEvent('click'))
@@ -81,7 +78,6 @@ dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Transitions transitioncancel event fires on disabled form elements
 - CSS Transitions transitionrun, transitionstart, transitionend events fire on disabled
   form elements
-- Calling click() on disabled elements must not dispatch events.
 - Real clicks on disabled elements must not dispatch events.
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching DOMContentLoaded event after being dispatched
@@ -135,9 +131,6 @@ dom/events/EventListener-invoke-legacy.html:
 - Listener of animationend
 - Listener of animationstart
 - Listener of transitionend
-dom/events/EventListenerOptions-capture.html:
-- Capture boolean should be honored correctly
-- Supports capture option
 dom/events/EventTarget-this-of-listener.html:
 - addEventListener should not require handleEvent to be defined on object listeners
 - dispatchEvent should invoke the current handleEvent method of the object
