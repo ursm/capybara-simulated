@@ -602,8 +602,6 @@ domparsing/innerhtml-03.xhtml:
 - innerHTML in XHTML 4
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-domparsing/innerhtml-07.html:
-- 'innerHTML and string conversion: undefined.'
 domparsing/innerhtml-mxss.sub.html:
 - 'href after setter: 1680'
 - 'href after setter: 2000'
