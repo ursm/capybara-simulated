@@ -30,12 +30,38 @@ when it shifts app-test timing — e.g. moving the timer / event-loop model
 from the pragmatic wall-sync clock toward a real HTML event loop (task
 queues + microtask checkpoints + spec timer ordering).
 
-Out of scope — a failure here is **not** a driver bug: anything that
-fundamentally needs a layout engine (visual hit-testing,
-`getBoundingClientRect` truthiness, viewport-clip visibility,
-`display: contents` / table layout), a real async runtime / streams, or
-IDNA / Unicode-host tables. These are tracked as allowlisted or skipped
-in the WPT gate, not chased.
+### In scope vs out of scope
+
+Out-of-scope status is **earned by showing why a subtest can't be
+satisfied**, never assumed because a fix looks like work. The default is
+**in scope**. A subtest is out of scope (allowlisted / skipped, *not* a
+driver bug) only when one of these holds:
+
+1. **It needs a subsystem we deliberately don't model.** A layout /
+   rendering engine (visual hit-testing, `getBoundingClientRect`
+   truthiness, viewport-clip visibility, `display: contents` / table
+   layout), a real async runtime / streams, or IDNA / Unicode-host /
+   legacy-multibyte encoding tables.
+2. **It's a spec edge no real browser-built library or app depends on,
+   AND satisfying it would require a library-shaped hack (rule 2) or a
+   *measured* performance regression (rule 3).** Examples: attribute /
+   property names around the 2³² index boundary; `Object.freeze` on a
+   platform exotic object.
+
+Everything else is in scope — fix it, favouring spec over app-quirk.
+Cost and risk decide **priority and approach (incremental, perf-safe,
+validated), not whether.** A high-cost-but-correct change (e.g. the
+namespaced-attribute model: SVG `xlink:href`, case-sensitivity — all
+real contracts) is scheduled as a careful staged effort, never skipped
+for being tedious. "Addressable but annoying" is a backlog item, not an
+exclusion.
+
+A bounded, documented conformance gap is acceptable **only** when it's
+the deliberate cost of a load-bearing design choice and the alternative
+costs more than it's worth — e.g. `HTMLCollection extends Array` (for
+framework array-iteration compat) forces `length` into
+`getOwnPropertyNames`. List and justify these explicitly; don't let them
+multiply.
 
 Caveat: "spec-correct" still means "what real browsers actually do."
 Where the spec is silent or browsers diverge from it, match Chromium /
