@@ -537,24 +537,9 @@ dom/ranges/Range-adopt-test.html:
 - 'Range container''s parentless container moved to another document with appendChild:
   Removing the only element in the range must collapse the range'
 - 'Range in document: Removing the only element in the range must collapse the range'
-dom/ranges/Range-attributes.html:
-- Range attributes
-dom/ranges/Range-commonAncestorContainer-2.html:
-- Detached Range
-dom/ranges/Range-comparePoint-2.html:
-- Range.comparePoint
-- Range.comparePoint 1
-- Range.comparePoint 2
-dom/ranges/Range-constructor.html:
-- Range constructor test
 dom/ranges/Range-extractContents-dynamic-end.html:
 - Range.extractContents should not extract out-of-bounds nodes if end container is
   removed during iframe unload
-dom/ranges/Range-intersectsNode-2.html:
-- Range.intersectsNode() simple cases
-dom/ranges/Range-intersectsNode-binding.html:
-- Calling intersectsNode without an argument or with an invalid argument should throw
-  a TypeError.
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
