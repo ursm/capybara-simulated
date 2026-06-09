@@ -175,28 +175,6 @@ dom/events/Event-dispatch-single-activation-behavior.html:
   type=submit></BUTTON></FORM>, only child should be activated.
 - When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <FORM><INPUT
   type=image></INPUT></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <A></A>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <AREA></AREA>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <FORM><INPUT type=submit></INPUT></FORM>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <INPUT type=checkbox></INPUT>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <INPUT type=radio></INPUT>, only child should be activated.
-- When clicking child <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL> of
-  parent <LABEL><BUTTON type=button></BUTTON></LABEL>, only child should be activated.
 dom/events/Event-dispatch-throwing-multiple-globals.html:
 - exception thrown in event listener function should result in error event on listener's
   global
