@@ -280,9 +280,6 @@ dom/nodes/Document-contentType/contentType/contenttype_png.html:
 - PNG document.contentType === 'image/png'
 dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
-dom/nodes/Document-createComment.html:
-- createComment(null)
-- createComment(undefined)
 dom/nodes/Document-createElementNS.html:
 - Lower-case non-HTML element with a prefix
 - Lower-case non-HTML element without a prefix
@@ -293,9 +290,6 @@ dom/nodes/Document-createElementNS.html:
 - empty string namespace
 - null namespace
 - undefined namespace
-dom/nodes/Document-createTextNode.html:
-- createTextNode(null)
-- createTextNode(undefined)
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
