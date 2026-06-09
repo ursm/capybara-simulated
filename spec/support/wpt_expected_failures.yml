@@ -299,11 +299,6 @@ dom/nodes/Document-createTextNode.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
-dom/nodes/Document-getElementById.html:
-- Calling document.getElementById with a null argument.
-- Calling document.getElementById with an undefined argument.
-- add id attribute via outerHTML
-- remove id attribute via outerHTML
 dom/nodes/Document-getElementsByClassName.html:
 - getElementsByClassName() should be a live collection
 dom/nodes/Document-getElementsByTagName.html:
@@ -790,14 +785,6 @@ domparsing/innerhtml-mxss.sub.html:
 - 'href before setter: 3000'
 domparsing/insert_adjacent_html-xhtml.xhtml:
 - insertAdjacentHTML in HTML
-domparsing/outerhtml-01.html:
-- 'outerHTML: child of #document'
-domparsing/outerhtml-02.html:
-- 'outerHTML and string conversion: null.'
-- 'outerHTML and string conversion: number.'
-- 'outerHTML and string conversion: toString.'
-- 'outerHTML and string conversion: undefined.'
-- 'outerHTML and string conversion: valueOf.'
 domparsing/style_attribute_html.html:
 - Parsing of initial style attribute
 - Parsing of invalid style attribute
