@@ -246,9 +246,6 @@ dom/historical.html:
 dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
-dom/nodes/Comment-constructor.html:
-- 'new Comment(): null'
-- 'new Comment(): prototype chain'
 dom/nodes/DOMImplementation-createHTMLDocument.html:
 - 'createHTMLDocument(): document location getter is null'
 - 'createHTMLDocument(): metadata'
@@ -431,9 +428,6 @@ dom/nodes/ParentNode-replaceChildren.html:
 - There should be a MutationRecord for the node removed from another parent node.
 dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 - ProcessingInstruction numeric escapes
-dom/nodes/Text-constructor.html:
-- 'new Text(): null'
-- 'new Text(): prototype chain'
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
   order.
