@@ -395,13 +395,6 @@ dom/nodes/Node-mutation-adoptNode.html:
 - simple append of foreign div with text
 dom/nodes/Node-nodeValue.html:
 - DocumentFragment.nodeValue
-dom/nodes/Node-replaceChild.html:
-- If the context node is a document, inserting a new doctype should work.
-- Replacing a node with itself should not move the node
-- Replacing the document element with a DocumentFragment containing a single element
-  and comments should work.
-- Replacing the document element with a DocumentFragment containing a single element
-  should work.
 dom/nodes/NodeList-static-length-getter-tampered-1.html:
 - NodeList (static collection) "length" getter tampered
 dom/nodes/NodeList-static-length-getter-tampered-2.html:
