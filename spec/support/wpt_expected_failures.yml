@@ -47,12 +47,9 @@ dom/collections/HTMLCollection-supported-property-names.html:
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-click.html:
-- disconnected form should not submit
 - event state during post-click handling
-- look at parents when event bubbles
 - pick the first with activation behavior <a href>
 - redispatch during post-click handling
-- submit button that morphed from checkbox should not activate
 dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Animation animationstart, animationiteration, animationend fire on disabled
   form elements
