@@ -47,30 +47,12 @@ dom/collections/HTMLCollection-supported-property-names.html:
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-click.html:
-- basic with dispatchEvent()
-- disabled checkbox should be checked from dispatchEvent(new MouseEvent("click"))
-- disabled checkbox should get legacy-canceled-activation behavior
-- disabled radio should be checked from dispatchEvent(new MouseEvent("click"))
-- disabled radio should get legacy-canceled-activation behavior
-- disconnected checkbox should be checked from dispatchEvent(new MouseEvent('click'))
 - disconnected form should not submit
-- disconnected radio should be checked from dispatchEvent(new MouseEvent('click'))
 - event state during post-click handling
 - look at parents when event bubbles
 - pick the first with activation behavior <a href>
-- pick the first with activation behavior <input type=checkbox>
-- pick the first with activation behavior <input type=radio>
 - redispatch during post-click handling
 - submit button that morphed from checkbox should not activate
-dom/events/Event-dispatch-detached-input-and-change.html:
-- attached checkbox should emit input and change events on dispatchEvent(new MouseEvent('click')).
-- attached radio should emit input and change events on dispatchEvent(new MouseEvent('click')).
-- attached to shadow dom checkbox should emit input and change events on dispatchEvent(new
-  MouseEvent('click')).
-- attached to shadow dom radio should emit input and change events on dispatchEvent(new
-  MouseEvent('click')).
-- detached checkbox should not emit input or change events on click().
-- detached radio should not emit input or change events on click().
 dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Animation animationstart, animationiteration, animationend fire on disabled
   form elements
