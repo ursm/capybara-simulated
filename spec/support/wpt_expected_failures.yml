@@ -22,16 +22,8 @@ dom/abort/abort-signal-timeout.html:
 - Signal returned by AbortSignal.timeout() is not aborted after frame detach
 dom/abort/reason-constructor.html:
 - AbortSignal.reason.constructor should be from iframe
-dom/collections/HTMLCollection-iterator.html:
-- HTMLCollection does not have iterable's entries method.
-- HTMLCollection does not have iterable's forEach method.
-- HTMLCollection does not have iterable's values method.
 dom/collections/HTMLCollection-supported-property-indices.html:
 - Handling of property names that look like integers around 2^32
-dom/collections/HTMLCollection-supported-property-names.html:
-- Object.getOwnPropertyNames on HTMLCollection
-- Object.getOwnPropertyNames on HTMLCollection with expando object
-- Object.getOwnPropertyNames on HTMLCollection with non-HTML namespace
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-on-disabled-elements.html:
@@ -174,12 +166,8 @@ dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
-dom/nodes/Document-getElementsByTagName.html:
-- hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Document-implementation.html:
 - Getting implementation off the same document
-dom/nodes/Element-children.html:
-- HTMLCollection edge cases 1
 dom/nodes/Element-closest.html:
 - Element.closest with context node 'test11' and selector ':invalid'
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
@@ -187,8 +175,6 @@ dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
-dom/nodes/Element-getElementsByTagName.html:
-- hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames
 dom/nodes/Element-removeAttribute.html:
 - removeAttribute should remove the first attribute, irrespective of namespace, when
   the first attribute is in a namespace
@@ -246,8 +232,6 @@ dom/nodes/NodeList-static-length-getter-tampered-indexOf-2.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
 dom/nodes/NodeList-static-length-getter-tampered-indexOf-3.html:
 - NodeList (static collection) "length" getter tampered (Array.prototype.indexOf)
-dom/nodes/ParentNode-children.html:
-- ParentNode.children should be a live collection
 dom/nodes/ParentNode-querySelector-escapes.html:
 - '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html:
