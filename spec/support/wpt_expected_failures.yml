@@ -22,8 +22,6 @@ dom/abort/abort-signal-timeout.html:
 - Signal returned by AbortSignal.timeout() is not aborted after frame detach
 dom/abort/reason-constructor.html:
 - AbortSignal.reason.constructor should be from iframe
-dom/collections/HTMLCollection-empty-name.html:
-- Empty string as a name for Element.children
 dom/collections/HTMLCollection-iterator.html:
 - HTMLCollection does not have iterable's entries method.
 - HTMLCollection does not have iterable's forEach method.
