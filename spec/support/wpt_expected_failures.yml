@@ -47,9 +47,7 @@ dom/collections/HTMLCollection-supported-property-names.html:
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
 dom/events/Event-dispatch-click.html:
-- event state during post-click handling
 - pick the first with activation behavior <a href>
-- redispatch during post-click handling
 dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Animation animationstart, animationiteration, animationend fire on disabled
   form elements
@@ -149,8 +147,6 @@ dom/events/scrolling/scrollend-fires-to-text-input.html:
   }).'
 dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 - When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
-dom/events/window-composed-path.html:
-- window target has an empty path after dispatch
 dom/historical.html:
 - 'Node member must be removed: localName'
 - 'Node member must be removed: namespaceURI'
