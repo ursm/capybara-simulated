@@ -46,8 +46,6 @@ dom/collections/HTMLCollection-supported-property-names.html:
 - Trying to set an expando that would shadow an already-existing named property
 dom/events/Event-dispatch-bubbles-false.html:
 - In new Document()
-dom/events/Event-dispatch-click.html:
-- pick the first with activation behavior <a href>
 dom/events/Event-dispatch-on-disabled-elements.html:
 - CSS Animation animationstart, animationiteration, animationend fire on disabled
   form elements
@@ -1765,12 +1763,8 @@ url/a-element.html:
 url/data-uri-fragment.html:
 - Data URI parsing of fragments
 url/javascript-urls.window.js:
-- 'javascript: URL containing a JavaScript string split over path and query'
 - 'javascript: URL containing a JavaScript string split over path and query and has
   a U+000A in scheme'
-- 'javascript: URL that fails to parse due to invalid host'
-- 'javascript: URL that fails to parse due to invalid host and has a U+0009 in scheme'
-- 'javascript: URL with extra slashes at the start'
 - 'javascript: URL without an opaque path'
 url/percent-encoding.window.js:
 - "Input \x0EA with encoding big5"
