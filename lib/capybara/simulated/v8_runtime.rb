@@ -32,8 +32,9 @@ begin
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
   # (Standard Node distribution ships the post-processor; no extra
-  # install needed.) The log is per-isolate, so per-visit
-  # `rebuild_ctx` produces one file per isolate.
+  # install needed.) The log is per-isolate: under the default
+  # warm-compile one isolate spans the whole run (one aggregate log);
+  # `CSIM_WARM_COMPILE=0` gives per-visit isolates → per-visit files.
   if ENV['CSIM_V8_PROF'] == '1'
     RustyRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
   end
@@ -80,11 +81,12 @@ module Capybara
       # attaches onto per-frame realm contexts (rusty's attach is per-context).
       class Ctx
         def initialize(snapshot: nil, timeout: 0)
-          @iso      = RustyRacer::Isolate.new(host_namespace: HOST_NAMESPACE_NAME,
-                                              snapshot:       snapshot,
-                                              timeout_ms:     timeout.to_i)
-          @ctx      = @iso.context
-          @attached = []
+          @iso        = RustyRacer::Isolate.new(host_namespace: HOST_NAMESPACE_NAME,
+                                                snapshot:       snapshot,
+                                                timeout_ms:     timeout.to_i)
+          @ctx        = @iso.context
+          @attached   = []
+          @generation = 0
         end
 
         # ── Context surface ─────────────────────────────────────────
@@ -100,6 +102,28 @@ module Capybara
         def attach(name, prc)
           @attached << [name, prc]
           @ctx.attach(name, prc)
+        end
+
+        # One rendezvous for the whole host-fn table (vs one per fn).
+        def attach_many(fns)
+          @attached.concat(fns.to_a)
+          @ctx.attach_many(fns)
+        end
+
+        # Bumped on every realm reset: realm-bound caches (module handles)
+        # key off `[object_id, generation]` so invalidation is intrinsic to
+        # reset — the Ctx OBJECT survives a warm reset, so object_id alone
+        # can't detect one.
+        attr_reader :generation
+
+        # Swap the realm for a snapshot-fresh one on the warm isolate. Per
+        # rusty's contract the host fns die with the old context — drop the
+        # replay record so the caller's re-attach doesn't accumulate stale
+        # entries visit over visit.
+        def reset
+          @ctx.reset
+          @attached.clear
+          @generation += 1
         end
 
         def compile(src, **kw)        = @ctx.compile(src, **kw)
@@ -118,15 +142,13 @@ module Capybara
         # own global + intrinsics). Carries `.id` / eval / call / dispose — the
         # rest of the surface `create_frame_realm` needs.
         #
-        # The replay is one attach (= one rendezvous) per host fn, ~55 per
-        # realm; a batched attach on the rusty side would collapse it to one.
-        # Fine at current iframe densities — revisit if a suite ever leans on
-        # iframe-heavy pages. NOTE: context-bound fns (`__csim_runScript*`,
-        # `__csim_evalEsmEntry`) get realm-bound overrides in
-        # `create_frame_realm` after this replay.
+        # `to_h` dedups re-attached names to their latest proc, matching
+        # attach's override semantics. NOTE: context-bound fns
+        # (`__csim_runScript*`, `__csim_evalEsmEntry`) get realm-bound
+        # overrides in `create_frame_realm` after this replay.
         def create_context
           realm = @iso.create_context
-          @attached.each {|name, prc| realm.attach(name, prc) }
+          realm.attach_many(@attached.to_h)
           realm
         end
       end
@@ -292,6 +314,12 @@ module Capybara
         # on the prior page) aborts iteration mid-fire and silently
         # drops every later callback — including the current page's.
         @snapshot = self.class.snapshot
+        # `@compiled_module_urls` tracks which module URLs this isolate has
+        # already compiled, for the no-cd path in `native_module_for`. It
+        # persists across warm realm resets (same isolate, warm in-memory
+        # compilation cache) and is cleared only on a true rebuild
+        # (different isolate, cold cache).
+        @compiled_module_urls = {}
         refill_pool_async
       end
 
@@ -328,11 +356,14 @@ module Capybara
 
       # Per-iframe realms (`Isolate#create_context`): a separate V8 context —
       # own global + intrinsics (Function/Error/DOMParser/onerror) — per
-      # nested browsing context, so cross-realm tests behave per spec. Keyed by
-      # context id; dropped on every ctx rebuild (the realms die with the isolate).
+      # nested browsing context, so cross-realm tests behave per spec. Keyed
+      # by context id; released explicitly by `dispose_frame_realms` on every
+      # rebuild — under warm-compile the isolate survives the visit, so
+      # nothing else would ever free them.
       def frame_realms = (@frame_realms ||= {})
 
       def dispose_frame_realms
+        @realm_module_handles&.clear
         return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
@@ -378,18 +409,55 @@ module Capybara
         ctx.call('__resetTimers')
       end
 
-      # Tears down the current context and brings up a fresh one from
-      # the warm snapshot. Partial in-context resets are not safe (see
-      # feedback_visit_always_rebuilds memory): library init guards
-      # stick, delegate registrations leak between visits. The snapshot
-      # warmup keeps the per-rebuild cost ~3 ms; jQuery / app-bundle
-      # re-eval dominates after that.
+      # Brings up a snapshot-fresh realm for the next page. The default is
+      # the warm path: `Context#reset` swaps in a brand-new global on the
+      # long-lived isolate — a FULL fresh realm, not a partial in-context
+      # reset (those are unsafe per feedback_visit_always_rebuilds: library
+      # init guards stick, delegates leak) — keeping the isolate's in-memory
+      # compilation cache + tiered-up code warm across visits (measured
+      # −4.5..19% suite wall). `CSIM_WARM_COMPILE=0` (and the warm path's
+      # failure rescue) take the cold route instead: dispose the isolate and
+      # check a pre-built one out of the pool.
       def rebuild_ctx
+        # Produce any queued bytecode-cache blobs while every queued target
+        # (frame realms included) is still alive — a job queued by the last
+        # activity of a test (e.g. a timer-fired dynamic import in a lazy
+        # frame) would otherwise compile against a disposed context and be
+        # dropped, leaving the disk cache permanently cold for that body.
+        ScriptCache.warm_pending!
         # Drop the previous page's iframe realms (a new visit = new nested
-        # browsing contexts). Safe here — we're between visits, not mid-callback.
+        # browsing contexts). Explicit — under warm-compile the isolate
+        # survives, so nothing else would ever release them.
         dispose_frame_realms
+        # Warm path: per rusty's reset contract the snapshot is REPLAYED —
+        # including its precompiled code cache — so re-visited app modules
+        # compile at in-memory-hit cost (~3.3× cheaper than a cold
+        # `cached_data` deserialize; see `@compiled_module_urls`). Host fns,
+        # module handles (invalidated via `Ctx#generation`), and every
+        # post-snapshot `c.eval` died with the old realm — re-seed exactly
+        # as `build_ctx` does after `Ctx.new`. A refused reset (mid-drain /
+        # suspended request — can't happen from these top-level call sites,
+        # but the contract reserves it, e.g. after a watchdog terminate
+        # wedges a nested rendezvous) falls back to the validated cold
+        # rebuild — loudly, because a persistent fallback is an invisible
+        # perf cliff (and log_console is trace-gated, nil during reset!).
+        if @ctx && WARM_COMPILE
+          begin
+            @ctx.reset
+            attach_host_fns(@ctx)
+            @ctx.eval('__csim_installWorker();')
+            return @ctx
+          rescue StandardError => e
+            warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
+            @browser.log_console('warn', "warm context reset failed, falling back to full rebuild: #{e.message}")
+          end
+        end
         old = @ctx
         @ctx = nil
+        # A true rebuild checks out a *different* isolate, whose in-memory
+        # compilation cache is cold — drop the no-cd tracking so the next
+        # visit goes back through the on-disk bytecode-cache path.
+        @compiled_module_urls.clear
         # Hand the old context off to a disposal thread so the next
         # visit doesn't wait on V8 teardown. Dispose order doesn't
         # matter — handles + listeners die with the isolate.
@@ -440,8 +508,18 @@ module Capybara
       # terminate escalates through any nested frames (it is
       # isolate-global by design), and the isolate itself stays healthy
       # for subsequent calls — csim treats a terminated call as fatal to
-      # that call only (the per-visit rebuild supplies the clean slate).
+      # that call only. The clean slate comes from the next rebuild: a
+      # warm `Context#reset` normally, or — if the terminate wedged a
+      # suspended request and reset is refused — the loud cold-rebuild
+      # fallback in `rebuild_ctx`.
       CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
+
+      # Warm-compile: per-visit `Context#reset` on a long-lived isolate
+      # instead of a fresh-isolate checkout. The isolate-level in-memory
+      # compilation cache + tiered-up code survive across visits — the same
+      # cross-navigation warmth a real browser has. Default ON;
+      # `CSIM_WARM_COMPILE=0` restores the cold per-visit rebuild.
+      WARM_COMPILE = ENV['CSIM_WARM_COMPILE'] != '0'
 
       # V8's bytecode-cache version tag. Keys every ScriptCache entry so a
       # V8 upgrade invalidates stale bytecode. Fixed per process → memoized.
@@ -457,8 +535,18 @@ module Capybara
         c
       end
 
+      # Under warm-compile the steady-state visit path reuses the one warm
+      # isolate and never checks out of the pool; a checkout only happens on
+      # the initial build or the rare reset-failure fallback. Keep a single
+      # pre-built spare so that fallback pops instantly instead of paying a
+      # synchronous `build_ctx`. Cold mode keeps the full POOL_SIZE for
+      # back-to-back visits.
+      def effective_pool_size
+        WARM_COMPILE ? 1 : POOL_SIZE
+      end
+
       def refill_pool_async
-        target = POOL_SIZE
+        target = effective_pool_size
         @pool_lock.synchronize {
           return if @refill_busy
           return if @pool.size >= target
@@ -502,6 +590,7 @@ module Capybara
         # linger in @frame_realms and get re-drained on every poll tick.
         # Disposing a non-executing child realm mid-callback is safe.
         c.attach('__csim_disposeFrameRealm', ->(id) {
+          @realm_module_handles&.delete(id)
           fr = frame_realms.delete(id)
           fr.dispose rescue nil if fr
           nil
@@ -550,8 +639,12 @@ module Capybara
         @browser.log_console('warn', "frame realm load failed: #{e.message}")
         # A realm created before the failure (load threw) is untracked — not in
         # frame_realms nor __csimChildRealmIds — so nothing would ever drain or
-        # dispose it. Tear it down here (safe: it's non-executing in the rescue).
-        realm.dispose rescue nil if realm
+        # dispose it. Tear it down here (safe: it's non-executing in the rescue),
+        # including any module handles its scripts compiled before the throw.
+        if realm
+          @realm_module_handles&.delete(realm.id)
+          realm.dispose rescue nil
+        end
         nil
       end
 
@@ -587,14 +680,15 @@ module Capybara
         url.to_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
       end
 
-      # `RustyRacer::Module` handles are bound to their context; rebuild_ctx
-      # invalidates them, so the cache is keyed off `@ctx.object_id` and
-      # rebuilt lazily on first use after a rebuild.
+      # `RustyRacer::Module` handles are bound to their realm; both rebuild
+      # paths invalidate them. The key carries `Ctx#generation` because a
+      # warm reset keeps the same Ctx OBJECT — object_id alone can't see it.
       def native_module_handles
         @native_module_handles ||= {}
-        if @native_module_handles_ctx != ctx.object_id
-          @native_module_handles = {}
-          @native_module_handles_ctx = ctx.object_id
+        key = [ctx.object_id, ctx.generation]
+        if @native_module_handles_key != key
+          @native_module_handles     = {}
+          @native_module_handles_key = key
         end
         @native_module_handles
       end
@@ -604,12 +698,31 @@ module Capybara
         url_s = url.to_s
         src = inline_src || @browser.rack_fetch_body(url_s)
         return handles[url] = nil unless src
-        body    = module_body(url_s, src)
-        sha     = Digest::SHA256.hexdigest(body)
-        version = self.class.cached_data_version_tag
-        cached  = ScriptCache.lookup(sha, version, kind: :module)
-        m       = target.compile_module(body, filename: url_s, cached_data: cached)
-        ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
+        body = module_body(url_s, src)
+        # No-cd warm path: once this isolate has compiled a URL, its in-memory
+        # compilation cache holds the bytecode keyed by source — skip
+        # `cached_data` so V8 hits that cache directly (~0.04 ms/module)
+        # instead of paying the forced kConsumeCodeCache deserialize
+        # (~0.15 ms/module). The first compile of each URL goes through the
+        # on-disk bytecode cache and warms it. The in-memory cache is
+        # source-keyed and re-populated by every compile, so a changed body
+        # or a GC-aged-out entry costs ONE re-parse and is warm again — no
+        # sticky cliff. (Only the on-disk blob for a changed body stays
+        # unwarmed; acceptable, module URLs here are fingerprinted-
+        # immutable.) Realms share the isolate's cache, so the tracking
+        # applies to frame-realm compiles too. On a cold rebuild
+        # `@compiled_module_urls` is cleared and everything returns to the
+        # `cached_data` path.
+        if WARM_COMPILE && inline_src.nil? && @compiled_module_urls.key?(url_s)
+          m = target.compile_module(body, filename: url_s)
+        else
+          sha     = Digest::SHA256.hexdigest(body)
+          version = self.class.cached_data_version_tag
+          cached  = ScriptCache.lookup(sha, version, kind: :module)
+          m       = target.compile_module(body, filename: url_s, cached_data: cached)
+          ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
+          @compiled_module_urls[url_s] = true if WARM_COMPILE && inline_src.nil?
+        end
         handles[url] = m
       rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
@@ -631,31 +744,45 @@ module Capybara
       # finishes the dynamic import per the V8 host contract — it
       # instantiates + evaluates the returned Module (TLA-aware, via the
       # evaluation promise) before resolving the outer `import()` promise.
-      # The resolver is per-ISOLATE and compiles against the MAIN ctx — a
-      # dynamic `import()` issued from a frame realm would link main-context
-      # modules (rusty doesn't surface the initiating context); static
-      # `<script type=module>` in frames is realm-correct via
+      # The resolver is per-ISOLATE; rusty hands it the INITIATING realm's
+      # Context as the third argument, so a frame realm's `import()`
+      # compiles + links in that realm with its own handle cache — same
+      # realm-correctness as static `<script type=module>` via
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
         c.attach('__csim_evalEsmEntry', ->(url, inline) {
           RuntimeShared.safe_call { eval_esm_module(url, inline) }
           nil
         })
-        c.dynamic_import_resolver = ->(specifier, referrer) {
+        c.dynamic_import_resolver = ->(specifier, referrer, initiating) {
+          target, handles =
+            if initiating && initiating.id != 0
+              [initiating, realm_module_handles(initiating.id)]
+            else
+              [ctx, native_module_handles]
+            end
           resolved = @browser.resolve_module_specifier(specifier, referrer)
-          m = native_module_for(resolved, nil, ctx, native_module_handles)
+          m = native_module_for(resolved, nil, target, handles)
           raise "module not found: #{resolved}" unless m
-          instantiate_native_module(m, resolved, ctx, native_module_handles)
+          instantiate_native_module(m, resolved, target, handles)
           m
         }
       end
 
-      # Frame-document `<script type=module>` entry, bound to the realm with
-      # a realm-local handle cache (it dies with the realm's closure).
+      # Per-realm module-handle caches, keyed by realm id (Module handles are
+      # context-bound). Shared by the realm's static `__csim_evalEsmEntry`
+      # and the isolate resolver's dynamic-import routing; dropped with the
+      # realm in the dispose paths.
+      def realm_module_handles(realm_id)
+        (@realm_module_handles ||= {})[realm_id] ||= {}
+      end
+
+      # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
-        handles = {}
         realm.attach('__csim_evalEsmEntry', ->(url, inline) {
-          RuntimeShared.safe_call { eval_esm_module(url, inline, target: realm, handles: handles) }
+          RuntimeShared.safe_call {
+            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id))
+          }
           nil
         })
       end
@@ -813,12 +940,14 @@ module Capybara
       # reuse the same `BROWSER_HOST_FNS` + `STDLIB_HOST_FNS` table
       # the main runtime wires up.
       def self.attach_host_fns(c, browser)
+        fns = {}
         RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
-          c.attach(name, ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } })
+          fns[name] = ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } }
         }
-        RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
-          c.attach(name, body)
-        }
+        fns.update(RuntimeShared::STDLIB_HOST_FNS)
+        # One rendezvous for the whole table (~50 fns) — this runs per pool
+        # refill, per worker, and per warm realm reset.
+        c.attach_many(fns)
         # `dispatchEventForUserAction` calls `__csim_yield` between listener
         # invocations to match HTML spec "clean up after running script"
         # microtask-checkpoint semantics. Alias it to the namespace's native
