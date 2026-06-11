@@ -314,12 +314,14 @@ module Capybara
         # on the prior page) aborts iteration mid-fire and silently
         # drops every later callback — including the current page's.
         @snapshot = self.class.snapshot
-        # `@compiled_module_urls` tracks which module URLs this isolate has
-        # already compiled, for the no-cd path in `native_module_for`. It
-        # persists across warm realm resets (same isolate, warm in-memory
-        # compilation cache) and is cleared only on a true rebuild
-        # (different isolate, cold cache).
+        # `@compiled_module_urls` / `@compiled_script_keys` track what this
+        # isolate has already compiled, for the no-cd paths in
+        # `native_module_for` / `attach_run_script_with_cache`. They persist
+        # across warm realm resets (same isolate, warm in-memory compilation
+        # cache) and are cleared only on a true rebuild (different isolate,
+        # cold cache).
         @compiled_module_urls = {}
+        @compiled_script_keys = {}
         refill_pool_async
       end
 
@@ -458,6 +460,7 @@ module Capybara
         # compilation cache is cold — drop the no-cd tracking so the next
         # visit goes back through the on-disk bytecode-cache path.
         @compiled_module_urls.clear
+        @compiled_script_keys.clear
         # Hand the old context off to a disposal thread so the next
         # visit doesn't wait on V8 teardown. Dispose order doesn't
         # matter — handles + listeners die with the isolate.
@@ -720,7 +723,9 @@ module Capybara
           version = self.class.cached_data_version_tag
           cached  = ScriptCache.lookup(sha, version, kind: :module)
           m       = target.compile_module(body, filename: url_s, cached_data: cached)
-          ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
+          if cached.nil? || m.cache_rejected?
+            ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module, stale: !cached.nil?)
+          end
           @compiled_module_urls[url_s] = true if WARM_COMPILE && inline_src.nil?
         end
         handles[url] = m
@@ -833,16 +838,31 @@ module Capybara
             # pure waste, since the value is discarded (`nil` below). The SHA keys
             # the bytecode cache on the COMPILED source, so the suffix must be
             # hashed and fed to `queue_warm` too (else cached_data is rejected).
-            src    = "#{body}\n;undefined"
-            sha    = Digest::SHA256.hexdigest(src)
-            cached = ScriptCache.lookup(sha, version_tag)
-            script = c.compile(src, filename: label.to_s, cached_data: cached)
-            $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
-            # V8 forbids `produce_cache: true` from inside a host-fn
-            # callback so we queue misses + rejects for top-level
-            # produce via `ScriptCache.warm_pending!` after the
-            # current `V8Runtime#call` returns.
-            ScriptCache.queue_warm(c, sha, label, src, version_tag) if cached.nil? || script.cache_rejected?
+            src = "#{body}\n;undefined"
+            # No-cd warm path, mirroring `native_module_for`: once this
+            # isolate has compiled a (label, bytesize), re-visits compile
+            # straight against V8's source-keyed in-memory cache — skipping
+            # the SHA256 of a 140KB+ chunk per visit (rbspy: ~4.8% of the
+            # Discourse perf sample was Digest#update) AND the disk lookup.
+            # The key is a heuristic, but a false positive only costs a
+            # plain recompile of the true source — never wrong code.
+            key = WARM_COMPILE ? [label.to_s, src.bytesize] : nil
+            if key && @compiled_script_keys.key?(key)
+              script = c.compile(src, filename: label.to_s)
+            else
+              sha    = Digest::SHA256.hexdigest(src)
+              cached = ScriptCache.lookup(sha, version_tag)
+              script = c.compile(src, filename: label.to_s, cached_data: cached)
+              $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
+              # V8 forbids `produce_cache: true` from inside a host-fn
+              # callback so we queue misses + rejects for top-level
+              # produce via `ScriptCache.warm_pending!` after the
+              # current `V8Runtime#call` returns.
+              if cached.nil? || script.cache_rejected?
+                ScriptCache.queue_warm(c, sha, label, src, version_tag, stale: !cached.nil?)
+              end
+              @compiled_script_keys[key] = true if key
+            end
             begin
               script.run
             ensure

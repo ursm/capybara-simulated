@@ -63,10 +63,19 @@ module Capybara
           enqueue_disk_write(disk_path_for(sha, version_tag, kind), blob)
         end
 
-        def queue_warm(ctx, sha, label, body, version_tag, kind: :script)
+        # `stale: true` = the caller HAD a blob and V8 rejected it (the
+        # snapshot bytes changed under the same version tag — a bridge edit
+        # rebuilds the snapshot, and `Snapshot.new` is non-deterministic).
+        # The rejected blob must be evicted from `@mem`, or this guard would
+        # treat it as "already cached" and skip the re-produce forever:
+        # every visit then hits the stale blob, rejects, and full-parses —
+        # a silent, permanent loss of the bytecode cache (caught 2026-06-12:
+        # 113/113 rejects on the Discourse perf sample).
+        def queue_warm(ctx, sha, label, body, version_tag, kind: :script, stale: false)
           return unless enabled?
           key = cache_key(sha, version_tag, kind)
           @lock.synchronize {
+            @mem.delete(key) if stale
             return if @mem.key?(key) || @pending.key?(key)
             @pending[key] = {ctx: ctx, label: label, body: body, version_tag: version_tag, sha: sha, kind: kind}
           }
