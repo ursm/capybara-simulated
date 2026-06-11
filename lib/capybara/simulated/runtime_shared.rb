@@ -12,7 +12,7 @@ module Capybara
     # Bits common to `V8Runtime` and `QuickJSRuntime` — JS asset paths,
     # the host-fn table that bridge.js reaches back through, the
     # error-swallowing wrapper. Each engine plugs the table into its
-    # own attach API (mini_racer's `Context#attach` vs quickjs.rb's
+    # own attach API (rusty_racer's `Context#attach` vs quickjs.rb's
     # `Quickjs::VM#define_function`).
     module RuntimeShared
       BRIDGE_JS         = File.expand_path('js/bridge.bundle.js',                 __dir__).freeze
@@ -162,7 +162,21 @@ module Capybara
         yield
       rescue StandardError => e
         warn "[capybara-simulated] host fn error: #{e.class}: #{e.message[0, 200]}"
+        warn "  at #{e.backtrace&.first(4)&.join("\n  at ")}" if ENV['CSIM_HOSTFN_TRACE'] == '1'
         nil
+      end
+
+      # Re-tag a text string for the Ruby→JS crossing. Marshalling is
+      # tag-driven: a BINARY-tagged String crosses as a Uint8Array, and a
+      # UTF-8-tagged string with invalid bytes raises — but Rack bodies,
+      # socket reads, and header values all arrive BINARY-tagged even when
+      # they ARE text. Decoding response bytes into text is the document
+      # layer's job (csim owns the charset knowledge; the contract is UTF-8),
+      # so every text crossing funnels through here: re-tag as UTF-8, scrub
+      # only actually-invalid bytes.
+      def self.utf8_text(s)
+        s = s.dup.force_encoding(Encoding::UTF_8) unless s.encoding == Encoding::UTF_8
+        s.valid_encoding? ? s : s.scrub
       end
     end
   end

@@ -158,9 +158,8 @@ module Capybara
       # Discourse's content-hashed `/assets/*.js` (shipped with `Last-Modified`
       # and no `Cache-Control`). In the volatile asset cache, cross-visit
       # staleness is bounded by `clear_volatile` dropping non-immutable entries
-      # per visit; the ESM loader's cross-visit cache has its own argument (it
-      # only holds content-stable module code at content-hashed URLs — see
-      # `V8Runtime` `@@module_src`).
+      # per visit; Browser's cross-visit `@@asset_src` cache has its own
+      # argument (it only holds content-stable assets at content-hashed URLs).
       HEURISTIC_FRESHNESS_CAP = 24 * 60 * 60
 
       def heuristic_freshness(headers)

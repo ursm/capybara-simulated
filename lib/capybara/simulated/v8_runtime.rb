@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# mini_racer Context wrapper. The DOM lives in JS; this class owns the
-# V8 context, the warm snapshot, the host-fn callbacks the bridge reaches
-# back through, and the per-visit `rebuild_ctx` dance.
+# V8 runtime on rusty_racer. The DOM lives in JS; this class owns the
+# V8 isolate/context pair, the warm snapshot, the host-fn callbacks the
+# bridge reaches back through, and the per-visit `rebuild_ctx` dance.
 #
 # `QuickJSRuntime` is the alternate implementation; both expose the same
 # surface (`eval` / `call` / `drain_timers` / `drain_microtasks` /
@@ -11,8 +11,7 @@
 
 require 'digest'
 require 'fileutils'
-require 'mini_racer_csim'
-require 'set'
+require 'rusty_racer'
 
 require_relative 'runtime_shared'
 require_relative 'script_cache'
@@ -21,32 +20,24 @@ require_relative 'worker_runtime'
 
 begin
   stack_kb = (ENV['CSIM_V8_STACK_KB'] || '2000').to_i
-  # `:single_threaded` mode is for production fork-safety. csim tests
-  # never fork mini_racer contexts, and the mode actively breaks two
-  # things we need: `eval` deadlocks on certain reentrant patterns
-  # (see `feedback_v8_backend_progress` memory) and cross-process
-  # bytecode cache blobs become process-local (V8 embeds isolate
-  # state in `CreateCodeCache` under single-threaded). Always run
-  # multi-threaded.
-  MiniRacerCsim::Platform.set_flags!(stack_size: stack_kb)
+  RustyRacer::Platform.set_flags!(stack_size: stack_kb)
   # Default V8 old-space cap is ~1.4 GB, which OOMs on workloads that
   # marshal large pixel buffers across postMessage (Discourse's
   # media-optimization-worker hands a 317 MB raw RGBA frame from an
-  # 8900×8900 fixture through bytesToLatin1 + btoa + JSON before the
-  # transfer; the encode chain peaks at ~1.4 GB by itself). Match
+  # 8900×8900 fixture through the transfer-buffer path). Match
   # Discourse's own testem flag of 4 GB so the test fits.
   max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
-  MiniRacerCsim::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
+  RustyRacer::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
   # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
   # (Standard Node distribution ships the post-processor; no extra
   # install needed.) The log is per-isolate, so per-visit
-  # `rebuild_ctx` produces one file per Context.
+  # `rebuild_ctx` produces one file per isolate.
   if ENV['CSIM_V8_PROF'] == '1'
-    MiniRacerCsim::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
+    RustyRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
   end
-rescue MiniRacerCsim::PlatformAlreadyInitialized
+rescue RustyRacer::PlatformAlreadyInitialized
 end
 
 module Capybara
@@ -58,37 +49,86 @@ module Capybara
       @@live_lock     = Mutex.new
       @@live          = []
 
-      # Cross-visit cache of ESM module sources keyed by URL → [sha, body,
-      # fresh_until]. `clear_volatile` drops cacheable bodies from the volatile
-      # asset cache every visit, so without this the loader re-fetches every
-      # module source from the server each visit JUST to recompute the SHA that
-      # keys the (disk-persisted, already-warm) bytecode cache.
-      #
-      # This deliberately SURVIVES the visit boundary (that is the point), so —
-      # unlike the volatile asset cache — `clear_volatile` does NOT bound it.
-      # Its safety rests on: (a) entries are stored only for responses the
-      # server marks durably cacheable (`Browser#durable_source` returns a
-      # non-nil `fresh_until` — header-driven, not a URL-shape guess; no-store /
-      # no-cache / max-age=0 yield nil and are re-fetched), and only honoured
-      # while still fresh; and (b) these are ESM MODULES — content-stable app
-      # code served at content-hashed URLs, so a content change yields a new URL
-      # (cache miss), unlike a dynamic response whose body can change under a
-      # stable URL. Size-capped to bound process memory.
-      @@module_src      = {}
-      @@module_src_lock = Mutex.new
-      MODULE_SRC_MAX    = 4096
-
       at_exit do
         @@live_lock.synchronize {
           @@live.each {|c|
             begin
-              c.stop rescue nil
+              c.terminate rescue nil
               c.dispose
             rescue StandardError
             end
           }
           @@live.clear
         }
+      end
+
+      # The host namespace rusty_racer installs into every context (main and
+      # per-frame): `globalThis.RustyRacer.drainMicrotasks()` (a native,
+      # rendezvous-free microtask checkpoint), `contextGlobal(id)` /
+      # `contextOf(value)` (the per-frame realm machinery), and
+      # `setPromiseRejectHandler`. The bridge JS hard-codes the same
+      # `globalThis.RustyRacer` literal (timers.js / platform-globals.js /
+      # unhandled-rejection.js / bridge.entry.js) — a rename must touch both
+      # sides.
+      HOST_NAMESPACE_NAME = 'RustyRacer'
+
+      # One isolate + its default context, presented as a single handle — the
+      # shape the rest of the runtime (and `ScriptCache`) passes around.
+      # rusty splits the VM into an `Isolate` (lifecycle / realms / microtasks /
+      # terminate) and the `Context`s it hands out (eval / call / attach /
+      # compile / reset); this class pairs them and replays recorded host-fn
+      # attaches onto per-frame realm contexts (rusty's attach is per-context).
+      class Ctx
+        def initialize(snapshot: nil, timeout: 0)
+          @iso      = RustyRacer::Isolate.new(host_namespace: HOST_NAMESPACE_NAME,
+                                              snapshot:       snapshot,
+                                              timeout_ms:     timeout.to_i)
+          @ctx      = @iso.context
+          @attached = []
+        end
+
+        # ── Context surface ─────────────────────────────────────────
+        # rusty drains microtasks at call-depth zero (V8's default kAuto
+        # policy), so a returned eval/call has already run its end-of-script
+        # microtasks.
+        def eval(src)          = @ctx.eval(src)
+        def call(name, *args)  = @ctx.call(name, *args)
+
+        # Record every attach so `create_context` can replay them: the bridge
+        # in a per-frame realm reaches the same Ruby host fns as the main
+        # context, but rusty's attach is per-context.
+        def attach(name, prc)
+          @attached << [name, prc]
+          @ctx.attach(name, prc)
+        end
+
+        def compile(src, **kw)        = @ctx.compile(src, **kw)
+        def compile_module(src, **kw) = @ctx.compile_module(src, **kw)
+
+        # ── Isolate surface ─────────────────────────────────────────
+        def terminate                        = @iso.terminate
+        def dispose                          = @iso.dispose
+        def perform_microtask_checkpoint     = @iso.perform_microtask_checkpoint
+
+        def dynamic_import_resolver=(prc)
+          @iso.dynamic_import_resolver = prc
+        end
+
+        # A per-iframe realm: a fresh context in the SAME isolate (shared heap,
+        # own global + intrinsics). Carries `.id` / eval / call / dispose — the
+        # rest of the surface `create_frame_realm` needs.
+        #
+        # The replay is one attach (= one rendezvous) per host fn, ~55 per
+        # realm; a batched attach on the rusty side would collapse it to one.
+        # Fine at current iframe densities — revisit if a suite ever leans on
+        # iframe-heavy pages. NOTE: context-bound fns (`__csim_runScript*`,
+        # `__csim_evalEsmEntry`) get realm-bound overrides in
+        # `create_frame_realm` after this replay.
+        def create_context
+          realm = @iso.create_context
+          @attached.each {|name, prc| realm.attach(name, prc) }
+          realm
+        end
       end
 
       def self.snapshot
@@ -98,8 +138,11 @@ module Capybara
       # Pre-warm script: exercises the JS surfaces that get JIT-compiled
       # on every page load (HTML parse, selector tokenise + match, event
       # dispatch, style-decl parse, cascade resolve). Runs once at
-      # snapshot creation; the resulting bytecode-cache state ships in
-      # the snapshot so each new Context starts with these paths warm.
+      # snapshot creation; the resulting compiled-code state ships in
+      # the snapshot so each new context starts with these paths warm.
+      # (`Snapshot#warmup!` follows the V8 WarmUpSnapshotDataBlob contract:
+      # the warmup runs in a throwaway context — only code, no heap state,
+      # survives into the blob.)
       SNAPSHOT_WARMUP = <<~JS.freeze
         (function () {
           // Drive a representative document through parse → script
@@ -135,32 +178,61 @@ module Capybara
       # validation (`ScriptCompiler::CompileUnboundScript` with
       # `kConsumeCodeCache`) keys on snapshot bytes, so re-`new`-ing in
       # each process makes cross-process `ScriptCache` hits get
-      # rejected and fall back to a SEGV-prone re-parse path. Building
-      # once and persisting the dump fixes both: every process boots
-      # off byte-identical snapshot bytes and `cached_data` accepts.
+      # rejected. Building once and persisting the dump fixes that:
+      # every process boots off byte-identical snapshot bytes and
+      # `cached_data` accepts.
       def self.build_snapshot
         cache_path = snapshot_cache_path
-        if cache_path
-          begin
-            return MiniRacerCsim::Snapshot.load(File.binread(cache_path))
-          rescue StandardError
-            # Fall through to rebuild; cache may be corrupt.
+        return build_snapshot_uncached unless cache_path
+        begin
+          FileUtils.mkdir_p(File.dirname(cache_path))
+          # Serialize concurrent cold boots (parallel test workers):
+          # `Snapshot.new` is non-deterministic, so two processes racing the
+          # build would persist different bytes and every ScriptCache entry
+          # keyed to the loser's blob gets `cache_rejected` forever after.
+          # One process builds under the lock; the rest load its bytes.
+          File.open("#{cache_path}.lock", File::CREAT | File::RDWR) do |lock|
+            lock.flock(File::LOCK_EX)
+            if (bytes = read_verified_snapshot(cache_path))
+              return RustyRacer::Snapshot.load(bytes)
+            end
+            snap  = build_snapshot_uncached
+            # Persist + reload so this process also boots from the same
+            # bytes other processes will load — the produce-side snapshot
+            # must equal the consume-side snapshot for `cached_data` to
+            # accept (see the build_snapshot header rationale).
+            bytes = snap.dump
+            persist_snapshot_bytes(bytes, cache_path)
+            return RustyRacer::Snapshot.load(bytes)
           end
+        rescue StandardError
+          # Cache plumbing must never break boot; fall back to an
+          # in-process build (we just lose the cross-process savings).
+          build_snapshot_uncached
         end
-        snap = MiniRacerCsim::Snapshot.new(RuntimeShared.snapshot_src)
-        # `warmup!` runs `SNAPSHOT_WARMUP` against the snapshot once
-        # and rolls the resulting V8 bytecode-cache state back in, so
-        # Contexts created from this snapshot inherit JIT-primed
-        # versions of the hot paths above.
+      end
+
+      def self.build_snapshot_uncached
+        snap = RustyRacer::Snapshot.new(RuntimeShared.snapshot_src)
+        # `warmup!` runs `SNAPSHOT_WARMUP` once in a throwaway context and
+        # keeps the resulting compiled code, so contexts created from this
+        # snapshot inherit JIT-primed versions of the hot paths above.
         snap.warmup!(SNAPSHOT_WARMUP) rescue nil
-        return snap unless cache_path
-        # Persist + reload so this process also boots from the same
-        # bytes other processes will load — the produce-side snapshot
-        # must equal the consume-side snapshot for `cached_data` to
-        # accept (see the build_snapshot header rationale).
-        bytes = snap.dump
-        persist_snapshot_bytes(bytes, cache_path)
-        MiniRacerCsim::Snapshot.load(bytes)
+        snap
+      end
+
+      # `Snapshot.load` doesn't validate — corrupt bytes surface as a V8
+      # FATAL abort at the first `Isolate.new`, long past any rescue here.
+      # Verify against the SHA sidecar written at persist time, so a
+      # truncated / corrupted blob rebuilds instead of crash-looping every
+      # subsequent run.
+      def self.read_verified_snapshot(path)
+        return nil unless File.exist?(path)
+        bytes = File.binread(path)
+        sha   = File.read("#{path}.sha256").strip
+        Digest::SHA256.hexdigest(bytes) == sha ? bytes : nil
+      rescue StandardError
+        nil
       end
 
       def self.snapshot_cache_path
@@ -173,16 +245,29 @@ module Capybara
       end
 
       def self.persist_snapshot_bytes(bytes, path)
-        FileUtils.mkdir_p(File.dirname(path))
         tmp = "#{path}.#{Process.pid}.tmp"
         File.binwrite(tmp, bytes)
+        File.write("#{path}.sha256", Digest::SHA256.hexdigest(bytes))
         File.rename(tmp, path)
+        prune_snapshot_cache(path)
       rescue StandardError
         # Best-effort: snapshot rebuild on every process is fine,
         # we just lose the cross-process startup savings.
       end
 
-      # Maintain a small pool of warmed-up Contexts per Browser. Each
+      # A multi-MB blob per bridge edit / V8 upgrade accrues forever
+      # otherwise; only the current key is ever loadable again, so drop
+      # the rest.
+      def self.prune_snapshot_cache(current)
+        keep = File.basename(current)
+        Dir.glob(File.join(File.dirname(current), '*.bin')).each do |f|
+          next if File.basename(f) == keep
+          FileUtils.rm_f([f, "#{f}.sha256", "#{f}.lock"])
+        end
+      rescue StandardError
+      end
+
+      # Maintain a small pool of warmed-up contexts per Browser. Each
       # entry is post-snapshot, post-attach_host_fns — checkout is just
       # `pool.pop`. Background thread refills after each checkout so
       # the pool stays full while tests run sequentially. Pool size 1
@@ -197,7 +282,7 @@ module Capybara
         @pool        = Queue.new
         @pool_lock   = Mutex.new
         @refill_busy = false
-        # Every Context is built from the base snapshot (bridge +
+        # Every context is built from the base snapshot (bridge +
         # vendor bundle). Library scripts (`<script src>`) get evaluated
         # per-visit just like a real browser does on page navigation.
         # Pre-evaluating libraries into the snapshot heap is not safe:
@@ -207,15 +292,6 @@ module Capybara
         # on the prior page) aborts iteration mid-fire and silently
         # drops every later callback — including the current page's.
         @snapshot = self.class.snapshot
-        # Decide the warm-compile path once at construction (CLAUDE.md rule 3:
-        # cache env-var decisions, don't re-read them on the per-visit /
-        # per-module hot paths). `@compiled_module_urls` tracks which URLs this
-        # isolate has already compiled, for the no-cd path in `native_module_for`;
-        # it persists across `reset_realm` (same isolate) and is cleared only on
-        # a true rebuild (different isolate, cold compilation cache).
-        @warm_compile         = WARM_COMPILE_ENABLED && self.class.reset_realm_supported?
-        @module_graph         = self.class.load_module_graph_supported?
-        @compiled_module_urls = {}
         refill_pool_async
       end
 
@@ -250,10 +326,10 @@ module Capybara
         r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
       end
 
-      # Per-iframe realms (mini_racer-csim Context#create_realm): a separate V8
-      # realm — own global + intrinsics (Function/Error/DOMParser/onerror) — per
+      # Per-iframe realms (`Isolate#create_context`): a separate V8 context —
+      # own global + intrinsics (Function/Error/DOMParser/onerror) — per
       # nested browsing context, so cross-realm tests behave per spec. Keyed by
-      # realm id; dropped on every ctx rebuild (the realms die with the isolate).
+      # context id; dropped on every ctx rebuild (the realms die with the isolate).
       def frame_realms = (@frame_realms ||= {})
 
       def dispose_frame_realms
@@ -262,15 +338,22 @@ module Capybara
         @frame_realms.clear
       end
 
-      # mini_racer drains microtasks at every `eval` boundary, so an
-      # empty `eval('0')` is the cheapest way to advance one round of
-      # chained `await`/`.then` queues. `settle` calls this in a loop
-      # to give the JS side a chance to drain before we tick real time.
-      def drain_microtasks(iters = 4)
-        i = iters.to_i
-        return if i <= 0
-        c = ctx
-        i.times { c.eval('0') }
+      # One native microtask checkpoint — a checkpoint runs the queue until
+      # empty, and rusty already performs one at the end of every top-level
+      # eval/call (V8's default kAuto policy), so a single explicit checkpoint
+      # is all `settle` needs to advance chained `await`/`.then` queues
+      # between ticks.
+      def drain_microtasks
+        @ctx&.perform_microtask_checkpoint
+      end
+
+      # Raw bytes pass through as-is: rusty marshals tag-driven — a
+      # BINARY-encoded Ruby String crosses as a JS Uint8Array (and
+      # Uint8Array/ArrayBuffer args come back as BINARY Strings) — one copy,
+      # no base64 / latin1 string inflation. `transfer_buffer_fetch` already
+      # returns ASCII-8BIT-tagged bytes.
+      def wrap_binary(bytes)
+        bytes
       end
 
       def settle_gen
@@ -295,8 +378,8 @@ module Capybara
         ctx.call('__resetTimers')
       end
 
-      # Tears down the current Context and brings up a fresh one from
-      # the warm snapshot. Partial in-Context resets are not safe (see
+      # Tears down the current context and brings up a fresh one from
+      # the warm snapshot. Partial in-context resets are not safe (see
       # feedback_visit_always_rebuilds memory): library init guards
       # stick, delegate registrations leak between visits. The snapshot
       # warmup keeps the per-rebuild cost ~3 ms; jQuery / app-bundle
@@ -305,39 +388,15 @@ module Capybara
         # Drop the previous page's iframe realms (a new visit = new nested
         # browsing contexts). Safe here — we're between visits, not mid-callback.
         dispose_frame_realms
-        # Warm path: swap the realm on the existing isolate instead of
-        # disposing it and checking out a fresh one. Keeps the compilation
-        # cache + builtin code warm. The host fns rebind and the snapshot
-        # replays automatically; we only re-seed the post-snapshot JS-eval
-        # state and drop the now-stale realm-bound Module handles (their
-        # Context object_id is unchanged, so `native_module_handles` wouldn't
-        # otherwise invalidate them). A failure leaves the previous realm
-        # intact (mini_racer commits the new realm atomically), so fall
-        # through to a full rebuild.
-        if @ctx && use_warm_compile?
-          begin
-            @ctx.reset_realm
-            @native_module_handles     = nil
-            @native_module_handles_ctx = nil
-            reseed_realm_js(@ctx)
-            return @ctx
-          rescue StandardError => e
-            @browser.log_console('warn', "warm-compile reset_realm failed, falling back to full rebuild: #{e.message}")
-          end
-        end
         old = @ctx
         @ctx = nil
-        # A true rebuild checks out a *different* isolate, whose in-memory
-        # compilation cache is cold — drop the no-cd tracking so the next
-        # visit goes back through the on-disk bytecode-cache path.
-        @compiled_module_urls.clear
-        # Hand the old Context off to a disposal thread so the next
+        # Hand the old context off to a disposal thread so the next
         # visit doesn't wait on V8 teardown. Dispose order doesn't
-        # matter — handles + listeners die with the Context.
+        # matter — handles + listeners die with the isolate.
         if old
           @@live_lock.synchronize { @@live.delete(old) }
           Thread.new { begin
-            old.stop rescue nil
+            old.terminate rescue nil
             old.dispose
           rescue StandardError
           end }
@@ -360,7 +419,7 @@ module Capybara
         end
       end
 
-      # Pulls a warm Context from the pool; if the pool is empty
+      # Pulls a warm context from the pool; if the pool is empty
       # (first call, or refill thread hasn't caught up) builds one
       # synchronously and registers it in `@@live` so at_exit cleanup
       # still sees it. Pool entries are pre-registered in `@@live` at
@@ -373,129 +432,33 @@ module Capybara
         c
       end
 
-      # Per-call wall-clock cap (ms). Off by default — mini_racer's
-      # timeout watchdog routes every eval/call through a pipe-based
-      # rendezvous Thread that subtly shifts async timing and made
-      # `importmap_spec` ESM-load tests flake. Opt in via
-      # `CSIM_V8_CALL_TIMEOUT_MS=30000` for long-running suites where
-      # an occasional JS-side infinite loop would otherwise stall the
-      # whole run; the timeout converts the hang into a
-      # `MiniRacerCsim::ScriptTerminatedError` on that one example.
+      # Per-call wall-clock cap (ms). Off by default. Opt in via
+      # `CSIM_V8_CALL_TIMEOUT_MS=30000` for long-running suites where an
+      # occasional JS-side infinite loop would otherwise stall the whole
+      # run; the timeout converts the hang into a
+      # `RustyRacer::ScriptTerminatedError` on that one example. The
+      # terminate escalates through any nested frames (it is
+      # isolate-global by design), and the isolate itself stays healthy
+      # for subsequent calls — csim treats a terminated call as fatal to
+      # that call only (the per-visit rebuild supplies the clean slate).
       CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
 
-      # mini_racer's opt-in host namespace (ursm fork c2dd72d+):
-      # `Context.new(host_namespace: 'MiniRacer')` installs
-      # `globalThis.MiniRacer.drainMicrotasks()` — a native, rendezvous-free
-      # microtask checkpoint (MicrotasksScope::PerformCheckpoint, no Locker,
-      # termination left active). We point `__csim_yield` at it so dispatch.js's
-      # per-listener checkpoint (and the event-loop microcheck) run inline on the
-      # isolate thread instead of a double cross-thread round-trip. Feature-detected
-      # so older fork SHAs (no kwarg) still load → they fall back to the attached
-      # Context#perform_microtask_checkpoint.
-      HOST_NAMESPACE_NAME = 'MiniRacer'
-      # Behaviour-probe once (memoised): mini_racer's `initialize` is a `*args`
-      # splat so the kwarg isn't introspectable — build one throwaway default
-      # Context with the kwarg and confirm the namespace + method actually
-      # installed. Old fork SHAs raise on the unknown kwarg → false → fallback.
-      def self.host_namespace_supported?
-        return @host_namespace_supported if defined?(@host_namespace_supported)
-        @host_namespace_supported =
-          begin
-            MiniRacerCsim::Context.new(host_namespace: HOST_NAMESPACE_NAME)
-              .eval("typeof globalThis.#{HOST_NAMESPACE_NAME} === 'object' && typeof globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks === 'function'") == true
-          rescue StandardError
-            false
-          end
-      end
-
-      # Warm-compile: instead of disposing the Context and checking out a
-      # fresh isolate on every visit, swap only the JS *realm* on the warm
-      # isolate (`reset_realm`). The isolate-level compilation cache + builtin
-      # machine code survive, so a re-visited page skips cold module compile /
-      # bytecode deserialize and re-tiers JIT faster. Closes the per-navigation
-      # warmth gap with a real browser (which reuses one isolate and swaps the
-      # realm per navigation). On by default — measured a net win across the app
-      # suites (multi-visit apps ~30% under real Chrome, SPAs at parity; per-app
-      # cold→warm gain 3–11%, biggest on the server-rendered Redmine whose many
-      # full visits each re-compile). Set `CSIM_WARM_COMPILE=0` to opt out.
-      # Requires the ursm mini_racer fork's `Context#reset_realm` —
-      # `reset_realm_supported?` probes it and falls back to the cold per-visit
-      # rebuild on stock mini_racer / QuickJS, so default-on is safe everywhere.
-      WARM_COMPILE_ENABLED = ENV['CSIM_WARM_COMPILE'] != '0'
-
-      # Batched ES-module graph loading (ursm mini_racer fork's
-      # `Context#load_module_graph`): instead of a compile_module + instantiate
-      # round-trip per module (~2·N Ruby↔V8 rendezvous for an N-module graph),
-      # walk the whole graph reachable from the entry on the V8 thread and invoke
-      # `resolve:` / `fetch_batch:` once per graph *level*. The fork persists the
-      # callbacks + a Context-lifetime URL→Module registry, so a later
-      # `import()` reuses the same Module instance for an already-loaded URL
-      # (identity preserved — the thing that broke the earlier spike).
-      # Unconditional (~4–5 ms/visit on heavy module graphs, zero regression
-      # across WPT / app suites, no failure mode) — gated only by
-      # `load_module_graph_supported?`, which falls back to the per-module path
-      # on builds without the fork's `Context#load_module_graph`.
-
-      def self.load_module_graph_supported?
-        return @load_module_graph_supported if defined?(@load_module_graph_supported)
-        @load_module_graph_supported = MiniRacerCsim::Context.method_defined?(:load_module_graph)
-      end
-
-      # V8's bytecode-cache version tag (mini_racer exposes it when the build
-      # supports `cached_data`; 0 otherwise). Keys every ScriptCache entry so a
+      # V8's bytecode-cache version tag. Keys every ScriptCache entry so a
       # V8 upgrade invalidates stale bytecode. Fixed per process → memoized.
       def self.cached_data_version_tag
         return @cached_data_version_tag if defined?(@cached_data_version_tag)
-        @cached_data_version_tag = (defined?(MiniRacerCsim::V8_CACHED_DATA_VERSION_TAG) && MiniRacerCsim::V8_CACHED_DATA_VERSION_TAG) || 0
+        @cached_data_version_tag = RustyRacer.cached_data_version_tag
       end
-
-      # Behaviour-probe `reset_realm` the same way as host_namespace: the method
-      # exists on the shared mixin even on the QuickJS backend (it raises
-      # NotImplementedError there), so a `respond_to?` check isn't enough —
-      # build a throwaway Context and confirm a realm swap actually preserves
-      # an attached host fn while wiping JS-eval state.
-      def self.reset_realm_supported?
-        return @reset_realm_supported if defined?(@reset_realm_supported)
-        @reset_realm_supported =
-          begin
-            c = MiniRacerCsim::Context.new
-            c.attach('__csim_probe', -> { 1 })
-            c.eval('globalThis.__csim_probe_marker = 1;')
-            c.reset_realm
-            c.eval('typeof __csim_probe === "function" && typeof globalThis.__csim_probe_marker === "undefined"') == true
-          rescue StandardError
-            false
-          ensure
-            c&.dispose
-          end
-      end
-
-      # Resolved once in `initialize`; the per-visit / per-module hot paths read
-      # the `@warm_compile` ivar directly.
-      def use_warm_compile? = @warm_compile
 
       def build_ctx
-        opts = { snapshot: @snapshot || self.class.snapshot }
-        opts[:timeout] = CALL_TIMEOUT_MS if CALL_TIMEOUT_MS > 0
-        opts[:host_namespace] = HOST_NAMESPACE_NAME if self.class.host_namespace_supported?
-        c = MiniRacerCsim::Context.new(**opts)
+        c = Ctx.new(snapshot: @snapshot || self.class.snapshot, timeout: CALL_TIMEOUT_MS)
         attach_host_fns(c)
         c.eval('__csim_installWorker();')
         c
       end
 
-      # Under warm-compile the steady-state visit path reuses the one warm
-      # isolate (reset_realm) and never checks out of the pool; a checkout only
-      # happens on the initial build or the rare reset_realm-failure fallback.
-      # Keep a single spare warm so that fallback pops a pre-built isolate
-      # instantly instead of paying a synchronous `build_ctx`. Cold mode keeps
-      # the full POOL_SIZE for back-to-back visits.
-      def effective_pool_size
-        use_warm_compile? ? 1 : POOL_SIZE
-      end
-
       def refill_pool_async
-        target = effective_pool_size
+        target = POOL_SIZE
         @pool_lock.synchronize {
           return if @refill_busy
           return if @pool.size >= target
@@ -526,20 +489,18 @@ module Capybara
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType)` (from
       # `iframe.contentWindow`'s getter) to spin up a real per-iframe realm. This
-      # runs re-entrantly inside the main ctx's eval; `Context#create_realm` is
-      # re-entrancy-safe in mini_racer-csim. Returns the realm id (or nil if the
-      # build doesn't support realms — then the bridge keeps its same-realm
-      # fallback). The bridge maps `iframe.contentWindow` to
-      # `MiniRacer.realmGlobal(id)`.
+      # runs re-entrantly inside the main ctx's eval — rusty services nested
+      # requests while a host callback is in flight. Returns the realm's context
+      # id (or nil on failure — then the bridge keeps its same-realm fallback).
+      # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        return unless c.respond_to?(:create_realm)
         c.attach('__csim_createFrameRealm', ->(url, body, content_type) {
           RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
-        # linger in @frame_realms and get re-drained on every poll tick. Disposing
-        # a non-executing child realm mid-callback is safe in mini_racer-csim.
+        # linger in @frame_realms and get re-drained on every poll tick.
+        # Disposing a non-executing child realm mid-callback is safe.
         c.attach('__csim_disposeFrameRealm', ->(id) {
           fr = frame_realms.delete(id)
           fr.dispose rescue nil if fr
@@ -547,35 +508,40 @@ module Capybara
         })
       end
 
-      # Build the iframe's realm: install the bridge (the realm boots from an
-      # empty global, so eval the snapshot source — ~5 ms, the isolate's compiled
-      # code is shared), re-seed the post-snapshot JS state, point it at its own
-      # URL with the top frame as parent/top, then load its document (running its
-      # scripts in the realm). Tracked for event-loop draining + teardown.
+      # Build the iframe's realm: a snapshot-built isolate replays the whole
+      # bridge into every new context automatically, so the realm already has
+      # `document` / `DOMParser` / the event loop; re-seed the post-snapshot JS
+      # state, point it at its own URL with the top frame as parent/top, then
+      # load its document (running its scripts in the realm). Tracked for
+      # event-loop draining + teardown.
       def create_frame_realm(parent_ctx, url, body, content_type)
-        realm = parent_ctx.create_realm
-        # A snapshot-built isolate replays the whole bridge into every new realm
-        # automatically, so the realm already has `document` / `DOMParser` / the
-        # event loop. Re-evaling the snapshot source then redefines snapshot
-        # globals (e.g. the `scrollX` accessor) and throws — re-entrantly, which
-        # crashes V8. Only eval the source on the bare no-snapshot dev ctx, where
-        # the realm boots empty. Host fns are inherited from the parent either way;
-        # `reseed_realm_js` re-points the post-snapshot realm state (`__csim_yield`).
+        realm = parent_ctx.create_context
+        # Re-evaling the snapshot source would redefine snapshot globals (e.g.
+        # the `scrollX` accessor) and throw — re-entrantly. Only eval the
+        # source on a bare no-snapshot dev ctx, where the realm boots empty.
+        # Host fns are replayed onto the realm by `Ctx#create_context`.
         has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
         realm.eval(RuntimeShared.snapshot_src) unless has_bridge
+        # The replayed `__csim_runScriptCached` / `__csim_runScriptEval` /
+        # `__csim_evalEsmEntry` close over the context they EXECUTE in (the
+        # main ctx) — left as-is, a frame script that routes through them
+        # (leading-lexical, ≥64KB, or `type=module`) would run against the
+        # PARENT realm's document. Rebind realm-executing variants on top.
+        attach_run_script_with_cache(realm)
+        attach_realm_esm_entry(realm)
         reseed_realm_js(realm)
-        # Wire parent/top to the main realm (mini_racer-csim numbers it 0). No user
-        # data in this eval — only the literal realm id.
+        # Wire parent/top to the main realm (context id 0). No user data in
+        # this eval — only the literal namespace.
         realm.eval(<<~JS)
-          if (globalThis.MiniRacer && typeof globalThis.MiniRacer.realmGlobal === 'function') {
-            var __topWin = globalThis.MiniRacer.realmGlobal(0);
+          if (globalThis.#{HOST_NAMESPACE_NAME} && typeof globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal === 'function') {
+            var __topWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(0);
             globalThis.parent = __topWin; globalThis.top = __topWin;
           }
         JS
-        # Pass the URL + document body as call ARGUMENTS, not interpolated into an
-        # eval string: mini_racer marshals them losslessly, so arbitrary HTML /
-        # control bytes survive (Ruby's String#inspect is NOT a faithful JS string
-        # escaper — it mangles \a, \e, and binary bytes).
+        # Pass the URL + document body as call ARGUMENTS, not interpolated into
+        # an eval string: the marshaller carries them losslessly, so arbitrary
+        # HTML / control bytes survive (Ruby's String#inspect is NOT a faithful
+        # JS string escaper — it mangles \a, \e, and binary bytes).
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         frame_realms[realm.id] = realm
@@ -589,106 +555,39 @@ module Capybara
         nil
       end
 
-      def eval_esm_module(url, inline_src = nil)
-        # An inline `<script type=module>` has no fetchable URL, so it can't be a
-        # graph entry — keep it on the per-module path. A `src=` entry under
-        # module-graph mode loads (and instantiates + evaluates) its whole graph
-        # in one batched call.
-        return eval_esm_graph(url) if @module_graph && inline_src.nil?
-        m = native_module_for(url, inline_src)
+      # `target` is the context the module graph compiles + evaluates in,
+      # `handles` its module-handle cache — the main ctx + `native_module_handles`
+      # by default, or a frame realm + its realm-local cache (Module handles are
+      # context-bound; sharing the main cache would link a frame's imports
+      # against main-context modules).
+      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil)
+        target  ||= ctx
+        handles ||= native_module_handles
+        m = native_module_for(url, inline_src, target, handles)
         return nil unless m
-        instantiate_native_module(m, url)
-        m.evaluate
+        begin
+          instantiate_native_module(m, url, target, handles)
+          m.evaluate
+        rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
+          # A top-level module throw belongs on the page console
+          # (trace-visible diagnostics), like a classic script's error —
+          # not just safe_call's truncated stderr warn. ScriptTerminatedError
+          # deliberately propagates (a watchdog terminate must escalate).
+          @browser.log_console('error', "module evaluate error in #{url}: #{e.message}")
+        end
         nil
-      end
-
-      # Load + instantiate + evaluate the entire module graph reachable from
-      # `entry_url` via the fork's `load_module_graph`. `resolve:`/`fetch_batch:`
-      # are batched (once per graph level) and persisted on the Context, so the
-      # registry-backed `import()` path reuses the same Module instances. Returns
-      # the entry's value (unused here — we evaluate for side effects).
-      def eval_esm_graph(entry_url)
-        c       = ctx
-        browser = @browser
-        version = self.class.cached_data_version_tag
-        fetched = {}
-        result  = c.load_module_graph(
-          entry_url.to_s,
-          resolve: ->(edges) {
-            edges.map {|specifier, referrer| browser.resolve_module_specifier(specifier, referrer) rescue nil }
-          },
-          fetch_batch: ->(urls) {
-            urls.map {|u|
-              if (memo = module_src_get(u))
-                sha, body = memo
-                cached = ScriptCache.lookup(sha, version, kind: :module)
-                fetched[u] = [sha, body, !cached.nil?]
-                next [body, cached]
-              end
-              src, fresh_until = browser.durable_source(u)
-              next nil unless src
-              body   = module_body(u, src)
-              sha    = Digest::SHA256.hexdigest(body)
-              cached = ScriptCache.lookup(sha, version, kind: :module)
-              module_src_put(u, sha, body, fresh_until) if fresh_until
-              fetched[u] = [sha, body, !cached.nil?]
-              [body, cached]
-            }
-          }
-        )
-        # Warm the on-disk bytecode cache for the modules this call actually
-        # compiled (already-registered URLs aren't relisted) that missed or were
-        # rejected — same policy as the per-module path's `queue_warm`. Guard the
-        # result shape: an empty/un-fetchable entry can yield a graph with no
-        # newly-compiled modules.
-        Array(result && result[:modules]).each {|mod|
-          meta = fetched[mod[:url]] or next
-          sha, body, had_cache = meta
-          ScriptCache.queue_warm(c, sha, mod[:url], body, version, kind: :module) if !had_cache || mod[:cache_rejected]
-        }
-        nil
-      # `MiniRacerCsim::Error` is the base of ParseError / RuntimeError and the
-      # graph-load errors; catch it all so a bad module under module-graph mode
-      # logs to the JS console (like the per-module path) instead of escaping to
-      # `safe_call` and surfacing only as a stderr warn.
-      rescue MiniRacerCsim::Error => e
-        @browser.log_console('error', "module graph error in #{entry_url}: #{e.message}")
-        nil
-      end
-
-      # Returns the cached `[sha, body]` for a module URL while still fresh, or
-      # nil (dropping an expired entry). Cross-visit, in-process; see the
-      # `@@module_src` declaration for why this is safe and header-driven.
-      def module_src_get(url)
-        @@module_src_lock.synchronize {
-          v = @@module_src[url] or return nil
-          if Time.now < v[2]
-            [v[0], v[1]]
-          else
-            @@module_src.delete(url)
-            nil
-          end
-        }
-      end
-
-      def module_src_put(url, sha, body, fresh_until)
-        @@module_src_lock.synchronize {
-          # Bound memory: real suites touch a few hundred distinct module URLs,
-          # so this never trips in practice; a pathological run just re-warms.
-          @@module_src.clear if @@module_src.size >= MODULE_SRC_MAX
-          @@module_src[url] = [sha, body, fresh_until]
-        }
       end
 
       # A `.json` module is exposed as the default export of its parsed value;
-      # every other body is the fetched source as-is. Shared by the per-module
-      # (`native_module_for`) and graph (`eval_esm_graph`) load paths so the two
-      # can't drift on what counts as a JSON module.
+      # every other body is the fetched source as-is. Module SOURCE is text,
+      # but it arrives as the raw Rack / File.binread body — tagged
+      # ASCII-8BIT (see `RuntimeShared.utf8_text`).
       def module_body(url, src)
+        src = RuntimeShared.utf8_text(src)
         url.to_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
       end
 
-      # MiniRacerCsim::Module handles are bound to their Context; rebuild_ctx
+      # `RustyRacer::Module` handles are bound to their context; rebuild_ctx
       # invalidates them, so the cache is keyed off `@ctx.object_id` and
       # rebuilt lazily on first use after a rebuild.
       def native_module_handles
@@ -700,58 +599,43 @@ module Capybara
         @native_module_handles
       end
 
-      def native_module_for(url, inline_src = nil)
-        cache = native_module_handles
-        return cache[url] if cache.key?(url)
+      def native_module_for(url, inline_src, target, handles)
+        return handles[url] if handles.key?(url)
         url_s = url.to_s
         src = inline_src || @browser.rack_fetch_body(url_s)
-        return cache[url] = nil unless src
-        body = module_body(url_s, src)
-        c    = ctx
-        # No-cd warm path: once this isolate has compiled a URL, its in-memory
-        # compilation cache holds the bytecode keyed by source. On a re-visit
-        # (same warm isolate via reset_realm) skip `cached_data` so V8 hits that
-        # cache directly instead of paying the forced kConsumeCodeCache
-        # deserialize. The first compile of each URL warms the on-disk bytecode
-        # cache for that body; if the same URL later serves a different body
-        # (non-fingerprinted / server-dynamic module) the no-cd branch recompiles
-        # it correctly from source — V8's in-memory cache is keyed by source, so a
-        # changed body just misses and recompiles — but won't re-warm the on-disk
-        # cache for the new body. Acceptable: module URLs on this path are
-        # fingerprinted-immutable. Only meaningful under warm-compile — on the
-        # cold rebuild path the isolate changes, `@compiled_module_urls` is
-        # cleared, and every module goes back through `cached_data`.
-        warm = @warm_compile && inline_src.nil?
-        if warm && @compiled_module_urls.key?(url_s)
-          m = c.compile_module(body, filename: url_s)
-        else
-          sha     = Digest::SHA256.hexdigest(body)
-          version = self.class.cached_data_version_tag
-          cached  = ScriptCache.lookup(sha, version, kind: :module)
-          m       = c.compile_module(body, filename: url_s, cached_data: cached)
-          ScriptCache.queue_warm(c, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
-          @compiled_module_urls[url_s] = true if warm
-        end
-        cache[url] = m
-      rescue MiniRacerCsim::ParseError => e
+        return handles[url] = nil unless src
+        body    = module_body(url_s, src)
+        sha     = Digest::SHA256.hexdigest(body)
+        version = self.class.cached_data_version_tag
+        cached  = ScriptCache.lookup(sha, version, kind: :module)
+        m       = target.compile_module(body, filename: url_s, cached_data: cached)
+        ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module) if cached.nil? || m.cache_rejected?
+        handles[url] = m
+      rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
-        cache[url] = nil
+        handles[url] = nil
       end
 
-      def instantiate_native_module(m, importer_url)
+      def instantiate_native_module(m, importer_url, target, handles)
         return unless m.status == :uninstantiated
         browser = @browser
         m.instantiate do |specifier, referrer|
           resolved = browser.resolve_module_specifier(specifier, referrer || importer_url)
-          child = native_module_for(resolved)
+          child = native_module_for(resolved, nil, target, handles)
           raise "module not found: #{resolved}" unless child
           child
         end
       end
 
-      # `import('x')` routes through this callback; mini_racer's C side
-      # auto-evaluates the returned Module and drains microtasks before
-      # resolving the outer Promise.
+      # `import('x')` routes through this callback; rusty's native side
+      # finishes the dynamic import per the V8 host contract — it
+      # instantiates + evaluates the returned Module (TLA-aware, via the
+      # evaluation promise) before resolving the outer `import()` promise.
+      # The resolver is per-ISOLATE and compiles against the MAIN ctx — a
+      # dynamic `import()` issued from a frame realm would link main-context
+      # modules (rusty doesn't surface the initiating context); static
+      # `<script type=module>` in frames is realm-correct via
+      # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
         c.attach('__csim_evalEsmEntry', ->(url, inline) {
           RuntimeShared.safe_call { eval_esm_module(url, inline) }
@@ -759,23 +643,31 @@ module Capybara
         })
         c.dynamic_import_resolver = ->(specifier, referrer) {
           resolved = @browser.resolve_module_specifier(specifier, referrer)
-          m = native_module_for(resolved)
+          m = native_module_for(resolved, nil, ctx, native_module_handles)
           raise "module not found: #{resolved}" unless m
-          instantiate_native_module(m, resolved)
+          instantiate_native_module(m, resolved, ctx, native_module_handles)
           m
         }
       end
 
-      # When mini_racer exposes `Context#compile` + `Script#cached_data`
-      # + `Snapshot.load` (rubyjs/mini_racer#413), override the JS-side
-      # `__csim_runScript` fallback with a Ruby host fn that
-      # bytecode-caches each script body in a process-wide hash +
-      # on-disk store. Discourse's main chunk is ~140 ms of parse +
-      # JIT per visit otherwise; the cache reduces it to a deserialize
-      # + run path. Worker isolates run on their own threads —
-      # `compile` from the main thread against a Worker isolate is
-      # unsafe — so the class-level `attach_host_fns` (used by
-      # `build_worker`) intentionally skips this attach.
+      # Frame-document `<script type=module>` entry, bound to the realm with
+      # a realm-local handle cache (it dies with the realm's closure).
+      def attach_realm_esm_entry(realm)
+        handles = {}
+        realm.attach('__csim_evalEsmEntry', ->(url, inline) {
+          RuntimeShared.safe_call { eval_esm_module(url, inline, target: realm, handles: handles) }
+          nil
+        })
+      end
+
+      # Override the JS-side `__csim_runScript` fallback with a Ruby host fn
+      # that bytecode-caches each script body in a process-wide hash + on-disk
+      # store (`Context#compile` + `Script#cached_data`). Discourse's main
+      # chunk is ~140 ms of parse + JIT per visit otherwise; the cache reduces
+      # it to a deserialize + run path. Worker isolates run on their own
+      # threads — `compile` from the main thread against a Worker isolate is
+      # unsafe — so the class-level `attach_host_fns` (used by `build_worker`)
+      # intentionally skips this attach.
       # V8's bytecode cache only pays off above a body-size threshold
       # — the rendezvous round-trip + Ruby-side SHA256 + compile +
       # dispose runs ~150–300 µs, while `(0, eval)(body)` at V8
@@ -799,7 +691,6 @@ module Capybara
       SCRIPT_CACHE_MIN_BYTES = (ENV['CSIM_SCRIPT_CACHE_MIN_BYTES'] || '65536').to_i
 
       def attach_run_script_with_cache(c)
-        return unless c.respond_to?(:compile)
         version_tag = self.class.cached_data_version_tag
         debug = ENV['CSIM_SCRIPT_CACHE_DEBUG']
         # Big bodies → Ruby-side bytecode cache. The dispatcher below
@@ -809,9 +700,9 @@ module Capybara
           RuntimeShared.safe_call {
             # Trailing `;undefined` suppresses the script's COMPLETION VALUE so
             # `script.run`'s return crosses the V8→Ruby boundary on the trivial
-            # ValueSerializer fast path. Without it, a large inline script ending
+            # marshalling fast path. Without it, a large inline script ending
             # in a jQuery-ish expression returns a `ce.fn.init` (array-like,
-            # non-cloneable) that drags through the safe_context deep-copy filter —
+            # non-cloneable) that drags through the deep-copy filter —
             # pure waste, since the value is discarded (`nil` below). The SHA keys
             # the bytecode cache on the COMPILED source, so the suffix must be
             # hashed and fed to `queue_warm` too (else cached_data is rejected).
@@ -860,20 +751,20 @@ module Capybara
         # WPT helper corpus + the `<script>const CFG…` pattern both lead
         # with the declaration.
         # NOTE: do NOT wrap in `safe_call`. A JS throw from `c.eval`
-        # raises MiniRacerCsim::RuntimeError, which mini_racer re-raises as a
+        # raises RustyRacer::RuntimeError, which rusty re-raises as a
         # JS exception at the call site — so bridge.entry.js's
         # `try { __csim_runScript(…) } catch (e)` sees it and runs its
         # normal path (console diagnostic, `_ok=false`, fire the script
-        # `error` event), exactly as the old JS-side `(0, eval)` did and
+        # `error` event), exactly as the JS-side `(0, eval)` does and
         # as the QuickJS runner does. Swallowing here would turn a
         # throwing leading-`const` inline script into a silent `load`.
         c.attach('__csim_runScriptEval', ->(label, body) {
           # Trailing `;undefined` makes the script's COMPLETION VALUE undefined so
           # `c.eval`'s return crosses the V8→Ruby boundary on the trivial
-          # ValueSerializer fast path. Without it, a leading-lexical inline script
+          # marshalling fast path. Without it, a leading-lexical inline script
           # ending in a jQuery-ish expression (`const cfg=…; $(…)`) returns a
           # `ce.fn.init` (array-like, non-cloneable) here, which falls into the
-          # safe_context deep-copy filter slow-path — pure waste, since the value
+          # deep-copy filter slow-path — pure waste, since the value
           # is discarded (`nil` below). The `//# sourceURL` line is a comment and
           # doesn't affect the completion value; lexical declarations persist as a
           # side effect of eval, independent of the completion value.
@@ -885,13 +776,11 @@ module Capybara
 
       # The JS-side `__csim_runScript` dispatcher routes each inline-script body
       # to the bytecode-cache path, the shared-lexical `ctx.eval` path, or the
-      # JS-only `(0, eval)` fast path. It is realm state (`globalThis.…`), so it
-      # is wiped by `reset_realm` and must be re-seeded on the warm-compile path
-      # (see `reseed_realm_js`). Split out from `attach_run_script_with_cache`
-      # for that reuse; the host-fn attaches above are auto-rebound by
-      # `reset_realm` and don't need re-running.
+      # JS-only `(0, eval)` fast path. It snapshots the CURRENT
+      # `__csim_runScriptCached` / `__csim_runScriptEval` host fns, so it must
+      # run after the attaches it captures (`attach_run_script_with_cache`
+      # installs it last for exactly that reason).
       def install_run_script_dispatcher(c)
-        return unless c.respond_to?(:compile)
         c.eval(<<~JS)
           (function () {
             const cached    = globalThis.__csim_runScriptCached;
@@ -909,32 +798,18 @@ module Capybara
         JS
       end
 
-      # After `reset_realm` swaps the JS realm on the warm isolate, the host-fn
-      # callbacks are auto-rebound and the snapshot (bridge.js) is re-replayed,
-      # but every `globalThis.…` assignment csim ran *post-snapshot* in
-      # `build_ctx` is gone (realm state). Re-seed exactly those three:
-      #   1. the `__csim_yield` alias to the native microtask checkpoint,
-      #   2. the `__csim_runScript` dispatcher,
-      #   3. the `__csim_installWorker()` post-snapshot init call.
-      # All other construction work (BROWSER/STDLIB host fns, the module loader,
-      # `dynamic_import_resolver`) survives the realm swap. Verified empirically:
-      # host fns rebind, snapshot globals replay, the C-side import resolver
-      # persists — only `c.eval`-installed realm state is wiped.
+      # A fresh per-frame realm boots from the snapshot, so every
+      # `globalThis.…` assignment csim ran *post-snapshot* in `build_ctx` is
+      # missing (realm state). Re-seed the `__csim_yield` alias and the
+      # `__csim_installWorker()` post-snapshot init; the `__csim_runScript`
+      # dispatcher comes from `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c)
-        # Only the host_namespace branch installs `__csim_yield` as a JS alias
-        # (`globalThis.__csim_yield = MiniRacer.drainMicrotasks`); the fallback
-        # branches `c.attach` it, and those survive the realm swap. So re-seed
-        # the alias exactly when the namespace is in use — install_realm
-        # re-installs `globalThis.MiniRacer`, so the alias just needs re-pointing.
-        if self.class.host_namespace_supported?
-          c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
-        end
-        install_run_script_dispatcher(c)
+        c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         c.eval('__csim_installWorker();')
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
-      # Contexts that don't have a Runtime instance wrapping them)
+      # contexts that don't have a Runtime instance wrapping them)
       # reuse the same `BROWSER_HOST_FNS` + `STDLIB_HOST_FNS` table
       # the main runtime wires up.
       def self.attach_host_fns(c, browser)
@@ -944,51 +819,51 @@ module Capybara
         RuntimeShared::STDLIB_HOST_FNS.each {|name, body|
           c.attach(name, body)
         }
-        # `dispatchEventForUserAction` calls this between listener
-        # invocations to match HTML spec "clean up after running
-        # script" microtask-checkpoint semantics. Older mini_racer
-        # without rubyjs/mini_racer#418 falls back to a no-op, leaving
-        # dispatch correct but losing the listener-interleaved
-        # Backburner-style autorun drains.
-        # Prefer the native in-isolate checkpoint (mini_racer host_namespace):
-        # alias `__csim_yield` to `globalThis.MiniRacer.drainMicrotasks` JS-side,
-        # so callers pay ~sub-µs instead of the attached-fn double cross-thread
-        # round-trip. Fall back to the attached Context#perform_microtask_checkpoint
-        # ('M' rendezvous) on older fork SHAs, or a no-op.
-        if c.eval("typeof globalThis.#{HOST_NAMESPACE_NAME} === 'object' && globalThis.#{HOST_NAMESPACE_NAME} !== null && typeof globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks === 'function'")
-          c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
-        elsif c.respond_to?(:perform_microtask_checkpoint)
-          c.attach('__csim_yield', -> { c.perform_microtask_checkpoint; nil })
-        else
-          c.attach('__csim_yield', -> { nil })
-        end
+        # `dispatchEventForUserAction` calls `__csim_yield` between listener
+        # invocations to match HTML spec "clean up after running script"
+        # microtask-checkpoint semantics. Alias it to the namespace's native
+        # in-isolate checkpoint so callers pay ~sub-µs instead of an
+        # attached-fn cross-thread round-trip.
+        c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
+        # Register the bridge's recorder for V8's promise-reject notifications
+        # — the channel that surfaces rejections NO handler ever sees
+        # (fire-and-forget async functions, bare `Promise.reject`); the
+        # bridge's `.then`-wrap can't observe those. Post-snapshot: the host
+        # namespace doesn't exist while the snapshot is built, which is why
+        # unhandled-rejection.js leaves registration to us. Main realm only —
+        # the recorder routes per-realm via `contextGlobal` itself, and a
+        # frame-realm registration would dangle once that realm is disposed.
+        c.eval(<<~JS)
+          if (typeof globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler === 'function' &&
+              typeof globalThis.__csimPromiseRejected === 'function') {
+            globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler(globalThis.__csimPromiseRejected);
+          }
+        JS
       end
 
-      # Worker-isolate factory: fresh Context from the shared
+      # Worker-isolate factory: fresh isolate from the shared
       # snapshot, host fns attached, `__csim_isWorker` flag set, +
       # the per-worker postMessage host fn closed over `post_back`.
       # Returns a uniform `WorkerRuntime` adapter that
       # `Browser#run_worker` drives.
       def self.build_worker(browser, post_back)
-        wopts = { snapshot: snapshot }
-        wopts[:host_namespace] = HOST_NAMESPACE_NAME if host_namespace_supported?
-        ctx = MiniRacerCsim::Context.new(**wopts)
-        attach_host_fns(ctx, browser)
-        ctx.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        c = Ctx.new(snapshot: snapshot)
+        attach_host_fns(c, browser)
+        c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
         # Worker's timer table is independent from main's; routing the
         # worker's `setTimersActive` through `browser.timers_active=`
         # races the main isolate's polling? gate, dropping main-thread
         # pending XHRs the moment the worker's queue empties. The settle
         # loop already polls `worker_pending?` for worker thread activity.
-        ctx.attach('__setTimersActive', ->(_flag) { nil })
-        ctx.eval('__csim_installWorkerScope();')
+        c.attach('__setTimersActive', ->(_flag) { nil })
+        c.eval('__csim_installWorkerScope();')
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { ctx.eval(s.to_s) },
-          call_fn:           ->(n, *a) { ctx.call(n.to_s, *a) },
-          drain_microtasks:  ->        { ctx.eval('0') },
-          drain_timers:      ->        { ctx.call('__drainTimers', 50) },
-          has_ready_timer:   ->        { !!ctx.call('__hasReadyTimer') },
-          dispose:           ->        { ctx.dispose rescue nil }
+          eval_fn:           ->(s)     { c.eval(s.to_s) },
+          call_fn:           ->(n, *a) { c.call(n.to_s, *a) },
+          drain_microtasks:  ->        { c.perform_microtask_checkpoint },
+          drain_timers:      ->        { c.call('__drainTimers', 50) },
+          has_ready_timer:   ->        { !!c.call('__hasReadyTimer') },
+          dispose:           ->        { c.dispose rescue nil }
         )
       end
     end

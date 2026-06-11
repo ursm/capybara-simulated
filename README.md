@@ -7,10 +7,10 @@ MutationObserver / custom elements / `<template>` / Shadow DOM /
 Trix / Stimulus / Turbo all work, and the Capybara DSL is unchanged.
 
 The DOM lives entirely inside the JS engine — V8 via
-[mini_racer](https://github.com/rubyjs/mini_racer) or QuickJS via
+[rusty_racer](https://github.com/ursm/rusty_racer) or QuickJS via
 [quickjs.rb](https://github.com/hmsk/quickjs.rb), whichever is
 installed — with no Nokogiri tree on the Ruby side. Capybara finds
-resolve through wgxpath / CSS-selector code running in the same
+resolve through xpathway / CSS-selector code running in the same
 context as the page's JS, so `find` / `has_css?` / `within` see
 exactly the tree the app sees.
 
@@ -31,11 +31,12 @@ escapes via screenshots and we don't try to simulate.
 
 ```ruby
 gem 'capybara-simulated', group: :test
-gem 'mini_racer-csim', '>= 0.21.1.5', group: :test  # JS engine — pick one
+gem 'rusty_racer', group: :test  # JS engine — pick one
 ```
 
 `bundle install`. The gem ships its JS bridge under
-`lib/capybara/simulated/js/`, with wgxpath under `vendor/js/`, so
+`lib/capybara/simulated/js/`, with the vendored JS deps under
+`vendor/js/`, so
 there's no Node toolchain at consume time.
 
 ### JS engine
@@ -43,23 +44,19 @@ there's no Node toolchain at consume time.
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'mini_racer-csim', '>= 0.21.1.5'
-                          # V8 (JIT, fastest per spec) — default
+gem 'rusty_racer'         # V8 (JIT, fastest per spec) — default
 gem 'quickjs', '>= 0.18'  # QuickJS (interpreter, smaller per-VM RAM —
                           # wins when scaling parallel workers under
                           # a fixed memory budget)
 ```
 
-The V8 engine comes from `mini_racer-csim`, a fork that adds the native
-ES Module API + `ScriptCompiler::CachedData` + `Context#reset_realm`
-surface upstream lacks — stock `mini_racer` 0.21.x lacks
-`Context#compile_module` / `Context#dynamic_import_resolver=` and will
-NoMethodError on the first `<script type="module">`. The fork ships its
-library as `mini_racer`, so auto-detection selects it as the `:v8`
-engine under either gem name.
+The V8 engine comes from [rusty_racer](https://github.com/ursm/rusty_racer),
+a rusty_v8-based Ruby binding with the native ES Module API,
+`ScriptCompiler::CachedData` snapshots, and per-frame realm contexts the
+driver builds on.
 
-The engine is auto-detected at boot; if both gems are present
-mini_racer wins. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`
+The engine is auto-detected at boot; if both gems are present V8 wins.
+Override explicitly with `CSIM_JS_ENGINE=v8|quickjs`
 or `Capybara::Simulated::Driver.new(app, js_engine: :quickjs)`.
 
 ## Use
@@ -231,7 +228,8 @@ end
 ## Performance characteristics
 
 The driver builds a base snapshot once per process (bridge.js +
-wgxpath — a V8 `Snapshot` for mini_racer, bytecode for QuickJS) and
+the vendored JS deps — a V8 `Snapshot` for rusty_racer, bytecode for
+QuickJS) and
 checks Contexts out of a small process-wide pool of pre-warmed
 clones, so each navigation lands on a fresh JS context instantly.
 
@@ -318,7 +316,7 @@ referenced page-specific DOM.
   event)`); virtual `setTimeout` / `setInterval` /
   `requestAnimationFrame` clock; MutationObserver; custom-element
   registry; `Range` / `Selection`; cascade resolver for `display` /
-  `visibility` / `text-transform` / layout primitives. wgxpath (true
+  `visibility` / `text-transform` / layout primitives. xpathway (true
   third-party, under `vendor/js/`) sits on top for XPath.
 - `lib/capybara/simulated/browser.rb` — Rack client, history stack,
   modal handler queue, virtual-clock anchor, trace recorder. Owns
@@ -329,7 +327,8 @@ referenced page-specific DOM.
 - `lib/capybara/simulated/v8_runtime.rb` / `quickjs_runtime.rb` —
   per-engine wrappers, common bits in `runtime_shared.rb`. The V8
   base-snapshot (and the QuickJS bytecode equivalent) caches
-  bridge.js + wgxpath so each Context spawn is sub-millisecond.
+  bridge.js + the vendored deps so each Context spawn is
+  sub-millisecond.
 - `lib/capybara/simulated/driver.rb` — Capybara `Driver::Base`
   surface (visit / find / execute_script / window handling / modal /
   tracing API).

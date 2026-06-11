@@ -133,7 +133,7 @@ module Capybara
         normalize(result)
       end
 
-      # mini_racer's `Context#call` drains the V8 microtask queue at
+      # the V8 engine drains its microtask queue at
       # the end of every call (V8's default microtask policy). QuickJS
       # does not: `js_std_await` only pumps pending jobs while it's
       # waiting for an actual Promise to resolve, and host-fn returns
@@ -163,12 +163,17 @@ module Capybara
         r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
       end
 
-      # `iters` is ignored — `drain_jobs!` already loops to queue-empty,
-      # so further rounds drain nothing extra. The arity matches
-      # `V8Runtime#drain_microtasks` so `Browser#settle` can call either
-      # engine's method without branching.
-      def drain_microtasks(_iters = 4)
+      # `drain_jobs!` loops to queue-empty — one call is a full checkpoint,
+      # same contract as `V8Runtime#drain_microtasks`.
+      def drain_microtasks
         vm.drain_jobs!
+      end
+
+      # No binary marshaler: QuickJS reinterprets high-bit bytes as UTF-8 and
+      # corrupts them, so binary payloads cross as base64 and the JS shim's
+      # `fetchedToBytes` atob's them back (see Browser#transfer_buffer_fetch_for_js).
+      def wrap_binary(bytes)
+        Base64.strict_encode64(bytes)
       end
 
       def settle_gen
@@ -211,7 +216,7 @@ module Capybara
       # already the inter-test reset point.
       def reset_page = rebuild_ctx
 
-      # bridge.js patches `Intl.DateTimeFormat`; mini_racer ships ICU
+      # bridge.js patches `Intl.DateTimeFormat`; rusty_racer ships ICU
       # built-in but QuickJS gates it behind a polyfill flag. Other JS
       # surfaces bridge.js touches (URL / TextEncoder / atob/btoa /
       # crypto) are already routed through Ruby-side host fns, so
@@ -399,7 +404,7 @@ module Capybara
       end
 
       # QuickJS marshals JS `undefined` as the symbol
-      # `Quickjs::Value::UNDEFINED`; mini_racer marshals it as `nil`. The
+      # `Quickjs::Value::UNDEFINED`; rusty_racer marshals it as `nil`. The
       # rest of the gem expects `nil`, so normalize at the boundary.
       # NaN gets the same treatment for consistency (the bridge never
       # surfaces it as a load-bearing value).

@@ -5,7 +5,8 @@ gemspec
 # JS engines: both installed in dev so the spec suite exercises both
 # (CSIM_JS_ENGINE=v8 / =quickjs). Downstream apps add whichever one
 # they want — neither is a hard dependency of the gem itself.
-gem 'mini_racer-csim', '>= 0.21.1.2'
+# TODO: switch to the released rusty_racer gem once it ships.
+gem 'rusty_racer', path: '../rusty_racer'
 gem 'nokogiri'
 gem 'quickjs', '>= 0.18'
 

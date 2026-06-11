@@ -123,13 +123,6 @@ module Capybara
       # the ~5-10 % wall on action-heavy suites where Capybara would
       # otherwise poll N times to catch a single debounce.
       USER_ACTION_DRAIN_MS = (ENV['CSIM_USER_ACTION_DRAIN_MS'] || '0').to_i
-      # Per-iter microtask drain depth. mini_racer drains one round
-      # per `eval` boundary, so this is the supported chained-await
-      # depth before we punt to drain_timers and let the virtual clock
-      # advance. 4 covers Turbo's `await fetch → response → text →
-      # stream` fan-out without blowing the per-iter cost.
-      SETTLE_MICRO_DRAIN_PER_ITER = 4
-
       # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
       # must lead with `Mozilla/5.0` so server-side bot detectors
       # (ahoy_matey's `Browser.new(ua).bot?`) treat us as a real
@@ -310,14 +303,11 @@ module Capybara
       WORKER_TERMINATE_GRACE = 0.05
       private_constant :WORKER_POLL_INTERVAL, :WORKER_TERMINATE_GRACE
 
-      # `js_engine` picks the JS runtime: `:v8` (mini_racer-csim, fastest
+      # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
       # wins on parallelism). Both gems are soft dependencies; pass nil
-      # to auto-select whichever is installed. The V8 engine is
-      # `mini_racer-csim`, our fork of mini_racer carrying reset_realm /
-      # realms / the native module API under its own `MiniRacerCsim`
-      # namespace (so it never collides with upstream `mini_racer`).
-      ENGINE_GEM = {v8: %w[mini_racer-csim], quickjs: %w[quickjs]}.freeze
+      # to auto-select whichever is installed.
+      ENGINE_GEM = {v8: %w[rusty_racer], quickjs: %w[quickjs]}.freeze
       private_constant :ENGINE_GEM
 
       def build_runtime(engine)
@@ -334,10 +324,16 @@ module Capybara
         end
       end
 
-      # Iterate `JS_ENGINES` in preference order — V8 first because
-      # JIT wins per-spec wall time, QuickJS second when only the
-      # smaller-footprint engine is installed.
+      # `CSIM_JS_ENGINE` forces the engine (overriding auto-detect); otherwise
+      # iterate `JS_ENGINES` in preference order — V8 first because JIT wins
+      # per-spec wall time, QuickJS second when only the smaller-footprint
+      # engine is installed.
       private def detect_js_engine
+        if (env = ENV['CSIM_JS_ENGINE'].to_s) && !env.empty?
+          sym = env.to_sym
+          return sym if JS_ENGINES.include?(sym)
+          raise ArgumentError, "unknown CSIM_JS_ENGINE #{env.inspect}; expected one of #{JS_ENGINES.inspect}"
+        end
         JS_ENGINES.find {|e| ENGINE_GEM.fetch(e).any? {|g| Gem.loaded_specs.key?(g) } } ||
           raise(LoadError, "capybara-simulated needs a JS engine: add one of #{ENGINE_GEM.values.map {|gems| "`gem '#{gems.first}'`" }.join(' / ')} to your Gemfile")
       end
@@ -459,8 +455,8 @@ module Capybara
 
       # JS-side selector parser throws a `DOMException('csim: …',
       # 'SyntaxError')`. The JS engine surfaces it as a `…::SyntaxError`
-      # (QuickJS via dynamic-named class) or, under mini_racer, a
-      # `MiniRacerCsim::RuntimeError` whose message is `"SyntaxError: csim: …"`.
+      # (QuickJS via dynamic-named class) or, under V8, a
+      # `RustyRacer::RuntimeError` whose message is `"SyntaxError: csim: …"`.
       # Match the `csim: ` marker anywhere in the message (it's no longer at
       # the start once the DOMException name is prefixed) or the class suffix,
       # so neither gem becomes a hard dependency.
@@ -675,11 +671,11 @@ module Capybara
           # drains.)
           if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
             # Most clicks don't queue any timers; bail as soon as a
-            # round drains nothing rather than burning the full 8 mini_racer
+            # round drains nothing rather than burning the full 8 engine
             # round-trips. Profile (Avo actions_spec / V8): the
             # unconditional loop cost ~7.7 % of wall time.
             8.times do
-              @runtime.drain_microtasks(4)
+              @runtime.drain_microtasks
               break if @runtime.drain_timers(50).to_i.zero?
             end
           end
@@ -733,7 +729,7 @@ module Capybara
           submit_baseline_url = @current_url
           if @runtime.respond_to?(:drain_microtasks) && @runtime.respond_to?(:drain_timers)
             8.times do
-              @runtime.drain_microtasks(4)
+              @runtime.drain_microtasks
               break if @runtime.drain_timers(50).to_i.zero?
             end
           end
@@ -813,7 +809,7 @@ module Capybara
         invalidate_find_cache
         ensure_alive_after_tick(handle)
         # `attach_file` hands us a Pathname (or Array of Pathnames);
-        # mini_racer rejects non-primitive types. Coerce to a path-list
+        # the marshaller rejects non-primitive types. Coerce to a path-list
         # form V8 can hold — the actual multipart upload happens later
         # in `build_multipart_body` during form submission.
         coerced = coerce_set_value(value)
@@ -900,7 +896,7 @@ module Capybara
       # `DirectUpload` MD5-chunks the file via FileReader before
       # POSTing to `/rails/active_storage/direct_uploads`. Returns
       # the requested byte range as base64 so binary content
-      # survives the mini_racer string boundary (same approach as
+      # survives the engine string boundary (same approach as
       # `__csimReadBlobBase64`).
       def read_file_pick(handle, index, start = nil, finish = nil)
         paths = file_picks_for(handle.to_i)
@@ -1408,8 +1404,8 @@ module Capybara
           # JS-driven (`history.back()` from a page handler): replaying
           # the history entry synchronously would call `rebuild_ctx`
           # on the still-executing Context and terminate the current
-          # call with `ScriptTerminatedError` (mini_racer's
-          # `Context#stop` raises on the eval thread). Stash the intent
+          # call with `ScriptTerminatedError` (terminating the
+          # in-flight call on the isolate). Stash the intent
           # and drain after the call returns — mirrors
           # `location_assign` / `location_reload`.
           @pending_history_traverse = target
@@ -1553,7 +1549,14 @@ module Capybara
         end
       end
 
+      # Resolved once — log_console fires for every page console.* line
+      # (CLAUDE.md rule 3: no per-call ENV reads on hot paths).
+      CONSOLE_STDERR = ENV['CSIM_CONSOLE_STDERR'] == '1'
+
       def log_console(severity, message)
+        # Diagnostic mirror: surface page console output on stderr regardless
+        # of trace state (engine bring-up / CI triage).
+        warn "[console:#{severity}] #{message.to_s[0, 300]}" if CONSOLE_STDERR
         return unless @trace
         @trace.log_console(severity, annotate_console_message(severity, message))
       end
@@ -1602,7 +1605,7 @@ module Capybara
       # Fire-and-forget variant: runs the script but never returns
       # its value to Ruby. Lets execute_script handle scripts whose
       # return is a complex JS object (jQuery chainable, DOM tree,
-      # …) that mini_racer's value filter would recurse into.
+      # …) that the marshaller would recurse into.
       def execute_script(code, args = [])
         tick_real_time
         invalidate_find_cache
@@ -1648,7 +1651,7 @@ module Capybara
 
       # Capybara passes Node instances directly as script args
       # (`session.evaluate_script('arguments[0].click()', some_node)`).
-      # mini_racer can't marshal a Ruby Node, so wrap as a sentinel
+      # the marshaller can't pass a Ruby Node, so wrap as a sentinel
       # the JS side recognises and rehydrates via the handle registry.
       def marshal_args(args)
         args.map {|a|
@@ -2048,9 +2051,9 @@ module Capybara
       # directives (RFC 9111 §5.2.2 / §4.2.2 heuristic) — NOT a URL-shape guess.
       # `clear_volatile` drops the body from the volatile per-visit asset cache,
       # but a content-hashed asset's source is content-stable while fresh, so a
-      # loader's own cross-visit cache can hold it for `fresh_until`. Used by both
-      # the ESM module loader (`@@module_src`, v8_runtime) and the external-asset
-      # cache (`external_asset_source`, scripts + stylesheets); name is generic.
+      # loader's own cross-visit cache can hold it for `fresh_until`. Used by
+      # the external-asset cache (`external_asset_source`, scripts +
+      # stylesheets); name is generic.
       def durable_source(url)
         body = rack_fetch_body(url)
         return [nil, nil] unless body
@@ -2060,16 +2063,14 @@ module Capybara
       end
 
       # Cross-visit cache of external asset bodies (classic `<script src>` bundles
-      # AND linked `<link rel=stylesheet>` CSS), url → [body, fresh_until]. The ESM
-      # loader already survives the visit boundary via `@@module_src` (v8_runtime);
-      # classic bundles and stylesheets had no equivalent, so a fresh VM per visit
-      # (`reset_page` → `clear_volatile`) re-fetched the same fingerprinted app
-      # assets (avo.base.js, avo.base.css, …) on every visit — a real browser
-      # HTTP-caches them once. Same safety as `@@module_src`: only responses the
-      # server marks durably cacheable (`fresh_until` from max-age) are stored, and
-      # these are content-stable assets at content-hashed URLs (a change yields a
-      # new URL = cache miss), so a stale body can't shadow a later test. Survives
-      # `clear_volatile` (that is the point); size-capped.
+      # AND linked `<link rel=stylesheet>` CSS), url → [body, fresh_until]. A
+      # fresh VM per visit (`reset_page` → `clear_volatile`) would otherwise
+      # re-fetch the same fingerprinted app assets (avo.base.js, avo.base.css, …)
+      # on every visit — a real browser HTTP-caches them once. Safety: only
+      # responses the server marks durably cacheable (`fresh_until` from max-age)
+      # are stored, and these are content-stable assets at content-hashed URLs
+      # (a change yields a new URL = cache miss), so a stale body can't shadow a
+      # later test. Survives `clear_volatile` (that is the point); size-capped.
       @@asset_src      = {}
       @@asset_src_lock = Mutex.new
       ASSET_SRC_MAX    = 4096
@@ -2093,6 +2094,9 @@ module Capybara
         # re-deriving `fresh_until` here.
         body, fresh_until = durable_source(key)
         return nil unless body
+        # Script / stylesheet source is TEXT, but the raw Rack / binread body
+        # arrives BINARY-tagged (see `RuntimeShared.utf8_text`).
+        body = RuntimeShared.utf8_text(body)
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
@@ -2126,7 +2130,7 @@ module Capybara
       #   3. Settle's drain loop calls `deliver_event_source_events`
       #      which polls the queue and hands the batch to
       #      `__csim_deliverEventSourceEvents` for dispatch.
-      # mini_racer / quickjs.rb VMs are single-threaded; only the main
+      # rusty_racer / quickjs.rb VMs are single-threaded; only the main
       # thread ever enters the VM. Background threads only touch the
       # Queue. `reset!` and per-visit context rebuilds kill all open
       # threads — the new VM gets a fresh handle space.
@@ -2294,7 +2298,14 @@ module Capybara
           end
         end
         return nil if data.empty? && type.nil?
-        {type: type || 'message', data: data.join("\n"), lastEventId: last_id}
+        # SSE is a UTF-8 TEXT protocol (the spec decodes the stream as UTF-8),
+        # but these strings are slices of the BINARY socket buffer (see
+        # `RuntimeShared.utf8_text`).
+        {
+          type:        RuntimeShared.utf8_text(type || 'message'),
+          data:        RuntimeShared.utf8_text(data.join("\n")),
+          lastEventId: last_id && RuntimeShared.utf8_text(last_id)
+        }
       end
 
       def reset_event_sources
@@ -2467,10 +2478,14 @@ module Capybara
           elsif (idx = line.index(':'))
             k = line[0...idx].strip.downcase
             v = line[(idx + 1)..].to_s.strip
-            headers[k] = v
+            # Slices of the BINARY socket buffer (see `RuntimeShared.utf8_text`).
+            headers[RuntimeShared.utf8_text(k)] = RuntimeShared.utf8_text(v)
           end
         end
-        {'status' => status, 'headers' => headers, 'body' => body.to_s}
+        # The held-poll body is TEXT (long-poll JSON); the socket read is
+        # BINARY-tagged.
+        body = RuntimeShared.utf8_text(body.to_s)
+        {'status' => status, 'headers' => headers, 'body' => body}
       end
 
       private def normalize_response_headers(headers)
@@ -2499,7 +2514,7 @@ module Capybara
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
-        # non-owning thread SEGVs (mini_racer is V8-isolate-thread-
+        # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
         body = fetch_worker_script(target)
         thread = Thread.new do
@@ -2553,7 +2568,7 @@ module Capybara
       # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
       # row-major RGBA buffer. Returns `{width, height, refId}` — the
       # raw bytes land in the transfer-buffer registry so the JS side
-      # fetches them as a `Uint8Array` via `MiniRacerCsim::Binary` rather
+      # fetches them as a `Uint8Array` (tag-driven binary marshalling) rather
       # than building a 423 MB latin-1 + base64 intermediate for the
       # 8900×8900 frames Discourse uploads exercise. Optional
       # `max_w`/`max_h` lets the caller pre-shrink for cheap OCR-style
@@ -2621,7 +2636,7 @@ module Capybara
       # ── postMessage transferable-buffer registry ───────────────────
       #
       # Large Uint8Array / ArrayBuffer payloads cross isolates by ID;
-      # mini_racer marshals typed arrays as ASCII-8BIT Strings so no
+      # rusty_racer marshals typed arrays as ASCII-8BIT Strings so no
       # JS-side latin-1 / base64 intermediate is built. Without this
       # the 317 MB raw frames in Discourse's media-optimization-worker
       # peak >4 GB of JS strings before the worker even sees them.
@@ -2639,15 +2654,15 @@ module Capybara
         @transfer_buffer_lock.synchronize { @transfer_buffers.delete(id.to_i) }
       end
 
-      # Wraps the raw bytes so mini_racer marshals them as a Uint8Array
-      # on the JS side. QuickJS has no binary marshaler — strings get
-      # reinterpreted as UTF-8 and high-bit bytes corrupt, so we base64
-      # the payload there and the JS shim's `fetchedToBytes` atob's.
+      # Wraps the raw bytes in whatever binary shape the ACTIVE runtime can
+      # marshal to a JS Uint8Array (V8: the BINARY-tagged string itself —
+      # tag-driven marshalling crosses it as a Uint8Array; QuickJS: base64
+      # that the JS shim's `fetchedToBytes` atob's — it has no binary
+      # marshaller). Asked of the runtime so each engine picks its shape.
       def transfer_buffer_fetch_for_js(id)
         bytes = transfer_buffer_fetch(id)
         return nil unless bytes
-        return MiniRacerCsim::Binary.new(bytes) if defined?(MiniRacerCsim::Binary)
-        Base64.strict_encode64(bytes)
+        @runtime.wrap_binary(bytes)
       end
 
       # ── Video decode (ffprobe + ffmpeg) ────────────────────────────
@@ -2739,6 +2754,9 @@ module Capybara
       # lands or an exception propagates.
       private def run_worker(handle, url, body, inbox, outbox, engine_class)
         raise "worker script not found: #{url}" unless body
+        # The worker SCRIPT is text; the Rack-fetched body arrives
+        # BINARY-tagged (see `RuntimeShared.utf8_text`).
+        body = RuntimeShared.utf8_text(body)
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         rt        = engine_class.build_worker(self, post_back)
         # Set the worker's `self.location.href` so webpack /
@@ -2847,7 +2865,7 @@ module Capybara
         method = (method || 'GET').to_s.upcase
         redirected = false
         # JS-side base64-encodes Blob/File bodies (raw bytes survive
-        # mini_racer's UTF-8 string boundary that way); decode before
+        # the engine's UTF-8 string boundary that way); decode before
         # handing to Rack so the upload PUT lands intact.
         if headers.is_a?(Hash) && headers['X-Csim-Body-B64'].to_s == '1'
           body = Base64.decode64(body.to_s)
@@ -2928,14 +2946,16 @@ module Capybara
         raw     = body.to_s
         hdrs    = stringify(headers)
         is_text = text_response?(hdrs)
+        # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
+        # as UTF-8 with invalid sequences replaced (a leading BOM selects the
+        # encoding per the HTML "decode" algorithm and is removed). The real
+        # bytes for binary consumers ride `body_b64`; the Rack body arrives
+        # BINARY-tagged (see `RuntimeShared.utf8_text`).
+        text = RuntimeShared.utf8_text(is_text ? decode_response_bom(raw) : raw)
         out = {
           'status'     => status,
           'headers'    => hdrs,
-          # Text responses cross the mini_racer boundary as UTF-8, so a UTF-16 /
-          # BOM-prefixed body must be decoded here (JS only sees the resulting
-          # characters). Matches the encoding-sniff step of the HTML "decode"
-          # algorithm: a leading BOM selects the encoding and is itself removed.
-          'body'       => is_text ? decode_response_bom(raw) : raw,
+          'body'       => text,
           'url'        => url,
           'redirected' => redirected,
           'type'       => 'basic'
@@ -3064,7 +3084,13 @@ module Capybara
       def history_length
         [@history.size, 1].max
       end
-      def document_cookie      ; @cookies.map {|k, v| "#{k}=#{v}" }.join('; ') ; end
+      # `document.cookie` is TEXT; jar entries parsed out of Rack's Set-Cookie
+      # headers can carry the BINARY tag, which would make the joined string
+      # cross into JS as a Uint8Array (`document.cookie.match is not a
+      # function`). Cookies are ASCII per RFC 6265.
+      def document_cookie
+        RuntimeShared.utf8_text(@cookies.map {|k, v| "#{k}=#{v}" }.join('; '))
+      end
       def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s)
         return if s.nil? || s.empty?
@@ -3234,6 +3260,11 @@ module Capybara
         flush_outgoing_page_init if @timers_active
         @runtime.rebuild_ctx
         reset_timer_state
+        # The DOCUMENT is text; the Rack body arrives BINARY-tagged (see
+        # `RuntimeShared.utf8_text`). Charset-header-driven decode is the
+        # fuller story; UTF-8 + scrub matches observable browser behavior
+        # for the suites we run.
+        html = RuntimeShared.utf8_text(html)
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
@@ -3461,9 +3492,13 @@ module Capybara
         }
       end
 
+      # Header names/values are TEXT (RFC 9110: field values are ASCII); Rack
+      # hands them over BINARY-tagged (see `RuntimeShared.utf8_text`).
       def stringify(headers)
         out = {}
-        headers.each {|k, v| out[k.to_s] = v.is_a?(Array) ? v.join(',') : v.to_s }
+        headers.each do |k, v|
+          out[k.to_s] = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(',') : v.to_s)
+        end
         out
       end
 

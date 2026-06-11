@@ -1,7 +1,7 @@
 # capybara-simulated — engineering principles
 
 This driver runs Capybara tests in-process: a V8-resident DOM (lives in
-`lib/capybara/simulated/js/bridge.js`) driven through mini_racer, with Nokogiri reserved
+`lib/capybara/simulated/js/bridge.js`) driven through rusty_racer, with Nokogiri reserved
 for the Rack response side. The codebase has a few load-bearing rules;
 deviations have repeatedly cost us regressions or paint us into a
 corner.

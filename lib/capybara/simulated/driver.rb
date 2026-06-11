@@ -27,7 +27,7 @@ module Capybara
           # thread. Background threads (`MessageBus::TimerThread`,
           # etc.) sleep too, but their Drivers — if any — were
           # registered under a different thread, so they skip; the
-          # filter is load-bearing because mini_racer / quickjs.rb
+          # filter is load-bearing because rusty_racer / quickjs.rb
           # VMs aren't thread-safe. Idle Drivers no-op
           # (`tick_real_time` short-circuits when `@timers_active`
           # is false), so the broadcast is cheap.
@@ -295,7 +295,7 @@ module Capybara
       # Capybara's `execute_script` contract is "run it, discard the
       # return". Route through a no-return JS path so a script that
       # returns a non-marshallable value (jQuery `$('…').text('…')`
-      # returns a chainable jQuery object that mini_racer's value
+      # returns a chainable jQuery object that the engine's value
       # filter recurses into until it stack-overflows) doesn't blow
       # up on the way back.
       def execute_script(script, *args)

@@ -39,8 +39,8 @@ const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeW
 // V8↔Ruby boundary per parse). We import the bare state machine, NOT the
 // `whatwg-url` barrel: the barrel's `URL` WebIDL wrapper pulls in
 // webidl-conversions/utils.js, which capture `ArrayBuffer.prototype.resizable` /
-// `SharedArrayBuffer` descriptors at load time — features mini_racer's hardened
-// V8 lacks, so they throw during snapshot build. The state machine needs none of
+// `SharedArrayBuffer` descriptors at load time — features unavailable during
+// V8 snapshot build, so they throw there. The state machine needs none of
 // that (just tr46, aliased to an ASCII-only shim, and TextEncoder — stubbed in
 // snapshot_stubs.js). url-parse.js assembles the component shape from it exactly
 // as whatwg-url's URL-impl does.

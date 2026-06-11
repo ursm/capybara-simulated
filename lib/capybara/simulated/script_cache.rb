@@ -13,14 +13,14 @@ module Capybara
     # recompile per visit to a deserialize + run path.
     #
     # Cross-process portability requires snapshot-bytes equality:
-    # `MiniRacerCsim::Snapshot.new(source)` is non-deterministic, so the
+    # `RustyRacer::Snapshot.new(source)` is non-deterministic, so the
     # blobs we produce here are only consumable by another process if
     # that process loads the SAME snapshot bytes via `Snapshot.load`.
     # `V8Runtime.build_snapshot` handles that side.
     #
     # **Produce path stays at top level.** `Context#compile(produce_
     # cache: true)` is unsafe inside a host-fn callback (V8's
-    # `CreateCodeCache` corrupts the parser when re-entered — mini_racer
+    # `CreateCodeCache` corrupts the parser when re-entered — rusty_racer
     # raises immediately). The host-fn consumer queues misses;
     # `V8Runtime#call` drains the queue from top-level Ruby after each
     # bridge call returns.
