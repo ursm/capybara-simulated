@@ -125,10 +125,6 @@ dom/events/scrolling/scrollend-fires-to-text-input.html:
   }).'
 dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 - When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
-dom/historical.html:
-- 'Node member must be removed: localName'
-- 'Node member must be removed: namespaceURI'
-- 'Node member must be removed: prefix'
 dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
@@ -138,7 +134,6 @@ dom/nodes/DOMImplementation-createHTMLDocument.html:
 dom/nodes/Document-URL.html:
 - Document.URL with redirect
 dom/nodes/Document-adoptNode.html:
-- Adopting a Document should throw.
 - Adopting an Element called 'x<' should work.
 dom/nodes/Document-constructor.html:
 - 'new Document(): URL parsing'
@@ -210,8 +205,6 @@ dom/nodes/Node-cloneNode-svg.html:
 - cloned <svg>'s xmlns:xlink attribute should have the right properties
 - cloned <use> should have the right properties
 - cloned <use>'s xlink:href attribute should have the right properties
-dom/nodes/Node-insertBefore.html:
-- Inserting a node before itself should not move the node
 dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
