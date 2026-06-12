@@ -229,13 +229,6 @@ dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
   order.
-dom/nodes/attributes-namednodemap.html:
-- setNamedItem and removeNamedItem on `attributes` should add and remove fields from
-  `attributes`
-- setNamedItem and removeNamedItem on `attributes` should not interfere with existing
-  method names
-- setting an attribute should not overwrite the length property of an `NamedNodeMap`
-  object
 dom/nodes/attributes.html:
 - First set attribute is returned by getAttribute
 - First set attribute is returned with mapped attribute set first
