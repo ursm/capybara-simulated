@@ -170,13 +170,6 @@ dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
-dom/nodes/Element-removeAttribute.html:
-- removeAttribute should remove the first attribute, irrespective of namespace, when
-  the first attribute is in a namespace
-- removeAttribute should remove the first attribute, irrespective of namespace, when
-  the first attribute is not in a namespace
-dom/nodes/Element-setAttribute.html:
-- setAttribute should change the first attribute, irrespective of namespace
 dom/nodes/MutationObserver-callback-arguments.html:
 - Callback is invoked with |this| value of MutationObserver and two arguments
 dom/nodes/MutationObserver-characterData.html:
@@ -224,18 +217,6 @@ dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 dom/nodes/Text-wholeText.html:
 - wholeText returns text of all Text nodes logically adjacent to the node, in document
   order.
-dom/nodes/attributes.html:
-- First set attribute is returned by getAttribute
-- First set attribute is returned with mapped attribute set first
-- First set attribute is returned with mapped attribute set later
-- Own property correctness with namespaced attribute before same-name non-namespaced
-  one
-- Own property correctness with non-namespaced attribute before same-name namespaced
-  one
-- Own property correctness with two namespaced attributes with the same name-with-prefix
-- getAttributeNames tests
-- setAttribute should set the first attribute with the given name
-- toggleAttribute should set the first attribute with the given name
 dom/nodes/insert-adjacent.html:
 - invalid object argument insertAdjacentElement
 dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.html:
