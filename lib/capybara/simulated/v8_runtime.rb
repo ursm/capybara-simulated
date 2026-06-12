@@ -37,6 +37,19 @@ begin
   if ENV['CSIM_V8_PROF'] == '1'
     RustyRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
   end
+  # `CSIM_V8_FLAGS` passes arbitrary V8 flags through to
+  # `set_flags_from_string` for perf experiments (JIT tier-up tuning,
+  # GC, lite-mode). Whitespace-separated; each token is `--`-prefixed by
+  # rusty's `set_flags!`, so write them WITHOUT the leading dashes:
+  #   CSIM_V8_FLAGS='jitless'                 -> --jitless
+  #   CSIM_V8_FLAGS='sparkplug no-turbofan'   -> --sparkplug --no-turbofan
+  #   CSIM_V8_FLAGS='max-opt=1'               -> --max-opt=1
+  # Flags may interact with the cached snapshot's compiled-code state, so
+  # pair a sweep with `CSIM_SNAPSHOT_CACHE=off`.
+  if (raw = ENV['CSIM_V8_FLAGS'].to_s.strip) && !raw.empty?
+    flags = raw.split(/\s+/).map {|f| f.sub(/\A--/, '') }
+    RustyRacer::Platform.set_flags!(*flags)
+  end
 rescue RustyRacer::PlatformAlreadyInitialized
 end
 
