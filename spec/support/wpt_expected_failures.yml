@@ -228,7 +228,6 @@ dom/nodes/attributes.html:
 - First set attribute is returned by getAttribute
 - First set attribute is returned with mapped attribute set first
 - First set attribute is returned with mapped attribute set later
-- Non-HTML element with upper-case attribute
 - Own property correctness with namespaced attribute before same-name non-namespaced
   one
 - Own property correctness with non-namespaced attribute before same-name namespaced
