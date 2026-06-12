@@ -195,11 +195,6 @@ dom/nodes/Node-childNodes.html:
 - Node.childNodes on a Document.
 dom/nodes/Node-cloneNode-document-with-doctype.html:
 - Created with DOMParser
-dom/nodes/Node-cloneNode-svg.html:
-- cloned <svg> should have the right properties
-- cloned <svg>'s xmlns:xlink attribute should have the right properties
-- cloned <use> should have the right properties
-- cloned <use>'s xlink:href attribute should have the right properties
 dom/nodes/Node-lookupNamespaceURI.html:
 - Document without documentElement has no namespace URI matching "xml"
 - Document without documentElement has no namespace URI matching "xmlns"
