@@ -170,20 +170,10 @@ dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
 - Entity References
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
-dom/nodes/MutationObserver-callback-arguments.html:
-- Callback is invoked with |this| value of MutationObserver and two arguments
-dom/nodes/MutationObserver-characterData.html:
-- 'characterData Comment: data mutations'
-- 'characterData ProcessingInstruction: data mutations'
-dom/nodes/MutationObserver-childList.html:
-- 'childList Node.replaceChild: self internal replacement mutation'
-- 'childList Range.surroundContents: children removal and addition mutation'
 dom/nodes/MutationObserver-document.html:
 - parser insertion mutations
 - parser script insertion mutation
 - removal of parent during parsing
-dom/nodes/MutationObserver-inner-outer.html:
-- outerHTML mutation
 dom/nodes/Node-childNodes.html:
 - Node.childNodes on a Document.
 dom/nodes/Node-cloneNode-document-with-doctype.html:
