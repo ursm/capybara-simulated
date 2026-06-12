@@ -177,11 +177,6 @@ dom/nodes/Element-removeAttribute.html:
   the first attribute is not in a namespace
 dom/nodes/Element-setAttribute.html:
 - setAttribute should change the first attribute, irrespective of namespace
-dom/nodes/MutationObserver-attributes.html:
-- 'attributes Element.attributes.value: same id mutation'
-- 'attributes Element.removeAttributeNS: removal mutation'
-- 'attributes Element.setAttributeNS: creation mutation'
-- 'attributes Element.setAttributeNS: prefixed attribute creation mutation'
 dom/nodes/MutationObserver-callback-arguments.html:
 - Callback is invoked with |this| value of MutationObserver and two arguments
 dom/nodes/MutationObserver-characterData.html:
