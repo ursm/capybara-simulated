@@ -32,9 +32,8 @@ begin
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
   # (Standard Node distribution ships the post-processor; no extra
-  # install needed.) The log is per-isolate: under the default
-  # warm-compile one isolate spans the whole run (one aggregate log);
-  # `CSIM_WARM_COMPILE=0` gives per-visit isolates → per-visit files.
+  # install needed.) The log is per-isolate, and warm-compile keeps one
+  # isolate for the whole run, so expect a single aggregate log.
   if ENV['CSIM_V8_PROF'] == '1'
     RustyRacer::Platform.set_flags!(:prof, 'logfile-per-isolate': nil)
   end
@@ -289,21 +288,9 @@ module Capybara
       rescue StandardError
       end
 
-      # Maintain a small pool of warmed-up contexts per Browser. Each
-      # entry is post-snapshot, post-attach_host_fns — checkout is just
-      # `pool.pop`. Background thread refills after each checkout so
-      # the pool stays full while tests run sequentially. Pool size 1
-      # would be enough for strictly serial visits, but 2 absorbs the
-      # case where `refill` is still building when the next visit
-      # arrives (form submit → redirect → another navigate, back-to-back).
-      POOL_SIZE = 2
-
       def initialize(browser)
-        @browser     = browser
-        @ctx         = nil
-        @pool        = Queue.new
-        @pool_lock   = Mutex.new
-        @refill_busy = false
+        @browser = browser
+        @ctx     = nil
         # Every context is built from the base snapshot (bridge +
         # vendor bundle). Library scripts (`<script src>`) get evaluated
         # per-visit just like a real browser does on page navigation.
@@ -322,7 +309,6 @@ module Capybara
         # cold cache).
         @compiled_module_urls = {}
         @compiled_script_keys = {}
-        refill_pool_async
       end
 
       def eval(code)         = ctx.eval(code.to_s)
@@ -411,15 +397,14 @@ module Capybara
         ctx.call('__resetTimers')
       end
 
-      # Brings up a snapshot-fresh realm for the next page. The default is
-      # the warm path: `Context#reset` swaps in a brand-new global on the
-      # long-lived isolate — a FULL fresh realm, not a partial in-context
-      # reset (those are unsafe per feedback_visit_always_rebuilds: library
-      # init guards stick, delegates leak) — keeping the isolate's in-memory
-      # compilation cache + tiered-up code warm across visits (measured
-      # −4.5..19% suite wall). `CSIM_WARM_COMPILE=0` (and the warm path's
-      # failure rescue) take the cold route instead: dispose the isolate and
-      # check a pre-built one out of the pool.
+      # Brings up a snapshot-fresh realm for the next page via the warm path:
+      # `Context#reset` swaps in a brand-new global on the long-lived isolate —
+      # a FULL fresh realm, not a partial in-context reset (those are unsafe per
+      # feedback_visit_always_rebuilds: library init guards stick, delegates
+      # leak) — keeping the isolate's in-memory compilation cache + tiered-up
+      # code warm across visits (measured −4.5..19% suite wall). Only a refused
+      # reset falls back to the cold route: dispose the isolate and build a
+      # fresh one (synchronously, on this thread).
       def rebuild_ctx
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
@@ -440,10 +425,10 @@ module Capybara
         # as `build_ctx` does after `Ctx.new`. A refused reset (mid-drain /
         # suspended request — can't happen from these top-level call sites,
         # but the contract reserves it, e.g. after a watchdog terminate
-        # wedges a nested rendezvous) falls back to the validated cold
-        # rebuild — loudly, because a persistent fallback is an invisible
-        # perf cliff (and log_console is trace-gated, nil during reset!).
-        if @ctx && WARM_COMPILE
+        # wedges a nested rendezvous) falls back to the cold rebuild below —
+        # loudly, because a persistent fallback is an invisible perf cliff
+        # (and log_console is trace-gated, nil during reset!).
+        if @ctx
           begin
             @ctx.reset
             attach_host_fns(@ctx)
@@ -456,25 +441,26 @@ module Capybara
         end
         old = @ctx
         @ctx = nil
-        # A true rebuild checks out a *different* isolate, whose in-memory
+        # The cold rebuild brings up a *different* isolate, whose in-memory
         # compilation cache is cold — drop the no-cd tracking so the next
         # visit goes back through the on-disk bytecode-cache path.
         @compiled_module_urls.clear
         @compiled_script_keys.clear
-        # Hand the old context off to a disposal thread so the next
-        # visit doesn't wait on V8 teardown. Dispose order doesn't
-        # matter — handles + listeners die with the isolate.
+        # Tear the old isolate down synchronously, on this (the only) thread
+        # that ever drove it. Each isolate is created, used, and disposed on
+        # the main thread — never dispatched to from a second thread (see
+        # `ctx`), which rusty_racer's thread-confined isolates require. This
+        # cold path is only the rare reset-failure fallback, so the inline
+        # teardown isn't on the steady-state path.
         if old
           @@live_lock.synchronize { @@live.delete(old) }
-          Thread.new { begin
+          begin
             old.terminate rescue nil
             old.dispose
           rescue StandardError
-          end }
+          end
         end
-        @ctx = checkout_ctx
-        refill_pool_async
-        @ctx
+        @ctx = build_and_track_ctx
       end
 
       # Capybara calls `Driver#reset!` between tests; Browser delegates
@@ -482,22 +468,20 @@ module Capybara
       # path is the same operation.
       def reset_page = rebuild_ctx
 
+      # Built lazily on first use, on the calling (main) thread. There is no
+      # pool / background pre-warm: under warm-compile the steady-state visit
+      # reuses this one isolate via `Context#reset` (rebuild_ctx) and never
+      # builds another, so a pool's async pre-warm bought nothing — and a pool
+      # dispatched to its entries from a refill thread before the main thread
+      # used them, migrating an isolate's caller thread. Building here keeps
+      # every isolate confined to one thread for its whole life. The one-time
+      # synchronous build is ~3 ms.
       def ctx
-        @ctx ||= begin
-          c = checkout_ctx
-          refill_pool_async
-          c
-        end
+        @ctx ||= build_and_track_ctx
       end
 
-      # Pulls a warm context from the pool; if the pool is empty
-      # (first call, or refill thread hasn't caught up) builds one
-      # synchronously and registers it in `@@live` so at_exit cleanup
-      # still sees it. Pool entries are pre-registered in `@@live` at
-      # refill time, so the pool path doesn't double-register.
-      def checkout_ctx
-        @pool.pop(true)
-      rescue ThreadError
+      # build_ctx + register for at_exit cleanup.
+      def build_and_track_ctx
         c = build_ctx
         @@live_lock.synchronize { @@live << c }
         c
@@ -517,13 +501,6 @@ module Capybara
       # fallback in `rebuild_ctx`.
       CALL_TIMEOUT_MS = (ENV['CSIM_V8_CALL_TIMEOUT_MS'] || '0').to_i
 
-      # Warm-compile: per-visit `Context#reset` on a long-lived isolate
-      # instead of a fresh-isolate checkout. The isolate-level in-memory
-      # compilation cache + tiered-up code survive across visits — the same
-      # cross-navigation warmth a real browser has. Default ON;
-      # `CSIM_WARM_COMPILE=0` restores the cold per-visit rebuild.
-      WARM_COMPILE = ENV['CSIM_WARM_COMPILE'] != '0'
-
       # V8's bytecode-cache version tag. Keys every ScriptCache entry so a
       # V8 upgrade invalidates stale bytecode. Fixed per process → memoized.
       def self.cached_data_version_tag
@@ -538,38 +515,6 @@ module Capybara
         c
       end
 
-      # Under warm-compile the steady-state visit path reuses the one warm
-      # isolate and never checks out of the pool; a checkout only happens on
-      # the initial build or the rare reset-failure fallback. Keep a single
-      # pre-built spare so that fallback pops instantly instead of paying a
-      # synchronous `build_ctx`. Cold mode keeps the full POOL_SIZE for
-      # back-to-back visits.
-      def effective_pool_size
-        WARM_COMPILE ? 1 : POOL_SIZE
-      end
-
-      def refill_pool_async
-        target = effective_pool_size
-        @pool_lock.synchronize {
-          return if @refill_busy
-          return if @pool.size >= target
-          @refill_busy = true
-        }
-        Thread.new do
-          begin
-            until @pool.size >= target
-              c = build_ctx
-              # Track pool entries so at_exit disposes them too —
-              # pool members aren't currently checked out so they
-              # wouldn't otherwise reach the cleanup path.
-              @@live_lock.synchronize { @@live << c }
-              @pool.push(c)
-            end
-          ensure
-            @pool_lock.synchronize { @refill_busy = false }
-          end
-        end
-      end
 
       def attach_host_fns(c)
         self.class.attach_host_fns(c, @browser)
@@ -716,7 +661,7 @@ module Capybara
         # applies to frame-realm compiles too. On a cold rebuild
         # `@compiled_module_urls` is cleared and everything returns to the
         # `cached_data` path.
-        if WARM_COMPILE && inline_src.nil? && @compiled_module_urls.key?(url_s)
+        if inline_src.nil? && @compiled_module_urls.key?(url_s)
           m = target.compile_module(body, filename: url_s)
         else
           sha     = Digest::SHA256.hexdigest(body)
@@ -726,7 +671,7 @@ module Capybara
           if cached.nil? || m.cache_rejected?
             ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module, stale: !cached.nil?)
           end
-          @compiled_module_urls[url_s] = true if WARM_COMPILE && inline_src.nil?
+          @compiled_module_urls[url_s] = true if inline_src.nil?
         end
         handles[url] = m
       rescue RustyRacer::ParseError => e
@@ -846,8 +791,8 @@ module Capybara
             # Discourse perf sample was Digest#update) AND the disk lookup.
             # The key is a heuristic, but a false positive only costs a
             # plain recompile of the true source — never wrong code.
-            key = WARM_COMPILE ? [label.to_s, src.bytesize] : nil
-            if key && @compiled_script_keys.key?(key)
+            key = [label.to_s, src.bytesize]
+            if @compiled_script_keys.key?(key)
               script = c.compile(src, filename: label.to_s)
             else
               sha    = Digest::SHA256.hexdigest(src)
@@ -965,8 +910,8 @@ module Capybara
           fns[name] = ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } }
         }
         fns.update(RuntimeShared::STDLIB_HOST_FNS)
-        # One rendezvous for the whole table (~50 fns) — this runs per pool
-        # refill, per worker, and per warm realm reset.
+        # One rendezvous for the whole table (~50 fns) — this runs per cold
+        # build, per worker, and per warm realm reset.
         c.attach_many(fns)
         # `dispatchEventForUserAction` calls `__csim_yield` between listener
         # invocations to match HTML spec "clean up after running script"
