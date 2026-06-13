@@ -10,22 +10,25 @@ The DOM lives entirely inside the JS engine — V8 via
 [rusty_racer](https://github.com/ursm/rusty_racer) or QuickJS via
 [quickjs.rb](https://github.com/hmsk/quickjs.rb), whichever is
 installed — with no Nokogiri tree on the Ruby side. Capybara finds
-resolve through xpathway / CSS-selector code running in the same
-context as the page's JS, so `find` / `has_css?` / `within` see
+resolve through css-select (CSS) and xpathway (XPath) running in the
+same context as the page's JS, so `find` / `has_css?` / `within` see
 exactly the tree the app sees.
 
 ## Status
 
-Pre-release — the API is unstable and the gem isn't published to
-RubyGems yet. The numbers and benchmarks live in
+The architecture and behaviour are stable. Correctness is held to two
+bars. A vendored subset of
+[web-platform-tests](https://github.com/web-platform-tests/wpt) — the
+same DOM / HTML tests Chromium and Firefox hold themselves to — runs as
+a conformance gate. And each target app (Redmine / Forem / Avo /
+Mastodon / Discourse) runs its full system suite against the driver in
 [capybara-simulated-vs-world](https://github.com/ursm/capybara-simulated-vs-world)
-where each target app (Redmine / Forem / Avo / Mastodon / Discourse)
-runs its system suite against this driver.
+as an integration check.
 
-The pending shared-spec tests all need a real layout engine
-(`elementFromPoint`, real `getBoundingClientRect`, viewport-clip
-visibility, `display: contents` table edge cases) — same set Selenium
-escapes via screenshots and we don't try to simulate.
+The remaining gaps need a real layout engine (`elementFromPoint`,
+truthy `getBoundingClientRect`, viewport-clip visibility, `display:
+contents` table edge cases) — the same set Selenium escapes via
+screenshots and this driver deliberately doesn't simulate.
 
 ## Install
 
@@ -34,10 +37,9 @@ gem 'capybara-simulated', group: :test
 gem 'rusty_racer', group: :test  # JS engine — pick one
 ```
 
-`bundle install`. The gem ships its JS bridge under
-`lib/capybara/simulated/js/`, with the vendored JS deps under
-`vendor/js/`, so
-there's no Node toolchain at consume time.
+`bundle install`. Requires Ruby ≥ 3.3. The gem ships its JS bridge
+under `lib/capybara/simulated/js/` and the vendored JS deps under
+`vendor/js/`, so there's no Node toolchain at consume time.
 
 ### JS engine
 
@@ -227,11 +229,13 @@ end
 
 ## Performance characteristics
 
-The driver builds a base snapshot once per process (bridge.js +
-the vendored JS deps — a V8 `Snapshot` for rusty_racer, bytecode for
-QuickJS) and
-checks Contexts out of a small process-wide pool of pre-warmed
-clones, so each navigation lands on a fresh JS context instantly.
+The driver builds a base snapshot once per process — the bundled
+bridge plus the vendored JS deps, as a V8 `Snapshot` for rusty_racer or
+bytecode for QuickJS. On V8 that snapshot warms a single long-lived
+isolate whose context is reset to a clean realm per navigation
+(`Context#reset`); on QuickJS each navigation checks a freshly
+snapshot-loaded VM out of a small pre-warmed pool. Either way, every
+navigation lands on a clean, warm JS context near-instantly.
 
 **Wall time is sensitive to whether the app uses Turbo Drive**,
 because navigation simulates real-browser semantics:
@@ -263,18 +267,20 @@ referenced page-specific DOM.
   Each external script is fetched through the in-process Rack app,
   compiled, and run in the JS engine with bytecode cache hits from
   the base snapshot warmup.
-- **CSS cascade resolution**: rules are parsed once on first encounter
-  per stylesheet set; subsequent finds on the same page hit the
-  cached `__layoutRules` / `__hideRules` arrays in JS-side memory.
+- **CSS cascade resolution**: stylesheets are parsed once per distinct
+  set of sources and cached content-addressably, so repeat visits and
+  subsequent finds on the same page reuse the resolved cascade instead
+  of re-parsing.
 - **DOM ops stay inside the JS engine** — find / has_? / event
   dispatch never cross the Ruby ↔ JS boundary for the actual tree
   walk; only the resulting handle ids do. Modify-heavy tests
   (SortableJS dragging thousands of items) run at JS-engine speed,
   not at host-call-IPC speed.
 - **Polling** (Capybara `default_max_wait_time`) advances a *virtual*
-  JS clock — `setTimeout(N)` fires after `N` ms of accumulated wall
-  time, not real time. A page that schedules `setTimeout(2000, x)`
-  doesn't block for 2 s; it fires once polling has waited that long.
+  JS clock — timers fire as polling steps the clock forward, not in
+  real time. A page that schedules `setTimeout(2000, x)` doesn't block
+  for 2 s; the callback fires once polling has advanced the clock past
+  it.
 
 ## Known limits
 
@@ -303,21 +309,26 @@ referenced page-specific DOM.
   open a window-handle and `current_window` / `switch_to_window`
   work, but each aux window only records its URL (no per-window JS
   context or cross-window `postMessage`).
-- **Frames, WebSocket, screenshots, and drag pixel coordinates** are
-  out of scope — use Selenium / Cuprite. (EventSource and Web Workers
-  *are* implemented.)
+- **`within_frame`, WebSocket, screenshots, and drag pixel
+  coordinates** are out of scope — use Selenium / Cuprite. There's no
+  frame-switching DSL to drive a test into an `<iframe>`, though an
+  iframe's own scripts do run, in a per-frame JS realm. (EventSource
+  and Web Workers *are* implemented.)
 
 ## Architecture
 
-- `lib/capybara/simulated/js/bridge.js` — the entire DOM lives here.
-  `Document` / `Element` / `Text` / `DocumentFragment` / `ShadowRoot`
-  classes; CSS selector tokeniser + matcher; event dispatch
-  (capture / target / bubble phases with `dispatchEvent(target,
-  event)`); virtual `setTimeout` / `setInterval` /
-  `requestAnimationFrame` clock; MutationObserver; custom-element
-  registry; `Range` / `Selection`; cascade resolver for `display` /
-  `visibility` / `text-transform` / layout primitives. xpathway (true
-  third-party, under `vendor/js/`) sits on top for XPath.
+- `lib/capybara/simulated/js/src/` — the entire DOM lives here, split
+  across ~50 ES modules bundled into `bridge.bundle.js` (esbuild; no
+  Node toolchain at consume time). `Document` / `Element` / `Text` /
+  `DocumentFragment` / `ShadowRoot` classes; event dispatch
+  (capture / target / bubble with shadow retargeting, via
+  `dispatchEvent(target, event)`); a virtual `setTimeout` /
+  `setInterval` / `requestAnimationFrame` clock; MutationObserver;
+  custom-element registry; `Range` / `Selection`; and the cascade
+  resolver for `display` / `visibility` / `text-transform`. Capybara's
+  finds run through the vendored css-select (with css-what / css-tree)
+  for CSS and xpathway for XPath — both true third parties under
+  `vendor/js/`, executing in the same context as the page's JS.
 - `lib/capybara/simulated/browser.rb` — Rack client, history stack,
   modal handler queue, virtual-clock anchor, trace recorder. Owns
   the JS runtime via `V8Runtime` or `QuickJSRuntime`. The hot
@@ -326,9 +337,9 @@ referenced page-specific DOM.
   per-result iteration stays Ruby-side.
 - `lib/capybara/simulated/v8_runtime.rb` / `quickjs_runtime.rb` —
   per-engine wrappers, common bits in `runtime_shared.rb`. The V8
-  base-snapshot (and the QuickJS bytecode equivalent) caches
-  bridge.js + the vendored deps so each Context spawn is
-  sub-millisecond.
+  base-snapshot (and the QuickJS bytecode equivalent) bakes in the
+  bundled bridge + vendored deps, so a per-navigation context reset
+  (V8) or pooled VM checkout (QuickJS) is sub-millisecond.
 - `lib/capybara/simulated/driver.rb` — Capybara `Driver::Base`
   surface (visit / find / execute_script / window handling / modal /
   tracing API).
@@ -368,3 +379,7 @@ pin '@hotwired/turbo'
 
 `window.fetch` routes through Rack, so Turbo's frame fetch and
 link-action POSTs round-trip the test app.
+
+## License
+
+[MIT](LICENSE).
