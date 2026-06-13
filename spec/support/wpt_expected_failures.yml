@@ -212,17 +212,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-text-and-script-in-style.htm
 - All style rules appended to a <style> element are inserted and script-observable
   to scripts inserted in the `<style>` element, by the time scripts execute after
   DOM insertions.
-dom/nodes/insertion-removing-steps/Node-appendChild-text-in-script.html:
-- 'Node.appendChild: inserting two text nodes in an empty script'
-dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts-from-fragment.html:
-- 'Node.appendChild: inserting three scripts from a document fragment'
-dom/nodes/insertion-removing-steps/Node-appendChild-three-scripts.html:
-- 'Node.appendChild: inserting three scripts from a div'
-dom/nodes/insertion-removing-steps/later-script-removed-by-earlier-script.html:
-- A later-inserted script removed by an earlier-inserted script in the same append()
-  call should not run
-- A later-inserted script removed by an earlier-inserted script in the same document
-  fragment should not run
 dom/nodes/moveBefore/child-style-preserve.html:
 - child-style-preserve
 dom/nodes/moveBefore/continue-css-animation-left.html:
