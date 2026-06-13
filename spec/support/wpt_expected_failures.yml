@@ -337,9 +337,6 @@ dom/nodes/remove-and-adopt-thcrash.html:
   doesn't crash.
 dom/nodes/remove-next-sibling-during-replace-with.html:
 - remove-next-sibling-during-replace-with
-dom/nodes/rootNode.html:
-- getRootNode() must return context object's shadow-including root if options's composed
-  is true, and context object's root otherwise
 dom/ranges/Range-adopt-test.html:
 - 'Parentless range container moved to another document with appendChild: Removing
   the only element in the range must collapse the range'
