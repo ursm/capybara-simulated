@@ -894,9 +894,18 @@ module Capybara
             // Leading top-level lexical declaration, after optional BOM /
             // whitespace / line+block comments / a "use strict" prologue.
             const LEADS_LEXICAL = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*(?:["']use strict["'];?\\s*)?(?:export\\s+)?(?:const|let|class)[\\s{\\[]/;
+            // A "use strict" directive prologue. A classic <script> evaluates as a
+            // top-level Script, where top-level `var` / `function` declarations
+            // bind on the global object even in strict mode — but the JS-only
+            // `(0, eval)(body)` fast path runs them as an INDIRECT eval, and a
+            // strict indirect eval gets its OWN variable environment, so those
+            // declarations never reach globalThis (a later <script> can't see
+            // them). Route strict-prologue scripts through the real top-level
+            // `ctx.eval` path too, same as leading lexical declarations.
+            const LEADS_USE_STRICT = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*["']use strict["']/;
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
-              if (LEADS_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
+              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body)) return runEval(label || 'csim-eval', body);
               (0, eval)(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();
