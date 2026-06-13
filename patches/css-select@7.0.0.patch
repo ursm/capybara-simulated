@@ -1,8 +1,22 @@
 diff --git a/dist/attributes.js b/dist/attributes.js
-index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..91755cc38ed4e498c0c63abe58b8467bf60f9815 100644
+index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..de89aa6ed9ae0c2caaf1fa552a6e31b7e06064c0 100644
 --- a/dist/attributes.js
 +++ b/dist/attributes.js
-@@ -117,7 +117,10 @@ export const attributeRules = {
+@@ -67,7 +67,12 @@ function shouldIgnoreCase(selector, options) {
+         ? selector.ignoreCase
+         : selector.ignoreCase === "quirks"
+             ? !!options.quirksMode
+-            : !options.xmlMode && caseInsensitiveAttributes.has(selector.name);
++            // csim patch: `lowerCaseAttributeNames: false` keeps `selector.name`
++            // case-preserved (so the adapter folds per element-namespace), but the
++            // HTML "case-insensitive attribute VALUE" list is keyed by the
++            // canonical lowercase name — fold here so `[TYPE=text]` still
++            // value-matches case-insensitively like `[type=text]`.
++            : !options.xmlMode && caseInsensitiveAttributes.has(selector.name.toLowerCase());
+ }
+ /**
+  * Attribute selectors
+@@ -117,7 +122,10 @@ export const attributeRules = {
      element(next, data, options) {
          const { adapter } = options;
          const { name, value } = data;
@@ -14,6 +28,25 @@ index 89dab0a26c12f18182e4c98b69bde2b68fc7fc2f..91755cc38ed4e498c0c63abe58b8467b
              return boolbase.falseFunc;
          }
          const regex = new RegExp(`(?:^|\\s)${escapeRegex(value)}(?:$|\\s)`, shouldIgnoreCase(data, options) ? "i" : "");
+diff --git a/dist/general.js b/dist/general.js
+index 5d3fdf164e2a7e9612dec3cf6bdb2768a14d06ed..e2ed9e28d75c5f51857b6e9e567fd27f82a94f13 100644
+--- a/dist/general.js
++++ b/dist/general.js
+@@ -27,7 +27,13 @@ export function compileGeneralSelector(next, selector, options, context, compile
+             if (selector.namespace != null) {
+                 throw new Error("Namespaced attributes are not yet supported by css-select");
+             }
+-            if (!options.xmlMode || options.lowerCaseAttributeNames) {
++            // csim patch: an explicit `lowerCaseAttributeNames: false` keeps the
++            // selector's attribute name CASE-PRESERVED even in HTML mode, so the
++            // adapter can fold case per-element (HTML = case-insensitive, SVG /
++            // MathML = case-sensitive) — a distinction css-select's global option
++            // can't express. Default (option unset) is unchanged.
++            if (options.lowerCaseAttributeNames !== false &&
++                (!options.xmlMode || options.lowerCaseAttributeNames)) {
+                 selector.name = selector.name.toLowerCase();
+             }
+             return attributeRules[selector.action](next, selector, options);
 diff --git a/dist/pseudo-selectors/aliases.js b/dist/pseudo-selectors/aliases.js
 index 8fb6633f09e40d21d668be06182a3868f0fc8dff..b2c7529cdf1c8b2a9933f4de70fbd076e793202c 100644
 --- a/dist/pseudo-selectors/aliases.js

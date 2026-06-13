@@ -340,8 +340,6 @@ dom/nodes/moveBefore/slotchange-events.html:
 - Moving default content out of a slot fires 'slotchange' event
 dom/nodes/query-target-in-load-event.html:
 - document.querySelector(":target") must work when called in the window.load event
-dom/nodes/querySelector-mixed-case.html:
-- Mixed HTML/SVG/MathML tree with various mixed-case attributes
 dom/nodes/remove-and-adopt-thcrash.html:
 - Check that removing a node and then adopting its parent into a different window/document
   doesn't crash.

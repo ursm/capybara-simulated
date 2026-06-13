@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  css-select@7.0.0: 3b0f1b381d3a0eff630b64c88b846f194636ac52a9fb1022d1af3fcbee224ca6
+  css-select@7.0.0: a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5
   css-tree@3.2.1: adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8
   css-what@8.0.0: 8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d
 
@@ -15,7 +15,7 @@ importers:
     dependencies:
       css-select:
         specifier: ^7.0.0
-        version: 7.0.0(patch_hash=3b0f1b381d3a0eff630b64c88b846f194636ac52a9fb1022d1af3fcbee224ca6)
+        version: 7.0.0(patch_hash=a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5)
       css-tree:
         specifier: ^3.2.1
         version: 3.2.1(patch_hash=adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8)
@@ -378,7 +378,7 @@ snapshots:
 
   boolbase@2.0.0: {}
 
-  css-select@7.0.0(patch_hash=3b0f1b381d3a0eff630b64c88b846f194636ac52a9fb1022d1af3fcbee224ca6):
+  css-select@7.0.0(patch_hash=a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5):
     dependencies:
       boolbase: 2.0.0
       css-what: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
