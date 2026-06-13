@@ -125,9 +125,6 @@ dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
-dom/nodes/DOMImplementation-createHTMLDocument.html:
-- 'createHTMLDocument(): document location getter is null'
-- 'createHTMLDocument(): metadata'
 dom/nodes/Document-URL.html:
 - Document.URL with redirect
 dom/nodes/Document-adoptNode.html:
@@ -158,8 +155,6 @@ dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 - new Document()
-dom/nodes/Document-implementation.html:
-- Getting implementation off the same document
 dom/nodes/Element-closest.html:
 - Element.closest with context node 'test11' and selector ':invalid'
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
