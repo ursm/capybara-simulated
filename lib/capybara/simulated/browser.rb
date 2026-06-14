@@ -221,6 +221,13 @@ module Capybara
         @find_cache_ctx               = nil
         @find_cache_value             = nil
         @document_handle              = 0
+        # `within_frame` state. `@current_realm_id` is the V8 context id of the
+        # active frame realm (nil = the main document); `@frame_stack` records
+        # the enclosing realms so `switch_to_frame(:parent)` can pop one level.
+        # DOM / node / query ops route through `dom_call`, which dispatches to
+        # this realm. nil is the steady state, so the routing is one nil-check.
+        @current_realm_id             = nil
+        @frame_stack                  = []
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @polling_grace                = nil
         @last_polled_gen              = nil
@@ -429,11 +436,121 @@ module Capybara
         @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
       end
 
+      attr_reader :current_realm_id
+
+      # DOM / node / query host-fn dispatch. Inside a `within_frame` block it
+      # routes to the active frame realm's context; otherwise straight to the
+      # main context. Handle integers are per-realm (each realm is a full
+      # bridge with its own registry), so an op on a frame node must run in the
+      # realm the handle came from — which, per Capybara's within_frame
+      # contract, is the current realm for the block's duration. Hot path:
+      # `@current_realm_id` is nil outside frames, so this is one nil-check over
+      # a direct `@runtime.call`.
+      def dom_call(name, *args)
+        return @runtime.call(name, *args) if @current_realm_id.nil?
+        # The active frame's realm was torn down mid-block (the iframe was
+        # removed or re-navigated). Surface a stale element so Capybara
+        # retries / reports, rather than letting realm_call fall back to the
+        # main context where this frame handle would mis-resolve.
+        unless @runtime.frame_realm_alive?(@current_realm_id)
+          raise Capybara::Simulated::StaleElement,
+            "frame browsing context #{@current_realm_id} was torn down (frame removed or re-navigated)"
+        end
+        @runtime.realm_call(@current_realm_id, name, *args)
+      end
+
+      # Root for a context-less find: the active frame's document (handle 0 ⇒
+      # the realm's own `globalThis.document`) when in a frame, else the main
+      # document handle.
+      def current_document_handle
+        @current_realm_id ? 0 : @document_handle
+      end
+
+      # Capybara `switch_to_frame`. `target` is an `<iframe>` handle in the
+      # CURRENT realm, or `:parent` / `:top`. Entering builds (or reuses) the
+      # frame's V8 realm and routes subsequent DOM ops there; `:parent` pops one
+      # level, `:top` returns to the main document. Frame switches invalidate
+      # the find cache (its keys aren't realm-qualified, and a switch is rare).
+      #
+      # Scope: finds, reads, interactions (click/fill_in/…), evaluate_script,
+      # and a self-targeted navigation (a link / form submit whose default
+      # action loads a new document) all route into the frame — the frame's
+      # realm is rebuilt from the fetched document, leaving the top page
+      # untouched (see `navigate_frame`). Out of scope: `_top` navigates the
+      # main page (correct), but a `_parent` target from a frame nested ≥2
+      # levels navigates the main page rather than the intermediate frame, and
+      # cross-origin frame locality is resolved against the main page's origin.
+      def switch_to_frame(target)
+        invalidate_find_cache
+        case target
+        when :parent
+          @frame_stack.pop
+          @current_realm_id = @frame_stack.last && @frame_stack.last[:realm_id]
+        when :top
+          reset_frame_scope
+        else
+          # Per-frame realms are a V8-engine feature; QuickJS has no nested
+          # browsing context to route into. Distinguish that (unsupported
+          # engine) from a frame that simply failed to build (below), so the
+          # error doesn't misattribute a load failure to the engine.
+          unless @runtime.respond_to?(:realm_call)
+            raise Capybara::Simulated::FrameNotSupported,
+              'within_frame needs a per-frame browsing context, which only the ' \
+              'V8 (rusty_racer) engine provides; QuickJS keeps a same-realm fallback.'
+          end
+          parent_realm = @current_realm_id
+          tick_real_time
+          rid = dom_call('__csimEnsureFrameRealm', target.to_i).to_i
+          if rid.zero?
+            raise Capybara::Simulated::StaleElement,
+              "could not enter frame ##{target} (not a frame element, or its document failed to load)"
+          end
+          # Record the iframe handle + the realm it lives in so a frame-scoped
+          # navigation can rebuild this exact frame (`reload_current_frame_realm`).
+          @frame_stack.push({realm_id: rid, iframe_handle: target.to_i, parent_realm_id: parent_realm})
+          @current_realm_id = rid
+          # Let the freshly built realm's inline scripts / load handlers settle
+          # so a find immediately inside the block sees the loaded document.
+          settle
+        end
+      end
+
+      # Return DOM-op routing to the main document and drop any frame stack.
+      # Called by `switch_to_frame(:top)`, per-test `reset!`, and every full
+      # page (re)build (which disposes all frame realms) — anything that
+      # invalidates the active `within_frame` scope.
+      def reset_frame_scope
+        @current_realm_id = nil
+        @frame_stack.clear
+      end
+
+      # The active browsing context's own URL: the frame document's URL inside
+      # a `within_frame` block, else the main page URL. Used to resolve a
+      # frame-relative navigation and to set its request referrer, so
+      # `resolve_against_current` / `pure_fragment_navigation?` work the same
+      # whether the navigation originates in the main page or a frame.
+      def current_browsing_context_url
+        return @current_url unless @current_realm_id
+        href = dom_call('__csimLocationHref').to_s
+        href.empty? ? @current_url : href
+      end
+
+      # Does a link/form `target` load into the CURRENT frame? Empty or `_self`
+      # do; `_top` / `_blank` / `_parent` / a named context do not. `_top`
+      # correctly navigates the main page (it falls through to `navigate`).
+      # `_parent` from a frame nested ≥2 levels would ideally navigate the
+      # intermediate parent frame, not the top page — that ancestor-targeted
+      # case isn't modelled yet (rare); it currently navigates the main page.
+      def frame_self_target?(target)
+        t = target.to_s.downcase
+        t.empty? || t == '_self'
+      end
+
       def find_css(css, context_handle = nil)
         s = css.to_s
         return find_xpath(s, context_handle) if xpath_shaped?(s)
         find_with_timer_fallback(:css, s, context_handle) do
-          @runtime.call('__csimQuery', context_handle || @document_handle, s).to_a
+          dom_call('__csimQuery', context_handle || current_document_handle, s).to_a
         rescue StandardError => e
           # Invalid selector → empty result. Callers that genuinely
           # need the throw go through `evaluate_script`.
@@ -445,7 +562,7 @@ module Capybara
       def find_first_css(css, context_handle = nil)
         s = css.to_s
         find_with_timer_fallback(:css_first, s, context_handle) do
-          h = @runtime.call('__csimQueryOne', context_handle || @document_handle, s).to_i
+          h = dom_call('__csimQueryOne', context_handle || current_document_handle, s).to_i
           h.zero? ? nil : h
         rescue StandardError => e
           raise unless syntax_or_invalid_selector_error?(e)
@@ -481,7 +598,7 @@ module Capybara
       def find_xpath(xpath, context_handle = nil)
         xpath_str = xpath.to_s
         find_with_timer_fallback(:xpath, xpath_str, context_handle) do
-          @runtime.call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
+          dom_call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
         end
       end
 
@@ -569,23 +686,23 @@ module Capybara
         @find_cache_dirty = true
       end
 
-      def text(handle)        = @runtime.call('__csimText', handle).to_s
-      def tag(handle)         = @runtime.call('__csimTag', handle).to_s
-      def attr(handle, name)  = @runtime.call('__csimAttr', handle, name.to_s)
-      def inner_html(handle)  = @runtime.call('__csimInnerHTML', handle).to_s
-      def outer_html(handle)  = @runtime.call('__csimOuterHTML', handle).to_s
+      def text(handle)        = dom_call('__csimText', handle).to_s
+      def tag(handle)         = dom_call('__csimTag', handle).to_s
+      def attr(handle, name)  = dom_call('__csimAttr', handle, name.to_s)
+      def inner_html(handle)  = dom_call('__csimInnerHTML', handle).to_s
+      def outer_html(handle)  = dom_call('__csimOuterHTML', handle).to_s
       def file_input?(handle)
         tag(handle) == 'input' && attr(handle, 'type').to_s.downcase == 'file'
       end
-      def visible?(handle)    = @runtime.call('__csimVisible', handle) ? true : false
+      def visible?(handle)    = dom_call('__csimVisible', handle) ? true : false
 
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.
       def all_text(handle)     = text(handle)
-      def visible_text(handle) = @runtime.call('__csimVisibleText', handle).to_s
+      def visible_text(handle) = dom_call('__csimVisibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
-      def value(handle)        = @runtime.call('__csimValue', handle)
-      def disabled?(handle)    = @runtime.call('__csimDisabled', handle)
+      def value(handle)        = dom_call('__csimValue', handle)
+      def disabled?(handle)    = dom_call('__csimDisabled', handle)
       # HTML spec: `<option>.selected` IDL is true when the `selected`
       # *attribute* is set OR when no sibling option has `selected` and
       # this is the first non-disabled option of a single-select
@@ -595,28 +712,28 @@ module Capybara
       # `<option selected>` reports no selected options and the matcher
       # fails even though the first option *is* the currently chosen
       # one in real browsers.
-      def option_selected?(h)  = !!@runtime.call('__csimOptionSelected', h)
+      def option_selected?(h)  = !!dom_call('__csimOptionSelected', h)
       def shadow_root_handle(handle)
-        h = @runtime.call('__csimShadowRoot', handle).to_i
+        h = dom_call('__csimShadowRoot', handle).to_i
         h.zero? ? nil : h
       end
       def computed_style(handle, names)
         tick_real_time
-        result = @runtime.call('__csimComputedStyle', handle, names.map(&:to_s))
+        result = dom_call('__csimComputedStyle', handle, names.map(&:to_s))
         return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
         result.transform_keys(&:to_s)
       end
-      def node_path(handle)    = @runtime.call('__csimNodePath', handle).to_s
+      def node_path(handle)    = dom_call('__csimNodePath', handle).to_s
 
       def lookup_node(handle)
-        handle if @runtime.call('__csimAlive', handle)
+        handle if dom_call('__csimAlive', handle)
       end
 
       def check_stale(handle, initial, gen = nil)
-        return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
+        return if initial && (gen.nil? || gen == @context_gen) && dom_call('__csimAlive', handle)
 
         tick_real_time
-        return if initial && (gen.nil? || gen == @context_gen) && @runtime.call('__csimAlive', handle)
+        return if initial && (gen.nil? || gen == @context_gen) && dom_call('__csimAlive', handle)
 
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
@@ -630,7 +747,7 @@ module Capybara
       # silently no-op (or, in the case of `__csimClickResolve`,
       # dispatch on a detached node whose listeners no longer matter).
       def ensure_alive_after_tick(handle)
-        return if @runtime.call('__csimAlive', handle)
+        return if dom_call('__csimAlive', handle)
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
@@ -646,11 +763,11 @@ module Capybara
             # Wall-sleep between mousedown and mouseup so click handlers
             # reading `Date.now()` see the elapsed gap (selenium parity).
             init['mouseDownOnly'] = true
-            partial = @runtime.call('__csimClickResolve', handle, init)
+            partial = dom_call('__csimClickResolve', handle, init)
             sleep delay
-            @runtime.call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
+            dom_call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
           else
-            @runtime.call('__csimClickResolve', handle, init)
+            dom_call('__csimClickResolve', handle, init)
           end
         unless action.is_a?(Hash)
           settle
@@ -693,11 +810,19 @@ module Capybara
         when 'navigate'
           url = action['url'].to_s
           target = action['target'].to_s
+          # Inside a frame, a self-targeted link navigates the FRAME, not the
+          # top page: fetch + rebuild this frame's realm. A pure-fragment link
+          # is already handled in-realm by the frame's own location JS.
+          if @current_realm_id && frame_self_target?(target)
+            unless pure_fragment_navigation?(url)
+              tick_real_time
+              navigate_frame(resolve_against_current(url, use_base: true))
+            end
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
           # in a new browsing context. URL-only multi-window mode
           # records the URL against a fresh aux handle; the primary
           # stays put (per HTML spec — original window is unaffected).
-          if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
+          elsif !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
             @driver.open_aux_window(resolve_against_current(url, use_base: true))
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
@@ -772,10 +897,11 @@ module Capybara
 
       def pure_fragment_navigation?(url)
         return true  if url.start_with?('#')
-        return false if @current_url.nil?
+        doc_url = current_browsing_context_url
+        return false if doc_url.nil?
         target = resolve_against_current(url)
         a = URI.parse(target)
-        b = URI.parse(@current_url)
+        b = URI.parse(doc_url)
         # Same-document iff everything but the fragment matches AND the
         # fragment actually changes — `a.fragment != b.fragment` covers
         # both adding/changing a fragment and *clearing* one (target has
@@ -854,14 +980,14 @@ module Capybara
               'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
             }
           }
-          @runtime.call('__csimSetFiles', handle, file_infos)
+          dom_call('__csimSetFiles', handle, file_infos)
           # Mirror real browser: <input type=file>.value reflects only
           # the filename of the first chosen file (security-faked path).
           # __csimSetValue dispatches input + change synchronously.
           js_value = paths.first ? File.basename(paths.first) : ''
-          @runtime.call('__csimSetValue', handle, js_value)
+          dom_call('__csimSetValue', handle, js_value)
         else
-          @runtime.call('__csimSetValue', handle, coerced)
+          dom_call('__csimSetValue', handle, coerced)
         end
         drain_after_user_action
       end
@@ -919,10 +1045,10 @@ module Capybara
         invalidate_find_cache
         ensure_alive_after_tick(handle)
         init = {'bubbles' => true, 'cancelable' => true, 'button' => 2, 'which' => 3}.merge(click_event_init(handle, keys, opts))
-        @runtime.call('__csimDispatchEvent', handle, 'mousedown', init)
+        dom_call('__csimDispatchEvent', handle, 'mousedown', init)
         sleep opts[:delay].to_f if opts[:delay].to_f > 0
-        @runtime.call('__csimDispatchEvent', handle, 'mouseup',     init)
-        @runtime.call('__csimDispatchEvent', handle, 'contextmenu', init)
+        dom_call('__csimDispatchEvent', handle, 'mouseup',     init)
+        dom_call('__csimDispatchEvent', handle, 'contextmenu', init)
       end
 
       # HTML5 drag-and-drop simulation. Capybara routes `Element#drop`
@@ -934,7 +1060,7 @@ module Capybara
         invalidate_find_cache
         ensure_alive_after_tick(handle)
         items = args.flat_map {|arg| drop_items(arg) }
-        @runtime.call('__csimDropOnto', handle, items)
+        dom_call('__csimDropOnto', handle, items)
       end
 
       # Element-to-element drag. Capybara's `Element#drag_to(target,
@@ -950,7 +1076,7 @@ module Capybara
         invalidate_find_cache
         ensure_alive_after_tick(source_handle)
         ensure_alive_after_tick(target_handle)
-        @runtime.call('__csimDragOnto', source_handle, target_handle)
+        dom_call('__csimDragOnto', source_handle, target_handle)
         drain_after_user_action
       end
       def drop_items(arg)
@@ -975,14 +1101,14 @@ module Capybara
         # UI Events spec: two full mousedown→mouseup→click chains
         # before the trailing `dblclick`. Jspreadsheet (table-builder's
         # `.jss_worksheet`) enters edit mode on the inner mousedown.
-        2.times { @runtime.call('__csimClickResolve', handle, opts) }
+        2.times { dom_call('__csimClickResolve', handle, opts) }
         init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
-        @runtime.call('__csimDispatchEvent', handle, 'dblclick', init)
+        dom_call('__csimDispatchEvent', handle, 'dblclick', init)
         # Real browsers' default-action on dblclick selects the word
         # under the cursor — ProseMirror / Tiptap "paste URL over
         # selection wraps with link" tests rely on the word being
         # selected before the paste.
-        @runtime.call('__csimSelectWordAt', handle)
+        dom_call('__csimSelectWordAt', handle)
         settle
       end
 
@@ -1015,7 +1141,7 @@ module Capybara
         has_xy = opts[:x] || opts[:y]
         center = opts[:offset] == :center || !has_xy
         if has_xy || center
-          rect = @runtime.call('__csimElementRect', handle)
+          rect = dom_call('__csimElementRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
           out['clientX'] = base_x + opts[:x].to_f
@@ -1038,14 +1164,14 @@ module Capybara
         # double-eval recursion the inlined `globalThis.document.
         # _hoverElement = ...` triggered (the eval string ran inside
         # a fresh microtask that re-entered the hover listeners).
-        @runtime.call('__csimSetHover', handle)
+        dom_call('__csimSetHover', handle)
       end
 
       def dispatch_event(handle, type, init = {})
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        @runtime.call('__csimDispatchEvent', handle, type.to_s, init)
+        dom_call('__csimDispatchEvent', handle, type.to_s, init)
       end
 
       # Capybara's `send_keys` accepts Strings and Symbols (special
@@ -1097,20 +1223,20 @@ module Capybara
         # before the next char arrives. Plain `<input>` / `<textarea>`
         # don't need this — keep the single batched call there.
         has_multichar_text = atoms.any? {|a| a['kind'] == 'text' && a['value'].to_s.length > 1 }
-        if has_multichar_text && @runtime.call('__csimIsContentEditable', handle)
+        if has_multichar_text && dom_call('__csimIsContentEditable', handle)
           per_char = atoms.flat_map {|a|
             next a unless a['kind'] == 'text' && a['value'].to_s.length > 1
             a['value'].to_s.each_char.map {|c| {'kind' => 'text', 'value' => c} }
           }
           head, *tail = per_char
-          @runtime.call('__csimSendKeys', handle, [head])
+          dom_call('__csimSendKeys', handle, [head])
           tail.each {|atom|
             tick_real_time
-            @runtime.call('__csimSendKeys', handle, [atom])
+            dom_call('__csimSendKeys', handle, [atom])
             settle
           }
         else
-          @runtime.call('__csimSendKeys', handle, atoms)
+          dom_call('__csimSendKeys', handle, atoms)
         end
         drain_after_user_action
       end
@@ -1119,7 +1245,7 @@ module Capybara
         mark_action_baseline
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimSelectOption', handle)
+        dom_call('__csimSelectOption', handle)
         tick_real_time
         drain_after_user_action
       end
@@ -1133,11 +1259,11 @@ module Capybara
         # the JS side whether the option's parent select is `multiple`
         # before issuing the unselect; the answer doubles as the
         # "found the right ancestor" check.
-        info = @runtime.call('__csimOptionContext', handle)
+        info = dom_call('__csimOptionContext', handle)
         if info.is_a?(Hash) && info['hasSelect'] && !info['multiple']
           raise Capybara::UnselectNotAllowed, 'Cannot unselect option from single select box.'
         end
-        @runtime.call('__csimUnselectOption', handle)
+        dom_call('__csimUnselectOption', handle)
         tick_real_time
         drain_after_user_action
       end
@@ -1285,7 +1411,7 @@ module Capybara
       def submit_form(handle)
         tick_real_time
         invalidate_find_cache
-        form_handle = @runtime.call('__csimAncestorForm', handle).to_i
+        form_handle = dom_call('__csimAncestorForm', handle).to_i
         return if form_handle.zero?
         submit_form_handle(form_handle, nil)
       end
@@ -1295,9 +1421,11 @@ module Capybara
         @runtime.call('__csimDocumentTitle').to_s
       end
 
+      # `page.html` inside a `within_frame` block returns the frame document's
+      # source (Selenium parity), so route through the active realm.
       def html
         tick_real_time
-        @runtime.call('__csimDocumentHtml').to_s
+        dom_call('__csimDocumentHtml').to_s
       end
 
       def status_code      = (@last_response_status || 200)
@@ -1449,7 +1577,7 @@ module Capybara
       end
       def active_element_handle
         tick_real_time
-        h = @runtime.call('__csimActiveElement').to_i
+        h = dom_call('__csimActiveElement').to_i
         h.zero? ? nil : h
       end
       # Session-level keystroke. Tab / shift-tab cycle focus; everything
@@ -1467,12 +1595,12 @@ module Capybara
         Array(keys).each do |k|
           sym = k.is_a?(Symbol) ? k : (k.respond_to?(:to_sym) ? k.to_sym : nil)
           if sym == :tab || sym == :backtab
-            @runtime.call('__csimAdvanceFocus', sym == :backtab)
+            dom_call('__csimAdvanceFocus', sym == :backtab)
           elsif sym && MODIFIER_KEY_NAMES.include?(sym)
             held << sym
           else
             handle = active_element_handle
-            handle = @document_handle if handle.nil? || handle.zero?
+            handle = current_document_handle if handle.nil? || handle.zero?
             atom = held.empty? ? k : (held + [k])
             send_keys(handle, [atom])
           end
@@ -1582,7 +1710,7 @@ module Capybara
       # description Proc).
       def describe_node_handle(handle)
         return "handle=#{handle}" if handle.nil? || handle.zero?
-        info = @runtime.call('__csimDescribeNode', handle)
+        info = dom_call('__csimDescribeNode', handle)
         return "handle=#{handle}" unless info.is_a?(Hash)
         s = info['tag'].to_s
         s += "##{info['id']}"  unless info['id'].to_s.empty?
@@ -1597,7 +1725,9 @@ module Capybara
         # to be active.
         tick_real_time
         invalidate_find_cache
-        result = @runtime.call('__csimEvalScript', code.to_s, marshal_args(args || []))
+        # Routes to the active frame realm inside `within_frame` (Selenium
+        # parity: `evaluate_script` runs in the current browsing context).
+        result = dom_call('__csimEvalScript', code.to_s, marshal_args(args || []))
         drain_pending_navigation
         result
       end
@@ -1609,7 +1739,7 @@ module Capybara
       def execute_script(code, args = [])
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__csimExecScript', code.to_s, marshal_args(args || []))
+        dom_call('__csimExecScript', code.to_s, marshal_args(args || []))
         drain_pending_navigation
         nil
       end
@@ -1666,14 +1796,17 @@ module Capybara
       def evaluate_async_script(code, args = [])
         tick_real_time
         invalidate_find_cache
-        @runtime.call('__evalAsyncScript', code.to_s, marshal_args(args || []))
+        # Runs in the active frame realm inside `within_frame` (Selenium
+        # parity), same as evaluate_script; the result slot is realm-local so
+        # the poll below must read from the same realm.
+        dom_call('__evalAsyncScript', code.to_s, marshal_args(args || []))
         # Pump virtual time so any setTimeout-driven completion lands.
         # Capybara's polling can't help here — we're inside one session
         # call, not a retry loop.
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) +
                    Capybara.default_max_wait_time.to_f
         loop do
-          result = @runtime.call('__pollAsyncResult')
+          result = dom_call('__pollAsyncResult')
           return result['value'] if result.is_a?(Hash) && result.key?('value')
           break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
           sleep 0.01
@@ -1875,7 +2008,7 @@ module Capybara
       # drives the Rack app via `navigate` (for GET) or a POST.
       def submit_form_handle(form_handle, submitter_handle)
         invalidate_find_cache
-        spec = @runtime.call('__csimFormSerialize', form_handle, submitter_handle || 0)
+        spec = dom_call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
         action  = spec['action'].to_s
         method  = spec['method'].to_s.upcase
@@ -1898,11 +2031,16 @@ module Capybara
             end
             URI.encode_www_form(fields)
           end
-        action_url = action.empty? ? (@current_url || @default_host) : resolve_against_current(action)
+        action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
+        # A form submitted inside a frame whose target is the frame itself
+        # navigates the FRAME, not the top page.
+        in_frame = !!@current_realm_id && frame_self_target?(spec['target'])
         if method == 'GET'
           uri = URI.parse(action_url)
           uri.query = body unless body.empty?
-          navigate(uri.to_s)
+          in_frame ? navigate_frame(uri.to_s) : navigate(uri.to_s)
+        elsif in_frame
+          navigate_frame_post(action_url, body, content_type || enctype)
         else
           navigate_post(action_url, body, content_type || enctype)
         end
@@ -2001,6 +2139,10 @@ module Capybara
         end
         @current_url     = nil
         @document_handle = 0
+        # A test may leave a frame switched-to without switching back
+        # (Capybara's reset_session spec covers exactly this); start the
+        # next test back on the main document.
+        reset_frame_scope
         @history.clear
         @history_idx     = -1
         @file_picks      = {} if @file_picks
@@ -3169,6 +3311,95 @@ module Capybara
 
       # Fetch via the Rack app and hand the body to V8 for parsing.
       # Only follows 3xx redirects up to a small depth.
+      # ── Frame-scoped navigation ─────────────────────────────────
+      # A self-targeted link click / form submit INSIDE a `within_frame` block
+      # navigates just that frame: fetch the document and rebuild the frame's
+      # own realm, leaving the top page (its URL, history, status) untouched.
+      # Mirrors `navigate` / `navigate_post`'s fetch + redirect-follow but
+      # terminates in `reload_current_frame_realm` instead of a main-page boot.
+
+      def navigate_frame(url, depth: 0)
+        raise 'too many redirects' if depth > 10
+        invalidate_find_cache
+        if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+          reload_current_frame_realm('about:blank', '', 'text/html')
+          return
+        end
+        env = Rack::MockRequest.env_for(url, method: 'GET')
+        apply_default_request_env(env, referer: current_browsing_context_url)
+        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+        merge_set_cookie(headers)
+        if (loc = redirect_location(status, headers))
+          next_url = carry_fragment(url, resolve_against_current(loc))
+          body.close if body.respond_to?(:close)
+          return navigate_frame(next_url, depth: depth + 1)
+        end
+        if download_response?(headers)
+          save_downloaded_response(url, headers, body)
+          return
+        end
+        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers))
+      end
+
+      def navigate_frame_post(url, body, content_type, depth: 0)
+        raise 'too many redirects' if depth > 10
+        invalidate_find_cache
+        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
+        env['CONTENT_LENGTH'] = body.bytesize.to_s
+        apply_default_request_env(env, referer: current_browsing_context_url)
+        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
+        merge_set_cookie(headers)
+        if (loc = redirect_location(status, headers))
+          next_url = resolve_against_current(loc)
+          resp_body.close if resp_body.respond_to?(:close)
+          # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
+          if [307, 308].include?(status)
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1)
+          else
+            return navigate_frame(next_url, depth: depth + 1)
+          end
+        end
+        if download_response?(headers)
+          save_downloaded_response(url, headers, resp_body)
+          return
+        end
+        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers))
+      end
+
+      # Tear down the active frame's realm and rebuild it from `html`, then
+      # re-point the iframe element at the new realm. The iframe lives in the
+      # PARENT realm, so the rebind host fn runs there.
+      def reload_current_frame_realm(url, html, content_type)
+        entry = @frame_stack.last
+        return unless entry
+        old_id = entry[:realm_id]
+        parent = entry[:parent_realm_id]
+        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type).to_i
+        return if new_id.zero?
+        rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
+        entry[:realm_id]  = new_id
+        @current_realm_id = new_id
+        invalidate_find_cache
+        settle
+      end
+
+      def rebind_frame_realm(parent_realm_id, iframe_handle, old_id, new_id)
+        if parent_realm_id.nil? || parent_realm_id.zero?
+          @runtime.call('__csimRebindFrameRealm', iframe_handle, old_id, new_id)
+        else
+          @runtime.realm_call(parent_realm_id, '__csimRebindFrameRealm', iframe_handle, old_id, new_id)
+        end
+      end
+
+      # Response content-type, defaulting to text/html. Header values can be a
+      # bare string or a one-element array (Rack 3 tuple form).
+      def response_content_type(headers)
+        ct = headers.find {|k, _| k.to_s.downcase == 'content-type' }&.last
+        ct = ct.first if ct.is_a?(Array)
+        ct.to_s.empty? ? 'text/html' : ct.to_s
+      end
+
       def navigate(url, depth: 0, referer: @current_url, from_history: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
@@ -3271,6 +3502,9 @@ module Capybara
         # finish before the next document loads; this is the in-process analogue.
         flush_outgoing_page_init if @timers_active
         @runtime.rebuild_ctx
+        # A full page (re)build disposes every frame realm, so any active
+        # `within_frame` scope is now stale — fall back to the main document.
+        reset_frame_scope
         reset_timer_state
         # The DOCUMENT is text; the Rack body arrives BINARY-tagged (see
         # `RuntimeShared.utf8_text`). Charset-header-driven decode is the
@@ -3521,6 +3755,9 @@ module Capybara
 
       def resolve_against_current(url, use_base: false)
         return url if url =~ %r{\A[a-z]+://}i
+        # Inside a `within_frame` block the "current document" is the frame's,
+        # so links / form actions resolve against the frame's URL + <base href>.
+        doc_url = current_browsing_context_url || @default_host
         base =
           if use_base && (bh = base_href) && !bh.empty?
             # The document's `<base href>` takes precedence over the
@@ -3528,17 +3765,19 @@ module Capybara
             # being resolved — HTML's base-tag semantics. `visit` skips
             # this branch so an address-bar navigation reaches the URL
             # the test typed.
-            URI.join(@current_url || @default_host, bh).to_s
+            URI.join(doc_url, bh).to_s
           else
-            @current_url || @default_host
+            doc_url
           end
         URI.join(base, url.to_s).to_s
       rescue URI::InvalidURIError, URI::BadURIError
         url
       end
 
+      # The active document's `<base href>` — routed to the current frame realm
+      # inside `within_frame`, else the main document.
       def base_href
-        @runtime.call('__csimBaseHref').to_s
+        dom_call('__csimBaseHref').to_s
       end
 
       def carry_fragment(from_url, to_url)

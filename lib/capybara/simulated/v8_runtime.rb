@@ -338,6 +338,32 @@ module Capybara
         result
       end
 
+      # Route a host-fn call into a specific frame realm's context — or the
+      # main context when `realm_id` is nil/0. Each frame realm is a full
+      # bridge with its OWN handle registry + `document`, so a node / query
+      # op on a frame node (a `within_frame` body) must execute in that
+      # realm; running it in the main context would dereference the handle
+      # against the wrong registry. Callers (`Browser#dom_call`) gate on
+      # `frame_realm_alive?` first, so a disposed realm surfaces as a stale
+      # element rather than silently mis-resolving against the main registry.
+      def realm_call(realm_id, name, *args)
+        return call(name, *args) if realm_id.nil? || realm_id.zero?
+        fr = frame_realms[realm_id]
+        return call(name, *args) unless fr
+        result = fr.call(name, *args)
+        ScriptCache.warm_pending!
+        result
+      end
+
+      # Is `realm_id` a live frame realm? A frame removed / re-navigated
+      # mid-block disposes its realm (`__csim_disposeFrameRealm`) while the
+      # Browser's `@current_realm_id` may still point at it; the Browser uses
+      # this to raise a stale-element instead of running a frame handle op
+      # against the main registry.
+      def frame_realm_alive?(realm_id)
+        !(realm_id.nil? || realm_id.zero?) && frame_realms.key?(realm_id)
+      end
+
       # bridge.js owns the virtual clock; Ruby still drives it because
       # Capybara's polling cadence is wall-clock-anchored. Use `call`
       # (function reference) rather than `eval` (string compile) — the
@@ -375,6 +401,21 @@ module Capybara
         return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
+      end
+
+      # Frame-scoped navigation: tear down the realm `old_id` and build a fresh
+      # one for the same `<iframe>` from the just-fetched document, returning the
+      # new realm's context id. A new context (not an in-place document reset) is
+      # the right model — it drops the prior frame document's timers / listeners
+      # / module state, exactly like the main page's per-visit rebuild. `parent_id`
+      # keeps the new realm's `parent`/`top` wired to the owning realm. The
+      # Browser then re-points the iframe element at the new id (`__csimRebindFrameRealm`).
+      def reload_frame_realm(old_id, parent_id, url, body, content_type)
+        if (fr = frame_realms.delete(old_id))
+          @realm_module_handles&.delete(old_id)
+          fr.dispose rescue nil
+        end
+        create_frame_realm(ctx, url, body, content_type, parent_id)
       end
 
       # One native microtask checkpoint — a checkpoint runs the queue until
@@ -543,15 +584,16 @@ module Capybara
         attach_frame_realm_loader(c)
       end
 
-      # The bridge calls `__csim_createFrameRealm(url, body, contentType)` (from
-      # `iframe.contentWindow`'s getter) to spin up a real per-iframe realm. This
+      # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
+      # (from `iframe.contentWindow`'s getter) to spin up a real per-iframe realm
+      # whose `parent`/`top` point at the realm `parentId` identifies. This
       # runs re-entrantly inside the main ctx's eval — rusty services nested
       # requests while a host callback is in flight. Returns the realm's context
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -571,7 +613,7 @@ module Capybara
       # state, point it at its own URL with the top frame as parent/top, then
       # load its document (running its scripts in the realm). Tracked for
       # event-loop draining + teardown.
-      def create_frame_realm(parent_ctx, url, body, content_type)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0)
         realm = parent_ctx.create_context
         # Re-evaling the snapshot source would redefine snapshot globals (e.g.
         # the `scrollX` accessor) and throw — re-entrantly. Only eval the
@@ -587,12 +629,18 @@ module Capybara
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
         reseed_realm_js(realm)
-        # Wire parent/top to the main realm (context id 0). No user data in
-        # this eval — only the literal namespace.
+        # Wire `parent` / `top` to the realm that owns this iframe (its context
+        # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
+        # `top` propagates up the chain (the main realm's `top` is itself). A
+        # nested frame thus reaches its TRUE parent, not unconditionally the
+        # main frame. `parent_id` is an integer the marshaller carries verbatim.
         realm.eval(<<~JS)
           if (globalThis.#{HOST_NAMESPACE_NAME} && typeof globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal === 'function') {
-            var __topWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(0);
-            globalThis.parent = __topWin; globalThis.top = __topWin;
+            var __parentWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(#{parent_id.to_i});
+            if (__parentWin) {
+              globalThis.parent = __parentWin;
+              globalThis.top    = __parentWin.top || __parentWin;
+            }
           }
         JS
         # Pass the URL + document body as call ARGUMENTS, not interpolated into

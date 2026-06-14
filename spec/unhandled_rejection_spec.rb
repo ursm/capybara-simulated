@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/js_engine'
 
 # A rejection with NO handler ever attached (fire-and-forget async function,
 # bare `Promise.reject`) never flows through the bridge's `Promise.prototype
@@ -21,9 +22,7 @@ RSpec.describe 'unhandled promise rejections' do
     # (`RustyRacer.setPromiseRejectHandler`); under QuickJS the equivalent
     # surfaces as a Ruby-side console log (vm.on_unhandled_rejection), not
     # a JS event.
-    env = ENV['CSIM_JS_ENGINE'].to_s
-    v8  = env.empty? ? Gem.loaded_specs.key?('rusty_racer') : env == 'v8'
-    skip 'native promise-reject channel needs the V8 engine' unless v8
+    skip 'native promise-reject channel needs the V8 engine' unless CsimEngine.v8?
     session.execute_script(<<~JS)
       window.__seen = null;
       window.addEventListener('unhandledrejection', e => {

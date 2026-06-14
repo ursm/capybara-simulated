@@ -47,13 +47,16 @@ browser:
   streaming, no concurrency, no WebSocket.
 - **Screenshots**.
 
-**Not yet, but feasible** — these aren't design exclusions, just unbuilt;
-the per-frame JS realm machinery they'd build on already exists, so they're
-roadmap items:
+**`within_frame` / `switch_to_frame`** work on the V8 (rusty_racer) engine:
+each `<iframe>` runs its own scripts in its own per-frame realm, and the DSL
+routes finds, reads, interactions, `evaluate_script`, and self-targeted
+navigation (a link or form submit inside the frame) into the active frame —
+nested frames included. (QuickJS keeps a same-realm fallback, so
+`within_frame` is V8-only.)
 
-- **`within_frame`** — an iframe's own scripts already run, each in its own
-  per-frame realm; what's missing is the DSL to drive finds into a frame's
-  document.
+**Not yet, but feasible** — not a design exclusion, just unbuilt; the
+per-frame JS realm machinery it'd build on already exists:
+
 - **Full multi-window** — `target="_blank"` tracks URLs and
   `switch_to_window` / `current_window` work, but aux windows don't yet
   have a per-window JS context, `postMessage`, or `opener`.
@@ -354,16 +357,20 @@ referenced page-specific DOM.
 - **WebSocket, screenshots, and drag pixel coordinates** are out of
   scope by design — use Selenium / Cuprite. (EventSource and Web
   Workers *are* implemented.)
-- **Multi-window and `within_frame`** are *not yet implemented*, but
-  they're feasible rather than design exclusions — the per-frame JS realm
-  machinery they'd build on already exists:
-  - Multi-window is URL-tracking only today — `target="_blank"` clicks
-    open a window-handle and `current_window` / `switch_to_window` work,
-    but each aux window only records its URL (no per-window JS context,
-    `postMessage`, or `opener`).
-  - There's no `within_frame` DSL to drive a test into an `<iframe>` —
-    though an iframe's own scripts *do* run, each in its own per-frame JS
-    realm, so the foundation for it is in place.
+- **`within_frame` / `switch_to_frame`** work on the V8 engine: each
+  `<iframe>` runs in its own per-frame realm and the DSL routes finds,
+  reads, interactions, `evaluate_script`, and self-targeted navigation
+  (link / form submit) into the active frame (nested frames included) — the
+  frame's realm is rebuilt from the fetched document, leaving the top page
+  untouched. `_top` navigates the main page; a `_parent` target from a
+  frame nested ≥2 levels falls back to navigating the main page, and
+  cross-origin frame locality resolves against the main origin. QuickJS has
+  no nested browsing context, so `within_frame` raises there.
+- **Multi-window** is *not yet implemented* but feasible (not a design
+  exclusion) — it'd build on the same per-frame realm machinery. Today it's
+  URL-tracking only: `target="_blank"` clicks open a window-handle and
+  `current_window` / `switch_to_window` work, but each aux window only
+  records its URL (no per-window JS context, `postMessage`, or `opener`).
 
 ## Architecture
 
