@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/js_engine'
 
 # Frame-document scripts must execute in the FRAME's realm, whichever
 # execution path the runtime routes them through. The leading-lexical and
@@ -11,9 +12,7 @@ RSpec.describe 'iframe inline-script realm routing' do
   before do
     # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps the
     # same-realm fallback by design.
-    env = ENV['CSIM_JS_ENGINE'].to_s
-    v8  = env.empty? ? Gem.loaded_specs.key?('rusty_racer') : env == 'v8'
-    skip 'per-frame realms need the V8 engine' unless v8
+    skip 'per-frame realms need the V8 engine' unless CsimEngine.v8?
   end
 
   let(:big_pad) { "// #{'x' * 70_000}\n" }

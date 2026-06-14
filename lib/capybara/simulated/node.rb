@@ -17,9 +17,13 @@ module Capybara
         @browser      = driver.current_browser
         @initial_node = @browser.lookup_node(handle)
         @context_gen  = @browser.context_gen
+        # The frame realm this handle belongs to (nil = main document). Handle
+        # integers are per-realm, so a main-document node and a frame node can
+        # share an id — `==` includes the realm to keep them distinct.
+        @realm_id     = @browser.current_realm_id
       end
 
-      attr_reader :handle_id, :context_gen
+      attr_reader :handle_id, :context_gen, :realm_id
 
       # Tick the virtual clock unconditionally on the text path. Unlike
       # `Node#[]` (attribute reads), the text readers are NOT preceded by
@@ -211,13 +215,25 @@ module Capybara
       def ==(other)
         other.is_a?(Node) &&
           other.handle_id == @handle_id &&
-          other.context_gen == @context_gen
+          other.context_gen == @context_gen &&
+          other.realm_id == @realm_id
       end
 
       private
 
       def browser     = @browser
-      def check_stale = browser.check_stale(handle_id, @initial_node, @context_gen)
+      def check_stale
+        # Handle integers are per-realm. If the browser is no longer switched
+        # to this node's frame (block exited, or a different frame entered),
+        # routing its handle through `dom_call` would hit the wrong realm's
+        # registry — so treat a cross-realm access as stale, matching how real
+        # browsers invalidate frame element references after `switch_to_frame`.
+        if @realm_id != browser.current_realm_id
+          raise Capybara::Simulated::StaleElement,
+            'element belongs to a different browsing context than the active frame'
+        end
+        browser.check_stale(handle_id, @initial_node, @context_gen)
+      end
     end
   end
 end

@@ -1,6 +1,7 @@
 require 'timeout'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
+require_relative 'support/js_engine'
 
 # Capybara's upstream shared-spec suite run against our `:simulated`
 # driver. The expected-pending set covers tests that need a real layout
@@ -11,15 +12,17 @@ module TestSessions
   Simulated = Capybara::Session.new(:simulated, TestApp)
 end
 
-SKIPPED_TESTS = %i[
+# `within_frame` routes DOM ops into a per-frame V8 realm, which only the
+# rusty_racer engine builds; under QuickJS frames stay a same-realm fallback,
+# so skip the `frames` capability there (same gate frame_realm_spec uses).
+SKIPPED_TESTS = (%i[
   about_scheme
-  frames
   screenshot
   scroll
   server
   spatial
   windows
-].freeze
+] + (CsimEngine.v8? ? [] : %i[frames])).freeze
 
 DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #drag_to ',

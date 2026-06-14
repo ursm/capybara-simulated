@@ -227,6 +227,15 @@ module Capybara
         current_browser.find_css(query).map {|id| Node.new(self, id) }
       end
 
+      # Capybara `within_frame` / `switch_to_frame`. `frame` is the iframe
+      # `Capybara::Node::Element` (its `.native` is our driver Node), or the
+      # `:parent` / `:top` symbols. The block's finds + actions then route into
+      # the frame's own V8 realm via the Browser's `@current_realm_id`.
+      def switch_to_frame(frame)
+        target = frame.is_a?(Symbol) ? frame : frame.native.handle_id
+        current_browser.switch_to_frame(target)
+      end
+
       # Per-window Browser/VM. `open_aux_window` creates a fresh
       # Browser sharing the Driver's cookie + localStorage jars
       # (origin-shared in real browsers) and visits the target URL;
