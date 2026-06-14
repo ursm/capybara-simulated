@@ -1,21 +1,23 @@
 require 'capybara/simulated'
 require 'open3'
 
-# A runaway script must NOT abort the whole process. rusty_racer's per-isolate
-# `memory_limit` (wired in v8_runtime.rb) turns V8's fatal "Reached heap limit"
-# OOM — which used to kill the test process and every remaining example with it,
-# uncatchable from Ruby — into a catchable `RustyRacer::V8OutOfMemoryError`,
-# after which the isolate recovers and stays usable. This guards against a
-# future rusty upgrade silently regressing to the fatal abort.
+# A runaway script must NOT abort the whole process. rusty_racer >= 0.1.4
+# installs a near-heap-limit callback on every isolate, so exceeding
+# `max-old-space-size` raises a catchable `RustyRacer::V8OutOfMemoryError`
+# (after which the isolate recovers and stays usable) instead of V8's fatal
+# "Reached heap limit" abort — which used to kill the test process and every
+# remaining example with it, uncatchable from Ruby. No per-isolate
+# `memory_limit` is needed; the cap itself is the backstop. This guards against
+# a future rusty upgrade silently regressing to the fatal abort.
 #
-# The limit is read once at require time, so the scenario runs in a subprocess
-# with a small `CSIM_V8_MEMORY_LIMIT_MB` (the 3.5 GB default would take far too
+# The cap is read once at require time, so the scenario runs in a subprocess
+# with a small `CSIM_V8_MAX_OLD_SPACE_MB` (the 4 GB default would take far too
 # long / too much RAM to trip).
-RSpec.describe 'V8 memory_limit backstop' do
+RSpec.describe 'V8 out-of-memory is catchable' do
   before do
     env = ENV['CSIM_JS_ENGINE'].to_s
     v8  = env.empty? ? Gem.loaded_specs.key?('rusty_racer') : env == 'v8'
-    skip 'memory_limit is a rusty_racer (V8) feature' unless v8
+    skip 'catchable heap-limit OOM is a rusty_racer (V8) feature' unless v8
   end
 
   it 'raises a catchable error on heap exhaustion and the isolate recovers' do
@@ -35,7 +37,7 @@ RSpec.describe 'V8 memory_limit backstop' do
     RUBY
 
     out, status = Open3.capture2e(
-      ENV.to_h.merge('CSIM_JS_ENGINE' => 'v8', 'CSIM_V8_MEMORY_LIMIT_MB' => '128'),
+      ENV.to_h.merge('CSIM_JS_ENGINE' => 'v8', 'CSIM_V8_MAX_OLD_SPACE_MB' => '128'),
       RbConfig.ruby, '-e', script
     )
 

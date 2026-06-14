@@ -26,6 +26,13 @@ begin
   # media-optimization-worker hands a 317 MB raw RGBA frame from an
   # 8900×8900 fixture through the transfer-buffer path). Match
   # Discourse's own testem flag of 4 GB so the test fits.
+  #
+  # rusty_racer >= 0.1.4 installs a near-heap-limit callback on every isolate,
+  # so EXCEEDING this cap raises a catchable `RustyRacer::V8OutOfMemoryError`
+  # (and the isolate recovers) instead of V8 aborting the whole process with a
+  # fatal "Reached heap limit". So this value doubles as the memory backstop: a
+  # runaway script fails one example, it doesn't kill the run. No per-isolate
+  # `memory_limit` needed — the default protection catches at the cap.
   max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
   RustyRacer::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
   # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
@@ -85,33 +92,6 @@ module Capybara
       # sides.
       HOST_NAMESPACE_NAME = 'RustyRacer'
 
-      # Catchable per-isolate memory backstop (rusty_racer >= 0.1.3). Before it,
-      # a runaway script — e.g. an accidental unbounded DOM-cloning recursion —
-      # grew the V8 heap until it hit `max-old-space-size` and V8 ABORTED THE
-      # WHOLE PROCESS ("Fatal JavaScript out of memory: Reached heap limit"),
-      # uncatchable from Ruby, taking every remaining test down with it. With a
-      # `memory_limit` V8 raises a catchable `RustyRacer::V8OutOfMemoryError`
-      # instead and the isolate recovers (forced GC + ceiling reset), so a
-      # runaway fails ONE example and the run continues.
-      #
-      # The default is deliberately generous so nobody has to think about it: it
-      # sits at 7/8 of `max-old-space-size` (3.5 GB by default), which is sized
-      # for the isolate's CUMULATIVE live heap — warm-compile reuses one isolate
-      # for the whole run, and the heaviest single known allocation is just a
-      # ~317 MB RGBA frame in Discourse's media worker — so normal suites never
-      # come close, yet it stays strictly BELOW `max-old-space-size`, because
-      # at/above it V8's fatal abort would win the race before the catchable
-      # limit fires. Tracks `CSIM_V8_MAX_OLD_SPACE_MB` so the two stay consistent
-      # if that is overridden. Set `CSIM_V8_MEMORY_LIMIT_MB` to override (0
-      # disables the backstop → back to the fatal abort).
-      MEMORY_LIMIT_BYTES = begin
-        max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
-        default_mb = max_old_mb > 0 ? max_old_mb * 7 / 8 : 3584
-        mb         = (ENV['CSIM_V8_MEMORY_LIMIT_MB'] || default_mb.to_s).to_i
-
-        mb > 0 ? mb * 1024 * 1024 : 0
-      end
-
       # One isolate + its default context, presented as a single handle — the
       # shape the rest of the runtime (and `ScriptCache`) passes around.
       # rusty splits the VM into an `Isolate` (lifecycle / realms / microtasks /
@@ -120,13 +100,9 @@ module Capybara
       # attaches onto per-frame realm contexts (rusty's attach is per-context).
       class Ctx
         def initialize(snapshot: nil, timeout: 0)
-          opts = {host_namespace: HOST_NAMESPACE_NAME, snapshot: snapshot, timeout_ms: timeout.to_i}
-          # `memory_limit` landed in rusty_racer 0.1.3 (which also introduced
-          # V8OutOfMemoryError); older rusty rejects the unknown keyword, so
-          # feature-detect and degrade to "no backstop" rather than crash —
-          # rusty is an optional engine, not a hard gemspec dependency.
-          opts[:memory_limit] = MEMORY_LIMIT_BYTES if defined?(RustyRacer::V8OutOfMemoryError)
-          @iso        = RustyRacer::Isolate.new(**opts)
+          @iso        = RustyRacer::Isolate.new(host_namespace: HOST_NAMESPACE_NAME,
+                                                snapshot:       snapshot,
+                                                timeout_ms:     timeout.to_i)
           @ctx        = @iso.context
           @attached   = []
           @generation = 0
