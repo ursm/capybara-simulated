@@ -338,7 +338,6 @@ domparsing/DOMParser-parseFromString-encoding.html:
 domparsing/DOMParser-parseFromString-html.html:
 - DOMParser should handle the content of <noembed> as raw text
 - DOMParser throws on an invalid enum value
-- Location value
 - Parsing of id attribute
 - compatMode
 domparsing/DOMParser-parseFromString-xml-doctype.html:
@@ -364,10 +363,6 @@ domparsing/DOMParser-parseFromString-xml-parsererror.html:
 - 'DOMParser: <parsererror> element added on error, <span>8</ span>'
 - 'DOMParser: <parsererror> element added on error, <span><em>4</span></em>'
 domparsing/DOMParser-parseFromString-xml.html:
-- Should parse correctly in type application/xhtml+xml
-- Should parse correctly in type application/xml
-- Should parse correctly in type image/svg+xml
-- Should parse correctly in type text/xml
 - Should return an error document for XML wellformedness errors in type application/xhtml+xml
 - Should return an error document for XML wellformedness errors in type application/xml
 - Should return an error document for XML wellformedness errors in type image/svg+xml
