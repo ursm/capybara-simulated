@@ -68,6 +68,16 @@ module Capybara
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
+        # Cross-window references (window.open / opener / postMessage). Each
+        # window is a separate VM, so these forward to the Driver to route to
+        # the target window's Browser.
+        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1]) },
+        '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
+        '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
+        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
+        '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
+        '__csimWindowClose'          => ->(b, *a) { b.close_child_window(a[0]); nil },
+        '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },

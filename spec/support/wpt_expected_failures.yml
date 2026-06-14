@@ -59,7 +59,8 @@ dom/events/EventListener-invoke-legacy.html:
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
-dom/events/event-global-is-still-set-when-reporting-exception-onerror.html: HARNESS_ERROR
+dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
+- window.onerror handler restores window.event after it reports an exception
 dom/events/event-global.html:
 - window.event is set to the current event, which is the event passed to dispatch
   (2)

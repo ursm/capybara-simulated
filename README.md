@@ -54,12 +54,14 @@ navigation (a link or form submit inside the frame) into the active frame —
 nested frames included. (QuickJS keeps a same-realm fallback, so
 `within_frame` is V8-only.)
 
-**Not yet, but feasible** — not a design exclusion, just unbuilt; the
-per-frame JS realm machinery it'd build on already exists:
-
-- **Full multi-window** — `target="_blank"` tracks URLs and
-  `switch_to_window` / `current_window` work, but aux windows don't yet
-  have a per-window JS context, `postMessage`, or `opener`.
+**Multiple windows / tabs** work on both engines: each window is its own
+Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
+shared). `open_new_window` / `within_window` / `switch_to_window` /
+`window_opened_by` drive them, and JS `window.open` opens a real window,
+`window.opener` points back to the opener, and `postMessage` is delivered
+across windows. (`target="_blank"` defaults to no-opener, matching modern
+browsers; cross-window `postMessage` data is JSON-shaped, not a full
+structured clone.)
 
 See [Known limits](#known-limits) for the full picture.
 
@@ -366,11 +368,18 @@ referenced page-specific DOM.
   frame nested ≥2 levels falls back to navigating the main page, and
   cross-origin frame locality resolves against the main origin. QuickJS has
   no nested browsing context, so `within_frame` raises there.
-- **Multi-window** is *not yet implemented* but feasible (not a design
-  exclusion) — it'd build on the same per-frame realm machinery. Today it's
-  URL-tracking only: `target="_blank"` clicks open a window-handle and
-  `current_window` / `switch_to_window` work, but each aux window only
-  records its URL (no per-window JS context, `postMessage`, or `opener`).
+- **Multiple windows / tabs** work on both engines: each window is its own
+  Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
+  shared across windows). `open_new_window` / `within_window` /
+  `switch_to_window` / `window_opened_by` drive them; JS `window.open` opens
+  a real window, `window.opener` links back, and `postMessage` is routed
+  across windows (delivered as a `message` event when the target window next
+  settles). Caveats: `target="_blank"` opens with no opener (modern-browser
+  no-opener default); cross-window `postMessage` data is JSON-shaped, not a
+  full structured clone (no `DataCloneError`, `undefined`→`null`); and only
+  the active window's event loop runs, so a message is delivered when you
+  switch to its window. Window viewport APIs (`maximize` / `fullscreen` /
+  pixel-exact `resize_to`) are no-ops — no layout engine.
 
 ## Architecture
 
