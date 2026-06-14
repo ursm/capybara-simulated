@@ -2632,12 +2632,15 @@ module Capybara
       # Background-thread frame reader: verify the 101 handshake, then loop
       # decoding server→client frames into queue events until close / EOF.
       private def run_websocket_reader(id, sock, expected_accept, queue)
-        ok = ws_read_handshake(sock, expected_accept)
+        ok, protocol = ws_read_handshake(sock, expected_accept)
         unless ok
           queue << {id: id, type: '__error', message: 'websocket handshake failed'}
           return
         end
-        queue << {id: id, type: '__open'}
+        # Carry the negotiated subprotocol — Action Cable's client closes the
+        # connection in its `onopen` unless `webSocket.protocol` is one it knows
+        # (`actioncable-v1-json`).
+        queue << {id: id, type: '__open', protocol: protocol}
         loop do
           frame = ws_read_message(sock, queue, id)
           break if frame.nil?                       # EOF
@@ -2666,19 +2669,29 @@ module Capybara
       end
 
       # Read + validate the 101 Switching Protocols response (status line +
-      # headers up to the blank line). Returns true iff the Sec-WebSocket-Accept
-      # matches the handshake key.
+      # headers up to the blank line). Returns `[accept_ok, negotiated_protocol]`
+      # — the accept hash must match the handshake key, and the negotiated
+      # `Sec-WebSocket-Protocol` (nil if none) is surfaced so `webSocket.protocol`
+      # is set (Action Cable's client requires `actioncable-v1-json`).
       private def ws_read_handshake(sock, expected_accept)
         status = sock.gets
-        return false unless status && status =~ %r{\AHTTP/1\.1 101}i
+        return [false, nil] unless status && status =~ %r{\AHTTP/1\.1 101}i
         accept_ok = false
+        protocol  = nil
         while (line = sock.gets)
           line = line.chomp
           break if line.empty?
           k, v = line.split(':', 2)
-          accept_ok = true if k && k.strip.casecmp('sec-websocket-accept').zero? && v.to_s.strip == expected_accept
+          next unless k
+          key = k.strip.downcase
+          val = v.to_s.strip
+          accept_ok = true if key == 'sec-websocket-accept'   && val == expected_accept
+          # utf8_text: socket reads are BINARY, and a BINARY string marshals to a
+          # JS Uint8Array — the protocol must reach JS as a real string so
+          # `webSocket.protocol` compares equal to `actioncable-v1-json`.
+          protocol  = RuntimeShared.utf8_text(val) if key == 'sec-websocket-protocol' && !val.empty?
         end
-        accept_ok
+        [accept_ok, protocol]
       end
 
       # Read one complete message (reassembling continuation frames), handling
