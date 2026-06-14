@@ -2,11 +2,13 @@
 
 require 'base64'
 require 'date'
+require 'digest'
 require 'fileutils'
 require 'json'
 require 'net/http'
 require 'openssl'
 require 'rack/mock'
+require 'securerandom'
 require 'socket'
 require 'thread'
 require 'time'
@@ -273,6 +275,23 @@ module Capybara
         @event_source_seq     = 0
         @event_source_threads = {}
         @event_source_queue   = Thread::Queue.new
+        # WebSocket — per-Browser handle counter, background frame-reader
+        # threads, the csim-side socket end of each connection (for writing
+        # client→server frames), and a Queue of lifecycle / message events
+        # awaiting delivery into the VM. Same model as SSE: the reader thread
+        # does the blocking socket read; the main thread drains the Queue in
+        # `settle` and dispatches via `__csim_deliverWebSocketEvents`. The
+        # connection rides the in-process `rack.hijack` socket Action Cable
+        # (and any Rack WebSocket middleware) takes over.
+        @websocket_seq        = 0
+        @websocket_threads    = {}
+        @websocket_sockets    = {}   # id → csim's socket end (main thread owns this hash)
+        @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
+        @websocket_queue      = Thread::Queue.new
+        # All frame writes (the reader thread's pong replies + the main thread's
+        # send/close) go through one socket; serialise them so two threads can't
+        # interleave bytes into a corrupt frame.
+        @websocket_write_lock = Mutex.new
         # Hijacked-XHR delivery — per-Browser handle counter,
         # background threads, and a Queue of completed responses for
         # Rack calls where the middleware used `rack.hijack` to hold
@@ -689,7 +708,7 @@ module Capybara
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
       end
 
       # Single-slot cache for the most recent find_xpath / find_css /
@@ -1374,8 +1393,9 @@ module Capybara
           deliver_worker_messages
           deliver_hijacked_fetches
           deliver_window_messages
+          deliver_websocket_events
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending?
+          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
           # pair: it fires due timers, runs a per-task microtask checkpoint (so
           # chained .then / MutationObserver delivery interleave spec-correctly),
@@ -1388,13 +1408,14 @@ module Capybara
           deliver_worker_messages
           deliver_hijacked_fetches
           deliver_window_messages
+          deliver_websocket_events
           break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending?
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending? && !websocket_pending?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -1886,7 +1907,7 @@ module Capybara
         # Background-thread work (workers, EventSource, MessageBus
         # long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle.
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
         if @timers_active
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
@@ -1917,7 +1938,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
+        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -1947,6 +1968,7 @@ module Capybara
           @find_cache_dirty = true if deliver_event_source_events > 0
           @find_cache_dirty = true if deliver_hijacked_fetches > 0
           @find_cache_dirty = true if deliver_window_messages > 0
+          @find_cache_dirty = true if deliver_websocket_events > 0
         ensure
           @ticking = false
         end
@@ -1990,7 +2012,7 @@ module Capybara
         end
         # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
         #     land before jumping the clock: advance one fixed step, reset the guard.
-        if worker_pending? || event_source_pending? || hijack_fetch_pending?
+        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending?
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
@@ -2203,6 +2225,7 @@ module Capybara
         reset_event_sources
         reset_hijacked_fetches
         reset_workers
+        reset_websockets
         @window_inbox.clear
         @blob_registry_lock.synchronize { @blob_registry.clear }
         # Drop volatile entries from the class-level HTTP asset cache
@@ -2497,6 +2520,241 @@ module Capybara
         @event_source_threads.each_value(&:kill)
         @event_source_threads.clear
         @event_source_queue.clear
+      end
+
+      # ── WebSocket (RFC6455 over in-process rack.hijack) ────────────
+      #
+      # A real browser's WebSocket connects, upgrades, and stays open for
+      # bidirectional framing. Action Cable (and any Rack WebSocket
+      # middleware) handles the upgrade by HIJACKING the connection and
+      # speaking frames over that socket — the same in-process `rack.hijack`
+      # mechanism the long-poll path already uses, but bidirectional. So we:
+      #   1. build the upgrade request as a Rack env (the server reads the
+      #      handshake from the env, like websocket-driver's rack helper),
+      #   2. hand the app a `Socket.pair` end via `rack.hijack` and call it,
+      #   3. the app writes the 101 + frames to its end; we read/write ours.
+      # The frame reader runs on a background thread (engine access stays on
+      # the main thread — events drain into the VM at `settle`, like SSE).
+      WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+      private_constant :WS_GUID
+
+      def ws_open(url, protocols = nil)
+        id       = (@websocket_seq += 1)
+        # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
+        # against the current document (Action Cable's consumer builds an
+        # absolute ws URL, but be tolerant).
+        http_url = url.to_s.sub(/\Awss/i, 'https').sub(/\Aws/i, 'http')
+        target   = resolve_against_current(http_url)
+        key      = SecureRandom.base64(16)
+        csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
+        env = Rack::MockRequest.env_for(target, method: 'GET')
+        apply_default_request_env(env, referer: @current_url)
+        env['HTTP_UPGRADE']               = 'websocket'
+        env['HTTP_CONNECTION']            = 'Upgrade'
+        env['HTTP_SEC_WEBSOCKET_KEY']     = key
+        env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
+        list = Array(protocols).map(&:to_s).reject(&:empty?)
+        env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
+        env['rack.hijack?']  = true
+        env['rack.hijack']   = -> { app_io }
+        env['rack.hijack_io'] = app_io
+        # The app hijacks + writes the 101 (synchronously, or on its own event
+        # loop thread — Action Cable handles the upgrade on a separate thread, so
+        # `@app.call` may return before the handshake bytes appear; the reader
+        # blocks until they do). Run it on the main thread like the long-poll
+        # hijack so we don't race a second concurrent `@app.call`. (No handshake
+        # timeout: a server that never writes the 101 leaks the reader+socket
+        # until `reset_websockets` — acceptable, real servers always respond.)
+        @app.call(env)
+        @websocket_sockets[id]     = csim_io
+        @websocket_app_sockets[id] = app_io
+        accept = Digest::SHA1.base64digest(key + WS_GUID)
+        queue  = @websocket_queue
+        @websocket_threads[id] = Thread.new do
+          Thread.current.report_on_exception = false
+          run_websocket_reader(id, csim_io, accept, queue)
+        end
+        id
+      rescue StandardError => e
+        # Nothing was registered for cleanup yet — close both pair ends here so
+        # a failed upgrade (mis-routed URL, app error) doesn't leak fds.
+        csim_io.close rescue nil
+        app_io.close  rescue nil
+        @websocket_queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
+        id
+      end
+
+      # `binary` is set by the JS side (it knows whether `send` was given a
+      # string or an ArrayBuffer/view) → opcode 0x2 vs the text 0x1. Action
+      # Cable is text-only (JSON). The payload's bytes are written as-is.
+      def ws_send(id, data, binary = false)
+        sock = @websocket_sockets[id.to_i] or return
+        ws_write_frame(sock, binary ? 0x2 : 0x1, data.to_s.b)
+        nil
+      rescue StandardError
+        nil
+      end
+
+      def ws_close(id, code = 1000, reason = '')
+        sock = @websocket_sockets[id.to_i] or return
+        # Send the close frame and let the close HANDSHAKE complete: the server
+        # replies with its own close frame, which the reader thread surfaces as
+        # the `__close` event (carrying the agreed code) before tearing the
+        # socket down in its `ensure`. Force teardown is `reset_websockets`'s job.
+        payload = [code.to_i].pack('n') + reason.to_s.b
+        ws_write_frame(sock, 0x8, payload) rescue nil
+        nil
+      end
+
+      def websocket_pending? = !@websocket_queue.empty?
+
+      def deliver_websocket_events
+        return 0 if @websocket_threads.empty? && @websocket_queue.empty?
+        events = drain_queue(@websocket_queue)
+        return 0 if events.empty?
+        @runtime.call('__csim_deliverWebSocketEvents', events)
+        events.size
+      end
+
+      def reset_websockets
+        @websocket_threads.each_value(&:kill)
+        @websocket_threads.clear
+        # Close BOTH pair ends: csim's read/write end and the app's hijack end
+        # (the app may abandon its end without closing it — e.g. its connection
+        # thread was just killed), so neither leaks across tests.
+        @websocket_sockets.each_value     {|s| s.close rescue nil }
+        @websocket_app_sockets.each_value {|s| s.close rescue nil }
+        @websocket_sockets.clear
+        @websocket_app_sockets.clear
+        @websocket_queue.clear
+      end
+
+      # Background-thread frame reader: verify the 101 handshake, then loop
+      # decoding server→client frames into queue events until close / EOF.
+      private def run_websocket_reader(id, sock, expected_accept, queue)
+        ok = ws_read_handshake(sock, expected_accept)
+        unless ok
+          queue << {id: id, type: '__error', message: 'websocket handshake failed'}
+          return
+        end
+        queue << {id: id, type: '__open'}
+        loop do
+          frame = ws_read_message(sock, queue, id)
+          break if frame.nil?                       # EOF
+          opcode, payload = frame
+          if opcode == :close
+            code   = payload.bytesize >= 2 ? payload[0, 2].unpack1('n') : 1005
+            reason = payload.bytesize > 2 ? RuntimeShared.utf8_text(payload[2..]) : ''
+            queue << {id: id, type: '__close', code: code, reason: reason}
+            break
+          end
+          # Binary frames cross to JS as raw bytes (wrap_binary) tagged so the
+          # JS side decodes them per `binaryType`; text is UTF-8.
+          if opcode == 0x2
+            queue << {id: id, type: 'message', binary: true, data: @runtime.wrap_binary(payload)}
+          else
+            queue << {id: id, type: 'message', data: RuntimeShared.utf8_text(payload)}
+          end
+        end
+      rescue StandardError => e
+        queue << {id: id, type: '__close', code: 1006, reason: e.message.to_s[0, 120]}
+      ensure
+        # Only the socket (a local) is closed here — the `@websocket_*` hashes
+        # are mutated solely on the main thread (`reset_websockets`) to avoid a
+        # cross-thread Hash race; a closed entry just no-ops on the next access.
+        sock.close rescue nil
+      end
+
+      # Read + validate the 101 Switching Protocols response (status line +
+      # headers up to the blank line). Returns true iff the Sec-WebSocket-Accept
+      # matches the handshake key.
+      private def ws_read_handshake(sock, expected_accept)
+        status = sock.gets
+        return false unless status && status =~ %r{\AHTTP/1\.1 101}i
+        accept_ok = false
+        while (line = sock.gets)
+          line = line.chomp
+          break if line.empty?
+          k, v = line.split(':', 2)
+          accept_ok = true if k && k.strip.casecmp('sec-websocket-accept').zero? && v.to_s.strip == expected_accept
+        end
+        accept_ok
+      end
+
+      # Read one complete message (reassembling continuation frames), handling
+      # interleaved control frames inline. Returns `[opcode, payload]` (opcode
+      # 0x1 text / 0x2 binary, or `:close`), or nil on EOF.
+      private def ws_read_message(sock, queue, id)
+        data       = +''.b
+        msg_opcode = nil
+        loop do
+          hdr = ws_read_n(sock, 2) or return nil
+          b0, b1 = hdr.bytes
+          fin    = (b0 & 0x80) != 0
+          opcode = b0 & 0x0f
+          masked = (b1 & 0x80) != 0
+          len    = b1 & 0x7f
+          if len == 126
+            ext = ws_read_n(sock, 2) or return nil
+            len = ext.unpack1('n')
+          elsif len == 127
+            ext = ws_read_n(sock, 8) or return nil
+            len = ext.unpack1('Q>')
+          end
+          mask = nil
+          if masked
+            mask = ws_read_n(sock, 4) or return nil
+          end
+          if len.zero?
+            payload = ''.b
+          else
+            payload = ws_read_n(sock, len) or return nil
+          end
+          payload = ws_mask(payload, mask) if mask  # server frames shouldn't be masked, but be defensive
+          case opcode
+          when 0x8 then return [:close, payload]
+          when 0x9 then ws_write_frame(sock, 0xA, payload); next   # ping → pong
+          when 0xA then next                                       # pong → ignore
+          when 0x0 then data << payload                            # continuation
+          else          msg_opcode = opcode; data << payload       # 0x1 text / 0x2 binary
+          end
+          return [msg_opcode || opcode, data] if fin
+        end
+      end
+
+      # Read exactly `n` bytes, or nil if the stream ends first (EOF, or a short
+      # read on a mid-frame close). `IO#read(n)` blocks for n bytes on a stream
+      # socket and only returns nil / fewer at EOF, so a nil-or-short result is
+      # a closed/broken connection — bail and let the caller surface a close.
+      private def ws_read_n(sock, n)
+        buf = sock.read(n)
+        buf if buf && buf.bytesize == n
+      end
+
+      # Write one frame. Client→server frames MUST be masked (RFC6455 §5.3);
+      # csim is always the client, so every frame it writes is masked. Holds the
+      # per-connection write lock so the reader thread's pong and the main
+      # thread's send/close can't interleave bytes on the shared socket.
+      private def ws_write_frame(sock, opcode, payload)
+        payload = payload.to_s.b
+        len     = payload.bytesize
+        out     = [0x80 | opcode].pack('C')
+        if len < 126
+          out << [0x80 | len].pack('C')
+        elsif len < 65_536
+          out << [0x80 | 126, len].pack('Cn')
+        else
+          out << [0x80 | 127, len].pack('CQ>')
+        end
+        key = SecureRandom.random_bytes(4)
+        out << key
+        out << ws_mask(payload, key)
+        @websocket_write_lock.synchronize { sock.write(out) }
+      end
+
+      private def ws_mask(payload, key)
+        kb = key.bytes
+        payload.bytes.each_with_index.map {|byte, i| byte ^ kb[i & 3] }.pack('C*')
       end
 
       # ── Hijack-aware async XHR ─────────────────────────────────────
