@@ -18,10 +18,6 @@
 #   bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-dom/abort/abort-signal-timeout.html:
-- Signal returned by AbortSignal.timeout() is not aborted after frame detach
-dom/abort/reason-constructor.html:
-- AbortSignal.reason.constructor should be from iframe
 dom/collections/HTMLCollection-supported-property-indices.html:
 - Handling of property names that look like integers around 2^32
 dom/events/Event-dispatch-on-disabled-elements.html:
@@ -62,10 +58,8 @@ dom/events/EventListener-invoke-legacy.html:
 - Listener of transitionend
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
-dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
-- window.event is still set when 'beforeunload' result is coerced to string
-dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
-- window.onerror handler restores window.event after it reports an exception
+dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
+dom/events/event-global-is-still-set-when-reporting-exception-onerror.html: HARNESS_ERROR
 dom/events/event-global.html:
 - window.event is set to the current event, which is the event passed to dispatch
   (2)
@@ -116,8 +110,11 @@ dom/events/scrolling/scrollend-fires-to-text-input.html:
   }).'
 - 'scrolled input field should receive scrollend with scrollTo({ behavior: ''smooth''
   }).'
-dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
-- When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
+dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html:
+- snap to fractional offset fires scrollend exactly once.
+dom/events/shadow-relatedTarget.html:
+- relatedTarget should not leak at capturing phase, at window object.
+- relatedTarget should not leak at target.
 dom/events/webkit-animation-end-event.html:
 - event types for prefixed and unprefixed animationend event handlers should be named
   appropriately
@@ -250,9 +247,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.html:
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.html:
 - Empty <source> immediately sets media.networkState during DOM insertion, so that
   an earlier-running script can observe networkState
-dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.html:
-- An outer script whose preparation/execution gets triggered by the insertion of a
-  'nested'/'inner' script, executes *before* the inner script executes
 dom/nodes/moveBefore/child-style-preserve.html:
 - child-style-preserve
 dom/nodes/moveBefore/continue-css-animation-left.html:
@@ -286,47 +280,33 @@ dom/nodes/moveBefore/custom-element-move-reactions.html:
 - the disconnected/connected callbacks should be called when no other callback is
   defined
 - the element should stay connected during the callbacks
-dom/nodes/moveBefore/fieldset-child-blur-event.html:
-- The 'blur' event is not fired on children of HTMLFieldSetElement during moveBefore()
 dom/nodes/moveBefore/fire-focusin-focusout.html:
 - Don't fire focusin and then correct when moving to a tree that is made inert using
   style
 - Don't fire focusin and then correct when moving to an inert subtree
 - Don't fire focusin/out when moving to the same parent
 - Don't fire focusin/out when reparenting an element that has focus within
-- Don't fire focusin/out when reparenting focused element directly
 dom/nodes/moveBefore/focus-preserve.html:
 - when reparenting a focused element into a hidden parent, reset the document focus
 - when reparenting a focused element into an inert parent, reset the document focus
 - when reparenting an ancestor of an focused element into a hidden parent, reset the
   document focus
-- when reparenting an element, don't automatically reset the document focus
 dom/nodes/moveBefore/focus-within.html:
 - ":focus-within should be eventually up to date when moving to a subtree that would
   become inert via style"
 - ":focus-within should be eventually up to date when moving to an inert subtree"
-- focus-within should be updated when reparenting an element that has focus within
-- focus-within should be updated when reparenting focused element directly
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - Document#fullscreenElement
 dom/nodes/moveBefore/modal-dialog.html:
 - when reparenting a modal dialog, the dialog should stay modal
 dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
 - moveBefore-from-light-to-shadow
-dom/nodes/moveBefore/moveBefore-option-recalc-style.html:
-- moveBefore() of an option element between two selects
-dom/nodes/moveBefore/moveBefore-selector-matching.html:
-- moveBefore() should invalidate target when descendant selector changes
 dom/nodes/moveBefore/moveBefore-shadow-inside.html:
 - moveBefore-shadow-inside
 dom/nodes/moveBefore/moveBefore-size-query.html:
 - moveBefore() between different size containers invalidates target
-dom/nodes/moveBefore/mutation-observer.html:
-- "[Connected move] MutationObserver removal + insertion is tracked by moveBefore()"
 dom/nodes/moveBefore/nonce.html:
 - Element nonce content attribute is not cleared after move
-dom/nodes/moveBefore/object-crash-regression.html:
-- Moving an object element does not crash
 dom/nodes/moveBefore/pointer-events.html:
 - Pointer capture should not be released when moving
 dom/nodes/moveBefore/popover-preserve.html:
@@ -355,9 +335,6 @@ dom/ranges/Range-adopt-test.html:
   the only element in the range must collapse the range'
 - 'Range container''s parentless container moved to another document with appendChild:
   Removing the only element in the range must collapse the range'
-dom/ranges/Range-extractContents-dynamic-end.html:
-- Range.extractContents should not extract out-of-bounds nodes if end container is
-  removed during iframe unload
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:

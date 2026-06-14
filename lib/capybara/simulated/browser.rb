@@ -3194,6 +3194,18 @@ module Capybara
         prior_navigating = @navigating
         @navigating = true unless from_history
         begin
+          # `about:blank` names an empty, network-less document — there's
+          # nothing to fetch. Rack::MockRequest.env_for can't parse the `about:`
+          # scheme (no host/path → nil[]); route straight to an empty document.
+          # `location = 'about:blank'` and navigating an iframe to about:blank
+          # both land here. Mirrors rack_fetch's non-http(s) guard. (Narrow to
+          # about:blank specifically — about:srcdoc carries its own markup.)
+          if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+            @current_url = url.to_s
+            record_response(200, {'content-type' => 'text/html'})
+            boot_response_into_ctx('')
+            return
+          end
           record_history({method: :get, url: url}) unless from_history || depth > 0
           env = Rack::MockRequest.env_for(url, method: 'GET')
           apply_default_request_env(env, referer: referer)
