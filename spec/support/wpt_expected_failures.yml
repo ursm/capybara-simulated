@@ -118,6 +118,70 @@ dom/events/scrolling/scrollend-fires-to-text-input.html:
   }).'
 dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html:
 - When `preventDefault` is called on a WheelEvent, scrolling should be prevented.
+dom/events/webkit-animation-end-event.html:
+- event types for prefixed and unprefixed animationend event handlers should be named
+  appropriately
+- event types for prefixed and unprefixed animationend event listeners should be named
+  appropriately
+- onwebkitanimationend event handler should not trigger if an unprefixed event handler
+  also exists
+- onwebkitanimationend event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationend event handler should trigger for an animation
+- webkitAnimationEnd event listener is case sensitive
+- webkitAnimationEnd event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitAnimationEnd event listener should not trigger if an unprefixed listener also
+  exists
+- webkitAnimationEnd event listener should trigger for an animation
+dom/events/webkit-animation-iteration-event.html:
+- event types for prefixed and unprefixed animationiteration event handlers should
+  be named appropriately
+- event types for prefixed and unprefixed animationiteration event listeners should
+  be named appropriately
+- onwebkitanimationiteration event handler should not trigger if an unprefixed event
+  handler also exists
+- onwebkitanimationiteration event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationiteration event handler should trigger for an animation
+- webkitAnimationIteration event listener is case sensitive
+- webkitAnimationIteration event listener should not trigger if an unprefixed event
+  handler also exists
+- webkitAnimationIteration event listener should not trigger if an unprefixed listener
+  also exists
+- webkitAnimationIteration event listener should trigger for an animation
+dom/events/webkit-animation-start-event.html:
+- event types for prefixed and unprefixed animationstart event handlers should be
+  named appropriately
+- event types for prefixed and unprefixed animationstart event listeners should be
+  named appropriately
+- onwebkitanimationstart event handler should not trigger if an unprefixed event handler
+  also exists
+- onwebkitanimationstart event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkitanimationstart event handler should trigger for an animation
+- webkitAnimationStart event listener is case sensitive
+- webkitAnimationStart event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitAnimationStart event listener should not trigger if an unprefixed listener
+  also exists
+- webkitAnimationStart event listener should trigger for an animation
+dom/events/webkit-transition-end-event.html:
+- event types for prefixed and unprefixed transitionend event handlers should be named
+  appropriately
+- event types for prefixed and unprefixed transitionend event listeners should be
+  named appropriately
+- onwebkittransitionend event handler should not trigger if an unprefixed event handler
+  also exists
+- onwebkittransitionend event handler should not trigger if an unprefixed listener
+  also exists
+- onwebkittransitionend event handler should trigger for an animation
+- webkitTransitionEnd event listener is case sensitive
+- webkitTransitionEnd event listener should not trigger if an unprefixed event handler
+  also exists
+- webkitTransitionEnd event listener should not trigger if an unprefixed listener
+  also exists
+- webkitTransitionEnd event listener should trigger for an animation
 dom/interface-objects.html: HARNESS_ERROR
 dom/lists/DOMTokenList-iteration.html:
 - classList inheritance from Array.prototype
@@ -195,10 +259,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragm
 - Empty <source> immediately sets media.networkState during DOM insertion, so that
   an earlier-running script can observe networkState
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.html:
-- An earlier-inserted <script> synchronously observes a later-inserted <style> (via
-  a DocumentFragment) being applied
-- An earlier-inserted <script> synchronously observes a later-inserted <style> (via
-  a div) being applied
 - Earlier-inserted <script> (via a DocumentFragment) synchronously observes a later-inserted
   <link rel=stylesheet>'s CSSStyleSheet creation
 - Earlier-inserted <script> (via a append()) synchronously observes a later-inserted
@@ -208,10 +268,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.html:
 dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.html:
 - An outer script whose preparation/execution gets triggered by the insertion of a
   'nested'/'inner' script, executes *before* the inner script executes
-dom/nodes/insertion-removing-steps/Node-appendChild-text-and-script-in-style.html:
-- All style rules appended to a <style> element are inserted and script-observable
-  to scripts inserted in the `<style>` element, by the time scripts execute after
-  DOM insertions.
 dom/nodes/moveBefore/child-style-preserve.html:
 - child-style-preserve
 dom/nodes/moveBefore/continue-css-animation-left.html:
