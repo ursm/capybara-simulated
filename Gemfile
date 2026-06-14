@@ -19,4 +19,5 @@ group :development, :test do
   gem 'selenium-webdriver' # bench/run.rb under :selenium
   gem 'stackprof',         require: false # sampling profiler for perf investigations
   gem 'sinatra',           '>= 4.0'
+  gem 'websocket-driver'   # server side of the WebSocket spec's in-process echo app (Action Cable's own framing lib)
 end

@@ -44,7 +44,9 @@ browser:
   `elementFromPoint()` isn't implemented, so visual hit-testing,
   coordinate drag-and-drop, and sticky-scroll math don't work.
 - **Real networking** — `fetch` / XHR are synchronous through Rack: no
-  streaming, no concurrency, no WebSocket.
+  streaming, no HTTP concurrency. (`EventSource` and `WebSocket` *do*
+  work — they ride real reader threads / the in-process `rack.hijack`
+  socket; see below.)
 - **Screenshots**.
 
 **`within_frame` / `switch_to_frame`** work on the V8 (rusty_racer) engine:
@@ -356,9 +358,18 @@ referenced page-specific DOM.
   but there's no real network, no streaming, no `Request#body`
   ReadableStream, and no concurrent requests. XHR is implemented
   with the same Rack pass-through.
-- **WebSocket, screenshots, and drag pixel coordinates** are out of
-  scope by design — use Selenium / Cuprite. (EventSource and Web
-  Workers *are* implemented.)
+- **WebSocket** works in-process: `new WebSocket(url)` rides the
+  `rack.hijack` socket the Rack app hijacks (the substrate Action Cable
+  uses), with a hand-rolled RFC6455 client (handshake, masked client
+  frames, ping/pong, close handshake). Frames deliver as `message`
+  events when the page next settles, like SSE. Caveats: server pushes
+  land at settle (not instant); binary frames are V8-only (QuickJS
+  corrupts raw bytes across the host boundary — text is fine on both);
+  the connection needs the app's **async / in-process** Cable adapter
+  (a real Redis adapter would need real Redis). `EventSource` and Web
+  Workers are likewise implemented.
+- **Screenshots and drag pixel coordinates** are out of scope by
+  design — use Selenium / Cuprite.
 - **`within_frame` / `switch_to_frame`** work on the V8 engine: each
   `<iframe>` runs in its own per-frame realm and the DSL routes finds,
   reads, interactions, `evaluate_script`, and self-targeted navigation
