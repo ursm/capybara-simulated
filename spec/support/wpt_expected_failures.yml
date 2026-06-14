@@ -322,11 +322,6 @@ dom/nodes/remove-and-adopt-thcrash.html:
   doesn't crash.
 dom/nodes/remove-next-sibling-during-replace-with.html:
 - remove-next-sibling-during-replace-with
-dom/ranges/Range-adopt-test.html:
-- 'Parentless range container moved to another document with appendChild: Removing
-  the only element in the range must collapse the range'
-- 'Range container''s parentless container moved to another document with appendChild:
-  Removing the only element in the range must collapse the range'
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
