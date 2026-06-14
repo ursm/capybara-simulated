@@ -272,14 +272,6 @@ dom/nodes/moveBefore/css-transition-to-disconnected-document.html:
   transitionm state
 dom/nodes/moveBefore/css-transition-trigger.html:
 - Node.moveBefore should trigger CSS transition state (left) if needed
-dom/nodes/moveBefore/custom-element-move-reactions.html:
-- Reactions to atomic move are called in order of element, not in order of operation
-- When connectedCallback is not defined, no crash
-- When connectedMoveCallback is defined, it is called instead of disconnectedCallback/connectedCallback
-- When disconnectedCallback is not defined, no crash
-- the disconnected/connected callbacks should be called when no other callback is
-  defined
-- the element should stay connected during the callbacks
 dom/nodes/moveBefore/fire-focusin-focusout.html:
 - Don't fire focusin and then correct when moving to a tree that is made inert using
   style
