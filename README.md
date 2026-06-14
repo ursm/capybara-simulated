@@ -36,16 +36,27 @@ visual layout:
   conformance gate plus five real app suites (see [Status](#status)).
 
 **Reach for a real browser** (Selenium / Cuprite) **when** your tests need
-what this driver deliberately doesn't simulate:
+what this driver doesn't simulate **by design** — there's no rendering
+engine or real network stack, the same ground Selenium covers via a real
+browser:
 
 - **Pixel layout** — `getBoundingClientRect()` returns zeros and
   `elementFromPoint()` isn't implemented, so visual hit-testing,
   coordinate drag-and-drop, and sticky-scroll math don't work.
 - **Real networking** — `fetch` / XHR are synchronous through Rack: no
   streaming, no concurrency, no WebSocket.
-- **Multiple windows or frames** — `target="_blank"` tracks URLs only, and
-  there's no `within_frame` DSL (an iframe's own scripts still run).
 - **Screenshots**.
+
+**Not yet, but feasible** — these aren't design exclusions, just unbuilt;
+the per-frame JS realm machinery they'd build on already exists, so they're
+roadmap items:
+
+- **`within_frame`** — an iframe's own scripts already run, each in its own
+  per-frame realm; what's missing is the DSL to drive finds into a frame's
+  document.
+- **Full multi-window** — `target="_blank"` tracks URLs and
+  `switch_to_window` / `current_window` work, but aux windows don't yet
+  have a per-window JS context, `postMessage`, or `opener`.
 
 See [Known limits](#known-limits) for the full picture.
 
@@ -340,15 +351,19 @@ referenced page-specific DOM.
   but there's no real network, no streaming, no `Request#body`
   ReadableStream, and no concurrent requests. XHR is implemented
   with the same Rack pass-through.
-- **Multi-window** is URL-tracking only — `target="_blank"` clicks
-  open a window-handle and `current_window` / `switch_to_window`
-  work, but each aux window only records its URL (no per-window JS
-  context or cross-window `postMessage`).
-- **`within_frame`, WebSocket, screenshots, and drag pixel
-  coordinates** are out of scope — use Selenium / Cuprite. There's no
-  frame-switching DSL to drive a test into an `<iframe>`, though an
-  iframe's own scripts do run, in a per-frame JS realm. (EventSource
-  and Web Workers *are* implemented.)
+- **WebSocket, screenshots, and drag pixel coordinates** are out of
+  scope by design — use Selenium / Cuprite. (EventSource and Web
+  Workers *are* implemented.)
+- **Multi-window and `within_frame`** are *not yet implemented*, but
+  they're feasible rather than design exclusions — the per-frame JS realm
+  machinery they'd build on already exists:
+  - Multi-window is URL-tracking only today — `target="_blank"` clicks
+    open a window-handle and `current_window` / `switch_to_window` work,
+    but each aux window only records its URL (no per-window JS context,
+    `postMessage`, or `opener`).
+  - There's no `within_frame` DSL to drive a test into an `<iframe>` —
+    though an iframe's own scripts *do* run, each in its own per-frame JS
+    realm, so the foundation for it is in place.
 
 ## Architecture
 
