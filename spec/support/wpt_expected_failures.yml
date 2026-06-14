@@ -232,16 +232,8 @@ dom/nodes/ParentNode-querySelectors-namespaces.html:
 - querySelectorAll must work with namespace attribute selectors on SVG
 dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 - ProcessingInstruction numeric escapes
-dom/nodes/insertion-removing-steps/Node-append-form-and-script-from-fragment.html:
-- When adding a script+form in a fragment and the form matches an associated element,
-  the script that checks whether the button is associated to the form should run after
-  inserting the form
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - "<meta name=referrer> gets processed and applied in the post-insertion steps"
-dom/nodes/insertion-removing-steps/Node-appendChild-script-and-button-from-div.html:
-- Script inserted before a form-associated button can observe the button's form, because
-  by the time the script executes, the DOM insertion that associates the button with
-  the form is already done
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
 - Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
   steps
@@ -317,9 +309,6 @@ dom/nodes/moveBefore/focus-within.html:
 - focus-within should be updated when reparenting focused element directly
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - Document#fullscreenElement
-dom/nodes/moveBefore/listed-form-element-reset.html:
-- Listed form element form owner is reset when a new form is moved closer before the
-  listed element
 dom/nodes/moveBefore/modal-dialog.html:
 - when reparenting a modal dialog, the dialog should stay modal
 dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
