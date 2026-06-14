@@ -276,8 +276,6 @@ dom/nodes/moveBefore/fire-focusin-focusout.html:
 - Don't fire focusin and then correct when moving to a tree that is made inert using
   style
 - Don't fire focusin and then correct when moving to an inert subtree
-- Don't fire focusin/out when moving to the same parent
-- Don't fire focusin/out when reparenting an element that has focus within
 dom/nodes/moveBefore/focus-preserve.html:
 - when reparenting a focused element into a hidden parent, reset the document focus
 - when reparenting a focused element into an inert parent, reset the document focus
