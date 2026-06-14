@@ -359,15 +359,18 @@ referenced page-specific DOM.
   ReadableStream, and no concurrent requests. XHR is implemented
   with the same Rack pass-through.
 - **WebSocket** works in-process: `new WebSocket(url)` rides the
-  `rack.hijack` socket the Rack app hijacks (the substrate Action Cable
-  uses), with a hand-rolled RFC6455 client (handshake, masked client
-  frames, ping/pong, close handshake). Frames deliver as `message`
-  events when the page next settles, like SSE. Caveats: server pushes
-  land at settle (not instant); binary frames are V8-only (QuickJS
-  corrupts raw bytes across the host boundary — text is fine on both);
-  the connection needs the app's **async / in-process** Cable adapter
-  (a real Redis adapter would need real Redis). `EventSource` and Web
-  Workers are likewise implemented.
+  `rack.hijack` socket the Rack app hijacks, with a hand-rolled RFC6455
+  client (handshake + subprotocol negotiation, masked client frames,
+  ping/pong, close handshake). Frames deliver as `message` events when
+  the page next settles, like SSE. **Action Cable** works end-to-end on
+  this: the real `@rails/actioncable` consumer connects, subscribes, and
+  receives server broadcasts (so `turbo_stream_from` live updates are
+  reachable) — Action Cable hijacks the connection just as csim drives
+  it. Caveats: server pushes land at settle (not instant); the app must
+  use the **async / in-process** Cable adapter (a real Redis adapter
+  would need real Redis); binary frames are V8-only (QuickJS corrupts
+  raw bytes across the host boundary — text, hence Action Cable, is fine
+  on both). `EventSource` and Web Workers are likewise implemented.
 - **Screenshots and drag pixel coordinates** are out of scope by
   design — use Selenium / Cuprite.
 - **`within_frame` / `switch_to_frame`** work on the V8 engine: each
