@@ -14,6 +14,36 @@ resolve through css-select (CSS) and xpathway (XPath) running in the
 same context as the page's JS, so `find` / `has_css?` / `within` see
 exactly the tree the app sees.
 
+## Is it a fit?
+
+**A good fit when** your tests are JavaScript-driven but don't depend on
+visual layout:
+
+- **An order of magnitude faster** than a headless browser — no Chrome to
+  boot, no WebDriver, no Node toolchain; everything runs in-process.
+- **Real front-end JS runs**: inline `<script>` + event handlers,
+  MutationObserver, custom elements, `<template>`, Shadow DOM, ES modules
+  + importmap, **Hotwire (Stimulus + Turbo)**, Trix.
+- **Drop-in**: the Capybara DSL is unchanged — register `:simulated` and
+  go. Just this gem plus one JS-engine gem.
+- **Held to spec**: a vendored
+  [web-platform-tests](https://github.com/web-platform-tests/wpt)
+  conformance gate plus five real app suites (see [Status](#status)).
+
+**Reach for a real browser** (Selenium / Cuprite) **when** your tests need
+what this driver deliberately doesn't simulate:
+
+- **Pixel layout** — `getBoundingClientRect()` returns zeros and
+  `elementFromPoint()` isn't implemented, so visual hit-testing,
+  coordinate drag-and-drop, and sticky-scroll math don't work.
+- **Real networking** — `fetch` / XHR are synchronous through Rack: no
+  streaming, no concurrency, no WebSocket.
+- **Multiple windows or frames** — `target="_blank"` tracks URLs only, and
+  there's no `within_frame` DSL (an iframe's own scripts still run).
+- **Screenshots**.
+
+See [Known limits](#known-limits) for the full picture.
+
 ## Status
 
 The architecture and behaviour are stable. Correctness is held to two
