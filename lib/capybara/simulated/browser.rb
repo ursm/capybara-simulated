@@ -53,6 +53,11 @@ module Capybara
 
       attr_writer :timers_active
 
+      # The Driver's handle for the window this Browser backs (set right after
+      # construction). Lets host fns name the source window of a cross-window
+      # `postMessage` / `window.open` so the Driver can route to the target.
+      attr_accessor :window_handle
+
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
       # before its own default_max_wait_time kicks in. Counted in poll
@@ -302,6 +307,11 @@ module Capybara
         @transfer_buffer_lock = Mutex.new
         @transfer_buffers     = {}
         @transfer_buffer_seq  = 0
+        # Cross-window `postMessage` inbox. Another window's `target.postMessage`
+        # routes through the Driver and lands here; this window drains it into a
+        # `message` event the next time it's active and settles/ticks. Plain
+        # array (same thread — windows aren't background-threaded like workers).
+        @window_inbox         = []
       end
 
       # Worker thread polling and termination intervals — split so a
@@ -358,8 +368,28 @@ module Capybara
 
       def resolve_visit_url(url)
         s = url.to_s
+        # `about:blank` (and other authority-less schemes) have no `//`, so the
+        # `scheme://` test below would treat them as relative paths and prepend
+        # the host root. `navigate` handles `about:blank` specially — pass it
+        # through untouched (open_new_window opens an about:blank tab).
+        return s if s.match?(/\Aabout:/i)
         unless s =~ %r{\A[a-z]+://}i
-          host_root = (begin URI.parse(@current_url) rescue nil end)&.tap {|u| u.path = ''; u.query = nil; u.fragment = nil }&.to_s || @default_host
+          # Strip path/query/fragment off the current URL to get the origin
+          # root. An opaque or host-less current URL (e.g. `about:blank` in a
+          # freshly-opened window) can't yield an origin — fall back to the
+          # default host so a subsequent relative `visit` still resolves.
+          host_root =
+            begin
+              u = URI.parse(@current_url.to_s)
+              if u.opaque || u.host.nil?
+                @default_host
+              else
+                u.path = ''; u.query = nil; u.fragment = nil
+                u.to_s
+              end
+            rescue URI::InvalidURIError
+              @default_host
+            end
           host_root = host_root.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
@@ -535,6 +565,13 @@ module Capybara
         href.empty? ? @current_url : href
       end
 
+      # Public entry for the Driver to resolve a `window.open` / cross-window
+      # `location` URL against THIS window's document (the internal resolver is
+      # private). Honours `<base href>` like the page's own links do.
+      def resolve_document_url(url)
+        resolve_against_current(url, use_base: true)
+      end
+
       # Does a link/form `target` load into the CURRENT frame? Empty or `_self`
       # do; `_top` / `_blank` / `_parent` / a named context do not. `_top`
       # correctly navigates the main page (it falls through to `navigate`).
@@ -652,7 +689,7 @@ module Capybara
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
       end
 
       # Single-slot cache for the most recent find_xpath / find_css /
@@ -819,9 +856,11 @@ module Capybara
               navigate_frame(resolve_against_current(url, use_base: true))
             end
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
-          # in a new browsing context. URL-only multi-window mode
-          # records the URL against a fresh aux handle; the primary
-          # stays put (per HTML spec — original window is unaffected).
+          # in a new browsing context (its own Browser/VM); the primary
+          # stays put (per HTML spec — original window is unaffected). No
+          # `opener_handle` is passed: modern browsers default `target=_blank`
+          # to `noopener` (so `window.opener` is null), unlike JS `window.open`
+          # which keeps the opener — see `open_window_from_js`.
           elsif !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
             @driver.open_aux_window(resolve_against_current(url, use_base: true))
           # In-page anchor links (`#frag` / current-page + `#frag`) move
@@ -1334,8 +1373,9 @@ module Capybara
           deliver_event_source_events
           deliver_worker_messages
           deliver_hijacked_fetches
+          deliver_window_messages
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending?
+          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
           # pair: it fires due timers, runs a per-task microtask checkpoint (so
           # chained .then / MutationObserver delivery interleave spec-correctly),
@@ -1347,13 +1387,14 @@ module Capybara
           deliver_event_source_events
           deliver_worker_messages
           deliver_hijacked_fetches
+          deliver_window_messages
           break if @runtime.settle_gen > start_gen
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending?
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -1845,7 +1886,7 @@ module Capybara
         # Background-thread work (workers, EventSource, MessageBus
         # long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle.
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending?
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
         if @timers_active
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
@@ -1876,7 +1917,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending?
+        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -1905,6 +1946,7 @@ module Capybara
           @find_cache_dirty = true if deliver_worker_messages > 0
           @find_cache_dirty = true if deliver_event_source_events > 0
           @find_cache_dirty = true if deliver_hijacked_fetches > 0
+          @find_cache_dirty = true if deliver_window_messages > 0
         ensure
           @ticking = false
         end
@@ -2161,6 +2203,7 @@ module Capybara
         reset_event_sources
         reset_hijacked_fetches
         reset_workers
+        @window_inbox.clear
         @blob_registry_lock.synchronize { @blob_registry.clear }
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
@@ -2700,6 +2743,50 @@ module Capybara
       end
 
       def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0
+
+      # ── Cross-window messaging (window.open / opener / postMessage) ──
+      # Each window is a separate Browser/VM/isolate, so a reference to another
+      # window can only be a proxy that forwards through the Driver. These
+      # forward host-fn calls (invoked from THIS window's VM) to the Driver,
+      # which routes to the target window's Browser.
+
+      # `window.open(url, name)` from JS — returns the new (or reused, by name)
+      # window's handle, or nil. The URL is resolved against THIS document so a
+      # relative `window.open('/x')` targets the right origin/path.
+      def open_child_window(url, name)
+        return nil unless @driver.respond_to?(:open_window_from_js)
+        @driver.open_window_from_js(self, url.to_s, name.to_s)
+      end
+
+      # `targetWindow.postMessage(data, origin)` — route to the target window's
+      # inbox, tagged with this window as the source.
+      def post_message_to_window(target_handle, data, origin)
+        return unless @driver.respond_to?(:window_post_message)
+        @driver.window_post_message(self, target_handle.to_s, data, origin.to_s)
+      end
+
+      def window_location_of(handle)   = @driver.respond_to?(:window_location)     ? @driver.window_location(handle.to_s).to_s     : ''
+      def set_window_location(handle, url) = (@driver.window_set_location(handle.to_s, url.to_s) if @driver.respond_to?(:window_set_location))
+      def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
+      def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
+      def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
+
+      # Queue a cross-window message for delivery into THIS window's VM (called
+      # by the Driver on the target Browser). Delivered as a `message` event the
+      # next time this window settles / ticks.
+      def enqueue_window_message(data, origin, source_handle)
+        @window_inbox << {'data' => data, 'origin' => origin.to_s, 'sourceHandle' => source_handle.to_s}
+      end
+
+      def window_message_pending? = !@window_inbox.empty?
+
+      # Fire queued cross-window messages as `message` events on window.
+      def deliver_window_messages
+        return 0 if @window_inbox.empty?
+        events = @window_inbox.slice!(0, @window_inbox.length)
+        @runtime.call('__csim_deliverWindowMessages', events)
+        events.size
+      end
 
       # ── Image decode (libvips) ─────────────────────────────────────
       #

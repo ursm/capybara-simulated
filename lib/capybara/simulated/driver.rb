@@ -73,7 +73,8 @@ module Capybara
         @cookies         = {}
         @local_storage   = {}
         @browser         = build_window_browser
-        @aux_windows     = []  # [{handle:, browser:}, …]
+        @browser.window_handle = PRIMARY_HANDLE
+        @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
         @active_handle   = nil
         @next_window_seq = 0
         @owner_thread    = Thread.current
@@ -247,30 +248,99 @@ module Capybara
       def window_handles
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
-      def open_aux_window(url = nil)
+
+      # All window entries (primary + aux) as `{handle:, browser:, name:, opener:}`.
+      private def window_entries
+        [{handle: PRIMARY_HANDLE, browser: @browser, name: '', opener: nil}] + @aux_windows
+      end
+
+      # The Browser backing a handle, or nil if the window is closed/unknown.
+      def window_browser(handle)
+        window_entries.find {|w| w[:handle] == handle }&.fetch(:browser)
+      end
+
+      # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
+      # clicks and `window.open` both land here. A non-empty `name` that
+      # matches an existing window navigates that window instead of opening a
+      # new one (HTML window-name targeting); `opener_handle` records the
+      # opener so the new window's `window.opener` resolves back to it.
+      def open_aux_window(url = nil, name: nil, opener_handle: nil)
+        name = name.to_s
+        if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
+          navigate_window(existing[:browser], url)
+          return existing[:handle]
+        end
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
+        aux.window_handle = handle
+        # Register BEFORE visiting: the opened document's own boot scripts read
+        # `window.opener`, which resolves through this entry — so the entry
+        # (with its opener) must exist before `visit` runs those scripts.
+        @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
         aux.visit(url) if url && !url.empty?
-        @aux_windows << {handle: handle, browser: aux}
         handle
       rescue StandardError => e
-        # Aux window URL-load failure (binary content, network error,
-        # …) shouldn't tear down the test — record the handle so
+        # Aux window URL-load failure (binary content, network error, …)
+        # shouldn't tear down the test — the handle is already recorded so
         # `window_opened_by` succeeds; within_window assertions on
-        # `current_url` may still pass through whatever `visit`
-        # managed to set before raising.
+        # `current_url` may still pass through whatever `visit` managed to set
+        # before raising.
         warn "[csim] open_aux_window(#{url.inspect}) raised: #{e.class}: #{e.message[0, 200]}"
-        @aux_windows << {handle: handle, browser: aux}
         handle
       end
 
-      # Capybara `Session#open_new_window(:tab)` entry point — visits
-      # `about:blank` so the test can `switch_to_window` then `visit`
-      # the real URL. We don't distinguish `:tab` from `:window` (no
-      # window-chrome semantics in this driver).
+      # ── JS-facing window routing (called via Browser host fns) ──────
+      # Each window is a separate Browser/VM, so a cross-window reference is a
+      # proxy that forwards here; the Driver routes to the target Browser.
+
+      # `window.open(url, name)` from the `opener` window's JS. Resolves the URL
+      # against the opener's document and records the opener relationship.
+      def open_window_from_js(opener_browser, url, name)
+        resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
+        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser))
+      end
+
+      # `targetWindow.postMessage(data, origin)` — queue on the target window's
+      # Browser, tagged with the source window's handle.
+      def window_post_message(source_browser, target_handle, data, _origin)
+        target = window_browser(target_handle) or return
+        target.enqueue_window_message(data, _origin, handle_for(source_browser))
+      end
+
+      def window_location(handle)        = (window_browser(handle)&.current_url).to_s
+      def window_set_location(handle, url)
+        b = window_browser(handle) or return
+        navigate_window(b, b.resolve_document_url(url))
+      end
+      def window_closed?(handle)         = window_browser(handle).nil?
+      def opener_handle_of(browser)
+        handle = handle_for(browser)
+        window_entries.find {|w| w[:handle] == handle }&.fetch(:opener)
+      end
+      private def handle_for(browser) = browser.window_handle
+
+      # Navigate an existing window. If it's the window whose JS is currently
+      # executing — a self-targeted `window.open(url, ownName)` or
+      # `someProxyToSelf.location = …` — DEFER via the location-assign queue:
+      # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
+      # V8 context mid-call and abort the running handler. A non-active window
+      # can navigate immediately (its VM isn't on the stack).
+      private def navigate_window(browser, url)
+        return if url.nil? || url.to_s.empty?
+        if browser.equal?(current_browser)
+          browser.location_assign(url)
+        else
+          browser.visit(url)
+        end
+      end
+
+      # Capybara `Session#open_new_window(:tab)` entry point — opens at
+      # `about:blank` (so `current_url`/title match a real new tab) and the
+      # test then `switch_to_window` + `visit`s the real URL. We don't
+      # distinguish `:tab` from `:window` (no window-chrome semantics here).
       def open_new_window(_kind = :tab)
-        open_aux_window
+        open_aux_window('about:blank')
       end
       def window_size(_)           = [current_browser.viewport_width, current_browser.viewport_height]
       def close_window(h)
