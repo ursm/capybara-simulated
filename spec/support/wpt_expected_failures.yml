@@ -258,13 +258,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.html:
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.html:
 - Empty <source> immediately sets media.networkState during DOM insertion, so that
   an earlier-running script can observe networkState
-dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.html:
-- Earlier-inserted <script> (via a DocumentFragment) synchronously observes a later-inserted
-  <link rel=stylesheet>'s CSSStyleSheet creation
-- Earlier-inserted <script> (via a append()) synchronously observes a later-inserted
-  <link rel=stylesheet>'s CSSStyleSheet creation
-- Earlier-inserted <script> (via a div) synchronously observes a later-inserted <link
-  rel=stylesheet>'s CSSStyleSheet creation
 dom/nodes/insertion-removing-steps/Node-appendChild-script-in-script.html:
 - An outer script whose preparation/execution gets triggered by the insertion of a
   'nested'/'inner' script, executes *before* the inner script executes
