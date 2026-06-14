@@ -19,8 +19,13 @@ exactly the tree the app sees.
 **A good fit when** your tests are JavaScript-driven but don't depend on
 visual layout:
 
-- **An order of magnitude faster** than a headless browser — no Chrome to
-  boot, no WebDriver, no Node toolchain; everything runs in-process.
+- **Fast, in-process** — no Chrome to boot, no WebDriver, no Node
+  toolchain. About **1.9× faster** than a headless browser on
+  server-rendered / Hotwire apps, and roughly at parity on JS-heavy SPAs
+  (with rusty_racer).
+- **Deterministic** — a virtual clock and synchronous in-process execution
+  remove the wall-clock timing, network, and rendering races that make
+  headless-browser suites flaky.
 - **Real front-end JS runs**: inline `<script>` + event handlers,
   MutationObserver, custom elements, `<template>`, Shadow DOM, ES modules
   + importmap, **Hotwire (Stimulus + Turbo)**, Trix.
