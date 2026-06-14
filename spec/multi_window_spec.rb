@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/js_engine'
 
 # Full multi-window: each window/tab is its own Browser + JS VM (own DOM,
 # sessionStorage, history; cookies + localStorage shared). On top of the
@@ -86,6 +87,21 @@ RSpec.describe 'multi-window' do
     # Re-opening the same name must not create a third window.
     session.execute_script("window.open('/other', 'pop')")
     expect(session.windows.size).to eq(opened)
+  end
+
+  # postMessage transfer semantics: the listed ArrayBuffer is detached on the
+  # sender (observable half of transfer; the bytes are still copied). V8 has
+  # `ArrayBuffer.prototype.transfer`; QuickJS has no JS-level detach.
+  it 'detaches a transferred ArrayBuffer on the sender', if: CsimEngine.v8? do
+    session.window_opened_by { session.find(:css, '#open').click }
+    detached = session.evaluate_script(<<~JS)
+      (() => {
+        const buf = new Uint8Array([1, 2, 3, 4]).buffer;
+        window.popup.postMessage(buf, '*', [buf]);
+        return buf.byteLength === 0 && buf.detached === true;
+      })()
+    JS
+    expect(detached).to be(true)
   end
 
   it 'reports window.closed after the window is closed' do
