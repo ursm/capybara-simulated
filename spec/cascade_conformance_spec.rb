@@ -57,6 +57,15 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<div class="c" id="t" style="display: block">x</div>',
       expect: { 't' => true } },
 
+    # An inline `!important` outranks a stylesheet `!important` (same author
+    # origin + importance → inline's higher specificity wins). This is the
+    # contract Capybara's `attach_file ..., make_visible: true` relies on to
+    # un-hide a `display: none !important` file input.
+    { name: 'inline !important beats rule !important',
+      css:  '.c { display: none !important }',
+      body: '<div class="c" id="t" style="display: block !important">x</div>',
+      expect: { 't' => true } },
+
     { name: '@media matching applies',
       css:  '@media (min-width: 1px) { #t { display: none } }',
       body: '<div id="t">x</div>',
