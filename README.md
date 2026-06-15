@@ -311,11 +311,11 @@ followed by the short list of things that need a real browser **by design**.
   its own scripts in its own per-frame realm; the DSL routes finds, reads,
   interactions, `evaluate_script`, and self-targeted navigation (a link /
   form submit) into the active frame, nested frames included (the frame's
-  realm is rebuilt from the fetched document; the top page is untouched).
-  A `_top` link navigates the main page; a `_parent` target from a frame
-  nested ≥2 levels falls back to the main page; cross-origin frame locality
-  resolves against the main origin. QuickJS has no nested browsing context,
-  so `within_frame` raises there.
+  realm is rebuilt from the fetched document; the top page is untouched) —
+  link clicks, form submits, and JS-driven `location.*` all stay in the
+  frame. The one edge: a `_parent`-targeted link from a frame nested ≥2
+  levels deep navigates the top page rather than the intermediate frame.
+  QuickJS has no nested browsing context, so `within_frame` raises there.
 - **Multiple windows / tabs** (both engines) — each window is its own
   Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
   shared). `open_new_window` / `within_window` / `switch_to_window` /
@@ -323,11 +323,12 @@ followed by the short list of things that need a real browser **by design**.
   `window.opener` links back, and `postMessage` crosses windows. Only the
   active window's event loop runs, so a message is delivered when you switch
   to its window. `target="_blank"` opens with no opener (modern-browser
-  default); `postMessage` data is JSON-shaped, not a full structured clone
-  (no `DataCloneError`, `undefined`→`null`) — though a `transfer`-list buffer
-  moves **zero-copy** (backing store by token, source detached). Window
-  viewport APIs (`maximize` / `fullscreen` / pixel-exact `resize_to`) are
-  no-ops (no layout engine).
+  default). `postMessage` carries real structured data (not a lossy JSON
+  hop) — `Date` / `Set` / `BigInt` / typed arrays / cyclic graphs round-trip
+  on V8 — and a `transfer`-list buffer moves **zero-copy** (backing store by
+  token, source detached); `Map` and bare `undefined` don't fully round-trip
+  yet. Window viewport APIs (`maximize` / `fullscreen` / pixel-exact
+  `resize_to`) are no-ops (no layout engine).
 - **WebSocket + Action Cable** — `new WebSocket(url)` works in-process over
   the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455:
   handshake + subprotocol negotiation, masked frames, ping/pong, close). The

@@ -73,15 +73,14 @@ RSpec.describe 'WebSocket' do
     expect(session.evaluate_script('window.ws.readyState')).to eq(1)   # OPEN
   end
 
-  # Binary frames round-trip raw bytes across the host boundary; QuickJS
-  # corrupts non-ASCII bytes there (the reason bytes.js base64-encodes for it),
-  # so binary WebSocket frames are a V8-only path. Text (Action Cable's
-  # protocol) works on both engines.
-  it 'round-trips a binary frame as an ArrayBuffer', if: CsimEngine.v8? do
+  # Binary frames round-trip on both engines, including bytes ≥ 0x80 (200 here)
+  # which used to corrupt over QuickJS's host boundary — the send path now
+  # base64-encodes for QuickJS, the receive path already does via wrap_binary.
+  it 'round-trips a binary frame as an ArrayBuffer' do
     expect(session).to have_title(/hello/)                 # connection established
-    session.execute_script('window.ws.send(new Uint8Array([5, 6, 7]))')
-    expect(session).to have_title('bin:5,6,7')
-    expect(session.evaluate_script('window.wsBin')).to eq([5, 6, 7])
+    session.execute_script('window.ws.send(new Uint8Array([5, 200, 7]))')
+    expect(session).to have_title('bin:5,200,7')
+    expect(session.evaluate_script('window.wsBin')).to eq([5, 200, 7])
   end
 
   it 'reports readyState transitions and fires close' do

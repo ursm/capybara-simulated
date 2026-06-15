@@ -67,7 +67,7 @@ module Capybara
         '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
         '__csim_wsOpen'              => ->(b, *a) { b.ws_open(a[0], a[1]) },
-        '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
+        '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2], a[3]); nil },
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
