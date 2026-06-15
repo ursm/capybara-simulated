@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Primary engine: V8 (rusty_racer), auto-selected when both engine gems are
+  # present. Runs the full suite including the WPT conformance gate, across the
+  # supported Ruby versions.
   test:
     runs-on: ubuntu-latest
 
@@ -32,3 +35,27 @@ jobs:
           bundler-cache: true
 
       - run: bundle exec rspec
+
+  # Secondary engine: QuickJS. It shares the JS bridge but has a distinct runtime
+  # layer (value marshalling, no per-frame realms), so it needs its own coverage
+  # to catch engine-specific regressions. The WPT gate (`:wpt`) is excluded: its
+  # expected-failures allowlist is tuned to V8 (the conformance engine), and
+  # QuickJS legitimately diverges on a handful of legacy-encoding / cross-realm
+  # subtests. One Ruby suffices — the QuickJS-specific risk is in the engine
+  # layer, not the (V8-matrix-covered) Ruby driver code.
+  test-quickjs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: sudo apt-get update && sudo apt-get install -y libvips42t64
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+
+      - run: bundle exec rspec --tag '~wpt'
+        env:
+          CSIM_JS_ENGINE: quickjs
