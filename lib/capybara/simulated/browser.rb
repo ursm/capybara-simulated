@@ -2255,6 +2255,23 @@ module Capybara
         invalidate_find_cache
       end
 
+      # Tear down an auxiliary window's Browser when its window closes (the
+      # Driver calls this on close_window / reset!). Releases what a bare GC of
+      # the isolate would NOT: live background threads (worker / SSE / hijacked-
+      # fetch / WebSocket readers) and any parked zero-copy transfer backing
+      # stores this window issued (the transfer registry is process-wide). Runs
+      # while the runtime is still alive so the transferDrop call lands.
+      def dispose
+        drop_pending_transfers
+        reset_workers
+        reset_event_sources
+        reset_hijacked_fetches
+        reset_websockets
+        @window_inbox.clear
+      rescue StandardError
+        nil
+      end
+
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
       def rack_fetch_body(url)
