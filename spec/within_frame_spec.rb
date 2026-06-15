@@ -24,6 +24,7 @@ RSpec.describe 'within_frame / switch_to_frame' do
             <input id="fieldInFrameOne" type="text">
             <button id="btnInFrameOne" onclick="document.getElementById('divInFrameOne').textContent = 'clicked'">go</button>
             <a id="frameLink" href="/frame_page2">go to page 2</a>
+            <button id="frameLocBtn" onclick="location.href='/frame_page2'">js nav</button>
             <form id="frameForm" action="/frame_form_target" method="post">
               <input type="text" name="q" value="hi">
               <button type="submit">submit</button>
@@ -113,6 +114,16 @@ RSpec.describe 'within_frame / switch_to_frame' do
     end
     # The top page is unchanged.
     expect(session.current_url).to end_with('/')
+    expect(session.find(:css, '#divInMainWindow')).to be_truthy
+  end
+
+  it 'navigates the frame (not the top page) on JS-driven location.href' do
+    session.within_frame('frameOne') do
+      session.find(:css, '#frameLocBtn').click
+      expect(session).to have_css('#divOnPage2', text: 'second frame page')
+      expect(session.driver.frame_url).to end_with('/frame_page2')
+    end
+    expect(session.current_url).to end_with('/')                 # top page untouched
     expect(session.find(:css, '#divInMainWindow')).to be_truthy
   end
 

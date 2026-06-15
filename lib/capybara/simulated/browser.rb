@@ -2615,10 +2615,16 @@ module Capybara
 
       # `binary` is set by the JS side (it knows whether `send` was given a
       # string or an ArrayBuffer/view) → opcode 0x2 vs the text 0x1. Action
-      # Cable is text-only (JSON). The payload's bytes are written as-is.
-      def ws_send(id, data, binary = false)
+      # Cable is text-only (JSON). `b64` is set when the bytes arrived base64-
+      # encoded (the QuickJS binary path — raw bytes ≥0x80 don't survive its
+      # host boundary); decode before framing.
+      def ws_send(id, data, binary = false, b64 = false)
         sock = @websocket_sockets[id.to_i] or return
-        ws_write_frame(sock, binary ? 0x2 : 0x1, data.to_s.b)
+        if binary
+          ws_write_frame(sock, 0x2, b64 ? Base64.decode64(data.to_s) : data.to_s.b)
+        else
+          ws_write_frame(sock, 0x1, data.to_s.b)
+        end
         nil
       rescue StandardError
         nil
@@ -3566,6 +3572,12 @@ module Capybara
         # the page, discarding all JS state.
         if pure_fragment_navigation?(url)
           update_current_hash(url)
+        elsif @current_realm_id
+          # A JS-driven `location.*` from inside a `within_frame` block
+          # navigates the FRAME, not the top page (same as a self-targeted
+          # link/form there). Gated on the realm, so the main-page path is
+          # untouched.
+          navigate_frame(url)
         else
           navigate(url)
         end
