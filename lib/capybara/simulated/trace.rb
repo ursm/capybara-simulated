@@ -29,6 +29,24 @@ module Capybara
         keyword_init: true
       )
 
+      VIEWER_TEMPLATE_PATH = File.expand_path('trace_viewer.html', __dir__)
+      VIEWER_DATA_TOKEN    = '__CSIM_TRACE_DATA__'
+
+      # Render the self-contained HTML viewer for a trace JSON *string*,
+      # embedding it inline (the `capybara-simulated trace` CLI is the
+      # caller). `</` → `<\/` so an embedded `</script>` inside a DOM
+      # snapshot can't close the data block early — still valid JSON
+      # (`\/` is a legal JSON escape for `/`). The whole point of inline
+      # embedding over fetch / `import … with { type: 'json' }` is that
+      # the result opens straight from `file://` with no server (module /
+      # fetch loads are CORS-blocked for `file://` origins).
+      def self.render_viewer(json_text)
+        template = (@viewer_template ||= File.read(VIEWER_TEMPLATE_PATH))
+        # Block form: the replacement is taken literally, so backslashes
+        # in the JSON aren't interpreted as regexp backreferences.
+        template.sub(VIEWER_DATA_TOKEN) { json_text.to_s.gsub('</', '<\/') }
+      end
+
       attr_reader :steps, :metadata
 
       def initialize(metadata: {})
@@ -49,9 +67,24 @@ module Capybara
         @console_buf << {severity: severity.to_s, message: message.to_s}
       end
 
-      def log_network(method, url, status)
+      def log_network(method, url, status,
+                      content_type: nil, size: nil, duration_ms: nil, redirected: nil,
+                      request_headers: nil, request_body: nil,
+                      response_headers: nil, response_body: nil)
         return unless @open_step
-        @network_buf << {method: method.to_s, url: url.to_s, status: status}
+        @network_buf << {
+          method:           method.to_s,
+          url:              url.to_s,
+          status:           status,
+          content_type:     content_type,
+          size:             size,
+          duration_ms:      duration_ms,
+          redirected:       redirected,
+          request_headers:  request_headers,
+          request_body:     request_body,
+          response_headers: response_headers,
+          response_body:    response_body
+        }.compact  # drop fields the caller couldn't determine, keeping entries lean
       end
 
       def begin_step(kind, description:, url_before: nil)

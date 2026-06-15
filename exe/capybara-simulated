@@ -1,0 +1,143 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# capybara-simulated CLI. Currently one subcommand:
+#
+#   capybara-simulated trace TRACE.json [-o OUT.html] [--no-open]
+#
+# Renders a trace JSON (produced by CSIM_TRACE_DIR / driver.stop_tracing)
+# into a self-contained HTML viewer and opens it in your browser. The
+# viewer embeds the JSON inline so it opens straight from file:// — no
+# server, unlike a fetch/import-based loader (CORS blocks those for
+# file:// origins). The persisted trace stays plain JSON; this turns one
+# into a UI on demand.
+
+require 'optparse'
+require 'tmpdir'
+
+# Prefer the library co-located with this executable. In an installed
+# gem that's the gem's own lib (correct version); in a checkout it's the
+# working tree — so `ruby exe/capybara-simulated` doesn't accidentally
+# load an older *installed* capybara-simulated that predates this CLI.
+lib = File.expand_path('../lib', __dir__)
+$LOAD_PATH.unshift(lib) if File.directory?(lib) && !$LOAD_PATH.include?(lib)
+require 'capybara/simulated/trace'
+
+PROG = 'capybara-simulated'
+
+# `file://` URL for a local path, percent-encoding each segment so a
+# path with spaces / special chars stays a valid URI for launchy.
+def file_url(path)
+  require 'cgi'
+  'file://' + path.split('/').map {|seg| CGI.escapeURIComponent(seg) }.join('/')
+end
+
+# Hand the raw path (not a URL) to the platform opener; `system`'s array
+# form needs no shell-quoting, so spaces are fine.
+def open_with_platform(path)
+  cmd =
+    case RbConfig::CONFIG['host_os']
+    when /darwin/      then ['open', path]
+    when /mswin|mingw/ then ['cmd', '/c', 'start', '', path]
+    else                    ['xdg-open', path]  # Linux / *BSD
+    end
+  system(*cmd)
+rescue StandardError
+  false
+end
+
+# Open a local file in the default browser. Prefer launchy (handles
+# macOS / Linux / Windows / WSL) when installed; on either a missing gem
+# OR a launchy runtime failure (headless box, no opener), fall back to
+# the platform opener.
+def open_in_browser(path)
+  begin
+    require 'launchy'
+    Launchy.open(file_url(path))
+    return true
+  rescue LoadError
+    # launchy not installed
+  rescue StandardError
+    # launchy present but failed — try the platform opener below
+  end
+  open_with_platform(path)
+end
+
+def cmd_trace(argv)
+  out  = nil
+  open = nil  # nil → default (open), unless writing to stdout
+  parser = OptionParser.new do |o|
+    o.banner = "Usage: #{PROG} trace [options] TRACE.json\n\n" \
+               "Render TRACE.json into a self-contained HTML viewer and open it\n" \
+               "in your browser. By default the HTML goes to a temp file."
+    o.on('-o', '--output PATH', "write HTML to PATH instead of a temp file ('-' = stdout)") {|v| out = v }
+    o.on('--[no-]open', 'open the HTML in your browser (default: yes)') {|v| open = v }
+    o.on('-h', '--help') do
+      puts o
+      exit
+    end
+  end
+  begin
+    parser.parse!(argv)
+  rescue OptionParser::ParseError => e
+    warn e.message
+    warn parser.help
+    exit 1
+  end
+
+  input = argv.shift
+  unless input
+    warn parser.help
+    exit 1
+  end
+  unless File.file?(input)
+    warn "#{PROG}: no such file: #{input}"
+    exit 1
+  end
+
+  json = File.read(input)
+  begin
+    require 'json'
+    JSON.parse(json)  # fail fast on a non-JSON / corrupt trace
+  rescue JSON::ParserError => e
+    warn "#{PROG}: #{input} is not valid JSON: #{e.message}"
+    exit 1
+  end
+
+  html = Capybara::Simulated::Trace.render_viewer(json)
+
+  if out == '-'
+    $stdout.write(html)
+    return
+  end
+  # Default output: a temp file named after the trace (re-runs overwrite).
+  out ||= File.join(Dir.tmpdir, File.basename(input).sub(/\.json\z/, '') + '.html')
+  File.write(out, html)
+  warn "wrote #{out}"
+  open_in_browser(File.expand_path(out)) unless open == false
+end
+
+def main(argv)
+  case argv.first
+  when 'trace'
+    cmd_trace(argv.drop(1))
+  when '-v', '--version'
+    require 'capybara/simulated/version'
+    puts Capybara::Simulated::VERSION
+  when nil, '-h', '--help'
+    puts <<~USAGE
+      Usage: #{PROG} <command> [options]
+
+      Commands:
+        trace TRACE.json   render a trace JSON into a self-contained HTML viewer
+
+      Run `#{PROG} trace --help` for command options.
+    USAGE
+  else
+    warn "#{PROG}: unknown command: #{argv.first}"
+    warn "Run `#{PROG} --help`."
+    exit 1
+  end
+end
+
+main(ARGV)

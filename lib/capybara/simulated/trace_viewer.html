@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>capybara-simulated trace</title>
+<!--
+  Self-contained trace viewer. The `capybara-simulated trace <file.json>`
+  CLI replaces the data token in the script block below with the trace
+  JSON (with `</` escaped to `<\/` so an embedded `</script>` in a DOM
+  snapshot can't close the data block). Inline embedding — not fetch /
+  `import … with { type: 'json' }` — is what lets the file open straight
+  from `file://` without a server (module/fetch loads are CORS-blocked
+  for `file://` origins). The Load button / drag-and-drop reads any other
+  trace JSON via FileReader, which is also CORS-free.
+-->
+<script id="csim-trace" type="application/json">__CSIM_TRACE_DATA__</script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --border: #e2e5ea; --text: #1f2329;
+    --muted: #6b7280; --accent: #2563eb; --accent-soft: #eaf0fe;
+    --error: #dc2626; --error-soft: #fdecec; --ok: #15803d;
+    --warn: #b45309; --code: #f3f4f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text); background: var(--bg); display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  header .spacer { flex: 1; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.passed { background: #e6f4ea; color: var(--ok); }
+  .badge.failed { background: var(--error-soft); color: var(--error); }
+  button, label.btn {
+    font: inherit; font-size: 13px; padding: 5px 12px; border: 1px solid var(--border);
+    background: var(--panel); border-radius: 6px; cursor: pointer; color: var(--text);
+  }
+  button:hover, label.btn:hover { background: var(--code); }
+  main { flex: 1; display: flex; min-height: 0; }
+  #steps { width: 320px; flex: none; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel); }
+  .step {
+    display: flex; align-items: baseline; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent;
+  }
+  .step:hover { background: var(--bg); }
+  .step.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+  .step.err { border-left-color: var(--error); }
+  .step .idx { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 22px; }
+  .step .kind { font-weight: 600; font-size: 12px; }
+  .step .desc { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .step .dur { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .step.err .kind { color: var(--error); }
+  #detail { flex: 1; overflow-y: auto; padding: 18px 22px; min-width: 0; }
+  #detail h2 { margin: 0 0 2px; font-size: 17px; }
+  #detail .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  section.block { margin: 18px 0; }
+  section.block > h3 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); margin: 0 0 8px; font-weight: 600;
+  }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .url-to { font-weight: 600; }
+  .panel-error { background: var(--error-soft); border: 1px solid #f3c4c4; border-radius: 6px; padding: 10px 12px; }
+  .panel-error .cls { font-weight: 600; color: var(--error); }
+  .panel-error .msg { white-space: pre-wrap; margin-top: 4px; }
+  .logs { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .log { display: flex; gap: 10px; padding: 4px 10px; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .log:first-child { border-top: none; }
+  .log .sev { flex: none; width: 52px; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .log .sev.error { color: var(--error); } .log .sev.warn, .log .sev.warning { color: var(--warn); }
+  .log .sev.debug { color: var(--muted); }
+  .log .msg { white-space: pre-wrap; word-break: break-word; }
+  .net-hint { font-size: 11px; margin-bottom: 6px; }
+  .net { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .net th, .net td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .net th { color: var(--muted); font-weight: 600; }
+  .net td.method { font-weight: 600; } .net td.url { word-break: break-all; }
+  .net td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .net td.status { font-variant-numeric: tabular-nums; }
+  .net td.status.ok { color: var(--ok); } .net td.status.redir { color: var(--warn); } .net td.status.err { color: var(--error); }
+  .net-row { cursor: pointer; }
+  .net-row:hover { background: var(--bg); }
+  .net-row.open { background: var(--accent-soft); }
+  .redir-tag { display: inline-block; font-size: 10px; font-weight: 600; color: var(--warn);
+               background: #fff5e6; border-radius: 8px; padding: 0 6px; vertical-align: middle; }
+  .net-detail td { background: var(--bg); }
+  .net-sub { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+             letter-spacing: .03em; margin: 8px 0 4px; }
+  .net-detail .net-sub:first-child { margin-top: 0; }
+  .kv.hdr { font-size: 12px; grid-template-columns: max-content 1fr; gap: 1px 12px; }
+  .kv.hdr dt { color: var(--muted); }
+  .net-body { max-height: 260px; overflow: auto; background: var(--code); border: 1px solid var(--border);
+              border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tabs button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  iframe.dom { width: 100%; height: 460px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+  pre.dom { max-height: 460px; overflow: auto; background: var(--code); border: 1px solid var(--border);
+            border-radius: 6px; padding: 12px; font-size: 12px; margin: 0; }
+  .muted { color: var(--muted); }
+  #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); text-align: center; }
+  #empty.hide { display: none; }
+  #drop-veil { position: fixed; inset: 0; background: rgba(37,99,235,.08); border: 3px dashed var(--accent);
+               display: none; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); z-index: 10; }
+  #drop-veil.on { display: flex; }
+</style>
+</head>
+<body>
+<header>
+  <h1>capybara-simulated trace</h1>
+  <div class="meta" id="meta"></div>
+  <span class="spacer"></span>
+  <label class="btn">Load JSON…<input id="file" type="file" accept=".json,application/json" hidden></label>
+</header>
+<main>
+  <div id="steps"></div>
+  <div id="detail"></div>
+  <div id="empty">
+    <div style="font-size:40px">📊</div>
+    <div>No trace loaded.<br>Drop a <code>*.json</code> trace here or use <b>Load JSON…</b>.</div>
+  </div>
+</main>
+<div id="drop-veil">Drop trace JSON to load</div>
+
+<script>
+(function () {
+  'use strict';
+  var stepsEl  = document.getElementById('steps');
+  var detailEl = document.getElementById('detail');
+  var emptyEl  = document.getElementById('empty');
+  var metaEl   = document.getElementById('meta');
+  var trace = null, selected = 0;
+
+  // Escapes both text and double-quoted-attribute contexts (severity /
+  // outcome land in class="…"), so a quote in trace data can't break out
+  // of an attribute and inject markup.
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function readEmbedded() {
+    var el = document.getElementById('csim-trace');
+    try {
+      var d = JSON.parse(el.textContent);
+      return (d && Array.isArray(d.steps)) ? d : null;
+    } catch (_) { return null; }
+  }
+
+  function load(data) {
+    if (!data || !Array.isArray(data.steps)) { return; }
+    trace = data; selected = 0;
+    emptyEl.classList.add('hide');
+    stepsEl.style.display = ''; detailEl.style.display = '';
+    renderMeta(); renderSteps(); renderDetail();
+  }
+
+  function renderMeta() {
+    var m = trace.metadata || {}, parts = [];
+    if (m.title)   parts.push('<span>' + esc(m.title) + '</span>');
+    if (m.file)    parts.push('<span class="mono">' + esc(m.file) + '</span>');
+    if (m.outcome) parts.push('<span class="badge ' + esc(m.outcome) + '">' + esc(m.outcome) + '</span>');
+    parts.push('<span>' + trace.steps.length + ' steps</span>');
+    var total = trace.steps.reduce(function (a, s) { return a + (s.duration_ms || 0); }, 0);
+    parts.push('<span>' + total + ' ms total</span>');
+    metaEl.innerHTML = parts.join('');
+  }
+
+  function renderSteps() {
+    stepsEl.innerHTML = '';
+    trace.steps.forEach(function (s, i) {
+      var row = document.createElement('div');
+      row.className = 'step' + (i === selected ? ' sel' : '') + (s.error ? ' err' : '');
+      row.innerHTML =
+        '<span class="idx">' + i + '</span>' +
+        '<span class="kind">' + esc(s.kind) + '</span>' +
+        '<span class="desc">' + esc(s.description) + '</span>' +
+        '<span class="dur">' + (s.duration_ms == null ? '' : s.duration_ms + 'ms') + '</span>';
+      row.onclick = function () { selected = i; renderSteps(); renderDetail(); };
+      stepsEl.appendChild(row);
+    });
+  }
+
+  function section(title, bodyHtml) {
+    return '<section class="block"><h3>' + title + '</h3>' + bodyHtml + '</section>';
+  }
+
+  function fmtBytes(n) {
+    if (n == null) { return ''; }
+    if (n < 1024) { return n + ' B'; }
+    if (n < 1048576) { return (n / 1024).toFixed(1) + ' KB'; }
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  function statusClass(st) {
+    var c = Math.floor((+st || 0) / 100);
+    return c === 2 ? 'ok' : c === 3 ? 'redir' : (c >= 4 ? 'err' : '');
+  }
+  function headerTable(h) {
+    var keys = h ? Object.keys(h) : [];
+    if (!keys.length) { return '<div class="muted">—</div>'; }
+    return '<dl class="kv hdr">' + keys.map(function (k) {
+      return '<dt>' + esc(k) + '</dt><dd>' + esc(h[k]) + '</dd>';
+    }).join('') + '</dl>';
+  }
+  function bodyBlock(label, body) {
+    if (body == null || body === '') { return ''; }
+    return '<div class="net-sub">' + label + '</div><pre class="net-body">' + esc(body) + '</pre>';
+  }
+  function wireNetwork() {
+    detailEl.querySelectorAll('tr.net-row').forEach(function (row) {
+      row.onclick = function () {
+        var d = detailEl.querySelector('tr.net-detail[data-i="' + row.getAttribute('data-i') + '"]');
+        if (d) { d.hidden = !d.hidden; row.classList.toggle('open'); }
+      };
+    });
+  }
+
+  function renderDetail() {
+    var s = trace.steps[selected];
+    if (!s) { detailEl.innerHTML = ''; return; }
+    var html = '<h2>#' + selected + ' · ' + esc(s.kind) + '</h2>';
+    html += '<div class="sub mono">' + esc(s.description) + '</div>';
+
+    var kv = '<dl class="kv">';
+    kv += '<dt>elapsed</dt><dd>' + (s.elapsed_ms || 0) + ' ms</dd>';
+    kv += '<dt>duration</dt><dd>' + (s.duration_ms || 0) + ' ms</dd>';
+    if (s.url_before != null || s.url_after != null) {
+      var changed = s.url_before !== s.url_after;
+      kv += '<dt>url</dt><dd class="mono">' + esc(s.url_before || '∅') +
+            (changed ? ' → <span class="url-to">' + esc(s.url_after || '∅') + '</span>' : '') + '</dd>';
+    }
+    kv += '</dl>';
+    html += section('Step', kv);
+
+    if (s.error) {
+      html += section('Error',
+        '<div class="panel-error"><div class="cls mono">' + esc(s.error.class || 'Error') +
+        '</div><div class="msg mono">' + esc(s.error.message) + '</div></div>');
+    }
+
+    if (s.console && s.console.length) {
+      var logs = s.console.map(function (c) {
+        var sev = String(c.severity || 'log').toLowerCase();
+        return '<div class="log"><span class="sev ' + esc(sev) + '">' + esc(sev) +
+               '</span><span class="msg">' + esc(c.message) + '</span></div>';
+      }).join('');
+      html += section('Console (' + s.console.length + ')', '<div class="logs">' + logs + '</div>');
+    }
+
+    if (s.network && s.network.length) {
+      var rows = s.network.map(function (n, i) {
+        var head =
+          '<tr class="net-row" data-i="' + i + '">' +
+            '<td class="method">' + esc(n.method) + '</td>' +
+            '<td class="url">' + esc(n.url) +
+              (n.redirected ? ' <span class="redir-tag">redirect</span>' : '') + '</td>' +
+            '<td class="status ' + statusClass(n.status) + '">' + esc(n.status) + '</td>' +
+            '<td>' + esc(n.content_type || '') + '</td>' +
+            '<td class="num">' + fmtBytes(n.size) + '</td>' +
+            '<td class="num">' + (n.duration_ms == null ? '' : n.duration_ms + ' ms') + '</td>' +
+          '</tr>';
+        var detail =
+          '<tr class="net-detail" data-i="' + i + '" hidden><td colspan="6">' +
+            '<div class="net-sub">Request headers</div>' + headerTable(n.request_headers) +
+            bodyBlock('Request body', n.request_body) +
+            '<div class="net-sub">Response headers</div>' + headerTable(n.response_headers) +
+            bodyBlock('Response body', n.response_body) +
+          '</td></tr>';
+        return head + detail;
+      }).join('');
+      html += section('Network (' + s.network.length + ')',
+        '<div class="muted net-hint">Click a request for headers and bodies.</div>' +
+        '<table class="net"><tr><th>Method</th><th>URL</th><th>Status</th>' +
+        '<th>Type</th><th>Size</th><th>Time</th></tr>' + rows + '</table>');
+    }
+
+    if (s.dom_after) {
+      html += section('DOM snapshot',
+        '<div class="tabs"><button id="t-prev" class="on">Preview</button>' +
+        '<button id="t-src">HTML</button></div><div id="dom-host"></div>');
+    } else {
+      html += section('DOM snapshot',
+        '<div class="muted">Not captured for this step — snapshots are taken only on an action error, ' +
+        'or for every step under <code>CSIM_TRACE=full</code>.</div>');
+    }
+
+    detailEl.innerHTML = html;
+    detailEl.scrollTop = 0;
+    if (s.network && s.network.length) { wireNetwork(); }
+    if (s.dom_after) { wireDomTabs(s.dom_after); }
+  }
+
+  // Pretty-print a DOM-snapshot HTML string for the source view: the
+  // driver serializes flat (one line), so we re-parse with the browser's
+  // own DOMParser and re-emit indented. Returns null on any parse trouble
+  // → caller falls back to the raw string. Raw-text / preformatted
+  // elements (pre/textarea/script/style) keep their content verbatim. The
+  // result is raw HTML text — the caller esc()s it once for display.
+  var VOID = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+  var RAWEL = new Set(['pre','textarea','script','style']);
+  function formatHtml(html) {
+    var doc;
+    try { doc = new DOMParser().parseFromString(html, 'text/html'); }
+    catch (_) { return null; }
+    if (!doc || !doc.documentElement) { return null; }
+    var out = [];
+    var pad = function (d) { return '  '.repeat(d); };
+    var attrs = function (el) {
+      return Array.prototype.map.call(el.attributes, function (a) {
+        return a.value === '' ? ' ' + a.name : ' ' + a.name + '="' + a.value + '"';
+      }).join('');
+    };
+    function emit(el, depth) {
+      var tag = el.tagName.toLowerCase();
+      var open = '<' + tag + attrs(el) + '>';
+      if (VOID.has(tag)) { out.push(pad(depth) + open); return; }
+      if (RAWEL.has(tag)) {
+        var text = el.textContent;
+        if (text.indexOf('\n') === -1) {
+          out.push(pad(depth) + open + text + '</' + tag + '>');
+        } else {
+          out.push(pad(depth) + open);
+          text.split('\n').forEach(function (l) { out.push(l); });  // verbatim, no re-indent
+          out.push(pad(depth) + '</' + tag + '>');
+        }
+        return;
+      }
+      var kids = Array.prototype.filter.call(el.childNodes, function (n) {
+        return n.nodeType === 1 || n.nodeType === 8 || (n.nodeType === 3 && /\S/.test(n.nodeValue));
+      });
+      if (kids.length === 0) {
+        out.push(pad(depth) + open + '</' + tag + '>');
+      } else if (kids.length === 1 && kids[0].nodeType === 3) {
+        out.push(pad(depth) + open + kids[0].nodeValue.trim() + '</' + tag + '>');
+      } else {
+        out.push(pad(depth) + open);
+        kids.forEach(function (k) {
+          if (k.nodeType === 3)      { out.push(pad(depth + 1) + k.nodeValue.trim()); }
+          else if (k.nodeType === 8) { out.push(pad(depth + 1) + '<!--' + k.nodeValue + '-->'); }
+          else                       { emit(k, depth + 1); }
+        });
+        out.push(pad(depth) + '</' + tag + '>');
+      }
+    }
+    if (doc.doctype) { out.push('<!DOCTYPE ' + doc.doctype.name + '>'); }
+    emit(doc.documentElement, 0);
+    return out.join('\n');
+  }
+
+  function wireDomTabs(domHtml) {
+    var host = document.getElementById('dom-host');
+    var bPrev = document.getElementById('t-prev');
+    var bSrc  = document.getElementById('t-src');
+    function preview() {
+      bPrev.classList.add('on'); bSrc.classList.remove('on');
+      var f = document.createElement('iframe');
+      f.className = 'dom'; f.setAttribute('sandbox', '');  // no scripts: a static visual snapshot
+      host.innerHTML = ''; host.appendChild(f);
+      f.srcdoc = domHtml;
+    }
+    function source() {
+      bSrc.classList.add('on'); bPrev.classList.remove('on');
+      var pretty = formatHtml(domHtml);
+      host.innerHTML = '<pre class="dom">' + esc(pretty != null ? pretty : domHtml) + '</pre>';
+    }
+    bPrev.onclick = preview; bSrc.onclick = source;
+    preview();
+  }
+
+  // ── loading other traces (FileReader → CORS-free, works on file://) ──
+  function readFile(file) {
+    var r = new FileReader();
+    r.onload = function () {
+      try { load(JSON.parse(r.result)); }
+      catch (e) { alert('Not a valid trace JSON: ' + e.message); }
+    };
+    r.readAsText(file);
+  }
+  document.getElementById('file').addEventListener('change', function (e) {
+    if (e.target.files[0]) { readFile(e.target.files[0]); }
+  });
+  var veil = document.getElementById('drop-veil');
+  window.addEventListener('dragover', function (e) { e.preventDefault(); veil.classList.add('on'); });
+  window.addEventListener('dragleave', function (e) { if (e.relatedTarget === null) { veil.classList.remove('on'); } });
+  window.addEventListener('drop', function (e) {
+    e.preventDefault(); veil.classList.remove('on');
+    if (e.dataTransfer.files[0]) { readFile(e.dataTransfer.files[0]); }
+  });
+  window.addEventListener('keydown', function (e) {
+    if (!trace) { return; }
+    if (e.key === 'ArrowDown' || e.key === 'j') { selected = Math.min(selected + 1, trace.steps.length - 1); renderSteps(); renderDetail(); }
+    if (e.key === 'ArrowUp'   || e.key === 'k') { selected = Math.max(selected - 1, 0); renderSteps(); renderDetail(); }
+  });
+
+  load(readEmbedded());
+})();
+</script>
+</body>
+</html>

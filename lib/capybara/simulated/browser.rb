@@ -1786,7 +1786,7 @@ module Capybara
         @stack_resolver ||= StackResolver.new(self)
       end
 
-      def log_network(method, url, status) = @trace&.log_network(method, url, status)
+      def log_network(method, url, status, **extra) = @trace&.log_network(method, url, status, **extra)
 
       # `tag#id.class` short description of the handle, for trace
       # `description` fields. One V8 round-trip; only paid when a step
@@ -3467,12 +3467,14 @@ module Capybara
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
         MAX_FETCH_REDIRECTS.times do
+          t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
           # entirely; stale-but-revalidatable → fall through with conditional
           # headers added so the server can return 304.
           cache_entry = method == 'GET' ? @@asset_cache.lookup(target) : nil
           if cache_entry&.fresh?
-            log_network(method, target, cache_entry.status)
+            # Cached static asset — log headers/type/size but skip the (boring) body.
+            trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
 
@@ -3483,14 +3485,16 @@ module Capybara
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
           merge_set_cookie(resp_headers)
-          log_network(method, target, status)
           if status == 304 && cache_entry
+            trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
             @@asset_cache.refresh(cache_entry, resp_headers)
             return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
           if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
             raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            # Log this hop (3xx) before method/body are rewritten for the next.
+            trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             redirected = true
             preserve = [307, 308].include?(status)
             next_url = resolve_against(loc, target)
@@ -3501,6 +3505,7 @@ module Capybara
             next
           end
           body_str = read_rack_body(resp_body)
+          trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
           return response_hash(status, resp_headers, body_str, target, redirected)
         end
@@ -3508,6 +3513,49 @@ module Capybara
       rescue StandardError => e
         warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
+      end
+
+      # Cap per-body capture so one big asset/response can't bloat the
+      # trace. Generous (this is a local debugging artifact).
+      NETWORK_BODY_CAP = 256 * 1024
+
+      # Enriched network log for the trace: response content-type / byte
+      # size / elapsed ms / redirect flag, plus request + response headers
+      # and bodies (devtools-style). No-ops — and skips all the lookups —
+      # unless a trace is recording, so the fetch hot path is unaffected
+      # when tracing is off.
+      def trace_network(method, url, status, req_headers, req_body, resp_headers, resp_body, t0, redirected)
+        return unless @trace
+        ct = resp_headers && (resp_headers['content-type'] || resp_headers['Content-Type'])
+        ct = ct.split(';', 2).first.strip if ct
+        size = if resp_body
+                 resp_body.bytesize
+               elsif (cl = resp_headers && (resp_headers['content-length'] || resp_headers['Content-Length']))
+                 cl.to_i
+               end
+        log_network(method, url, status,
+                    content_type:     ct,
+                    size:             size,
+                    duration_ms:      (t0 && ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round),
+                    redirected:       (redirected || nil),
+                    request_headers:  normalize_trace_headers(req_headers),
+                    request_body:     (req_body && !req_body.to_s.empty? ? cap_trace_body(req_body) : nil),
+                    response_headers: normalize_trace_headers(resp_headers),
+                    response_body:    (resp_body ? cap_trace_body(resp_body) : nil))
+      end
+
+      # JSON-safe body for the trace: binary (non-UTF-8) bodies become a
+      # placeholder rather than mojibake, and long bodies are truncated
+      # (scrubbed so a mid-codepoint cut can't yield invalid UTF-8).
+      def cap_trace_body(body)
+        s = body.to_s
+        return "[binary, #{s.bytesize} bytes]" unless s.dup.force_encoding('UTF-8').valid_encoding?
+        s.bytesize > NETWORK_BODY_CAP ? (s.byteslice(0, NETWORK_BODY_CAP).scrub + "\n…[truncated, #{s.bytesize} bytes total]") : s
+      end
+
+      def normalize_trace_headers(headers)
+        return nil unless headers
+        headers.each_with_object({}) {|(k, v), out| out[k.to_s] = v.is_a?(Array) ? v.join(', ') : v.to_s }
       end
 
       # CGI convention: `Content-Type` and `Content-Length` land in env

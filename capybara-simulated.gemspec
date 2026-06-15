@@ -21,10 +21,14 @@ Gem::Specification.new do |spec|
   spec.files = Dir[
     'lib/**/*.rb',
     'lib/capybara/simulated/js/*.js',  # bridge.bundle.js + snapshot_stubs.js — NOT src/
+    'lib/capybara/simulated/*.html',   # trace_viewer.html — the `trace` CLI's viewer template
     'vendor/js/*.js',
+    'exe/*',
     'README.md',
     'LICENSE'
   ]
+  spec.bindir        = 'exe'
+  spec.executables   = ['capybara-simulated']
   spec.require_paths = ['lib']
 
   spec.add_dependency 'capybara', '>= 3.37'
