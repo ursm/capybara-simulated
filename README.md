@@ -309,13 +309,13 @@ followed by the short list of things that need a real browser **by design**.
 
 - **`within_frame` / `switch_to_frame`** (V8 engine) — each `<iframe>` runs
   its own scripts in its own per-frame realm; the DSL routes finds, reads,
-  interactions, `evaluate_script`, and self-targeted navigation (a link /
-  form submit) into the active frame, nested frames included (the frame's
-  realm is rebuilt from the fetched document; the top page is untouched) —
-  link clicks, form submits, and JS-driven `location.*` all stay in the
-  frame. The one edge: a `_parent`-targeted link from a frame nested ≥2
-  levels deep navigates the top page rather than the intermediate frame.
-  QuickJS has no nested browsing context, so `within_frame` raises there.
+  interactions, `evaluate_script`, and navigation into the active frame,
+  nested frames included (the target frame's realm is rebuilt from the
+  fetched document; the top page is untouched). Link clicks, form submits,
+  and JS-driven `location.*` stay in the frame, and a `_parent`-targeted
+  link from a deeply nested frame rebuilds the intermediate frame rather
+  than the top page. QuickJS has no nested browsing context, so
+  `within_frame` raises there.
 - **Multiple windows / tabs** (both engines) — each window is its own
   Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
   shared). `open_new_window` / `within_window` / `switch_to_window` /

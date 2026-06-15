@@ -411,11 +411,18 @@ module Capybara
       # keeps the new realm's `parent`/`top` wired to the owning realm. The
       # Browser then re-points the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type)
-        if (fr = frame_realms.delete(old_id))
-          @realm_module_handles&.delete(old_id)
-          fr.dispose rescue nil
-        end
+        dispose_frame_realm(old_id)
         create_frame_realm(ctx, url, body, content_type, parent_id)
+      end
+
+      # Tear down a single frame realm (e.g. a descendant frame destroyed when an
+      # ancestor frame re-navigates). No-op for nil/0/unknown ids.
+      def dispose_frame_realm(id)
+        return if id.nil? || id.zero?
+        @realm_module_handles&.delete(id)
+        fr = frame_realms.delete(id)
+        fr.dispose rescue nil if fr
+        nil
       end
 
       # One native microtask checkpoint — a checkpoint runs the queue until

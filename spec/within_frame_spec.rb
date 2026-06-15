@@ -24,10 +24,15 @@ RSpec.describe 'within_frame / switch_to_frame' do
             <input id="fieldInFrameOne" type="text">
             <button id="btnInFrameOne" onclick="document.getElementById('divInFrameOne').textContent = 'clicked'">go</button>
             <a id="frameLink" href="/frame_page2">go to page 2</a>
+            <a id="parentNavLink" target="_parent" href="/frame_two">to parent</a>
             <button id="frameLocBtn" onclick="location.href='/frame_page2'">js nav</button>
             <form id="frameForm" action="/frame_form_target" method="post">
               <input type="text" name="q" value="hi">
               <button type="submit">submit</button>
+            </form>
+            <form id="parentForm" action="/frame_form_target" target="_parent" method="post">
+              <input type="text" name="q" value="par">
+              <button type="submit">send to parent</button>
             </form>
             </body></html>
           HTML
@@ -155,6 +160,31 @@ RSpec.describe 'within_frame / switch_to_frame' do
       end
       expect(session).to have_css('body#parentBody')
     end
+    expect(session.find(:css, '#divInMainWindow')).to be_truthy
+  end
+
+  it 'navigates the parent frame (not the top page) on a _parent-targeted link from a doubly-nested frame' do
+    session.within_frame('parentFrame') do
+      session.within_frame('childFrame') do
+        session.click_link('to parent')   # target="_parent" → navigates parentFrame
+      end
+      # Back in parentFrame's context: it now holds the navigated document.
+      expect(session).to have_css('#divInFrameTwo', text: 'This is the text of divInFrameTwo')
+    end
+    # The top page is untouched.
+    expect(session.current_url).to end_with('/')
+    expect(session.find(:css, '#divInMainWindow')).to be_truthy
+  end
+
+  it 'submits a _parent-targeted form into the parent frame from a doubly-nested frame' do
+    session.within_frame('parentFrame') do
+      session.within_frame('childFrame') do
+        session.find(:css, '#parentForm button').click   # target="_parent" form POST
+      end
+      # The parent frame holds the POST response.
+      expect(session).to have_css('#posted', text: 'posted q=par')
+    end
+    expect(session.current_url).to end_with('/')
     expect(session.find(:css, '#divInMainWindow')).to be_truthy
   end
 end
