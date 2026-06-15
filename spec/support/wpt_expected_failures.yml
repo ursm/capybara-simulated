@@ -338,33 +338,9 @@ domparsing/DOMParser-parseFromString-xml-doctype.html:
 domparsing/DOMParser-parseFromString-xml-internal-subset.html:
 - Parsing and serialization of doctype internal subset
 domparsing/XMLSerializer-serializeToString.html:
-- Check if "ns1" is generated even if the element already has xmlns:ns1.
 - Check if a prefix bound to an empty namespace URI ("no namespace") serialize
-- Check if an attribute with namespace and no prefix is serialized with the nearest-declared
-  prefix
-- Check if an attribute with namespace and no prefix is serialized with the nearest-declared
-  prefix even if the prefix is assigned to another namespace.
-- Check if attribute serialization takes into account of following xmlns:* attributes
-- Check if attribute serialization takes into account of the same prefix declared
-  in an ancestor element
-- Check if end tag serialization matches start tag for elements in the XML namespace.
-- Check if end tag serialization matches start tag when an appropriate prefix is found.
-- Check if generated prefixes match to "ns${index}".
 - Check if no special handling for XLink namespace unlike HTML serializer.
-- Check if start tag serialization applied the original prefix even if it is declared
-  in an ancestor element.
-- Check if start tag serialization does NOT apply the default namespace if its namespace
-  is declared in an ancestor.
-- Check if start tag serialization drops element prefix if the namespace is same as
-  inherited default namespace.
-- Check if start tag serialization finds an appropriate prefix.
-- Check if start tag serialization takes into account of its xmlns:* attributes
-- Check if the prefix of an attribute is NOT preserved in a case where neither its
-  prefix nor its namespace URI is not already used.
-- Check if the prefix of an attribute is replaced with a generated one in a case where
-  the prefix is already mapped to a different namespace URI.
-- Check if the prefix of an attribute is replaced with another existing prefix mapped
-  to the same namespace URI.
+- Drop inconsistent xmlns="..." by matching on local name
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
 domparsing/domparser-spurious-attributes.html:
@@ -1629,7 +1605,6 @@ url/percent-encoding.window.js:
 - Input  with encoding gb18030
 - Input  with encoding utf-8
 url/url-constructor.any.js:
-- 'Parsing: <??a=b&c=d> against <http://example.org/foo/bar>'
 - 'Parsing: <file://%C2%AD/p> without base'
 - 'Parsing: <file://a%C2%ADb/p> without base'
 - 'Parsing: <file://a­b/p> without base'
@@ -1679,9 +1654,6 @@ url/url-origin.any.js:
 - 'Origin parsing: <https://%e2%98%83> without base'
 - 'Origin parsing: <https://a%C2%ADb/> without base'
 - 'Origin parsing: <https://faß.ExAmPlE/> without base'
-url/url-searchparams.any.js:
-- URL.searchParams and URL.search setters, update propagation
-- URL.searchParams setter, invalid values
 url/url-setters-a-area.window.js:
 - "<a>: Setting <https://example.com/>.host = '%C2%AD'"
 - "<a>: Setting <https://example.com/>.host = 'a%C2%ADb'"
@@ -1711,25 +1683,5 @@ url/url-setters.any.js:
 - 'URL: Setting <https://example.com/>.hostname = ''xn--'''
 - 'URL: Setting <https://example.com/>.hostname = ''­'''
 - 'URL: Setting <https://x/>.host = ''ß'' IDNA Nontransitional_Processing'
-url/urlencoded-parser.any.js:
-- 'URLSearchParams constructed with: %EF%BB%BFtest=%EF%BB%BF'
-- "URLSearchParams constructed with: \uFEFFtest=\uFEFF"
 url/urlsearchparams-constructor.any.js:
-- Construct with 2 unpaired surrogates (no trailing)
-- Construct with 3 unpaired surrogates (no leading)
-- Construct with object with NULL, non-ASCII, and surrogate keys
-- Custom [Symbol.iterator]
 - URLSearchParams constructor, DOMException as argument
-url/urlsearchparams-delete.any.js:
-- Two-argument delete()
-- Two-argument delete() respects undefined as second arg
-url/urlsearchparams-foreach.any.js:
-- For-of Check
-- delete current param during iteration
-- delete every param seen during iteration
-- delete next param during iteration
-url/urlsearchparams-has.any.js:
-- Two-argument has()
-- Two-argument has() respects undefined as second arg
-url/urlsearchparams-set.any.js:
-- Set basics
