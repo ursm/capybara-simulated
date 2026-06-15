@@ -67,9 +67,24 @@ module Capybara
         @console_buf << {severity: severity.to_s, message: message.to_s}
       end
 
-      def log_network(method, url, status)
+      def log_network(method, url, status,
+                      content_type: nil, size: nil, duration_ms: nil, redirected: nil,
+                      request_headers: nil, request_body: nil,
+                      response_headers: nil, response_body: nil)
         return unless @open_step
-        @network_buf << {method: method.to_s, url: url.to_s, status: status}
+        @network_buf << {
+          method:           method.to_s,
+          url:              url.to_s,
+          status:           status,
+          content_type:     content_type,
+          size:             size,
+          duration_ms:      duration_ms,
+          redirected:       redirected,
+          request_headers:  request_headers,
+          request_body:     request_body,
+          response_headers: response_headers,
+          response_body:    response_body
+        }.compact  # drop fields the caller couldn't determine, keeping entries lean
       end
 
       def begin_step(kind, description:, url_before: nil)

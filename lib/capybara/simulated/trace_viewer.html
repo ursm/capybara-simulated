@@ -80,10 +80,27 @@
   .log .sev.error { color: var(--error); } .log .sev.warn, .log .sev.warning { color: var(--warn); }
   .log .sev.debug { color: var(--muted); }
   .log .msg { white-space: pre-wrap; word-break: break-word; }
+  .net-hint { font-size: 11px; margin-bottom: 6px; }
   .net { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  .net th, .net td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--border); }
+  .net th, .net td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
   .net th { color: var(--muted); font-weight: 600; }
   .net td.method { font-weight: 600; } .net td.url { word-break: break-all; }
+  .net td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .net td.status { font-variant-numeric: tabular-nums; }
+  .net td.status.ok { color: var(--ok); } .net td.status.redir { color: var(--warn); } .net td.status.err { color: var(--error); }
+  .net-row { cursor: pointer; }
+  .net-row:hover { background: var(--bg); }
+  .net-row.open { background: var(--accent-soft); }
+  .redir-tag { display: inline-block; font-size: 10px; font-weight: 600; color: var(--warn);
+               background: #fff5e6; border-radius: 8px; padding: 0 6px; vertical-align: middle; }
+  .net-detail td { background: var(--bg); }
+  .net-sub { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+             letter-spacing: .03em; margin: 8px 0 4px; }
+  .net-detail .net-sub:first-child { margin-top: 0; }
+  .kv.hdr { font-size: 12px; grid-template-columns: max-content 1fr; gap: 1px 12px; }
+  .kv.hdr dt { color: var(--muted); }
+  .net-body { max-height: 260px; overflow: auto; background: var(--code); border: 1px solid var(--border);
+              border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
   .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
   .tabs button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   iframe.dom { width: 100%; height: 460px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
@@ -177,6 +194,36 @@
     return '<section class="block"><h3>' + title + '</h3>' + bodyHtml + '</section>';
   }
 
+  function fmtBytes(n) {
+    if (n == null) { return ''; }
+    if (n < 1024) { return n + ' B'; }
+    if (n < 1048576) { return (n / 1024).toFixed(1) + ' KB'; }
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  function statusClass(st) {
+    var c = Math.floor((+st || 0) / 100);
+    return c === 2 ? 'ok' : c === 3 ? 'redir' : (c >= 4 ? 'err' : '');
+  }
+  function headerTable(h) {
+    var keys = h ? Object.keys(h) : [];
+    if (!keys.length) { return '<div class="muted">—</div>'; }
+    return '<dl class="kv hdr">' + keys.map(function (k) {
+      return '<dt>' + esc(k) + '</dt><dd>' + esc(h[k]) + '</dd>';
+    }).join('') + '</dl>';
+  }
+  function bodyBlock(label, body) {
+    if (body == null || body === '') { return ''; }
+    return '<div class="net-sub">' + label + '</div><pre class="net-body">' + esc(body) + '</pre>';
+  }
+  function wireNetwork() {
+    detailEl.querySelectorAll('tr.net-row').forEach(function (row) {
+      row.onclick = function () {
+        var d = detailEl.querySelector('tr.net-detail[data-i="' + row.getAttribute('data-i') + '"]');
+        if (d) { d.hidden = !d.hidden; row.classList.toggle('open'); }
+      };
+    });
+  }
+
   function renderDetail() {
     var s = trace.steps[selected];
     if (!s) { detailEl.innerHTML = ''; return; }
@@ -210,12 +257,30 @@
     }
 
     if (s.network && s.network.length) {
-      var rows = s.network.map(function (n) {
-        return '<tr><td class="method">' + esc(n.method) + '</td><td class="url">' + esc(n.url) +
-               '</td><td>' + esc(n.status) + '</td></tr>';
+      var rows = s.network.map(function (n, i) {
+        var head =
+          '<tr class="net-row" data-i="' + i + '">' +
+            '<td class="method">' + esc(n.method) + '</td>' +
+            '<td class="url">' + esc(n.url) +
+              (n.redirected ? ' <span class="redir-tag">redirect</span>' : '') + '</td>' +
+            '<td class="status ' + statusClass(n.status) + '">' + esc(n.status) + '</td>' +
+            '<td>' + esc(n.content_type || '') + '</td>' +
+            '<td class="num">' + fmtBytes(n.size) + '</td>' +
+            '<td class="num">' + (n.duration_ms == null ? '' : n.duration_ms + ' ms') + '</td>' +
+          '</tr>';
+        var detail =
+          '<tr class="net-detail" data-i="' + i + '" hidden><td colspan="6">' +
+            '<div class="net-sub">Request headers</div>' + headerTable(n.request_headers) +
+            bodyBlock('Request body', n.request_body) +
+            '<div class="net-sub">Response headers</div>' + headerTable(n.response_headers) +
+            bodyBlock('Response body', n.response_body) +
+          '</td></tr>';
+        return head + detail;
       }).join('');
       html += section('Network (' + s.network.length + ')',
-        '<table class="net"><tr><th>Method</th><th>URL</th><th>Status</th></tr>' + rows + '</table>');
+        '<div class="muted net-hint">Click a request for headers and bodies.</div>' +
+        '<table class="net"><tr><th>Method</th><th>URL</th><th>Status</th>' +
+        '<th>Type</th><th>Size</th><th>Time</th></tr>' + rows + '</table>');
     }
 
     if (s.dom_after) {
@@ -230,6 +295,7 @@
 
     detailEl.innerHTML = html;
     detailEl.scrollTop = 0;
+    if (s.network && s.network.length) { wireNetwork(); }
     if (s.dom_after) { wireDomTabs(s.dom_after); }
   }
 

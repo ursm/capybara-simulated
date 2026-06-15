@@ -23,6 +23,28 @@ RSpec.describe Capybara::Simulated::Trace do
     end
   end
 
+  describe '#log_network' do
+    it 'records the rich fields and drops the ones the caller omitted' do
+      t = described_class.new
+      t.begin_step(:click, description: 'Pay')
+      t.log_network('POST', '/api', 500,
+                    content_type: 'application/json', size: 86, duration_ms: 42,
+                    request_headers: {'X-CSRF-Token' => 'abc'}, request_body: '{"a":1}',
+                    response_headers: {'content-type' => 'application/json'}, response_body: '{"error":"x"}')
+      t.log_network('GET', '/style.css', 200)  # bare call — extras absent
+      t.finish_step
+
+      rich, bare = t.steps.first.network
+      expect(rich).to include(
+        method: 'POST', status: 500, content_type: 'application/json', size: 86,
+        request_body: '{"a":1}', response_body: '{"error":"x"}'
+      )
+      expect(rich[:request_headers]).to eq({'X-CSRF-Token' => 'abc'})
+      # compact: a bare call carries no nil keys for the fields it didn't set.
+      expect(bare.keys).to contain_exactly(:method, :url, :status)
+    end
+  end
+
   describe '.render_viewer' do
     it 'embeds the JSON, leaving no unreplaced placeholder' do
       html = described_class.render_viewer(sample_trace.to_json)
