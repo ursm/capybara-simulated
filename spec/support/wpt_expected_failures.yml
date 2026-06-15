@@ -331,9 +331,6 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
 - NodeFilter is cross-realm plain object with non-callable 'acceptNode' property
 - NodeFilter is cross-realm plain object with revoked Proxy as 'acceptNode' property
 - NodeFilter is cross-realm plain object without 'acceptNode' property
-dom/window-extends-event-target.html:
-- EventTarget methods on Window instances are inherited from the EventTarget prototype
-- window.addEventListener respects custom `this`
 domparsing/DOMParser-parseFromString-encoding.html:
 - 'HTML: meta charset'
 domparsing/DOMParser-parseFromString-html.html:
