@@ -2,9 +2,8 @@
 
 A lightweight Capybara driver that runs JavaScript against an
 in-process JS-resident DOM, with no Chrome. Forms submit through
-`Rack::MockRequest`, inline `<script>` and event handlers run,
-MutationObserver / custom elements / `<template>` / Shadow DOM /
-Trix / Stimulus / Turbo all work, and the Capybara DSL is unchanged.
+`Rack::MockRequest`, inline `<script>` and event handlers run, and the
+Capybara DSL is unchanged.
 
 The DOM lives entirely inside the JS engine — V8 via
 [rusty_racer](https://github.com/ursm/rusty_racer) or QuickJS via
@@ -58,10 +57,9 @@ Mastodon / Discourse) runs its full system suite against the driver in
 [capybara-simulated-vs-world](https://github.com/ursm/capybara-simulated-vs-world)
 as an integration check.
 
-The remaining gaps need a real layout engine (`elementFromPoint`,
-truthy `getBoundingClientRect`, viewport-clip visibility, `display:
-contents` table edge cases) — the same set Selenium escapes via
-screenshots and this driver deliberately doesn't simulate.
+The remaining gaps are the layout / pixel-geometry features the driver
+deliberately doesn't simulate — the same set Selenium escapes via
+screenshots (see [Capabilities & limits](#capabilities--limits)).
 
 ## Install
 
@@ -310,12 +308,9 @@ followed by the short list of things that need a real browser **by design**.
 - **`within_frame` / `switch_to_frame`** (V8 engine) — each `<iframe>` runs
   its own scripts in its own per-frame realm; the DSL routes finds, reads,
   interactions, `evaluate_script`, and navigation into the active frame,
-  nested frames included (the target frame's realm is rebuilt from the
-  fetched document; the top page is untouched). Link clicks, form submits,
-  and JS-driven `location.*` stay in the frame, and a `_parent`-targeted
-  link from a deeply nested frame rebuilds the intermediate frame rather
-  than the top page. QuickJS has no nested browsing context, so
-  `within_frame` raises there.
+  nested frames included — the target frame's realm is rebuilt from the
+  fetched document, the top page untouched. QuickJS has no nested browsing
+  context, so `within_frame` raises there.
 - **Multiple windows / tabs** (both engines) — each window is its own
   Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
   shared). `open_new_window` / `within_window` / `switch_to_window` /
@@ -330,10 +325,10 @@ followed by the short list of things that need a real browser **by design**.
   (Ruby has no distinct `undefined`). Window viewport APIs (`maximize` /
   `fullscreen` / pixel-exact `resize_to`) are no-ops (no layout engine).
 - **WebSocket + Action Cable** — `new WebSocket(url)` works in-process over
-  the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455:
-  handshake + subprotocol negotiation, masked frames, ping/pong, close). The
-  real `@rails/actioncable` consumer connects, subscribes, and receives
-  broadcasts, so `turbo_stream_from` live updates work. Constraints: server
+  the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455, including
+  subprotocol negotiation). The real `@rails/actioncable` consumer connects,
+  subscribes, and receives broadcasts, so `turbo_stream_from` live updates
+  work. Constraints: server
   pushes land at settle (not instant); the Cable app must use the **async /
   in-process** adapter (a real Redis adapter needs real Redis); binary frames
   are V8-only (QuickJS corrupts raw bytes across the host boundary — text,
