@@ -270,21 +270,6 @@ isolate whose context is reset to a clean realm per navigation
 snapshot-loaded VM out of a small pre-warmed pool. Either way, every
 navigation lands on a clean, warm JS context near-instantly.
 
-**Wall time is sensitive to whether the app uses Turbo Drive**,
-because navigation simulates real-browser semantics:
-
-| navigation source | what happens |
-|---|---|
-| `visit(...)`, `refresh`, programmatic `location.assign` | full reload — fresh JS Context, scripts re-evaluated |
-| link click *with Turbo Drive loaded* | Turbo intercepts, body-swap via JS, **JS context preserved** |
-| link click *without Turbo Drive* | full reload (anchor default action) |
-| form submit *with Turbo Drive loaded* | Turbo intercepts (turbo-frame or page-level), body-swap |
-| form submit *without Turbo Drive* | full reload |
-
-So Turbo Drive apps stay fast even with click-heavy tests; non-Turbo
-apps pay full-reload cost per click — exactly mirroring what the
-production site does.
-
 ### Library snapshot policy
 
 Per visit, `<script src>`-referenced libraries (jQuery, Stimulus,
@@ -407,39 +392,6 @@ followed by the short list of things that need a real browser **by design**.
 - `lib/capybara/simulated/node.rb` — `Driver::Node` over a
   `(handle_id, context_gen)` pair so a handle from a pre-rebuild
   Context can't ghost into the next one.
-
-## ES modules + importmap
-
-`<script type="module">` and `<script type="importmap">` work the
-same way they do in a real browser: bare specifiers resolve through
-the importmap, relative paths resolve against the importer's URL,
-and every load (including dynamic `import(...)`) routes back through
-the in-process Rack app. No bundling step, no Node toolchain.
-
-The standard importmap-rails layout works as-is:
-
-```erb
-<%= javascript_importmap_tags %>
-<!-- emits:
-  <script type="importmap">{ "imports": { "application": "/assets/application-...js", ... } }</script>
-  <script type="module">import "application"</script>
--->
-```
-
-## Hotwire (Stimulus + Turbo)
-
-Stimulus and Turbo work both via UMD (classic `<script src>`) and via
-the standard ESM bundles imported through importmap. For
-importmap-rails apps, no changes are needed:
-
-```ruby
-# config/importmap.rb
-pin '@hotwired/stimulus'
-pin '@hotwired/turbo'
-```
-
-`window.fetch` routes through Rack, so Turbo's frame fetch and
-link-action POSTs round-trip the test app.
 
 ## License
 
