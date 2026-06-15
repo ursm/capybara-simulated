@@ -37,35 +37,15 @@ visual layout:
 
 **Reach for a real browser** (Selenium / Cuprite) **when** your tests need
 what this driver doesn't simulate **by design** — there's no rendering
-engine or real network stack, the same ground Selenium covers via a real
-browser:
+engine: **pixel layout** (`getBoundingClientRect()` returns zeros,
+`elementFromPoint()` isn't implemented, so visual hit-testing, coordinate
+drag-and-drop, and sticky-scroll math don't work) and **screenshots**.
 
-- **Pixel layout** — `getBoundingClientRect()` returns zeros and
-  `elementFromPoint()` isn't implemented, so visual hit-testing,
-  coordinate drag-and-drop, and sticky-scroll math don't work.
-- **Real networking** — `fetch` / XHR are synchronous through Rack: no
-  streaming, no HTTP concurrency. (`EventSource` and `WebSocket` *do*
-  work — they ride real reader threads / the in-process `rack.hijack`
-  socket; see below.)
-- **Screenshots**.
-
-**`within_frame` / `switch_to_frame`** work on the V8 (rusty_racer) engine:
-each `<iframe>` runs its own scripts in its own per-frame realm, and the DSL
-routes finds, reads, interactions, `evaluate_script`, and self-targeted
-navigation (a link or form submit inside the frame) into the active frame —
-nested frames included. (QuickJS keeps a same-realm fallback, so
-`within_frame` is V8-only.)
-
-**Multiple windows / tabs** work on both engines: each window is its own
-Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
-shared). `open_new_window` / `within_window` / `switch_to_window` /
-`window_opened_by` drive them, and JS `window.open` opens a real window,
-`window.opener` points back to the opener, and `postMessage` is delivered
-across windows. (`target="_blank"` defaults to no-opener, matching modern
-browsers; cross-window `postMessage` data is JSON-shaped, not a full
-structured clone.)
-
-See [Known limits](#known-limits) for the full picture.
+Most of the rest runs in-process — including the things that usually mean
+"you need a real browser": **`within_frame`**, **multiple windows / tabs**,
+**WebSocket + Action Cable**, **EventSource**, and **Web Workers** all work.
+Each has constraints (JS engine, settle-timing, no layout); see
+[Capabilities & limits](#capabilities--limits).
 
 ## Status
 
@@ -335,67 +315,66 @@ referenced page-specific DOM.
   for 2 s; the callback fires once polling has advanced the clock past
   it.
 
-## Known limits
+## Capabilities & limits
 
-- **No layout engine.** `visible?` and `Node#style` consult the CSS
-  cascade and the inline `style` attribute, but
-  `getBoundingClientRect()` returns zeros and `elementFromPoint()`
-  isn't implemented. Click offsets work for fixture-style absolute /
-  relative positioning (ancestor-summed `top`/`left`); position-via-
-  layout (Dragula drops, sticky-header scroll math) needs a real
-  browser.
-- **`:hover` / `:focus-within`-gated content** is reachable two ways:
-  call `element.hover` explicitly (we track the most-recently-hovered
-  element and propagate `:hover` up its chain), or rely on the
-  candidate-chain fallback (when stateless cascade reports
-  `display: none`, we re-evaluate with the candidate itself in the
-  `:hover` set). Symmetric peers — N rows each with `tr:hover .icon`
-  revealing `.icon`, queried as bare `find('.icon')` — reveal all and
-  Capybara raises `Capybara::Ambiguous`. Scope the test (`find('tr',
-  text: 'foo').hover` then `find('.icon')`) — also more robust
-  against real-browser flake.
-- **`fetch` is synchronous-via-Rack** — HTML / JSON round-trips work
-  but there's no real network, no streaming, no `Request#body`
-  ReadableStream, and no concurrent requests. XHR is implemented
-  with the same Rack pass-through.
-- **WebSocket** works in-process: `new WebSocket(url)` rides the
-  `rack.hijack` socket the Rack app hijacks, with a hand-rolled RFC6455
-  client (handshake + subprotocol negotiation, masked client frames,
-  ping/pong, close handshake). Frames deliver as `message` events when
-  the page next settles, like SSE. **Action Cable** works end-to-end on
-  this: the real `@rails/actioncable` consumer connects, subscribes, and
-  receives server broadcasts (so `turbo_stream_from` live updates are
-  reachable) — Action Cable hijacks the connection just as csim drives
-  it. Caveats: server pushes land at settle (not instant); the app must
-  use the **async / in-process** Cable adapter (a real Redis adapter
-  would need real Redis); binary frames are V8-only (QuickJS corrupts
-  raw bytes across the host boundary — text, hence Action Cable, is fine
-  on both). `EventSource` and Web Workers are likewise implemented.
-- **Screenshots and drag pixel coordinates** are out of scope by
-  design — use Selenium / Cuprite.
-- **`within_frame` / `switch_to_frame`** work on the V8 engine: each
-  `<iframe>` runs in its own per-frame realm and the DSL routes finds,
-  reads, interactions, `evaluate_script`, and self-targeted navigation
-  (link / form submit) into the active frame (nested frames included) — the
-  frame's realm is rebuilt from the fetched document, leaving the top page
-  untouched. `_top` navigates the main page; a `_parent` target from a
-  frame nested ≥2 levels falls back to navigating the main page, and
-  cross-origin frame locality resolves against the main origin. QuickJS has
-  no nested browsing context, so `within_frame` raises there.
-- **Multiple windows / tabs** work on both engines: each window is its own
+Most features run in-process; the notes below are mostly "works, but…",
+followed by the short list of things that need a real browser **by design**.
+
+### Works, with constraints
+
+- **`within_frame` / `switch_to_frame`** (V8 engine) — each `<iframe>` runs
+  its own scripts in its own per-frame realm; the DSL routes finds, reads,
+  interactions, `evaluate_script`, and self-targeted navigation (a link /
+  form submit) into the active frame, nested frames included (the frame's
+  realm is rebuilt from the fetched document; the top page is untouched).
+  A `_top` link navigates the main page; a `_parent` target from a frame
+  nested ≥2 levels falls back to the main page; cross-origin frame locality
+  resolves against the main origin. QuickJS has no nested browsing context,
+  so `within_frame` raises there.
+- **Multiple windows / tabs** (both engines) — each window is its own
   Browser + JS VM (own DOM, sessionStorage, history; cookies + localStorage
-  shared across windows). `open_new_window` / `within_window` /
-  `switch_to_window` / `window_opened_by` drive them; JS `window.open` opens
-  a real window, `window.opener` links back, and `postMessage` is routed
-  across windows (delivered as a `message` event when the target window next
-  settles). Caveats: `target="_blank"` opens with no opener (modern-browser
-  no-opener default); cross-window `postMessage` data is JSON-shaped, not a
-  full structured clone (no `DataCloneError`, `undefined`→`null`) — but a
-  buffer in the `transfer` list moves **zero-copy** (its backing store crosses
-  isolates by token and the source is detached); and only the active window's
-  event loop runs, so a message is delivered when you switch to its window.
-  Window viewport APIs (`maximize` / `fullscreen` /
-  pixel-exact `resize_to`) are no-ops — no layout engine.
+  shared). `open_new_window` / `within_window` / `switch_to_window` /
+  `window_opened_by` drive them; JS `window.open` opens a real window,
+  `window.opener` links back, and `postMessage` crosses windows. Only the
+  active window's event loop runs, so a message is delivered when you switch
+  to its window. `target="_blank"` opens with no opener (modern-browser
+  default); `postMessage` data is JSON-shaped, not a full structured clone
+  (no `DataCloneError`, `undefined`→`null`) — though a `transfer`-list buffer
+  moves **zero-copy** (backing store by token, source detached). Window
+  viewport APIs (`maximize` / `fullscreen` / pixel-exact `resize_to`) are
+  no-ops (no layout engine).
+- **WebSocket + Action Cable** — `new WebSocket(url)` works in-process over
+  the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455:
+  handshake + subprotocol negotiation, masked frames, ping/pong, close). The
+  real `@rails/actioncable` consumer connects, subscribes, and receives
+  broadcasts, so `turbo_stream_from` live updates work. Constraints: server
+  pushes land at settle (not instant); the Cable app must use the **async /
+  in-process** adapter (a real Redis adapter needs real Redis); binary frames
+  are V8-only (QuickJS corrupts raw bytes across the host boundary — text,
+  hence Action Cable, works on both engines). `EventSource` and Web Workers
+  are likewise real (background reader threads draining at settle).
+- **`fetch` / XHR** — synchronous through Rack: HTML / JSON round-trips work,
+  but there's no streaming, no `Request#body` ReadableStream, and no
+  concurrent requests.
+- **`:hover` / `:focus-within`-gated content** — reachable two ways: call
+  `element.hover` explicitly (we track the most-recently-hovered element and
+  propagate `:hover` up its chain), or rely on the candidate-chain fallback
+  (when the stateless cascade reports `display: none`, we re-evaluate with the
+  candidate itself in the `:hover` set). Symmetric peers — N rows each with
+  `tr:hover .icon` revealing `.icon`, queried as a bare `find('.icon')` —
+  reveal all and Capybara raises `Capybara::Ambiguous`; scope the test
+  (`find('tr', text: 'foo').hover` then `find('.icon')`), which is also more
+  robust against real-browser flake.
+
+### Out of scope (by design — use Selenium / Cuprite)
+
+- **Layout / pixel geometry.** `visible?` and `Node#style` consult the CSS
+  cascade and the inline `style` attribute, but `getBoundingClientRect()`
+  returns zeros and `elementFromPoint()` isn't implemented. Click offsets work
+  for fixture-style absolute / relative positioning (ancestor-summed
+  `top`/`left`); position-via-layout (Dragula drops, sticky-header scroll math,
+  viewport-clip visibility) needs a real browser.
+- **Screenshots.**
 
 ## Architecture
 
