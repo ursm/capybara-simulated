@@ -233,6 +233,63 @@
     if (s.dom_after) { wireDomTabs(s.dom_after); }
   }
 
+  // Pretty-print a DOM-snapshot HTML string for the source view: the
+  // driver serializes flat (one line), so we re-parse with the browser's
+  // own DOMParser and re-emit indented. Returns null on any parse trouble
+  // → caller falls back to the raw string. Raw-text / preformatted
+  // elements (pre/textarea/script/style) keep their content verbatim. The
+  // result is raw HTML text — the caller esc()s it once for display.
+  var VOID = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+  var RAWEL = new Set(['pre','textarea','script','style']);
+  function formatHtml(html) {
+    var doc;
+    try { doc = new DOMParser().parseFromString(html, 'text/html'); }
+    catch (_) { return null; }
+    if (!doc || !doc.documentElement) { return null; }
+    var out = [];
+    var pad = function (d) { return '  '.repeat(d); };
+    var attrs = function (el) {
+      return Array.prototype.map.call(el.attributes, function (a) {
+        return a.value === '' ? ' ' + a.name : ' ' + a.name + '="' + a.value + '"';
+      }).join('');
+    };
+    function emit(el, depth) {
+      var tag = el.tagName.toLowerCase();
+      var open = '<' + tag + attrs(el) + '>';
+      if (VOID.has(tag)) { out.push(pad(depth) + open); return; }
+      if (RAWEL.has(tag)) {
+        var text = el.textContent;
+        if (text.indexOf('\n') === -1) {
+          out.push(pad(depth) + open + text + '</' + tag + '>');
+        } else {
+          out.push(pad(depth) + open);
+          text.split('\n').forEach(function (l) { out.push(l); });  // verbatim, no re-indent
+          out.push(pad(depth) + '</' + tag + '>');
+        }
+        return;
+      }
+      var kids = Array.prototype.filter.call(el.childNodes, function (n) {
+        return n.nodeType === 1 || n.nodeType === 8 || (n.nodeType === 3 && /\S/.test(n.nodeValue));
+      });
+      if (kids.length === 0) {
+        out.push(pad(depth) + open + '</' + tag + '>');
+      } else if (kids.length === 1 && kids[0].nodeType === 3) {
+        out.push(pad(depth) + open + kids[0].nodeValue.trim() + '</' + tag + '>');
+      } else {
+        out.push(pad(depth) + open);
+        kids.forEach(function (k) {
+          if (k.nodeType === 3)      { out.push(pad(depth + 1) + k.nodeValue.trim()); }
+          else if (k.nodeType === 8) { out.push(pad(depth + 1) + '<!--' + k.nodeValue + '-->'); }
+          else                       { emit(k, depth + 1); }
+        });
+        out.push(pad(depth) + '</' + tag + '>');
+      }
+    }
+    if (doc.doctype) { out.push('<!DOCTYPE ' + doc.doctype.name + '>'); }
+    emit(doc.documentElement, 0);
+    return out.join('\n');
+  }
+
   function wireDomTabs(domHtml) {
     var host = document.getElementById('dom-host');
     var bPrev = document.getElementById('t-prev');
@@ -246,7 +303,8 @@
     }
     function source() {
       bSrc.classList.add('on'); bPrev.classList.remove('on');
-      host.innerHTML = '<pre class="dom">' + esc(domHtml) + '</pre>';
+      var pretty = formatHtml(domHtml);
+      host.innerHTML = '<pre class="dom">' + esc(pretty != null ? pretty : domHtml) + '</pre>';
     }
     bPrev.onclick = preview; bSrc.onclick = source;
     preview();
