@@ -399,10 +399,7 @@ domparsing/innerhtml-mxss.sub.html:
 domparsing/insert_adjacent_html-xhtml.xhtml:
 - insertAdjacentHTML in HTML
 domparsing/style_attribute_html.html:
-- Parsing of initial style attribute
 - Parsing of invalid style attribute
-- Parsing of style attribute
-- Update style.backgroundColor
 domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
 - streamAfterHTML with trusted types and no default policy returns a WritableStream.
 - streamAppendHTML with trusted types and no default policy returns a WritableStream.
