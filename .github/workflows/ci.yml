@@ -44,12 +44,6 @@ jobs:
   # subtests. One Ruby suffices — the QuickJS-specific risk is in the engine
   # layer, not the (V8-matrix-covered) Ruby driver code.
   test-quickjs:
-    # Runs only when code lands on `main`, not on every PR: the QuickJS suite is
-    # boot-bound (~3x slower — each navigation rebuilds the VM, no V8-style heap
-    # snapshot) and that wall time gated PR feedback. Keeping it off the PR
-    # critical path keeps PRs fast while still catching QuickJS regressions
-    # immediately at merge.
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
