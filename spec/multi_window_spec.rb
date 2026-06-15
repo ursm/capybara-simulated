@@ -24,6 +24,11 @@ RSpec.describe 'multi-window' do
                 window.popup.postMessage(buf, '*', [buf]);          // TRANSFER (zero-copy)
                 return buf.byteLength;                              // 0 if detached
               };
+              window.postCloneToPopup = function () {
+                // Structured-clone fidelity: a Map (+ nested Set / Date / BigInt)
+                // must arrive as the same live types, not degrade to plain objects.
+                window.popup.postMessage(new Map([['a', 1], ['b', 2]]), '*');
+              };
             </script>
           </body></html>
         HTML
@@ -38,6 +43,8 @@ RSpec.describe 'multi-window' do
                 if (e.data instanceof ArrayBuffer) {
                   const b = new Uint8Array(e.data);
                   document.title = 'POPUP_BUF:' + b.reduce((a, x) => a + x, 0) + '/' + b.length;
+                } else if (e.data instanceof Map) {
+                  document.title = 'POPUP_MAP:' + [...e.data.entries()].map(([k, v]) => k + '=' + v).join(',');
                 } else {
                   document.title = 'POPUP_GOT:' + e.data;
                 }
@@ -132,6 +139,18 @@ RSpec.describe 'multi-window' do
       expect(session).to have_title('POPUP_BUF:20/4')    # bytes arrived intact
     end
     expect(RustyRacer.pending_transfer_count).to eq(0)   # imported → no parked store
+  end
+
+  # Structured-clone fidelity: a Map crosses the window boundary as a live Map
+  # (rusty_racer ≥ 0.1.8 gives JS Map a round-trippable Ruby representation;
+  # earlier it degraded to a plain object). V8 only — the QuickJS host boundary
+  # marshals through a JSON-shaped hop that has no Map.
+  it 'round-trips a Map across postMessage with fidelity', if: CsimEngine.v8? do
+    win = session.window_opened_by { session.find(:css, '#open').click }
+    session.execute_script('window.postCloneToPopup()')
+    session.within_window(win) do
+      expect(session).to have_title('POPUP_MAP:a=1,b=2')
+    end
   end
 
   it 'reports window.closed after the window is closed' do
