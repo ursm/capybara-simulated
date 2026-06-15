@@ -25,9 +25,19 @@ RSpec.describe 'CSSStyleDeclaration setProperty / !important' do
             #probe.win { color: blue !important; }
           </style></head><body>
             <form action="/" method="post" enctype="multipart/form-data">
-              <label for="up">画像を追加</label>
+              <label for="up">Add image (css)</label>
               <input type="file" id="up" name="files[]" multiple>
-              <button type="submit">send</button>
+              <button type="submit">send-css</button>
+            </form>
+            <!-- A second form whose file input is hidden via the `hidden`
+                 ATTRIBUTE (UA [hidden]{display:none}), as Bootstrap-style
+                 "label.btn wraps a hidden input" markup does. -->
+            <form action="/" method="post" enctype="multipart/form-data">
+              <label class="btn">
+                Add image (attr)
+                <input type="file" name="files[]" multiple hidden>
+              </label>
+              <button type="submit">send-attr</button>
             </form>
             <div id="probe" style="color: red"></div>
           </body></html>
@@ -87,8 +97,21 @@ RSpec.describe 'CSSStyleDeclaration setProperty / !important' do
   it 'attaches a file to an input hidden with display:none !important via make_visible' do
     tmp = Tempfile.new(['up', '.png'])
     tmp.write('png-bytes'); tmp.flush
-    attach_file '画像を追加', [tmp.path, tmp.path], make_visible: true
-    find(:css, 'button', text: 'send').click
+    attach_file 'Add image (css)', [tmp.path, tmp.path], make_visible: true
+    find(:css, 'button', text: 'send-css').click
+    expect(page).to have_css('#done', text: 'got 2')
+  ensure
+    tmp&.close!
+  end
+
+  # The reported case: a file input hidden via the `hidden` ATTRIBUTE (the
+  # UA `[hidden] { display: none }` rule), which make_visible's inline
+  # `display: block !important` must override.
+  it 'attaches a file to an input hidden via the hidden attribute through make_visible' do
+    tmp = Tempfile.new(['up', '.png'])
+    tmp.write('png-bytes'); tmp.flush
+    attach_file 'Add image (attr)', [tmp.path, tmp.path], make_visible: true
+    find(:css, 'button', text: 'send-attr').click
     expect(page).to have_css('#done', text: 'got 2')
   ensure
     tmp&.close!
