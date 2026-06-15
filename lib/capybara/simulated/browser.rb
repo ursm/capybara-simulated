@@ -531,13 +531,14 @@ module Capybara
       # the find cache (its keys aren't realm-qualified, and a switch is rare).
       #
       # Scope: finds, reads, interactions (click/fill_in/…), evaluate_script,
-      # and a self-targeted navigation (a link / form submit whose default
-      # action loads a new document) all route into the frame — the frame's
-      # realm is rebuilt from the fetched document, leaving the top page
-      # untouched (see `navigate_frame`). Out of scope: `_top` navigates the
-      # main page (correct), but a `_parent` target from a frame nested ≥2
-      # levels navigates the main page rather than the intermediate frame, and
-      # cross-origin frame locality is resolved against the main page's origin.
+      # and navigation (a link / form submit whose default action loads a new
+      # document) all route into the frame — the target frame's realm is rebuilt
+      # from the fetched document, leaving the top page untouched (see
+      # `navigate_frame` / `frame_nav_target_entry`). A `_parent`-targeted link
+      # or form from a frame nested ≥2 levels rebuilds the intermediate parent
+      # frame; `_top` (and a one-level `_parent`, whose parent is the top
+      # context) navigate the main page. Cross-origin frame locality is resolved
+      # against the main page's origin.
       def switch_to_frame(target)
         invalidate_find_cache
         case target
@@ -601,14 +602,25 @@ module Capybara
       end
 
       # Does a link/form `target` load into the CURRENT frame? Empty or `_self`
-      # do; `_top` / `_blank` / `_parent` / a named context do not. `_top`
-      # correctly navigates the main page (it falls through to `navigate`).
-      # `_parent` from a frame nested ≥2 levels would ideally navigate the
-      # intermediate parent frame, not the top page — that ancestor-targeted
-      # case isn't modelled yet (rare); it currently navigates the main page.
+      # do; `_top` / `_blank` / `_parent` / a named context do not.
       def frame_self_target?(target)
         t = target.to_s.downcase
         t.empty? || t == '_self'
+      end
+
+      # Resolve a link/form `target` to the frame stack entry its navigation
+      # should rebuild, or nil when it targets the top page / a new context
+      # (the caller then falls through to a full-page `navigate` or aux window).
+      # Only meaningful inside a frame (`@current_realm_id` set):
+      #   - `''` / `_self` → the current frame.
+      #   - `_parent` → the intermediate parent frame, but only when nested ≥2
+      #     levels deep; at one level the parent IS the top browsing context, so
+      #     it returns nil and the full-page path handles it (same as `_top`).
+      def frame_nav_target_entry(target)
+        return nil unless @current_realm_id
+        return @frame_stack.last if frame_self_target?(target)
+        return @frame_stack[-2] if target.to_s.downcase == '_parent' && @frame_stack.size >= 2
+        nil
       end
 
       def find_css(css, context_handle = nil)
@@ -875,13 +887,14 @@ module Capybara
         when 'navigate'
           url = action['url'].to_s
           target = action['target'].to_s
-          # Inside a frame, a self-targeted link navigates the FRAME, not the
-          # top page: fetch + rebuild this frame's realm. A pure-fragment link
-          # is already handled in-realm by the frame's own location JS.
-          if @current_realm_id && frame_self_target?(target)
-            unless pure_fragment_navigation?(url)
+          # Inside a frame, a frame-targeted link (self, or `_parent` of a
+          # ≥2-deep frame) navigates that FRAME, not the top page: fetch +
+          # rebuild its realm. A self-targeted pure-fragment link is already
+          # handled in-realm by the frame's own location JS, so skip it.
+          if (frame_entry = frame_nav_target_entry(target))
+            unless frame_entry.equal?(@frame_stack.last) && pure_fragment_navigation?(url)
               tick_real_time
-              navigate_frame(resolve_against_current(url, use_base: true))
+              navigate_frame(resolve_against_current(url, use_base: true), entry: frame_entry)
             end
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
           # in a new browsing context (its own Browser/VM); the primary
@@ -2105,15 +2118,15 @@ module Capybara
             URI.encode_www_form(fields)
           end
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
-        # A form submitted inside a frame whose target is the frame itself
-        # navigates the FRAME, not the top page.
-        in_frame = !!@current_realm_id && frame_self_target?(spec['target'])
+        # A form submitted inside a frame whose target is that frame (self, or a
+        # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
+        frame_entry = frame_nav_target_entry(spec['target'])
         if method == 'GET'
           uri = URI.parse(action_url)
           uri.query = body unless body.empty?
-          in_frame ? navigate_frame(uri.to_s) : navigate(uri.to_s)
-        elsif in_frame
-          navigate_frame_post(action_url, body, content_type || enctype)
+          frame_entry ? navigate_frame(uri.to_s, entry: frame_entry) : navigate(uri.to_s)
+        elsif frame_entry
+          navigate_frame_post(action_url, body, content_type || enctype, entry: frame_entry)
         else
           navigate_post(action_url, body, content_type || enctype)
         end
@@ -3736,11 +3749,11 @@ module Capybara
       # Mirrors `navigate` / `navigate_post`'s fetch + redirect-follow but
       # terminates in `reload_current_frame_realm` instead of a main-page boot.
 
-      def navigate_frame(url, depth: 0)
+      def navigate_frame(url, depth: 0, entry: @frame_stack.last)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
-          reload_current_frame_realm('about:blank', '', 'text/html')
+          reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
         env = Rack::MockRequest.env_for(url, method: 'GET')
@@ -3750,16 +3763,16 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_against_current(loc))
           body.close if body.respond_to?(:close)
-          return navigate_frame(next_url, depth: depth + 1)
+          return navigate_frame(next_url, depth: depth + 1, entry: entry)
         end
         if download_response?(headers)
           save_downloaded_response(url, headers, body)
           return
         end
-        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers))
+        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry)
       end
 
-      def navigate_frame_post(url, body, content_type, depth: 0)
+      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
@@ -3773,31 +3786,53 @@ module Capybara
           resp_body.close if resp_body.respond_to?(:close)
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if [307, 308].include?(status)
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1)
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry)
           else
-            return navigate_frame(next_url, depth: depth + 1)
+            return navigate_frame(next_url, depth: depth + 1, entry: entry)
           end
         end
         if download_response?(headers)
           save_downloaded_response(url, headers, resp_body)
           return
         end
-        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers))
+        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry)
       end
 
-      # Tear down the active frame's realm and rebuild it from `html`, then
-      # re-point the iframe element at the new realm. The iframe lives in the
-      # PARENT realm, so the rebind host fn runs there.
-      def reload_current_frame_realm(url, html, content_type)
-        entry = @frame_stack.last
+      # Tear down a frame's realm and rebuild it from `html`, then re-point the
+      # iframe element at the new realm. The iframe lives in the PARENT realm, so
+      # the rebind host fn runs there. `entry` defaults to the active frame; a
+      # `_parent`-targeted navigation passes an ancestor entry instead — every
+      # frame below it in the stack is destroyed along with the ancestor's old
+      # document, so we dispose those realms and leave `@current_realm_id` on the
+      # (now-gone) current frame, surfacing StaleElement for the rest of the open
+      # `within_frame` block. Its `ensure` pops back to `entry`, whose `realm_id`
+      # we've updated to the rebuilt realm.
+      #
+      # Teardown reaches the realms on the entered `@frame_stack` (the ones a
+      # find could route into). Like the self-nav path, descendant realms of the
+      # rebuilt frame that were entered-then-popped earlier (so they no longer
+      # sit on the stack) aren't disposed here — they linger, unreferenced and
+      # un-stepped, until the next full-page rebuild's `dispose_frame_realms`. A
+      # bounded per-test leak, only reachable by re-entering a sibling subframe
+      # before an ancestor `_parent` nav; not worth a JS descendant walk on this
+      # path's perf budget.
+      def reload_current_frame_realm(url, html, content_type, entry: @frame_stack.last)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type).to_i
         return if new_id.zero?
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
-        entry[:realm_id]  = new_id
-        @current_realm_id = new_id
+        if entry.equal?(@frame_stack.last)
+          entry[:realm_id]  = new_id
+          @current_realm_id = new_id
+        else
+          # Match by object identity (the branch was chosen by `equal?`); index
+          # by `==` could collide if two entries were ever structurally equal.
+          idx = @frame_stack.index {|e| e.equal?(entry) }
+          @frame_stack[(idx + 1)..].each {|descendant| @runtime.dispose_frame_realm(descendant[:realm_id]) }
+          entry[:realm_id] = new_id
+        end
         invalidate_find_cache
         settle
       end
