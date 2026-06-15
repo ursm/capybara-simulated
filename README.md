@@ -390,9 +390,11 @@ referenced page-specific DOM.
   across windows (delivered as a `message` event when the target window next
   settles). Caveats: `target="_blank"` opens with no opener (modern-browser
   no-opener default); cross-window `postMessage` data is JSON-shaped, not a
-  full structured clone (no `DataCloneError`, `undefined`→`null`); and only
-  the active window's event loop runs, so a message is delivered when you
-  switch to its window. Window viewport APIs (`maximize` / `fullscreen` /
+  full structured clone (no `DataCloneError`, `undefined`→`null`) — but a
+  buffer in the `transfer` list moves **zero-copy** (its backing store crosses
+  isolates by token and the source is detached); and only the active window's
+  event loop runs, so a message is delivered when you switch to its window.
+  Window viewport APIs (`maximize` / `fullscreen` /
   pixel-exact `resize_to`) are no-ops — no layout engine.
 
 ## Architecture
