@@ -200,11 +200,18 @@ end
 
 ### File output
 
-Set `CSIM_TRACE_DIR=/path/to/dir` to enable file output. The bundled
-RSpec hook ([`csim_rspec.rb`](https://github.com/ursm/capybara-simulated-vs-world/blob/main/support/csim_rspec.rb))
-writes `<example slug>.json` into that directory after each test;
-mirror it in `application_system_test_case.rb`'s teardown for
-Minitest.
+Require the test-framework integration in your `spec_helper` /
+`rails_helper` (RSpec) or `test_helper` /
+`application_system_test_case.rb` (Minitest):
+
+```ruby
+require 'capybara/simulated/rspec'     # RSpec
+require 'capybara/simulated/minitest'  # Minitest / Rails system tests
+```
+
+With `CSIM_TRACE_DIR=/path/to/dir` set, each example that recorded a
+trace is written to `<dir>/<slug>.json` after it runs; both integrations
+are inert when the env var is unset.
 
 ```sh
 CSIM_TRACE_DIR=tmp/csim-traces bundle exec rspec spec/system
@@ -213,6 +220,31 @@ CSIM_TRACE_DIR=tmp/csim-traces bundle exec rspec spec/system
 The metadata block on each trace includes `title`, `file`, `outcome`
 (`passed` / `failed`), and the exception message — enough to index a
 CI artifact directory by failure.
+
+### Viewing traces
+
+The recorded JSON stays plain data; to look at one, render it into a
+self-contained HTML viewer with the bundled CLI:
+
+```sh
+capybara-simulated trace tmp/csim-traces/checkout_flow.json
+# wrote /tmp/checkout_flow.html   (then opens it in your browser)
+```
+
+By default the HTML is written to a temp file and opened in your
+browser. The viewer works straight from `file://` — the trace JSON is
+embedded inline, so no server is needed — and shows a step-by-step UI: a
+timeline of actions, and per step the URL before/after, console output,
+network requests, the error, and a rendered preview of the post-action
+DOM snapshot. Its **Load JSON…** button / drag-and-drop swaps in any
+other trace file.
+
+`-o PATH` writes the HTML somewhere specific (`-o -` to stdout);
+`--no-open` skips launching the browser. Browser launching uses
+[launchy](https://rubygems.org/gems/launchy) when it's installed
+(`gem 'launchy'`, recommended for reliable cross-platform / WSL opening)
+and falls back to the platform opener (`xdg-open` / `open` / `start`)
+otherwise.
 
 ### Programmatic
 

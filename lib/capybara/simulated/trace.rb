@@ -29,6 +29,24 @@ module Capybara
         keyword_init: true
       )
 
+      VIEWER_TEMPLATE_PATH = File.expand_path('trace_viewer.html', __dir__)
+      VIEWER_DATA_TOKEN    = '__CSIM_TRACE_DATA__'
+
+      # Render the self-contained HTML viewer for a trace JSON *string*,
+      # embedding it inline (the `capybara-simulated trace` CLI is the
+      # caller). `</` → `<\/` so an embedded `</script>` inside a DOM
+      # snapshot can't close the data block early — still valid JSON
+      # (`\/` is a legal JSON escape for `/`). The whole point of inline
+      # embedding over fetch / `import … with { type: 'json' }` is that
+      # the result opens straight from `file://` with no server (module /
+      # fetch loads are CORS-blocked for `file://` origins).
+      def self.render_viewer(json_text)
+        template = (@viewer_template ||= File.read(VIEWER_TEMPLATE_PATH))
+        # Block form: the replacement is taken literally, so backslashes
+        # in the JSON aren't interpreted as regexp backreferences.
+        template.sub(VIEWER_DATA_TOKEN) { json_text.to_s.gsub('</', '<\/') }
+      end
+
       attr_reader :steps, :metadata
 
       def initialize(metadata: {})
