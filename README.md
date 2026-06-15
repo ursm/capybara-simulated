@@ -324,11 +324,11 @@ followed by the short list of things that need a real browser **by design**.
   active window's event loop runs, so a message is delivered when you switch
   to its window. `target="_blank"` opens with no opener (modern-browser
   default). `postMessage` carries real structured data (not a lossy JSON
-  hop) — `Date` / `Set` / `BigInt` / typed arrays / cyclic graphs round-trip
-  on V8 — and a `transfer`-list buffer moves **zero-copy** (backing store by
-  token, source detached); `Map` and bare `undefined` don't fully round-trip
-  yet. Window viewport APIs (`maximize` / `fullscreen` / pixel-exact
-  `resize_to`) are no-ops (no layout engine).
+  hop) — `Map` / `Set` / `Date` / `BigInt` / typed arrays / cyclic graphs all
+  round-trip on V8 — and a `transfer`-list buffer moves **zero-copy** (backing
+  store by token, source detached); only bare `undefined` collapses to `null`
+  (Ruby has no distinct `undefined`). Window viewport APIs (`maximize` /
+  `fullscreen` / pixel-exact `resize_to`) are no-ops (no layout engine).
 - **WebSocket + Action Cable** — `new WebSocket(url)` works in-process over
   the `rack.hijack` socket the Rack app hijacks (hand-rolled RFC6455:
   handshake + subprotocol negotiation, masked frames, ping/pong, close). The
