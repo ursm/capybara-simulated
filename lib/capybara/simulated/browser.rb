@@ -2139,7 +2139,7 @@ module Capybara
           append_multipart_part(body, boundary, name, value.to_s)
         end
         file_inputs.each do |fi|
-          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
+          picks = file_pick_paths(fi)
           if picks.empty?
             append_multipart_part(body, boundary, fi['name'].to_s, '', filename: '')
           else
@@ -2152,6 +2152,34 @@ module Capybara
         end
         body << "--#{boundary}--\r\n"
         {content_type: "multipart/form-data; boundary=#{boundary}", body: body}
+      end
+
+      # The on-disk paths backing a file input's current selection. Each
+      # selected File reports its host-backed source (`handle`/`index` → the
+      # `@file_picks` slot recorded at `attach_file` time); this resolves bytes
+      # even when JS moved a File onto a different input (`input.files =
+      # dataTransfer.files`), whose own handle was never attached to. Falls back
+      # to the input's own handle for older serializer payloads.
+      #
+      # Only host-backed Files (from `attach_file`) resolve here; a purely
+      # in-memory `new File(['bytes'], …)` assigned via JS has no `@file_picks`
+      # slot, so a CLASSIC (non-Turbo) submit drops its bytes — the fetch/XHR
+      # path serializes those in JS (`serializeMultipart` → `blobBytes`) and is
+      # unaffected. This matches the pre-existing behaviour and covers every
+      # realistic upload (host-backed file submitted through Turbo or a plain
+      # form).
+      def file_pick_paths(fi)
+        refs = fi['files']
+        if refs.is_a?(Array) && !refs.empty?
+          refs.filter_map {|ref|
+            handle = ref['handle']
+            next if handle.nil?
+            picks = @file_picks && @file_picks[handle.to_i]
+            picks && picks[ref['index'].to_i]
+          }
+        else
+          (@file_picks && @file_picks[fi['handle'].to_i]) || []
+        end
       end
 
       def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
