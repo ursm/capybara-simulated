@@ -333,25 +333,42 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
 - NodeFilter is cross-realm plain object without 'acceptNode' property
 domparsing/DOMParser-parseFromString-encoding.html:
 - 'HTML: meta charset'
-domparsing/DOMParser-parseFromString-html.html:
-- DOMParser should handle the content of <noembed> as raw text
-- DOMParser throws on an invalid enum value
-- Parsing of id attribute
-- compatMode
 domparsing/DOMParser-parseFromString-xml-doctype.html:
 - Doctype parsing of System Id must fail on ommitted value
 domparsing/DOMParser-parseFromString-xml-internal-subset.html:
 - Parsing and serialization of doctype internal subset
-domparsing/DOMParser-parseFromString-xml.html:
-- scripting must be disabled with type application/xhtml+xml
-- scripting must be disabled with type application/xml
-- scripting must be disabled with type image/svg+xml
-- scripting must be disabled with type text/xml
+domparsing/XMLSerializer-serializeToString.html:
+- Check if "ns1" is generated even if the element already has xmlns:ns1.
+- Check if a prefix bound to an empty namespace URI ("no namespace") serialize
+- Check if an attribute with namespace and no prefix is serialized with the nearest-declared
+  prefix
+- Check if an attribute with namespace and no prefix is serialized with the nearest-declared
+  prefix even if the prefix is assigned to another namespace.
+- Check if attribute serialization takes into account of following xmlns:* attributes
+- Check if attribute serialization takes into account of the same prefix declared
+  in an ancestor element
+- Check if end tag serialization matches start tag for elements in the XML namespace.
+- Check if end tag serialization matches start tag when an appropriate prefix is found.
+- Check if generated prefixes match to "ns${index}".
+- Check if no special handling for XLink namespace unlike HTML serializer.
+- Check if start tag serialization applied the original prefix even if it is declared
+  in an ancestor element.
+- Check if start tag serialization does NOT apply the default namespace if its namespace
+  is declared in an ancestor.
+- Check if start tag serialization drops element prefix if the namespace is same as
+  inherited default namespace.
+- Check if start tag serialization finds an appropriate prefix.
+- Check if start tag serialization takes into account of its xmlns:* attributes
+- Check if the prefix of an attribute is NOT preserved in a case where neither its
+  prefix nor its namespace URI is not already used.
+- Check if the prefix of an attribute is replaced with a generated one in a case where
+  the prefix is already mapped to a different namespace URI.
+- Check if the prefix of an attribute is replaced with another existing prefix mapped
+  to the same namespace URI.
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
 domparsing/domparser-spurious-attributes.html:
 - Using ">" and "\r" in an attribute creates no unexpected attributes.
-- Using ">" and HTML entities in an attribute creates no unexpected attributes.
 domparsing/innerhtml-01.xhtml:
 - 'innerHTML in XHTML: getting while the document is in an invalid state'
 - 'innerHTML in XHTML: getting while the document is in an invalid state 1'
