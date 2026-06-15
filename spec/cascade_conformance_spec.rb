@@ -66,6 +66,24 @@ RSpec.describe 'CSS cascade visibility conformance' do
       body: '<div class="c" id="t" style="display: block !important">x</div>',
       expect: { 't' => true } },
 
+    # The `hidden` attribute is the UA rule `[hidden] { display: none }` — the
+    # lowest-priority display:none, so any author `display` overrides it
+    # (Chromium-confirmed: `<div hidden style="display:block">` is visible).
+    { name: '[hidden] attribute hides',
+      css:  '',
+      body: '<div id="t" hidden>x</div>',
+      expect: { 't' => false } },
+
+    { name: 'inline display overrides [hidden]',
+      css:  '',
+      body: '<div id="t" hidden style="display: block">x</div>',
+      expect: { 't' => true } },
+
+    { name: 'stylesheet display overrides [hidden]',
+      css:  '#t { display: block }',
+      body: '<div id="t" hidden>x</div>',
+      expect: { 't' => true } },
+
     { name: '@media matching applies',
       css:  '@media (min-width: 1px) { #t { display: none } }',
       body: '<div id="t">x</div>',
