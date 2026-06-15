@@ -3527,14 +3527,15 @@ module Capybara
       def trace_network(method, url, status, req_headers, req_body, resp_headers, resp_body, t0, redirected)
         return unless @trace
         ct = resp_headers && (resp_headers['content-type'] || resp_headers['Content-Type'])
-        ct = ct.split(';', 2).first.strip if ct
+        ct = ct.first if ct.is_a?(Array)  # Rack 3 permits array-valued header fields
+        ct = ct.split(';', 2).first.strip if ct.is_a?(String)
         size = if resp_body
                  resp_body.bytesize
                elsif (cl = resp_headers && (resp_headers['content-length'] || resp_headers['Content-Length']))
-                 cl.to_i
+                 (cl.is_a?(Array) ? cl.first : cl).to_i
                end
         log_network(method, url, status,
-                    content_type:     ct,
+                    content_type:     (ct if ct.is_a?(String)),
                     size:             size,
                     duration_ms:      (t0 && ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round),
                     redirected:       (redirected || nil),
@@ -3542,6 +3543,12 @@ module Capybara
                     request_body:     (req_body && !req_body.to_s.empty? ? cap_trace_body(req_body) : nil),
                     response_headers: normalize_trace_headers(resp_headers),
                     response_body:    (resp_body ? cap_trace_body(resp_body) : nil))
+      rescue StandardError => e
+        # A trace-logging bug must NEVER break the real fetch: rack_fetch's
+        # own `rescue StandardError` would otherwise swallow it and return
+        # nil, so the asset (e.g. jQuery) silently fails to load. Drop the
+        # log entry instead.
+        warn "capybara-simulated: trace network log failed: #{e.class}: #{e.message}"
       end
 
       # JSON-safe body for the trace: binary (non-UTF-8) bodies become a

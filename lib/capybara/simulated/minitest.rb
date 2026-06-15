@@ -27,9 +27,11 @@ module Capybara
         nil
       end
 
-      # Skips aren't failures for outcome purposes.
+      # Skips aren't failures for outcome purposes. `::Minitest` —
+      # unqualified `Minitest` here resolves to `Capybara::Minitest`
+      # (Capybara ships that submodule), which has no `Skip`.
       def real_failures(test)
-        test.failures.reject {|f| f.is_a?(Minitest::Skip) }
+        test.failures.reject {|f| f.is_a?(::Minitest::Skip) }
       end
     end
   end
@@ -44,14 +46,19 @@ if (dir = ENV['CSIM_TRACE_DIR']) && !dir.empty?
     define_method(:after_teardown) do
       super()
     ensure
-      fails = Capybara::Simulated::MinitestTrace.real_failures(self)
-      Capybara::Simulated::TracePersistence.persist_all(
-        dir,
-        title:     "#{self.class}##{name}",
-        file:      Capybara::Simulated::MinitestTrace.source_file(self),
-        outcome:   fails.empty? ? 'passed' : 'failed',
-        exception: fails.first&.message
-      )
+      begin
+        fails = Capybara::Simulated::MinitestTrace.real_failures(self)
+        Capybara::Simulated::TracePersistence.persist_all(
+          dir,
+          title:     "#{self.class}##{name}",
+          file:      Capybara::Simulated::MinitestTrace.source_file(self),
+          outcome:   fails.empty? ? 'passed' : 'failed',
+          exception: fails.first&.message
+        )
+      rescue StandardError => e
+        # Trace output must never turn a test red.
+        warn "capybara-simulated: trace persist failed: #{e.message}"
+      end
     end
   end
   Minitest::Test.prepend(hook)

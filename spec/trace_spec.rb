@@ -1,7 +1,8 @@
 require 'spec_helper'
 require 'capybara/simulated/trace'
 require 'capybara/simulated/trace_persistence'
-require 'capybara/simulated/minitest'
+require 'capybara/minitest'  # defines Capybara::Minitest — the reason a bare `Minitest::Skip`
+require 'capybara/simulated/minitest'  # inside the gem resolves wrong; keep this require BEFORE it
 require 'json'
 require 'open3'
 require 'tmpdir'
@@ -146,6 +147,33 @@ RSpec.describe Capybara::Simulated::MinitestTrace do
 
       expect(described_class.real_failures(test)).to eq([assert])
     end
+  end
+end
+
+RSpec.describe 'trace network capture' do
+  # Regression: with tracing active, `trace_network` ran on every fetch.
+  # A Rack-3 array-valued header made it raise, and rack_fetch's rescue
+  # swallowed that as a failed fetch → the asset (e.g. jQuery) silently
+  # failed to load. A trace-logging error must never break the fetch.
+  it 'never breaks a fetch when a response header is array-valued' do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/data'
+        [200, {'content-type' => ['application/json']}, ['{"ok":1}']]  # array value
+      else
+        [200, {'content-type' => 'text/html'},
+         ['<!doctype html><html><body><script>' \
+          'fetch("/data").then(function(r){return r.text()}).then(function(t){document.body.dataset.t=t})' \
+          '</script></body></html>']]
+      end
+    end
+    driver = Capybara::Simulated::Driver.new(app)
+    driver.start_tracing  # force a trace so trace_network runs on the fetch
+    driver.visit('/')
+
+    # Without the fix, trace_network raises on the array header (before it
+    # even reaches the open-step check), rack_fetch swallows it, returns
+    # nil, and the body is never set.
+    expect(driver.evaluate_script('document.body.dataset.t || ""')).to eq('{"ok":1}')
   end
 end
 
