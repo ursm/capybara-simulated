@@ -326,6 +326,15 @@ module Capybara
         @transfer_buffer_lock = Mutex.new
         @transfer_buffers     = {}
         @transfer_buffer_seq  = 0
+        # Zero-copy postMessage transfer tokens (rusty_racer >= 0.1.6
+        # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
+        # crosses isolates by token (no byte copy), its source detached. A token
+        # parked but never imported pins its backing store PROCESS-WIDE, so we
+        # record every issued token (reported from JS, possibly on a worker
+        # thread — hence the lock) and `transferDrop` the lot on `reset!`
+        # (idempotent: an already-imported token no-ops).
+        @transfer_tokens      = []
+        @transfer_tokens_lock = Mutex.new
         # Cross-window `postMessage` inbox. Another window's `target.postMessage`
         # routes through the Driver and lands here; this window drains it into a
         # `message` event the next time it's active and settles/ticks. Plain
@@ -2227,6 +2236,9 @@ module Capybara
         reset_workers
         reset_websockets
         @window_inbox.clear
+        # Free any zero-copy transfer backing stores that went unimported
+        # (worker killed before draining its inbox, etc.) before the rebuild.
+        drop_pending_transfers
         @blob_registry_lock.synchronize { @blob_registry.clear }
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
@@ -3152,6 +3164,25 @@ module Capybara
 
       def transfer_buffer_fetch(id)
         @transfer_buffer_lock.synchronize { @transfer_buffers.delete(id.to_i) }
+      end
+
+      # JS reports each zero-copy transfer token it mints (`RustyRacer.transferOut`)
+      # so we can release any that go unimported. Callable from a worker thread.
+      def transfer_token_issued(token)
+        t = token.to_i
+        @transfer_tokens_lock.synchronize { @transfer_tokens << t } if t > 0
+        nil
+      end
+
+      # Release every outstanding transfer token's backing store. The transfer
+      # registry is process-wide (it bridges isolates) and survives isolate
+      # teardown, so an unimported token would leak across the whole run; drop
+      # them on `reset!` via the (still-live) main context — `transferDrop` is
+      # idempotent, so dropping already-imported tokens is a harmless no-op.
+      def drop_pending_transfers
+        toks = @transfer_tokens_lock.synchronize { ts = @transfer_tokens; @transfer_tokens = []; ts }
+        return if toks.empty?
+        @runtime.call('__csimTransferDropAll', toks) rescue nil
       end
 
       # Wraps the raw bytes in whatever binary shape the ACTIVE runtime can
