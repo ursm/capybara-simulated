@@ -45,7 +45,6 @@ Document:
 Element:
   - activeViewTransition
   - ariaNotify
-  - assignedSlot
   - clientLeft
   - clientTop
   - computedStyleMap

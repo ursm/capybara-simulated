@@ -309,7 +309,6 @@ dom/nodes/moveBefore/select-option-optgroup.html:
 - Option selectedness is updated on option and optgroup DOM moves
 dom/nodes/moveBefore/slotchange-events.html:
 - Moving a slot runs the assign slottables algorithm
-- Moving a slottable into and out out of a custom element fires 'slotchange' event
 - Moving default content into a slot fires 'slotchange' event
 - Moving default content out of a slot fires 'slotchange' event
 dom/nodes/query-target-in-load-event.html:
@@ -319,6 +318,9 @@ dom/nodes/remove-and-adopt-thcrash.html:
   doesn't crash.
 dom/nodes/remove-next-sibling-during-replace-with.html:
 - remove-next-sibling-during-replace-with
+dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
+- Range in shadow should stay in the shadow after the host is removed
+- Range in shadow should stay in the shadow after the host parent is removed
 dom/ranges/Range-intersectsNode-shadow.html:
 - Range.intersectsNode() doesn't return true for shadow children in other trees
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
@@ -1661,12 +1663,8 @@ shadow-dom/Element-interface-attachShadow-custom-element.html:
   should throw a NotSupportedError
 - Element.attachShadow for an autonomous custom element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
-- Element.attachShadow must throw a NotSupportedError for customized built-in elements
 shadow-dom/Element-interface-attachShadow.html:
 - Element.attachShadow must throw a NotSupportedError for non-safelisted elements
-- Element.attachShadow must throw a NotSupportedError if the context object already
-  hosts a shadow tree
-- Element.attachShadow must throw a TypeError if mode is not "open" or "closed"
 shadow-dom/Extensions-to-Event-Interface.html:
 - The event must not propagate out of closed mode shadow tree of the target but must
   propagate out of inner shadow trees when the scoped flag is set
@@ -1685,38 +1683,7 @@ shadow-dom/Extensions-to-Event-Interface.html:
 - composedPath() must contain and only contain the unclosed nodes of target in open
   mode shadow trees
 shadow-dom/HTMLSlotElement-interface.html:
-- '"name" attribute on HTMLSlotElement must reflect "name" attribute'
 - HTMLSlotElement must be defined on window
-- assignedNodes() must return the list of assigned nodes when none of the assigned
-  nodes themselves are slots
-- assignedNodes() must update when a default slot is introduced dynamically by a slot
-  rename
-- assignedNodes() must update when slot and name attributes are modified
-- assignedNodes() must update when slot elements are inserted or removed
-- assignedNodes() on a HTMLSlotElement must return an empty array when the slot element
-  is not in a tree or in a document tree
-- assignedNodes({"flattened":false}) must return the list of assigned nodes when none
-  of the assigned nodes themselves are slots
-- assignedNodes({"flattened":false}) must update when a default slot is introduced
-  dynamically by a slot rename
-- assignedNodes({"flattened":false}) must update when slot and name attributes are
-  modified
-- assignedNodes({"flattened":false}) must update when slot elements are inserted or
-  removed
-- assignedNodes({"flattened":false}) on a HTMLSlotElement must return an empty array
-  when the slot element is not in a tree or in a document tree
-- assignedNodes({"flattened":true}) must return the list of assigned nodes when none
-  of the assigned nodes themselves are slots
-- assignedNodes({"flattened":true}) must update when a default slot is introduced
-  dynamically by a slot rename
-- assignedNodes({"flattened":true}) must update when slot and name attributes are
-  modified
-- assignedNodes({"flattened":true}) must update when slot elements are inserted or
-  removed
-- assignedNodes({"flattened":true}) on a HTMLSlotElement must return an empty array
-  when the slot element is not in a tree or in a document tree
-- 'assignedNodes({flatten: true}) must return the distributed nodes, and assignedNodes()
-  and assignedNodes({flatten: false}) must returned the assigned nodes'
 shadow-dom/HighlightRegistry-highlightsFromPoint.html:
 - CSS.highlights.highlightsFromPoint() doesn't return Highlights that are not painted
   at the given coordinates even when they fall inside the Highlights' ranges
@@ -1742,18 +1709,9 @@ shadow-dom/ShadowRoot-interface.html:
   root style sheets when shadow root is closed.
 - ShadowRoot.styleSheets must return a StyleSheetList sequence containing the shadow
   root style sheets when shadow root is open.
-shadow-dom/Slottable-mixin.html:
-- assignedSlot attribute must be defined on Element and Text interfaces
-- assignedSlot must return null when the assigned slot element is inside a closed
-  shadow tree
-- assignedSlot must return null when the node does not have an assigned node
-- assignedSlot must return the assigned slot
 shadow-dom/accesskey.tentative.html:
 - button element with accesskey in the shadow tree of closed mode
 - button element with accesskey in the shadow tree of open mode
-shadow-dom/assign-slottables-after-removing-shadow-tree-from-document.html:
-- Slottables should be assigned to slots even after the shadow host has been removed
-  from the document
 shadow-dom/capturing-and-bubbling-event-listeners-across-shadow-trees.html:
 - Capturing event listeners should be invoked before bubbling event listeners on the
   target without shadow trees
@@ -2372,14 +2330,10 @@ shadow-dom/imperative-slot-api.html:
 - Previously assigned slottable is moved to new slot when it's reassigned.
 - Removing a node from the document does not break manually assigned slot linkage.
 - Removing a slot from DOM resets its slottable's slot assignment.
-- attachShadow can take slotAssignment parameter.
 - slot.attach() should take variadic not sequence.
 shadow-dom/imperative-slot-fallback-clear.html:
 - Element fallback should be cleared in a subsequent layout
 - Text node fallback should be cleared in a subsequently layout
-shadow-dom/imperative-slot-initial-fallback.html:
-- Unassigned imperative slot can render element as the initial fallback
-- Unassigned imperative slot can render text node as the initial fallback
 shadow-dom/innerHTML-setter.xhtml:
 - InnerHTML behavior on custom element in default 'foo' namespace
 - InnerHTML behavior on custom element in default XHTML namespace
@@ -2388,9 +2342,6 @@ shadow-dom/input-element-list.html:
 - Input element's list attribute should point to the datalist element in Shadow DOM.
 shadow-dom/input-type-radio.html:
 - input type=radio elements should form a group inside shadow DOM.
-shadow-dom/inserting-fragment-under-shadow-host.html:
-- This tests inserting a document fragment with a mixture of elements and text nodes,
-  which should dispatch a `slotchange` event.
 shadow-dom/offsetParent-across-shadow-boundaries.html:
 - offsetParent must find the first offset parent which is a shadow-including ancestor
   of the context object even some shadow tree of closed mode did not have any offset
@@ -2579,156 +2530,23 @@ shadow-dom/shadow-root-clonable.html:
 - declarative shadow roots can opt in to clonable with shadowrootclonable
 - 'declarative shadow roots do *not* get clonable: true automatically'
 - declarative shadow roots inside templates do *not* get cloned automatically
-shadow-dom/slot-reconciliation-at-node-removal.html:
-- 'Slot reconciliation: assignedNodes should be empty when slot is removed from shadow
-  tree'
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
 shadow-dom/slotchange-event.html:
-- slotchange event must fire at the end of current microtask after mutation observers
-  are invoked inside a closed shadow root  in a document when slots's contents change
-- slotchange event must fire at the end of current microtask after mutation observers
-  are invoked inside a closed shadow root  not in a document when slots's contents
-  change
-- slotchange event must fire at the end of current microtask after mutation observers
-  are invoked inside an open shadow root  in a document when slots's contents change
-- slotchange event must fire at the end of current microtask after mutation observers
-  are invoked inside an open shadow root  not in a document when slots's contents
-  change
-- slotchange event must fire on a default slot element inside a closed shadow root  in
-  a document
-- slotchange event must fire on a default slot element inside a closed shadow root  not
-  in a document
-- slotchange event must fire on a default slot element inside an open shadow root  in
-  a document
-- slotchange event must fire on a default slot element inside an open shadow root  not
-  in a document
-- slotchange event must fire on a named slot element insidea closed shadow root  in
-  a document
-- slotchange event must fire on a named slot element insidea closed shadow root  not
-  in a document
-- slotchange event must fire on a named slot element insidean open shadow root  in
-  a document
-- slotchange event must fire on a named slot element insidean open shadow root  not
-  in a document
-- slotchange event must fire on a slot element inside a closed shadow root  in a document
-  even if the slot was removed immediately after the assigned nodes were mutated
-- slotchange event must fire on a slot element inside a closed shadow root  in a document
-  when innerHTML modifies the children of the shadow host
 - slotchange event must fire on a slot element inside a closed shadow root  in a document
   when nested slots's contents change
 - slotchange event must fire on a slot element inside a closed shadow root  not in
-  a document even if the slot was removed immediately after the assigned nodes were
-  mutated
-- slotchange event must fire on a slot element inside a closed shadow root  not in
-  a document when innerHTML modifies the children of the shadow host
-- slotchange event must fire on a slot element inside a closed shadow root  not in
   a document when nested slots's contents change
-- slotchange event must fire on a slot element inside an open shadow root  in a document
-  even if the slot was removed immediately after the assigned nodes were mutated
-- slotchange event must fire on a slot element inside an open shadow root  in a document
-  when innerHTML modifies the children of the shadow host
 - slotchange event must fire on a slot element inside an open shadow root  in a document
   when nested slots's contents change
 - slotchange event must fire on a slot element inside an open shadow root  not in
-  a document even if the slot was removed immediately after the assigned nodes were
-  mutated
-- slotchange event must fire on a slot element inside an open shadow root  not in
-  a document when innerHTML modifies the children of the shadow host
-- slotchange event must fire on a slot element inside an open shadow root  not in
   a document when nested slots's contents change
-- slotchange event must fire on a slot element when a shadow host has a slottable
-  and the slot was inserted and must not fire when the shadow host was mutated after
-  the slot was removed inside a closed shadow root  in a document
-- slotchange event must fire on a slot element when a shadow host has a slottable
-  and the slot was inserted and must not fire when the shadow host was mutated after
-  the slot was removed inside a closed shadow root  not in a document
-- slotchange event must fire on a slot element when a shadow host has a slottable
-  and the slot was inserted and must not fire when the shadow host was mutated after
-  the slot was removed inside an open shadow root  in a document
-- slotchange event must fire on a slot element when a shadow host has a slottable
-  and the slot was inserted and must not fire when the shadow host was mutated after
-  the slot was removed inside an open shadow root  not in a document
-- slotchange event must not fire on a slot element inside a closed shadow root  in
-  a document when another slot's assigned nodes change
-- slotchange event must not fire on a slot element inside a closed shadow root  not
-  in a document when another slot's assigned nodes change
-- slotchange event must not fire on a slot element inside an open shadow root  in
-  a document when another slot's assigned nodes change
-- slotchange event must not fire on a slot element inside an open shadow root  not
-  in a document when another slot's assigned nodes change
 shadow-dom/slotchange.html:
-- 'slotchange event: A slot is assigned to another slot.'
 - 'slotchange event: Add a fallback content to nested slots - assignedNodes still
   empty.'
 - 'slotchange event: Append a child to a host (onslotchange).'
-- 'slotchange event: Append a child to a host.'
-- 'slotchange event: Change fallback content - assignedNodes still empty.'
-- 'slotchange event: Change slot''s name= attribute so that a node is assigned to
-  the slot.'
-- 'slotchange event: Change slot''s name= attribute so that none is assigned.'
-- 'slotchange event: Change slot= attribute to make it assigned.'
-- 'slotchange event: Change slot= attribute to make it un-assigned.'
-- 'slotchange event: Child content is added to nested slots.'
-- 'slotchange event: Insert a slot before an existing slot.'
-- 'slotchange event: Remove a child before adding an event listener.'
-- 'slotchange event: Remove a child from a host.'
-- 'slotchange event: Remove a fallback content - assignedNodes still empty.'
 - 'slotchange event: Remove a fallback content from nested slots - assignedNodes still
   empty.'
-- 'slotchange event: Remove a preceding slot.'
-- 'slotchange event: Slotchange should be fired if assigned nodes are changed.'
-shadow-dom/slots-fallback-in-document.html:
-- Children of a slot in a document tree should not be counted in flattened assigned
-  nodes.
-- Slot fallback content in shadow tree should be counted in flattened assigned nodes.
-shadow-dom/slots-fallback.html:
-- 'Slots fallback: Basic, elements only.'
-- 'Slots fallback: Basic.'
-- 'Slots fallback: Complex case, elements only.'
-- 'Slots fallback: Complex case.'
-- 'Slots fallback: Fallback contents should not be used if a node is assigned.'
-- 'Slots fallback: Mutation.  Remove a slot which is a fallback content of another
-  slot.'
-- 'Slots fallback: Mutation. Append fallback contents.'
-- 'Slots fallback: Mutation. Assign a node to a slot so that fallback contens are
-  no longer used.'
-- 'Slots fallback: Mutation. Remove an assigned node from a slot so that fallback
-  contens will be used.'
-- 'Slots fallback: Mutation. Remove fallback contents.'
-- 'Slots fallback: Slots in Slots, elements only.'
-- 'Slots fallback: Slots in Slots.'
-- 'Slots fallback: Slots in Slots: Assigned nodes should be used as fallback contents
-  of another slot'
-shadow-dom/slots-outside-shadow-dom.html:
-- Light DOM slot element should be in flattened assignedNodes
-shadow-dom/slots.html:
-- 'Slots: Basic, elements only.'
-- 'Slots: Basic.'
-- 'Slots: Closed > Closed.'
-- 'Slots: Closed > Open.'
-- 'Slots: Complex case: Basi line.'
-- 'Slots: Default Slot.'
-- 'Slots: Distributed nodes for Slots not in a shadow tree.'
-- 'Slots: Mutation: Add a slot: after.'
-- 'Slots: Mutation: Add a slot: before.'
-- 'Slots: Mutation: Change slot name= attribute.'
-- 'Slots: Mutation: Change slot slot= attribute.'
-- 'Slots: Mutation: Change slot= attribute 1.'
-- 'Slots: Mutation: Change slot= attribute 2.'
-- 'Slots: Mutation: Change slot= attribute 3.'
-- 'Slots: Mutation: Remove a child.'
-- 'Slots: Mutation: Remove a slot.'
-- 'Slots: Mutation: appendChild.'
-- 'Slots: Name matching'
-- 'Slots: No direct host child.'
-- 'Slots: Open > Closed.'
-- 'Slots: Slot in Slot does not matter in assignment.'
-- 'Slots: Slot is assigned to another slot'
-- 'Slots: Slots in closed, elements only.'
-- 'Slots: Slots in closed.'
-- 'Slots: Slots not in a shadow tree, elements only.'
-- 'Slots: Slots not in a shadow tree.'
 shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/attributes/test-006.html:
 - A_10_02_01_06_T01
 shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/methods/test-001.html:
