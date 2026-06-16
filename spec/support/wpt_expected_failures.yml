@@ -303,10 +303,6 @@ dom/nodes/moveBefore/relevant-mutations.html:
 dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 - Option selectedness is updated on option and optgroup DOM moves
-dom/nodes/moveBefore/slotchange-events.html:
-- Moving a slot runs the assign slottables algorithm
-- Moving default content into a slot fires 'slotchange' event
-- Moving default content out of a slot fires 'slotchange' event
 dom/nodes/query-target-in-load-event.html:
 - document.querySelector(":target") must work when called in the window.load event
 dom/nodes/remove-and-adopt-thcrash.html:
@@ -1498,9 +1494,6 @@ shadow-dom/Document-caretPositionFromPoint.tentative.html:
   as an argument
 - document.caretPositionFromPoint() should return a CaretPosition at the specified
   location when the non-intersecting shadow tree is specified as an argument
-shadow-dom/Document-prototype-adoptNode.html:
-- adoptNode on a shadow root in closed mode must throw a HierarchyRequestError
-- adoptNode on a shadow root in open mode must throw a HierarchyRequestError
 shadow-dom/Document-prototype-currentScript.html:
 - document.currentScript must be set to a script element that loads an external script
   in a document tree
@@ -1678,27 +1671,9 @@ shadow-dom/MouseEvent-prototype-offsetX-offsetY.html:
 shadow-dom/Node-prototype-cloneNode.html:
 - cloneNode on a shadow root in closed mode must throw a NotSupportedError
 - cloneNode on a shadow root in open mode must throw a NotSupportedError
-shadow-dom/ShadowRoot-interface.html:
-- ShadowRoot must not be a constructor
-- ShadowRoot.activeElement must return the focused element of the context object when
-  shadow root is closed.
-- ShadowRoot.activeElement must return the focused element of the context object when
-  shadow root is open.
-- ShadowRoot.styleSheets must return a StyleSheetList sequence containing the shadow
-  root style sheets when shadow root is closed.
-- ShadowRoot.styleSheets must return a StyleSheetList sequence containing the shadow
-  root style sheets when shadow root is open.
 shadow-dom/accesskey.tentative.html:
 - button element with accesskey in the shadow tree of closed mode
 - button element with accesskey in the shadow tree of open mode
-shadow-dom/capturing-and-bubbling-event-listeners-across-shadow-trees.html:
-- Capturing event listeners should be invoked before bubbling event listeners when
-  an event is dispatched inside a doubly nested shadow tree
-- Capturing event listeners should be invoked before bubbling event listeners when
-  an event is dispatched inside a shadow tree
-- Capturing event listeners should be invoked before bubbling event listeners when
-  an event is dispatched inside a shadow tree which passes through another shadow
-  tree
 shadow-dom/declarative/declarative-after-attachshadow.html:
 - 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
   called'
@@ -2057,9 +2032,7 @@ shadow-dom/focus-within-shadow.html:
 - Don't clear focus within shadow root if light DOM children are cleared
 shadow-dom/focus/DocumentOrShadowRoot-activeElement.html:
 - activeElement on a neighboring host when focused element is in another shadow tree
-- activeElement on document & shadow root when focused element is in the document
 - activeElement on document & shadow root when focused element is in the shadow tree
-- activeElement on document & shadow root when focused element is slotted
 - activeElement when focused element is in a nested shadow tree
 - activeElement when focused element is in a parent shadow tree
 shadow-dom/focus/ShadowRoot-delegatesFocus.html:
@@ -2068,8 +2041,6 @@ shadow-dom/focus/ShadowRoot-delegatesFocus.html:
 - delegatesFocus set to true in init dict
 shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
 - Calling blur() on shadow host with delegatesFocus should remove the focus.
-- Calling blur() on shadow host with delegatesFocus when the focus is on a slotted
-  element should not remove the focus.
 shadow-dom/focus/click-focus-slot-ancestor.html:
 - Clicking on non-focusable slot inside focusable div will make the flat-tree focusable
   ancestor get focused
@@ -2084,8 +2055,6 @@ shadow-dom/focus/focus-autofocus.html:
   focus
 - Focus should be delegated to the nested div which has autofocus based on the tree
   order
-- Focus should not be delegated to the autofocus element because the inner host doesn't
-  have delegates focus
 - Focus should not be delegated to the slotted elements
 - The second input should be focused since it has autofocus
 shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
@@ -2140,37 +2109,6 @@ shadow-dom/focus/focus-tabindex-order-shadow-zero.html:
 - Order when all tabindex=0 is and delegatesFocus = false
 shadow-dom/form-control-form-attribute.html:
 - Shadow form control's form attribute should work also in shadow DOM.
-shadow-dom/imperative-slot-api-slotchange.html:
-- Fire slotchange event on node assignment and when assigned node is removed.
-- Fire slotchange event on previous slot and new slot when node is reassigned.
-- Fire slotchange event when assign node to nested slot, ensure event bubbles ups.
-- Fire slotchange event when assigned node is removed.
-- Fire slotchange event when order of assigned nodes changes.
-- Fire slotchange event when removing a slot from Shadows Root that changes its assigned
-  nodes.
-- Fire slotchange event when slot's assigned nodes changes.
-- Signal a slot change should be done in tree order.
-- slotchange event must not fire synchronously.
-- slotchange event should not fire when assignments do not change assignedNodes.
-- slotchange event should not fire when same node is assigned.
-shadow-dom/imperative-slot-api.html:
-- Appending slottable to different host, it loses slot assignment. It can be re-assigned
-  within a new host.
-- Assigning invalid nodes should be allowed.
-- Assignment with the same node in parameters should be ignored, first one wins.
-- Imperative slot API can assign nodes in manual slot assignment.
-- Moving a slot to a new host, the slot loses its previously assigned slottables.
-- Moving a slot's tree order position within a shadow host has no impact on its assigned
-  slottables.
-- Nodes can be assigned even if slots or nodes aren't in the same tree.
-- Order and assignment of nodes are preserved during multiple assignment in a row.
-- Order of slottables is preserved in manual slot assignment.
-- Previously assigned node should not be assigned if slot moved to a new shadow root.
-  The node is re-assigned when moved back.
-- Previously assigned slottable is moved to new slot when it's reassigned.
-- Removing a node from the document does not break manually assigned slot linkage.
-- Removing a slot from DOM resets its slottable's slot assignment.
-- slot.attach() should take variadic not sequence.
 shadow-dom/imperative-slot-fallback-clear.html:
 - Element fallback should be cleared in a subsequent layout
 - Text node fallback should be cleared in a subsequently layout
@@ -2364,20 +2302,11 @@ shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
   fragid in the document tree even if there was another element with the same ID inside
   an open shadow tree earlier in tree order
 shadow-dom/shadow-root-clonable.html:
-- 'attachShadow with clonable: false'
-- 'attachShadow with clonable: true'
-- 'attachShadow with clonable: undefined'
 - declarative shadow roots can opt in to clonable with shadowrootclonable
 - 'declarative shadow roots do *not* get clonable: true automatically'
 - declarative shadow roots inside templates do *not* get cloned automatically
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
-shadow-dom/slotchange.html:
-- 'slotchange event: Add a fallback content to nested slots - assignedNodes still
-  empty.'
-- 'slotchange event: Append a child to a host (onslotchange).'
-- 'slotchange event: Remove a fallback content from nested slots - assignedNodes still
-  empty.'
 shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/attributes/test-006.html:
 - A_10_02_01_06_T01
 shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/methods/test-001.html:
