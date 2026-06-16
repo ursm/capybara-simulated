@@ -327,12 +327,10 @@ domparsing/DOMParser-parseFromString-encoding.html:
 - 'HTML: meta charset'
 domparsing/XMLSerializer-serializeToString.html:
 - Check if a prefix bound to an empty namespace URI ("no namespace") serialize
-- Check if no special handling for XLink namespace unlike HTML serializer.
+- Check if the prefix of an attribute is NOT preserved in a case where neither its prefix nor its namespace URI is not already used.
 - Drop inconsistent xmlns="..." by matching on local name
 domparsing/createContextualFragment.html:
 - Implicit <body> creation
-domparsing/domparser-spurious-attributes.html:
-- Using ">" and "\r" in an attribute creates no unexpected attributes.
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 domparsing/innerhtml-mxss.sub.html:
