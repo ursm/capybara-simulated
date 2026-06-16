@@ -159,3 +159,49 @@ RSpec.describe 'multi-window' do
     expect(session.evaluate_script('!window.popup || window.popup.closed')).to be(true)
   end
 end
+
+# Regression: meta/ctrl+Enter on a focused link, where the app's own keymap
+# already opens the target (window.open) and preventDefaults the keydown — as
+# Discourse's ItsATrap does for topic-list links. send_keys must NOT also fire
+# its synthetic link activation, or TWO windows open instead of one. Verified
+# in real Chrome: preventDefault on the keydown suppresses the native cmd+Enter
+# new-tab, so the app's open is the only one.
+RSpec.describe 'meta+Enter on a link the app already handles' do
+  let(:app) {
+    lambda do |env|
+      body =
+        if env['PATH_INFO'] == '/'
+          <<~HTML
+            <!doctype html><html><head><title>main</title></head><body>
+              <a id="lnk" href="/topic">open</a>
+              <a id="plain" href="/topic">plain</a>
+              <script>
+                document.getElementById('lnk').addEventListener('keydown', function (e) {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    window.open(e.currentTarget.href, '_blank');
+                    e.preventDefault();   // app handled it; native must not also open
+                  }
+                });
+              </script>
+            </body></html>
+          HTML
+        else
+          '<!doctype html><html><head><title>topic</title></head><body><h1 id="t">T</h1></body></html>'
+        end
+      [200, {'content-type' => 'text/html'}, [body]]
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit('/') }
+  after  { session.reset_session! }
+
+  it 'opens exactly one window (the app preventDefaulted, so no extra synthetic open)' do
+    session.window_opened_by { session.find(:css, '#lnk').send_keys(%i[meta return]) }
+    expect(session.windows.size).to eq(2)   # main + the app's one window
+  end
+
+  it 'still opens via the synthetic activation when the app does NOT preventDefault' do
+    session.window_opened_by { session.find(:css, '#plain').send_keys(%i[meta return]) }
+    expect(session.windows.size).to eq(2)   # main + the synthetic cmd+Enter open
+  end
+end
