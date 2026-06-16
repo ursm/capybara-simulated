@@ -284,16 +284,6 @@ dom/nodes/Document-URL.html:
   reason: Requires iframe to follow a real HTTP 302 redirect to redirect.py, fire
     onload, then read contentDocument.URL as the final URL; needs true network async
     navigation.
-dom/nodes/Document-constructor.html:
-- name: 'new Document(): URL parsing'
-  reason: The only failing assertion is a.constructor === HTMLAnchorElement. Every
-    tag constructor deliberately shares Element.prototype (dom-class-aliases.js
-    makeTagCtor) so feature-detection probes like file-saver's `'download' in
-    HTMLAnchorElement.prototype` walk our single Element IDL surface; instanceof is
-    narrowed via Symbol.hasInstance. Giving each tag a distinct prototype chain
-    (so .constructor resolves to the tag interface) abandons that load-bearing
-    shared-prototype model and is documented to break file-saver / IDL probes — a
-    bounded gap that is the deliberate cost of the design (rule 1).
 dom/nodes/Document-contentType/contentType/contenttype_bmp.html:
 - name: BMP document.contentType === 'image/bmp'
   reason: Loading a binary image into an iframe makes the UA synthesize an image-viewer
