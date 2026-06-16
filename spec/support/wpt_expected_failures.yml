@@ -324,8 +324,6 @@ domparsing/XMLSerializer-serializeToString.html:
 - Check if a prefix bound to an empty namespace URI ("no namespace") serialize
 - Check if the prefix of an attribute is NOT preserved in a case where neither its prefix nor its namespace URI is not already used.
 - Drop inconsistent xmlns="..." by matching on local name
-domparsing/createContextualFragment.html:
-- Implicit <body> creation
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 domparsing/innerhtml-mxss.sub.html:
