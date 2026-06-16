@@ -345,14 +345,6 @@ domparsing/createContextualFragment.html:
 - Implicit <body> creation
 domparsing/domparser-spurious-attributes.html:
 - Using ">" and "\r" in an attribute creates no unexpected attributes.
-domparsing/innerhtml-01.xhtml:
-- 'innerHTML in XHTML: getting while the document is in an invalid state'
-- 'innerHTML in XHTML: getting while the document is in an invalid state 1'
-domparsing/innerhtml-03.xhtml:
-- innerHTML in XHTML
-- innerHTML in XHTML 1
-- innerHTML in XHTML 3
-- innerHTML in XHTML 4
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 domparsing/innerhtml-mxss.sub.html:
