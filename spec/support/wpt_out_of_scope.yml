@@ -3684,6 +3684,15 @@ encoding/streams/readable-writable-properties.any.js:
 - name: TextEncoderStream readable and writable properties must pass brand checks
   reason: Needs TextEncoderStream.readable/writable to be real ReadableStream/WritableStream
     passing getReader/getWriter brand checks; no stream classes exist.
+encoding/textdecoder-eof.any.js:
+- name: TextDecoder end-of-queue handling
+  reason: UTF-8 assertions pass; the subtest also asserts Big5 lead-byte buffering
+    (e.g. [0x81,0x81] -> one replacement), which needs the Big5 legacy multibyte table
+    we deliberately don't model.
+- name: 'TextDecoder end-of-queue handling using stream: true'
+  reason: UTF-8 streaming assertions pass; the subtest also asserts Big5 lead-byte
+    buffering across chunks, which needs the Big5 legacy multibyte table we deliberately
+    don't model.
 encoding/textdecoder-mistakes.any.js:
 - name: Concatenating two ISO-2022-JP outputs is not always valid
   reason: iso-2022-jp legacy multibyte escape-state decoding; deliberately not modeled
