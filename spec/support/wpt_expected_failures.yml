@@ -2383,25 +2383,6 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-002.
 - A_08_01_02_T01
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
 - Elements in a shadow tree should not be accessible from owner document's "all" attribute.
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/ownerdocument-001.html:
-- All children nodes of a shadow root get a valid ownerDocument when added to a shadow
-  tree.
-- Elements added to a shadow tree should automatically get a valid ownerDocument.
-- ownerDocument property of a node should remain the same, even if its child is adopted
-  into a shadow tree.
-- ownerDocument property of a shadow root should be the document of the shadow host,
-  regardless of the location of the shadow host.
-- ownerDocument property of an element in a shadow tree should be the document of
-  the shadow host, even if the host element is created from another document.
-- ownerDocument property of elements in a shadow tree should match the document of
-  the shadow host, regardless of the element's location in a shadow tree.
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/shadow-root-001.html:
-- The parentElement attribute of a shadow root must always return null, even if the
-  shadow root is nested inside another shadow root.
-- The parentElement attribute of a shadow root must always return null.
-- The parentNode attribute of a shadow root must always return null, even if the shadow
-  root is nested inside another shadow root.
-- The parentNode attribute of a shadow root must always return null.
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-005.html:
 - A_04_01_05_T01
 - A_04_01_05_T02
