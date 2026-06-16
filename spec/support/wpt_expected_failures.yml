@@ -133,37 +133,6 @@ domparsing/XMLSerializer-serializeToString.html:
 - Drop inconsistent xmlns="..." by matching on local name
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-domparsing/innerhtml-mxss.sub.html:
-- 'href after setter: 1680'
-- 'href after setter: 2000'
-- 'href after setter: 2001'
-- 'href after setter: 2002'
-- 'href after setter: 2003'
-- 'href after setter: 2004'
-- 'href after setter: 2005'
-- 'href after setter: 2006'
-- 'href after setter: 2007'
-- 'href after setter: 2008'
-- 'href after setter: 2009'
-- 'href after setter: 200a'
-- 'href after setter: 2028'
-- 'href after setter: 205f'
-- 'href after setter: 3000'
-- 'href before setter: 1680'
-- 'href before setter: 2000'
-- 'href before setter: 2001'
-- 'href before setter: 2002'
-- 'href before setter: 2003'
-- 'href before setter: 2004'
-- 'href before setter: 2005'
-- 'href before setter: 2006'
-- 'href before setter: 2007'
-- 'href before setter: 2008'
-- 'href before setter: 2009'
-- 'href before setter: 200a'
-- 'href before setter: 2028'
-- 'href before setter: 205f'
-- 'href before setter: 3000'
 domparsing/style_attribute_html.html:
 - Parsing of invalid style attribute
 domparsing/tentative/stream-positional.html:

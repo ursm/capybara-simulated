@@ -59,7 +59,44 @@ module WptRunner
     '.css'  => 'text/css'
   }.freeze
 
+  # Canonical WPT server identity for `.sub.*` template substitution. wptserve
+  # rewrites `{{host}}` / `{{ports[...]}}` / `{{domains[...]}}` / … in `.sub.`
+  # files at serve time; we emulate the subset our vendored corpus uses and
+  # visit `.sub.` files at this exact host:port (see `run`) so resolved-URL
+  # assertions — e.g. innerhtml-mxss's `a.href` — match. Non-`.sub.` files keep
+  # the default www.example.com origin, so this is scoped to the `.sub.` set.
+  SUB_HOST       = 'web-platform.test'
+  SUB_ALT_HOST   = 'not-web-platform.test'
+  SUB_HTTP_PORT  = '8000'
+  SUB_HTTPS_PORT = '8443'
+  SUB_ORIGIN     = "http://#{SUB_HOST}:#{SUB_HTTP_PORT}"
+
   module_function
+
+  # Emulate wptserve's server-side `{{…}}` substitution for `.sub.` files (the
+  # subset our vendored corpus references). `req_path` feeds the `location[...]`
+  # tokens. Unknown tokens are left verbatim so a new, unhandled pattern shows
+  # up loudly as a literal `{{…}}` in a failing assertion rather than silently
+  # mis-substituting to something plausible.
+  def substitute(body, req_path)
+    # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
+    # would raise Encoding::CompatibilityError the moment the body carries any
+    # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
+    body.dup.force_encoding('UTF-8').gsub(/\{\{([^}]+)\}\}/) do |whole|
+      case Regexp.last_match(1)
+      when 'host'                      then SUB_HOST
+      when /\Aports\[http\]\[\d+\]\z/  then SUB_HTTP_PORT
+      when /\Aports\[https\]\[\d+\]\z/ then SUB_HTTPS_PORT
+      when 'location[scheme]'          then 'http'
+      when 'location[host]'            then "#{SUB_HOST}:#{SUB_HTTP_PORT}"
+      when 'location[path]'            then req_path
+      when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
+      when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? SUB_ALT_HOST : "#{m}.#{SUB_ALT_HOST}"
+      when /\Ahosts\[\]\[(\w*)\]\z/    then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
+      else whole
+      end
+    end
+  end
 
   def app
     @app ||= Rack::Builder.new {
@@ -86,8 +123,10 @@ module WptRunner
           next [404, {'content-type' => 'text/plain'}, ['not found']]
         end
 
-        ct = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
-        [200, {'content-type' => ct}, [File.binread(file)]]
+        ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
+        body = File.binread(file)
+        body = WptRunner.substitute(body, path) if File.basename(path).include?('.sub.')
+        [200, {'content-type' => ct}, [body]]
       }
     }.to_app
   end
@@ -176,10 +215,18 @@ module WptRunner
   #   { completed: true,  failing: ["subtest name", …] }   # harness finished
   #   { completed: false, error: "…" | nil }               # never completed
   def run(rel)
+    # `.sub.` files are served with wptserve `{{…}}` substitution and visited at
+    # the canonical wptserve origin so their substituted host:port matches the
+    # document origin (resolved-URL assertions depend on it). Crossing origins on
+    # the shared session leaves the *next* file's harness unable to complete, so
+    # isolate `.sub.` runs behind a fresh session on both sides — cheap (a handful
+    # of files) and keeps every other file on the stable www.example.com path.
+    sub = File.basename(rel).include?('.sub.')
+    @session = nil if sub
     s = session
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
-    s.visit "/#{visit}"
+    s.visit(sub ? "#{SUB_ORIGIN}/#{visit}" : "/#{visit}")
     # The driver doesn't auto-fire window 'load'; testharness completes its
     # sync tests off that event (then a setTimeout(0) sets `all_loaded`).
     s.evaluate_script("window.dispatchEvent(new Event('load'))")
@@ -219,6 +266,10 @@ module WptRunner
     # rebuild it so the next file (and the result) doesn't depend on run order.
     @session = nil
     {completed: false, error: e.message}
+  ensure
+    # Drop the cross-origin session so the next (non-sub) file starts fresh on
+    # the default origin — see the `sub` isolation note above.
+    @session = nil if sub
   end
 
   # The behavioural-conformance allowlist is split across two files: the in-scope
