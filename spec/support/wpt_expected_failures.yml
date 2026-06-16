@@ -207,7 +207,6 @@ dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 dom/nodes/Document-doctype.html:
 - Window document with doctype
 dom/nodes/Element-closest.html:
-- Element.closest with context node 'test11' and selector ':invalid'
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
