@@ -16,9 +16,10 @@ require 'set'
 # reads the results our reporter (spec/wpt/resources/testharnessreport.js)
 # stashed on `globalThis.__wptResults`.
 module WptRunner
-  ROOT          = File.expand_path('../wpt', __dir__)
-  EXPECTED_PATH = File.expand_path('wpt_expected_failures.yml', __dir__)
-  SKIP_PATH     = File.expand_path('wpt_skip.yml', __dir__)
+  ROOT              = File.expand_path('../wpt', __dir__)
+  EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
+  OUT_OF_SCOPE_PATH = File.expand_path('wpt_out_of_scope.yml', __dir__)
+  SKIP_PATH         = File.expand_path('wpt_skip.yml', __dir__)
 
   # Sentinel allowlist value for a file whose harness never reaches completion
   # (unsupported include, parse crash, real hang → testharness timeout, …).
@@ -220,8 +221,37 @@ module WptRunner
     {completed: false, error: e.message}
   end
 
+  # The behavioural-conformance allowlist is split across two files: the in-scope
+  # backlog (wpt_expected_failures.yml — bare name lists, the roadmap) and the
+  # earned out-of-scope failures (wpt_out_of_scope.yml — {name, reason} lists, a
+  # deliberate non-goal per CLAUDE.md rule 1). The gate is symmetric over the
+  # UNION: a non-PASS subtest listed in NEITHER turns red, and a listed subtest
+  # that now passes turns red regardless of which file it's in. `expected` returns
+  # that merged view per file — a name multiset, or the HARNESS_ERROR sentinel.
   def expected
-    @expected ||= File.exist?(EXPECTED_PATH) ? (YAML.safe_load_file(EXPECTED_PATH) || {}) : {}
+    @expected ||= begin
+      in_map  = load_yaml_map(EXPECTED_PATH)
+      out_map = out_of_scope
+      (in_map.keys | out_map.keys).each_with_object({}) do |rel, merged|
+        iv = in_map[rel]
+        merged[rel] = iv == HARNESS_ERROR ? HARNESS_ERROR : Array(iv) + out_subtest_names(rel)
+      end
+    end
+  end
+
+  # Raw out-of-scope map: rel => [{ 'name' =>, 'reason' => }, …]. Exposed so the
+  # regen script can preserve each kept entry's reason across regenerations.
+  def out_of_scope
+    @out_of_scope ||= load_yaml_map(OUT_OF_SCOPE_PATH)
+  end
+
+  # Out-of-scope subtest names for a file, with multiplicity (reasons dropped).
+  def out_subtest_names(rel)
+    Array(out_of_scope[rel]).map {|e| e.is_a?(Hash) ? e['name'] : e }
+  end
+
+  def load_yaml_map(path)
+    File.exist?(path) ? (YAML.safe_load_file(path) || {}) : {}
   end
 
   # Multiset difference: the elements of `a` left over after removing one

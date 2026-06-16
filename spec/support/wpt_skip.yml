@@ -1,6 +1,7 @@
 # WPT files excluded from the conformance run because they CRASH or
 # pathologically hang the driver — as opposed to merely producing wrong
-# subtest results (those stay in wpt_expected_failures.yml and keep running).
+# subtest results (those keep running and are listed in wpt_expected_failures.yml
+# if in-scope, or wpt_out_of_scope.yml with a reason if an earned non-goal).
 #
 # This is the driver-crasher backlog. Each entry is relpath => reason. Removing
 # an entry means the underlying driver crash/hang has been fixed; the file then

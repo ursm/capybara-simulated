@@ -1,30 +1,54 @@
-# Dev helper: regenerate spec/support/wpt_expected_failures.yml by running the
-# whole vendored WPT subset and recording each file's current non-PASS state.
-# Run after implementing a fix so the symmetric conformance gate stays honest.
+# Dev helper: regenerate the WPT conformance allowlists by running the whole
+# vendored WPT subset and recording each file's current non-PASS state. Run after
+# implementing a fix so the symmetric conformance gate stays honest.
 #
 #   bundle exec ruby script/regen_wpt_expected_failures.rb
 #
+# The allowlist is SPLIT across two files:
+#   - spec/support/wpt_expected_failures.yml — IN-SCOPE backlog (bare name lists,
+#     plus the HARNESS_ERROR sentinel for files whose harness never completes)
+#   - spec/support/wpt_out_of_scope.yml      — EARNED non-goals ({name, reason}
+#     lists; needs a subsystem we deliberately don't model, per CLAUDE.md rule 1)
+#
+# Partitioning rule: a freshly-observed failing subtest defaults to IN-SCOPE
+# (rule 1: out-of-scope is earned, never assumed). An observed failure that is
+# ALREADY listed in wpt_out_of_scope.yml stays out-of-scope and keeps its reason.
+# So this script preserves manual out-of-scope classifications across regens; to
+# reclassify a subtest, move its line between the two files by hand. A subtest
+# that now PASSes is dropped from whichever file listed it.
+#
 # Output per file (only files with something to record are listed):
 #   "dom/nodes/Node-appendChild.html":
-#   - "Appending to a text node"        # subtest currently FAIL/TIMEOUT/NOTRUN
+#   - "Appending to a text node"        # IN-scope: subtest currently FAIL/TIMEOUT
 #   "dom/nodes/some-broken.html": HARNESS_ERROR   # harness never completed
 #
 # Serialized with Psych (not String#inspect) so the writer's escape grammar is
 # the exact inverse of the gate's YAML.safe_load_file reader — a subtest name
 # containing e.g. `#{` would make an inspect-quoted scalar that Psych rejects.
 #
-# The wpt_spec gate is symmetric: a non-PASS subtest not listed here turns the
-# suite RED (fix it or list it), and a listed subtest that now PASSes ALSO turns
-# it RED (delete the stale line). Shrinking this file is the parity roadmap.
+# The wpt_spec gate is symmetric over the UNION of both files: a non-PASS subtest
+# in NEITHER turns the suite RED (fix it or list it), and a listed subtest that
+# now PASSes ALSO turns it RED (delete the stale line). Shrinking the in-scope
+# file is the parity roadmap.
 require_relative '../spec/support/wpt_runner'
 
 files = WptRunner.test_files
 warn "Running #{files.size} WPT files…"
 
-expected = {}
+# Existing out-of-scope classification: rel => queue of [name, reason] per name,
+# consumed with multiplicity so a repeated name keeps the right count out-of-scope.
+out_existing = WptRunner.out_of_scope.each_with_object({}) do |(rel, entries), h|
+  by_name = Hash.new {|hh, k| hh[k] = [] }
+  Array(entries).each {|e| by_name[e.is_a?(Hash) ? e['name'] : e] << (e.is_a?(Hash) ? e['reason'] : nil) }
+  h[rel] = by_name
+end
+
+in_map  = {}   # rel => [name, …]  | HARNESS_ERROR
+out_map = {}   # rel => [{ 'name' =>, 'reason' => }, …]
 completed_count = 0
 error_count = 0
-fail_subtests = 0
+in_subtests = 0
+out_subtests = 0
 
 files.each_with_index do |rel, i|
   result = WptRunner.run(rel)
@@ -33,50 +57,76 @@ files.each_with_index do |rel, i|
     # Keep the full multiset (no uniq): a subtest name that fails more than once
     # must be recorded with its multiplicity, or the gate's multiset comparison
     # under-counts it and a later same-named regression slips through green.
-    failing = result[:failing].sort
-    unless failing.empty?
-      expected[rel] = failing
-      fail_subtests += failing.size
+    pool = out_existing[rel]
+    in_list  = []
+    out_list = []
+    result[:failing].sort.each do |name|
+      if pool && pool[name] && !pool[name].empty?
+        reason = pool[name].shift
+        out_list << { 'name' => name, 'reason' => reason.to_s }
+      else
+        in_list << name
+      end
+    end
+    unless in_list.empty?
+      in_map[rel] = in_list
+      in_subtests += in_list.size
+    end
+    unless out_list.empty?
+      out_map[rel] = out_list
+      out_subtests += out_list.size
     end
   else
     error_count += 1
-    expected[rel] = WptRunner::HARNESS_ERROR
+    in_map[rel] = WptRunner::HARNESS_ERROR
   end
   warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 25).zero? || i + 1 == files.size
 end
 warn ''
 
-hdr = <<~H
-  # WPT expected non-PASS state — the behavioural-conformance backlog for the
-  # vendored web-platform-tests subset (spec/wpt/), made measurable.
+in_hdr = <<~H
+  # WPT IN-SCOPE backlog — subtests that currently fail but are real driver gaps
+  # we intend to fix (the conformance roadmap). Earned out-of-scope failures live
+  # in wpt_out_of_scope.yml. The gate (spec/wpt_spec.rb) loads BOTH and checks the
+  # union symmetrically: a non-PASS subtest in NEITHER file -> RED; a listed subtest
+  # that now PASSes -> RED. New failures default here (in-scope) until shown to be
+  # an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
   #
-  # Each entry is one test file:
-  #   - a list of subtest names currently NOT passing (FAIL / TIMEOUT / NOTRUN), or
-  #   - the string HARNESS_ERROR if the harness never reached completion
-  #     (unsupported include, parse crash, or a real hang hitting the harness
-  #     timeout) so no per-subtest results are available.
+  # Each entry is one file: a list of not-yet-passing subtest names, or the string
+  # HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
   #
-  # spec/wpt_spec.rb is symmetric, mirroring the IDL gate:
-  #   - a non-PASS subtest NOT listed here          -> RED (regression / new gap)
-  #   - a listed subtest that now PASSes             -> RED (stale; delete it)
-  #   - a file that now completes but is HARNESS_ERROR (or vice-versa) -> RED
-  # So fixing a driver gap forces its lines out, and a regression that drops a
-  # passing subtest is caught immediately. Shrinking this file is the roadmap.
-  #
-  # Regenerate after a driver fix with:
-  #   bundle exec ruby script/regen_wpt_expected_failures.rb
+  # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
   #
 H
 
-# Build a key-sorted hash and let Psych emit it: real YAML escaping so every
-# subtest name round-trips through YAML.safe_load_file byte-for-byte.
-ordered = expected.keys.sort.each_with_object({}) {|rel, h| h[rel] = expected[rel] }
+out_hdr = <<~H
+  # WPT OUT-OF-SCOPE failures — subtests that fail because they need a subsystem we
+  # deliberately do NOT model (per CLAUDE.md rule 1): a layout/rendering engine, a
+  # real async runtime / streams, IDNA / legacy-multibyte encoding tables, or a spec
+  # edge no real library/app depends on. These are NOT a backlog; each carries the
+  # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
+  #
+  # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
+  # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
+  # it to the in-scope file / delete it). Format per file: a list of {name, reason}.
+  #
+  # regen_wpt_expected_failures.rb PRESERVES these classifications + reasons across
+  # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
+  #
+H
 
-File.write(WptRunner::EXPECTED_PATH, hdr + ordered.to_yaml)
+# Key-sorted hashes, emitted by Psych: real YAML escaping so every subtest name
+# round-trips through YAML.safe_load_file byte-for-byte.
+in_ordered  = in_map.keys.sort.each_with_object({})  {|rel, h| h[rel] = in_map[rel] }
+out_ordered = out_map.keys.sort.each_with_object({}) {|rel, h| h[rel] = out_map[rel] }
+
+File.write(WptRunner::EXPECTED_PATH, in_hdr + in_ordered.to_yaml)
+File.write(WptRunner::OUT_OF_SCOPE_PATH, out_hdr + out_ordered.to_yaml)
 
 warn "wrote #{WptRunner::EXPECTED_PATH}"
+warn "  and  #{WptRunner::OUT_OF_SCOPE_PATH}"
 warn "  files:          #{files.size}"
 warn "  completed:      #{completed_count}"
 warn "  harness errors: #{error_count}"
-warn "  listed files:   #{expected.size}"
-warn "  fail subtests:  #{fail_subtests}"
+warn "  in-scope:       #{in_map.size} files / #{in_subtests} subtests"
+warn "  out-of-scope:   #{out_map.size} files / #{out_subtests} subtests"
