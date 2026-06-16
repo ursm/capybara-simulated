@@ -1465,6 +1465,1438 @@ encoding/utf-32-from-win1252.html:
 encoding/utf-32.html:
 - Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
 - Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
+shadow-dom/Document-caretPositionFromPoint.tentative.html:
+- document.caretPositionFromPoint() for a point after a forced break should return
+  a CaretPosition at the specified location pointing to a textarea element which is
+  the offsetNode.
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to a closed shadow tree when the shadow tree is specified as an
+  argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to a textarea element which is the offsetNode.
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to an input element when the shadow tree is specified as an argument.
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to an input element which is the offsetNode.
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the inner shadow tree when the point is in an inner shadow
+  tree and the inner shadow tree and the outer shadow tree are specified as an argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the inner shadow tree when the point is in an inner shadow
+  tree and the inner shadow tree is specified as an argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the input element's shadow host's parent when the shadow tree
+  is not specified as an argument.
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the outer shadow host's parent when the point is in an inner
+  shadow tree and no shadow tree is specified as an argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the outer shadow tree when the point is in an inner shadow
+  tree and the outer shadow tree is specified as an argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location pointing to the shadow host's parent when the shadow tree is not specified
+  as an argument
+- document.caretPositionFromPoint() should return a CaretPosition at the specified
+  location when the non-intersecting shadow tree is specified as an argument
+shadow-dom/Document-prototype-adoptNode.html:
+- adoptNode on a shadow root in closed mode must throw a HierarchyRequestError
+- adoptNode on a shadow root in open mode must throw a HierarchyRequestError
+shadow-dom/Document-prototype-currentScript.html:
+- document.currentScript must be set to a script element that loads an external script
+  in a document tree
+- document.currentScript must be set to a script element that loads an external script
+  in a document tree (2)
+- document.currentScript must be set to a script element that loads an external script
+  that was in a closed shadow tree and then removed
+- document.currentScript must be set to a script element that loads an external script
+  that was in an open shadow tree and then removed
+- document.currentScript must not be set to a script element that loads an external
+  script in a closed shadow tree
+- document.currentScript must not be set to a script element that loads an external
+  script in an open shadow tree
+shadow-dom/Document-prototype-importNode.html:
+- importNode on a shadow root in closed mode must throw a NotSupportedError
+- importNode on a shadow root in open mode must throw a NotSupportedError
+shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: block'
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: inline'
+- 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow host
+  of the hit-tested text node when the hit-tested text node is a direct child of the
+  root and the host has display: inline-block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: inline'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the element
+  assigned to a slot when hit-tested text node under an element is assigned to a slot
+  in the shadow tree and the shadow host of the slot has display: inline-block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  block'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  inline'
+- 'document.elementFromPoint and shadowRoot.elementFromPoint must return the shadow
+  host when the hit-tested text node is assigned to a slot and the host has display:
+  inline-block'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: block'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: inline'
+- 'document.elementFromPoint must return the shadow host and shadowRoot.elementFromPoint
+  must return the slot parent of the fallback text when the hit-tested text node is
+  a fallback content and the host has display: inline-block'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: block'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: inline'
+- 'document.elementFromPoint must return the shadow host of the hit-tested element
+  under a shadow root and shadowRoot.elementFromPoint must return the element parent
+  of the hit-tested text node under the point when the shadow host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint must return a child element
+  with its own shadow tree assigned to a slot when the hit-tested text node is a child
+  of another element and innerShadow.elementFromPoint must return the parent element
+  of the hit-tested text node under it when the outer shadow host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element assigned to a slot when the hit-tested text node is
+  assigned to a slot in the shadow tree of the child element and the outer shadow
+  host has display: inline-block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  block'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  inline'
+- 'document.elementFromPoint, shadowRoot.elementFromPoint, innerShadow.elementFromPoint
+  must return a child element with its own shadow tree assigned to a slot when the
+  hit-tested text node is its direct child and the outer shadow host has display:
+  inline-block'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: block'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: inline'
+- 'document.elementsFromPoint and shadow.elementsFromPoint must return the shadow
+  host and its ancestors of the hit-tested text node when the hit-tested text node
+  is a direct child of the root and the host has display: inline-block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: inline'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the element
+  assigned to a slot and its non-shadow ancestors when hit-tested text node under
+  an element is assigned to a slot in the shadow tree and the shadow host of the slot
+  has display: inline-block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: block'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: inline'
+- 'document.elementsFromPoint and shadowRoot.elementsFromPoint must return the shadow
+  host and its ancestors when the hit-tested text node is assigned to a slot and the
+  host has display: inline-block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: inline'
+- 'document.elementsFromPoint must return the shadow host and its ancestors and shadowRoot.elementsFromPoint
+  must return the slot parent of the fallback text and its non-shadow ancestors when
+  the hit-tested text node is a fallback content and the host has display: inline-block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: block'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: inline'
+- 'document.elementsFromPoint must return the shadow host and its ancestors of the
+  hit-tested element under a shadow root andshadowRoot.elementsFromPoint must return
+  the element parent and its non-shadow ancestors of the hit-tested text node under
+  the point when the shadow host has display: inline-block'
+- elementsFromPoint should return all elements under a point, even when context object
+  is not connected
+- shadowRoot.elementsFromPoint must behave the same with document.elementsFromPoint
+  regarding HTML element
+shadow-dom/Element-interface-attachShadow-custom-element.html:
+- Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
+  should throw a NotSupportedError
+- Element.attachShadow for an autonomous custom element with disabledFeatures=["shadow"]
+  should throw a NotSupportedError
+- Element.attachShadow must throw a NotSupportedError for customized built-in elements
+shadow-dom/Element-interface-attachShadow.html:
+- Element.attachShadow must throw a NotSupportedError for non-safelisted elements
+- Element.attachShadow must throw a NotSupportedError if the context object already
+  hosts a shadow tree
+- Element.attachShadow must throw a TypeError if mode is not "open" or "closed"
+shadow-dom/Extensions-to-Event-Interface.html:
+- The event must not propagate out of closed mode shadow tree of the target but must
+  propagate out of inner shadow trees when the scoped flag is set
+- The event must not propagate out of open mode shadow tree of the target but must
+  propagate out of inner shadow trees when the scoped flag is set
+- The event must propagate out of closed mode shadow boundaries when the composed
+  flag is set
+- The event must propagate out of closed mode shadow tree in which the relative target
+  and the relative related target are the same
+- The event must propagate out of open mode shadow boundaries when the composed flag
+  is set
+- The event must propagate out of open mode shadow tree in which the relative target
+  and the relative related target are the same
+- composedPath() must contain and only contain the unclosed nodes of target in closed
+  mode shadow trees
+- composedPath() must contain and only contain the unclosed nodes of target in open
+  mode shadow trees
+shadow-dom/HTMLSlotElement-interface.html:
+- '"name" attribute on HTMLSlotElement must reflect "name" attribute'
+- HTMLSlotElement must be defined on window
+- assignedNodes() must return the list of assigned nodes when none of the assigned
+  nodes themselves are slots
+- assignedNodes() must update when a default slot is introduced dynamically by a slot
+  rename
+- assignedNodes() must update when slot and name attributes are modified
+- assignedNodes() must update when slot elements are inserted or removed
+- assignedNodes() on a HTMLSlotElement must return an empty array when the slot element
+  is not in a tree or in a document tree
+- assignedNodes({"flattened":false}) must return the list of assigned nodes when none
+  of the assigned nodes themselves are slots
+- assignedNodes({"flattened":false}) must update when a default slot is introduced
+  dynamically by a slot rename
+- assignedNodes({"flattened":false}) must update when slot and name attributes are
+  modified
+- assignedNodes({"flattened":false}) must update when slot elements are inserted or
+  removed
+- assignedNodes({"flattened":false}) on a HTMLSlotElement must return an empty array
+  when the slot element is not in a tree or in a document tree
+- assignedNodes({"flattened":true}) must return the list of assigned nodes when none
+  of the assigned nodes themselves are slots
+- assignedNodes({"flattened":true}) must update when a default slot is introduced
+  dynamically by a slot rename
+- assignedNodes({"flattened":true}) must update when slot and name attributes are
+  modified
+- assignedNodes({"flattened":true}) must update when slot elements are inserted or
+  removed
+- assignedNodes({"flattened":true}) on a HTMLSlotElement must return an empty array
+  when the slot element is not in a tree or in a document tree
+- 'assignedNodes({flatten: true}) must return the distributed nodes, and assignedNodes()
+  and assignedNodes({flatten: false}) must returned the assigned nodes'
+shadow-dom/HighlightRegistry-highlightsFromPoint.html:
+- CSS.highlights.highlightsFromPoint() doesn't return Highlights that are not painted
+  at the given coordinates even when they fall inside the Highlights' ranges
+- CSS.highlights.highlightsFromPoint() handles slotted light DOM content correctly.
+- CSS.highlights.highlightsFromPoint() returns Highlights present at a given point
+  inside a shadow tree in the right order.
+shadow-dom/MouseEvent-prototype-offsetX-offsetY.html:
+- MouseEvent's offsetX and offsetY attributes must be relative to the shadow host
+  when an event is dispatched inside its shadow tree.
+- MouseEvent's offsetX and offsetY attributes must be relative to the target when
+  an event is dispatched on a slotted content.
+- MouseEvent's offsetX and offsetY attributes must be relative to the target.
+shadow-dom/Node-prototype-cloneNode.html:
+- cloneNode on a shadow root in closed mode must throw a NotSupportedError
+- cloneNode on a shadow root in open mode must throw a NotSupportedError
+shadow-dom/ShadowRoot-interface.html:
+- ShadowRoot must not be a constructor
+- ShadowRoot.activeElement must return the focused element of the context object when
+  shadow root is closed.
+- ShadowRoot.activeElement must return the focused element of the context object when
+  shadow root is open.
+- ShadowRoot.styleSheets must return a StyleSheetList sequence containing the shadow
+  root style sheets when shadow root is closed.
+- ShadowRoot.styleSheets must return a StyleSheetList sequence containing the shadow
+  root style sheets when shadow root is open.
+shadow-dom/Slottable-mixin.html:
+- assignedSlot attribute must be defined on Element and Text interfaces
+- assignedSlot must return null when the assigned slot element is inside a closed
+  shadow tree
+- assignedSlot must return null when the node does not have an assigned node
+- assignedSlot must return the assigned slot
+shadow-dom/accesskey.tentative.html:
+- button element with accesskey in the shadow tree of closed mode
+- button element with accesskey in the shadow tree of open mode
+shadow-dom/assign-slottables-after-removing-shadow-tree-from-document.html:
+- Slottables should be assigned to slots even after the shadow host has been removed
+  from the document
+shadow-dom/capturing-and-bubbling-event-listeners-across-shadow-trees.html:
+- Capturing event listeners should be invoked before bubbling event listeners on the
+  target without shadow trees
+- Capturing event listeners should be invoked before bubbling event listeners when
+  an event is dispatched inside a doubly nested shadow tree
+- Capturing event listeners should be invoked before bubbling event listeners when
+  an event is dispatched inside a shadow tree
+- Capturing event listeners should be invoked before bubbling event listeners when
+  an event is dispatched inside a shadow tree which passes through another shadow
+  tree
+- Capturing event listeners should be invoked before bubbling event listeners when
+  an event is dispatched via a slot
+shadow-dom/declarative/declarative-after-attachshadow.html:
+- 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
+  called'
+shadow-dom/declarative/declarative-shadow-dom-available-to-element-internals.html:
+- 'Declarative Shadow DOM: shadow root should be available to element internals'
+shadow-dom/declarative/declarative-shadow-dom-basic.html:
+- 'Declarative Shadow DOM: Basic test'
+- 'Declarative Shadow DOM: Closed shadow root attribute'
+- 'Declarative Shadow DOM: Feature detection'
+- 'Declarative Shadow DOM: Fragment parser basic test'
+- 'Declarative Shadow DOM: Missing closing tag'
+- 'Declarative Shadow DOM: Multiple roots'
+- 'Declarative Shadow DOM: clonable attribute'
+- 'Declarative Shadow DOM: delegates focus attribute'
+- 'Declarative Shadow DOM: template containing (deeply nested) declarative shadow
+  root'
+- 'Declarative Shadow DOM: template containing a template containing declarative shadow
+  root'
+- 'Declarative Shadow DOM: template containing declarative shadow root (with shadowrootclonable)'
+- 'Declarative Shadow DOM: template containing declarative shadow root and UA shadow
+  root'
+- Shadowrootclonable reflection
+- Shadowrootclonable reflection, setter
+- Shadowrootdelegatesfocus reflection
+- Shadowrootdelegatesfocus reflection, setter
+- Shadowrootmode reflection
+- Shadowrootmode reflection, setter
+shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
+- Non-fragment parsing needs no opt-in
+shadow-dom/declarative/declarative-shadow-dom-repeats-2.html:
+- Repeated declarative shadow roots keep only the first
+shadow-dom/declarative/declarative-shadow-dom-repeats-slot-assignment.html:
+- attachShadow() on declarative shadow root does not change slotAssignment
+- attachShadow() on declarative shadow root with manual slotAssignment
+shadow-dom/declarative/declarative-shadow-dom-repeats.html:
+- Calling attachShadow() on declarative shadow root must match all parameters
+- Calling attachShadow() on declarative shadow root must match mode
+- Repeated declarative shadow roots keep only the first
+shadow-dom/declarative/declarative-shadow-dom-serialization.html:
+- nested elements inside shadow root are serialized
+- shadow root children are serialized inside template
+shadow-dom/declarative/declarative-shadow-dom-slot-assignment-serialization.html:
+- shadowrootslotassignment=manual is serialized and appears before shadowrootclonable
+  and shadowrootserializable
+- shadowrootslotassignment=manual serializes between shadowrootdelegatesfocus and
+  shadowrootclonable
+- shadowrootslotassignment=named is not serialized as it's the default
+shadow-dom/declarative/declarative-shadow-dom-slot-assignment.html:
+- 'Declarative Shadow DOM: missing shadowrootslotassignment defaults to named'
+- 'Declarative Shadow DOM: shadowrootslotassignment invalid value defaults to named'
+- 'Declarative Shadow DOM: shadowrootslotassignment is case insensitive'
+- 'Declarative Shadow DOM: shadowrootslotassignment on closed shadows can be set to
+  manual'
+- 'Declarative Shadow DOM: shadowrootslotassignment=manual'
+- 'Declarative Shadow DOM: shadowrootslotassignment=named'
+- shadowrootslotassignment reflection
+- shadowrootslotassignment reflection, setter
+shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
+- "`document.write` on inner iframe handles declarative shadow DOM"
+shadow-dom/declarative/gethtml-ordering.html:
+- attribute position
+- both template and attribute position
+- template position
+shadow-dom/declarative/innerhtml-before-closing-tag.html:
+- 'Declarative Shadow DOM: innerHTML should work while parsing streaming declarative
+  shadow root <template>'
+shadow-dom/declarative/innerhtml-on-ordinary-template.html:
+- 'Declarative Shadow DOM: innerHTML should work on <template shadowroot> that is
+  left over'
+shadow-dom/declarative/move-template-before-closing-tag.html:
+- Moving the template node during parsing should attach to initial parent (content
+  after observer)
+- Moving the template node during parsing should attach to initial parent (content
+  before observer)
+- Moving the template node from invalid parent to valid parent should still not attach
+shadow-dom/declarative/script-access.html:
+- 'Streaming Declarative Shadow DOM: template .content() should be null'
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-disconnect-iframe.html:
+- Destroying iframe during async adoptedStyleSheets fetch does not crash.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-disconnect.html:
+- Disconnecting and reconnecting host during async fetch still applies styles.
+? shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-duplicate-bare-specifier.html
+: - Bare specifier and resolved URL are not deduplicated but share the same CSSStyleSheet.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-duplicate-importmap.html:
+- Duplicate bare specifiers via import map are deduplicated and applied.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-duplicate.html:
+- Duplicate specifiers in the attribute are deduplicated.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-failure-shared.html:
+- 'Declarative failure: subsequent import() of the same URL rejects (consistent with
+  imperative-first failure).'
+- Failed fetch initiated by shadowrootadoptedstylesheets stays failed for later declarative
+  consumers.
+- Failed import() is observed by subsequent shadowrootadoptedstylesheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-failure.html:
+- 'Async fetch failure: JS-duplicated references all remain after failure.'
+- 'Async fetch failure: bare module specifier contributes no sheet.'
+- 'Async fetch failure: empty placeholder sheet remains in adoptedStyleSheets.'
+- 'Async fetch failure: failed sheet remains empty; valid specifier still works.'
+- 'Async fetch failure: import map mapping specifier to null contributes no sheet.'
+- 'Async fetch failure: invalid URL (lone surrogate) contributes no sheet.'
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-clear.html:
+- Clearing adoptedStyleSheets before fetch prevents styles from being applied.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-insertrule.html:
+- Fetched sheet replaces placeholder including manually-inserted rules.
+? shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-reinsert-same.html
+: - Placeholder removed and reinserted at same position is replaced by fetched sheet.
+? shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-reinsert-swap.html
+: - Placeholders reinserted in swapped positions reflect new cascade order after fetch.
+? shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-remove-middle.html
+: - Removing middle placeholder before fetch excludes it from final adoptedStyleSheets.
+? shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-removed-still-updates.html
+: - Removed original_sheet is still updated by fetch and applies styles when re-adopted.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-mutation-replacesync.html:
+- Fetched sheet replaces placeholder including replaceSync content.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-ordering.html:
+- Multiple async-fetched CSS modules maintain attribute order in adoptedStyleSheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-shared.html:
+- Shared CSS module specifier across shadow roots produces the same CSSStyleSheet.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch.html:
+- Async-fetched CSS module replaces placeholder and applies styles.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-basic.html:
+- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
+  attribute.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode-async-fetch.html:
+- cloneNode handles both placeholder and resolved async-fetched adoptedStyleSheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode.html:
+- Adopted stylesheets resolved from the cloned shadow root style the cloned tree.
+- cloneNode(true) on a non-clonable host does not produce a shadow root regardless
+  of shadowrootadoptedstylesheets.
+- cloneNode(true) preserves order of multiple shadowrootadoptedstylesheets specifiers.
+- cloneNode(true) preserves resolution semantics for whitespace-padded shadowrootadoptedstylesheets
+  values.
+- cloneNode(true) re-processes shadowrootadoptedstylesheets and the clone shares the
+  resolved sheet.
+- cloneNode(true) reflects only the shadowrootadoptedstylesheets attribute, not script
+  mutations to adoptedStyleSheets.
+- cloneNode(true) with absent shadowrootadoptedstylesheets does not crash and produces
+  an empty adoptedStyleSheets.
+- cloneNode(true) with empty shadowrootadoptedstylesheets produces an empty adoptedStyleSheets
+  on the clone.
+- document.importNode does NOT inherit the source document's import map resolution.
+- document.importNode resolves shadowrootadoptedstylesheets against the destination
+  document.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-absent-and-empty.html:
+- Declarative shadow roots with absent or empty shadowrootadoptedstylesheets adopt
+  no stylesheets.
+- shadowRootAdoptedStyleSheets reflects absent and authored-empty content attributes
+  correctly.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-feature-detection.html:
+- shadowRootAdoptedStyleSheets is exposed as a configurable, enumerable accessor on
+  HTMLTemplateElement.prototype.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-reflection.html:
+- Empty-string assignment and removeAttribute() are distinguishable on shadowRootAdoptedStyleSheets.
+- shadowRootAdoptedStyleSheets reflects the shadowrootadoptedstylesheets content attribute.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-invalid-specifier.html:
+- 'Mixed valid/invalid specifiers: only valid ones produce entries and apply styles.'
+- Unresolvable bare specifier produces no entry and applies no styles.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-async.html:
+- Modulepreload after shadow root creation resolves the placeholder.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-basic.html:
+- Modulepreloaded CSS module is available synchronously for shadowrootadoptedstylesheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-failure.html:
+- Failed modulepreload (404) is skipped by shadowrootadoptedstylesheets.
+- 'Mixed valid/invalid modulepreloads: failed ones are skipped and valid ones work.'
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-identity.html:
+- Modulepreload, import(), and shadowrootadoptedstylesheets all share the same CSSStyleSheet.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-nested.html:
+- Nested shadow roots with modulepreloaded CSS independently resolve their styles.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-ordering.html:
+- Modulepreloaded CSS modules maintain attribute order in adoptedStyleSheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-shared.html:
+- Modulepreloaded CSS module is shared across multiple shadow roots.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-multiple.html:
+- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
+  attribute.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-async.html:
+- Nested shadow roots independently resolve async adoptedStyleSheets.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-sync.html:
+- 'Nested sync: shadow roots independently resolve specifiers and apply styles.'
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-placeholder-identity.html:
+- Sheet identity does not change after fetch completes.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-serialization.html:
+- ShadowRoot.getHTML() returns children-only markup (no wrapping template).
+- getHTML() ignores script-added entries in adoptedStyleSheets and emits only the
+  authored shadowrootadoptedstylesheets value.
+- getHTML() with an empty authored shadowrootadoptedstylesheets value is unaffected
+  by script mutations.
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-with-declarative-module.html:
+- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
+  attribute.
+shadow-dom/dragenter-related-target.html:
+- dragleave relatedTarget should be retargeted to shadow host when entering shadow
+  DOM
+shadow-dom/dragleave-related-target.html:
+- dragleave relatedTarget should be retargeted to shadow host when entering shadow
+  DOM
+shadow-dom/event-composed-path-with-related-target.html:
+- Event path for an event with a relatedTarget which is identical to target. Event
+  should be dispatched and should stop at the shadow root.
+- Event path for an event with a relatedTarget. Event should be dispatched at every
+  slots.
+- Event path for an event with a relatedTarget. Event should be dispatched at every
+  slots. relatedTarget should be correctly retargeted.
+- Event path for an event with a relatedTarget. Event should be dispatched even when
+  target and relatedTarget are same.
+- Event path for an event with a relatedTarget. Event should stop at the shadow root
+- Event path for an event with a relatedTarget. relatedTarget != target.
+- Event path for an event with a relatedTarget. relatedTarget is a shadow-including
+  ancestor of target.
+- Event path for an event with a relatedTarget. relatedTarget is assigned to a slot.
+- Event path for an event with a relatedTarget. target and relaterTarget do not share
+  any shadow-including ancestor. target is in a shadow tree.
+- Event path for an event with a relatedTarget. target and relaterTarget do not share
+  any shadow-including ancestor. target is not in a shadow tree
+- Event path for an event with a relatedTarget. target and relaterTarget share the
+  same shadow-including ancestor. Both are in shadow trees.
+- Event path for an event with a relatedTarget. target is a shadow-including ancestor
+  of relatedTarget.
+- Event path for an event with a relatedTarget. target is assigned to a slot.
+shadow-dom/event-composed-path.html:
+- Event Path with a closed ShadowRoot.
+- Event Path with a slot in a closed Shadow Root.
+- Event Path with a slot in an open Shadow Root.
+- Event Path with an open ShadowRoot.
+- 'Event Path with nested ShadowRoots: closed > closed.'
+- 'Event Path with nested ShadowRoots: closed > open.'
+- 'Event Path with nested ShadowRoots: open > closed.'
+- 'Event Path with nested ShadowRoots: open > open.'
+- 'Event Path with slots in nested ShadowRoots: closed > closed.'
+- 'Event Path with slots in nested ShadowRoots: open > open.'
+- Event Path without ShadowRoots.
+shadow-dom/event-composed.html:
+- A UA click event should not be scoped
+- A synthetic FocusEvent with composed=true should not be scoped
+- A synthetic MouseEvent with composed=true should not be scoped
+- An event should not be scoped if composed is specified
+shadow-dom/event-dispatch-order.tentative.html:
+- 'Event dispatch order: capture listerns should be called in capturing phase at a
+  shadow host'
+shadow-dom/event-inside-slotted-node.html:
+- Firing an event inside a grand child of a detached closed mode shadow host
+- Firing an event inside a grand child of a detached open mode shadow host
+- Firing an event inside a grand child of an in-document closed mode shadow host
+- Firing an event inside a grand child of an in-document open mode shadow host
+- Firing an event on a node with two ancestors with a detached closed and closed shadow
+  trees with an inner closed shadow tree
+- Firing an event on a node with two ancestors with a detached closed and closed shadow
+  trees with an inner open shadow tree
+- Firing an event on a node with two ancestors with a detached closed and open shadow
+  trees with an inner closed shadow tree
+- Firing an event on a node with two ancestors with a detached closed and open shadow
+  trees with an inner open shadow tree
+- Firing an event on a node with two ancestors with a detached open and closed shadow
+  trees with an inner closed shadow tree
+- Firing an event on a node with two ancestors with a detached open and closed shadow
+  trees with an inner open shadow tree
+- Firing an event on a node with two ancestors with a detached open and open shadow
+  trees with an inner closed shadow tree
+- Firing an event on a node with two ancestors with a detached open and open shadow
+  trees with an inner open shadow tree
+- Firing an event on a node within a closed shadow tree that is itself a closed shadow
+  tree (the latter being the descendent of a host for a separate closed shadow tree)
+- Firing an event on a node within a closed shadow tree that is itself a closed shadow
+  tree (the latter being the descendent of a host for a separate open shadow tree)
+- Firing an event on a node within a closed shadow tree that is itself a open shadow
+  tree (the latter being the descendent of a host for a separate closed shadow tree)
+- Firing an event on a node within a closed shadow tree that is itself a open shadow
+  tree (the latter being the descendent of a host for a separate open shadow tree)
+- Firing an event on a node within a open shadow tree that is itself a closed shadow
+  tree (the latter being the descendent of a host for a separate closed shadow tree)
+- Firing an event on a node within a open shadow tree that is itself a closed shadow
+  tree (the latter being the descendent of a host for a separate open shadow tree)
+- Firing an event on a node within a open shadow tree that is itself a open shadow
+  tree (the latter being the descendent of a host for a separate closed shadow tree)
+- Firing an event on a node within a open shadow tree that is itself a open shadow
+  tree (the latter being the descendent of a host for a separate open shadow tree)
+shadow-dom/event-post-dispatch-no-listeners.html:
+- 'Event properties post dispatch with a closed ShadowRoot and no listeners (composed:
+  true)'
+- 'Event properties post dispatch with a disabled element in shadow tree and no listeners
+  (composed: true)'
+- 'Event properties post dispatch with an open ShadowRoot and no listeners (composed:
+  false)'
+- 'Event properties post dispatch with an open ShadowRoot and no listeners (composed:
+  true)'
+- 'Event properties post dispatch with nested open ShadowRoots and no listeners (composed:
+  true)'
+shadow-dom/event-post-dispatch.html:
+- Event properties post dispatch when target get moved out of the shadow tree by event
+  listener
+- 'Event properties post dispatch with a closed ShadowRoot (composed: false).'
+- 'Event properties post dispatch with a closed ShadowRoot (composed: true).'
+- 'Event properties post dispatch with an open ShadowRoot (composed: false).'
+- 'Event properties post dispatch with an open ShadowRoot (composed: true).'
+- 'Event properties post dispatch with nested ShadowRoots (composed: false).'
+- 'Event properties post dispatch with nested ShadowRoots (composed: true).'
+- 'Event properties post dispatch with relatedTarget in the different shadow trees.
+  (composed: false)'
+- 'Event properties post dispatch with relatedTarget in the different shadow trees.
+  (composed: true)'
+- 'Event properties post dispatch with relatedTarget in the document tree and the
+  shadow tree. (composed: false)'
+- 'Event properties post dispatch with relatedTarget in the document tree and the
+  shadow tree. (composed: true)'
+- 'Event properties post dispatch with relatedTarget in the same shadow tree. (composed:
+  false)'
+- 'Event properties post dispatch with relatedTarget in the same shadow tree. (composed:
+  true)'
+shadow-dom/event-with-related-target.html:
+- Firing an event at A1a with relatedNode at B1a (detached) with closed mode shadow
+  trees
+- Firing an event at A1a with relatedNode at B1a (detached) with open mode shadow
+  trees
+- Firing an event at A1a with relatedNode at B1a with closed mode shadow trees
+- Firing an event at A1a with relatedNode at B1a with open mode shadow trees
+- Firing an event at B1a with relatedNode at A1a (detached) with closed mode shadow
+  trees
+- Firing an event at B1a with relatedNode at A1a (detached) with open mode shadow
+  trees
+- Firing an event at B1a with relatedNode at A1a with closed mode shadow trees
+- Firing an event at B1a with relatedNode at A1a with open mode shadow trees
+- Firing an event at B1a with relatedNode at B1 with closed mode shadow trees
+- Firing an event at B1a with relatedNode at B1 with open mode shadow trees
+- Firing an event at B1a with relatedNode at B1b1 with closed mode shadow trees
+- Firing an event at B1a with relatedNode at B1b1 with open mode shadow trees
+- Firing an event at B1a with relatedNode at D1 with closed mode shadow trees
+- Firing an event at B1a with relatedNode at D1 with open mode shadow trees
+- Firing an event at B1b1 with relatedNode at B1a with closed mode shadow trees
+- Firing an event at B1b1 with relatedNode at B1a with open mode shadow trees
+- Firing an event at D1 with relatedNode at B1a with closed mode shadow trees
+- Firing an event at D1 with relatedNode at B1a with open mode shadow trees
+shadow-dom/execcommand-insertList-in-shadow.html:
+- Toggle off List for all the child nodes in the ShadowRoot
+shadow-dom/focus-navigation/delegatesFocus-highlight-sibling.html:
+- crbug/474687 :focus style should properly be applied to shadow hosts.
+shadow-dom/focus-navigation/focus-navigation-slot-fallback-default-tabindex.html:
+- Default tabindex for a slot node should be 0.
+shadow-dom/focus-navigation/focus-navigation-slot-fallback.html:
+- Focus should jump to fallback elements when a slot does not have any assigned nodes.
+shadow-dom/focus-navigation/focus-navigation-slot-nested-2levels.html:
+- Focus controller should treat each slot as a focus scope.
+shadow-dom/focus-navigation/focus-navigation-slot-nested-delegatesFocus.html:
+- Focus controller should treat each slot as a focus scope.
+shadow-dom/focus-navigation/focus-navigation-slot-nested-fallback.html:
+- Focus should cover assigned elements of an assigned slot espacially there are fallback
+  contents.
+shadow-dom/focus-navigation/focus-navigation-slot-nested.html:
+- Focus controller should treat each slot as a focus scope.
+shadow-dom/focus-navigation/focus-navigation-slot-shadow-in-fallback.html:
+- Focus should cover assigned elements of an assigned slot, as well as elements that
+  are directly assigned to a slot.
+shadow-dom/focus-navigation/focus-navigation-slot-shadow-in-slot.html:
+- Focus should cover assigned elements of an assigned slot, as well as elements that
+  are directly assigned to a slot.
+shadow-dom/focus-navigation/focus-navigation-slot-with-tabindex.html:
+- Slots tabindex should be considred in focus navigation.
+shadow-dom/focus-navigation/focus-navigation-slots-in-slot.html:
+- Focus should cover assigned nodes of slot, especially for nested slots in slot scope.
+shadow-dom/focus-navigation/focus-navigation-slots.html:
+- Focus should cover assigned elements of an assigned slot, as well as elements that
+  are directly assigned to a slot.
+shadow-dom/focus-navigation/focus-navigation-web-component-radio.html:
+- Focus for web component input type elements should be bound by <form> inside shadow
+  DOM
+shadow-dom/focus-navigation/focus-navigation-with-delegatesFocus.html:
+- Testing tab navigation order with mode closed, no tabindex and delegatesFocus=false.
+- Testing tab navigation order with mode closed, no tabindex and delegatesFocus=true.
+- Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=false.
+- Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=true.
+- Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=false.
+- Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=true.
+- Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=false.
+- Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=true.
+- Testing tab navigation order with mode open, no tabindex and delegatesFocus=false.
+- Testing tab navigation order with mode open, no tabindex and delegatesFocus=true.
+- Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=false.
+- Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=true.
+- Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=false.
+- Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=true.
+- Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=false.
+- Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=true.
+shadow-dom/focus-navigation/focus-navigation.html:
+- Focus controller should treat slots as a focus scope.
+shadow-dom/focus-navigation/focus-nested-slots.html:
+- Verifies that focus order goes in flat tree order with buttons inside nested slots
+  which have a mixture of assigned and unassigned states.
+shadow-dom/focus-navigation/focus-reverse-unassignable-slot.html:
+- Verifies that focusing backwards from an input inside a slot which has no shadow
+  root goes to the previous focusable element in light DOM.
+shadow-dom/focus-navigation/focus-reverse-unassigned-slot.html:
+- Verifies that focusing backwards from a button inside a slot which has no assigned
+  nodes goes to the previous focusable element.
+shadow-dom/focus-navigation/focus-unassignable-slot.html:
+- Verifies that focusing forwards from an input inside a slot which has no shadow
+  root goes to the next focusable element in light DOM.
+shadow-dom/focus-navigation/focus-with-negative-index.html:
+- Focus controller should treat slots as a focus scope.
+- 'This is a regression test: After focusing negative tabindex-ed elements, focus
+  moves in tree order.'
+shadow-dom/focus-navigation/menu/tentative/focus-menu-elements.html:
+- Focus navigation should skip over other menuitems in menubars.
+shadow-dom/focus-navigation/reading-flow/tentative/carousel-grid-order.html:
+- Grid items in carousel should follow grid-order reading flow
+shadow-dom/focus-navigation/reading-flow/tentative/flex-flow.html:
+- Flex items in flexbox should follow flex-flow reading flow
+- Flex items in rtl flexbox should follow flex-flow reading flow
+- Flex items in vertical-lr flexbox should follow flex-flow reading flow
+shadow-dom/focus-navigation/reading-flow/tentative/flex-visual-order.html:
+- Flex items in flexbox should follow flex-visual reading flow
+- Flex items in row-reverse and vertical-lr flexbox should follow flex-visual reading
+  flow
+- Flex items in row-reverse flexbox should follow flex-visual reading flow
+- Flex items in row-reverse rtl flexbox should follow flex-visual reading flow
+shadow-dom/focus-navigation/reading-flow/tentative/grid-auto-flow-reading-order.html:
+- Grid items should follow grid-rows reading flow, but let reading-order can move
+  item's focus order to the top.
+- Grid items should follow reading flow, mix of reading-order and order values.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-columns.html:
+- Grid items in grid template columns should follow grid-columns reading flow
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-across-scopes.html:
+- Grid items in shadow host that is a display contents grid item
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-on-shadow-host.html:
+- Grid items in shadow host with delegatesFocus
+- Grid items in shadow host without delegatesFocus
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-pseudo-elements.html:
+- Grid pseudo items are not focusable
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-display-contents.html:
+- Grid items are in nested display contents containers.
+- Items in display contents are sorted in same grid container and are placed in the
+  position where their first child resides.
+- Items in display contents are sorted in same grid container and are placed in the
+  position where their first child resides. The display contents have tabindex and
+  should be focusable.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-iframe.html:
+- Grid items are iframes.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-nested-grids.html:
+- Grid items are grid containers.
+- Grid items are not grid containers.
+- Only has grid containers.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-popover.html:
+- Popover is reading-flow item and reading-flow container.
+- Popover is reading-flow item.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-position-absolute.html:
+- Items in position:absolute container are visited at the end of the focus sequence.
+  reading-order can override DOM order.
+- Items that have position:absolute are visited at the end of the focus sequence,
+  in DOM order.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-position-fixed.html:
+- Items in position:fixed container are visited at the end of the focus sequence.
+  reading-order can override DOM order.
+- Items that have position:fixed are visited at the end of the focus sequence, in
+  DOM order.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-slots.html:
+- Slot assigned element is a grid with reading-flow.
+- Slot is a display block inside a grid container.
+- Slot is a display contents inside a grid container.
+- Slot is a grid with reading-flow inside a grid container with reading-flow.
+- Slot is a grid with reading-flow.
+- Slot is inside a grid container with reading-flow.
+- Slot is not inside a shadow host.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order.html:
+- Grid items with `order` property
+- Grid items with `order` property and tabindex. Positive tabindex doesn't reorder
+  reading flow item, but can affect its descendants.
+- Grid items without `order` property
+- Items in display block are not in parent grid container.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-rows.html:
+- Grid items in grid template columns should follow grid-rows reading flow
+shadow-dom/focus-navigation/reading-flow/tentative/normal.html:
+- Block elements. Focus should be in DOM tabindexed-order.
+- Grid items. Focus should be in DOM tabindexed-order.
+shadow-dom/focus-navigation/reading-flow/tentative/source-order-invalid.html:
+- Inline elements. Focus should be in DOM tabindexed-order.
+shadow-dom/focus-navigation/reading-flow/tentative/source-order-valid.html:
+- Block elements. Focus should be in DOM tabindexed-order, but reading-order takes
+  effect.
+- Block inline elements. Focus should be in DOM tabindexed-order, but reading-order
+  takes effect.
+- Flex elements. Focus should be in DOM tabindexed-order, but reading-order takes
+  effect.
+- Flow root elements. Focus should be in DOM tabindexed-order, but reading-order takes
+  effect.
+- Grid elements. Focus should be in DOM tabindexed-order, but reading-order takes
+  effect.
+shadow-dom/focus-navigation/tentative/focus-navigation-scroller-interactive-child.html:
+- While focusing a keyboard-focusable scroller, adding interactive content should
+  not cancel focusability
+shadow-dom/focus-navigation/tentative/focus-scroller-layout-update.html:
+- When checking that element is a scroller, layout information should be up to date.
+shadow-dom/focus-within-shadow.html:
+- Don't clear focus within shadow root if light DOM children are cleared
+shadow-dom/focus/DocumentOrShadowRoot-activeElement.html:
+- activeElement on a neighboring host when focused element is in another shadow tree
+- activeElement on document & shadow root when focused element is in the document
+- activeElement on document & shadow root when focused element is in the shadow tree
+- activeElement on document & shadow root when focused element is slotted
+- activeElement when focused element is in a nested shadow tree
+- activeElement when focused element is in a parent shadow tree
+shadow-dom/focus/ShadowRoot-delegatesFocus.html:
+- default delegatesFocus value
+- delegatesFocus set to false in init dict
+- delegatesFocus set to true in init dict
+shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
+- Calling blur() on shadow host with delegatesFocus should remove the focus.
+- Calling blur() on shadow host with delegatesFocus when the focus is on a slotted
+  element should not remove the focus.
+shadow-dom/focus/click-focus-slot-ancestor.html:
+- Clicking on non-focusable slot inside focusable div will make the flat-tree focusable
+  ancestor get focused
+- Select on non-focusable non-editable slot in a contenteditable shadow DOM and inside
+  focusable div will select text
+- Select on non-focusable slot inside focusable div will select text
+shadow-dom/focus/delegatesFocus-tabindex-change.html:
+- Setting tabindex on the shadow host of a focused element with delegatesFocus should
+  not change focus.
+shadow-dom/focus/focus-autofocus.html:
+- Focus should be delegated to the autofocus element when the inner host has delegates
+  focus
+- Focus should be delegated to the nested div which has autofocus based on the tree
+  order
+- Focus should not be delegated to the autofocus element because the inner host doesn't
+  have delegates focus
+- Focus should not be delegated to the slotted elements
+- The second input should be focused since it has autofocus
+shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
+- delegatesFocus shouldn't cause extra focus steps
+shadow-dom/focus/focus-selector-delegatesFocus.html:
+- ":focus applies to host with delegatesFocus=false when an element in a nested shadow
+  tree with delegatesFocus=false is focused"
+- ":focus applies to host with delegatesFocus=false when an element in a nested shadow
+  tree with delegatesFocus=true is focused"
+- ":focus applies to host with delegatesFocus=false when the shadow root's descendant
+  has focus"
+- ":focus applies to host with delegatesFocus=true when an element in a nested shadow
+  tree with delegatesFocus=false is focused"
+- ":focus applies to host with delegatesFocus=true when an element in a nested shadow
+  tree with delegatesFocus=true is focused"
+- ":focus applies to host with delegatesFocus=true when the shadow root's descendant
+  has focus"
+shadow-dom/focus/focus-shadowhost-display-none.html:
+- when shadow host itself is focused, it should match display:none, lose focus then
+  becomes display:block again.
+- when shadow host with delegatesFocus=true has focused element inside the shadow,
+  it should also match display:none, then lose focus and become display:block again.
+shadow-dom/focus/focus-slot-box-generated-tabindex-0.html:
+- slot with tabindex=0 that generates a box should be focusable
+shadow-dom/focus/focus-tabindex-order-shadow-negative-delegatesFocus.html:
+- Order when all tabindex=-1 is and delegatesFocus = true
+shadow-dom/focus/focus-tabindex-order-shadow-negative.html:
+- Order when all elements in shadow tree has negative tabindex
+shadow-dom/focus/focus-tabindex-order-shadow-slot-one.html:
+- Order when all tabindex=0, except for one slot that has tabindex=1
+shadow-dom/focus/focus-tabindex-order-shadow-varying-delegatesFocus.html:
+- Order when tabindex varies and delegatesFocus = true
+shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
+- Order with different tabindex on host
+shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
+- Order with different tabindex on host
+shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex.html:
+- Order with various tabindex values
+shadow-dom/focus/focus-tabindex-order-shadow-zero-delegatesFocus.html:
+- Order when all tabindex=0 is and delegatesFocus = true
+shadow-dom/focus/focus-tabindex-order-shadow-zero-host-negative.html:
+- Order when all tabindex=0 except for host, which has tabindex=-1
+shadow-dom/focus/focus-tabindex-order-shadow-zero-host-not-set-scrollable.html:
+- Order when all tabindex=0 except scrollable host (tabindex not set)
+shadow-dom/focus/focus-tabindex-order-shadow-zero-host-not-set.html:
+- Order when all tabindex=0 except host (tabindex not set)
+shadow-dom/focus/focus-tabindex-order-shadow-zero-host-one.html:
+- Order when all tabindex=0 except for host, which has tabindex=1
+shadow-dom/focus/focus-tabindex-order-shadow-zero-host-scrollable.html:
+- Order when all tabindex=0 and host is scrollable
+shadow-dom/focus/focus-tabindex-order-shadow-zero.html:
+- Order when all tabindex=0 is and delegatesFocus = false
+shadow-dom/form-control-form-attribute.html:
+- Shadow form control's form attribute should work also in shadow DOM.
+shadow-dom/imperative-slot-api-slotchange.html:
+- Fire slotchange event on node assignment and when assigned node is removed.
+- Fire slotchange event on previous slot and new slot when node is reassigned.
+- Fire slotchange event when assign node to nested slot, ensure event bubbles ups.
+- Fire slotchange event when assigned node is removed.
+- Fire slotchange event when order of assigned nodes changes.
+- Fire slotchange event when removing a slot from Shadows Root that changes its assigned
+  nodes.
+- Fire slotchange event when slot's assigned nodes changes.
+- Signal a slot change should be done in tree order.
+- slotchange event must not fire synchronously.
+- slotchange event should not fire when assignments do not change assignedNodes.
+- slotchange event should not fire when same node is assigned.
+shadow-dom/imperative-slot-api.html:
+- Appending slottable to different host, it loses slot assignment. It can be re-assigned
+  within a new host.
+- Assigning invalid nodes should be allowed.
+- Assignment with the same node in parameters should be ignored, first one wins.
+- Imperative slot API can assign nodes in manual slot assignment.
+- Moving a slot to a new host, the slot loses its previously assigned slottables.
+- Moving a slot's tree order position within a shadow host has no impact on its assigned
+  slottables.
+- Nodes can be assigned even if slots or nodes aren't in the same tree.
+- Order and assignment of nodes are preserved during multiple assignment in a row.
+- Order of slottables is preserved in manual slot assignment.
+- Previously assigned node should not be assigned if slot moved to a new shadow root.
+  The node is re-assigned when moved back.
+- Previously assigned slottable is moved to new slot when it's reassigned.
+- Removing a node from the document does not break manually assigned slot linkage.
+- Removing a slot from DOM resets its slottable's slot assignment.
+- attachShadow can take slotAssignment parameter.
+- slot.attach() should take variadic not sequence.
+shadow-dom/imperative-slot-fallback-clear.html:
+- Element fallback should be cleared in a subsequent layout
+- Text node fallback should be cleared in a subsequently layout
+shadow-dom/imperative-slot-initial-fallback.html:
+- Unassigned imperative slot can render element as the initial fallback
+- Unassigned imperative slot can render text node as the initial fallback
+shadow-dom/innerHTML-setter.xhtml:
+- InnerHTML behavior on custom element in default 'foo' namespace
+- InnerHTML behavior on custom element in default XHTML namespace
+- InnerHTML behavior with prefixes on custom element
+shadow-dom/input-element-list.html:
+- Input element's list attribute should point to the datalist element in Shadow DOM.
+shadow-dom/input-type-radio.html:
+- input type=radio elements should form a group inside shadow DOM.
+shadow-dom/inserting-fragment-under-shadow-host.html:
+- This tests inserting a document fragment with a mixture of elements and text nodes,
+  which should dispatch a `slotchange` event.
+shadow-dom/offsetParent-across-shadow-boundaries.html:
+- offsetParent must find the first offset parent which is a shadow-including ancestor
+  of the context object even some shadow tree of closed mode did not have any offset
+  parent
+- offsetParent must find the first offset parent which is a shadow-including ancestor
+  of the context object even some shadow tree of open mode did not have any offset
+  parent
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in closed mode which is not assigned to any slot
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in closed mode which is not in the flat tree
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in open mode which is not assigned to any slot
+- offsetParent must return null on a child element of a shadow host for the shadow
+  tree in open mode which is not in the flat tree
+- offsetParent must return null when the context object is assigned to a slot without
+  a fixed containing block in shadow tree of closed mode
+- offsetParent must return null when the context object is assigned to a slot without
+  a fixed containing block in shadow tree of open mode
+- offsetParent must return the fixed position containing block of a fixed element
+  when the context object is assigned to a slot within a fixed containing block in
+  shadow tree of closed mode
+- offsetParent must return the fixed position containing block of a fixed element
+  when the context object is assigned to a slot within a fixed containing block in
+  shadow tree of open mode
+- offsetParent must return the fixed position containing block of an element when
+  the context object is assigned to a slot within a fixed containing block in shadow
+  tree of closed mode
+- offsetParent must return the fixed position containing block of an element when
+  the context object is assigned to a slot within a fixed containing block in shadow
+  tree of open mode
+- offsetParent must return the offset parent in the same shadow tree of closed mode
+- offsetParent must return the offset parent in the same shadow tree of closed mode
+  even when nested
+- offsetParent must return the offset parent in the same shadow tree of open mode
+- offsetParent must return the offset parent in the same shadow tree of open mode
+  even when nested
+- offsetParent must skip multiple offset parents of an element when the context object
+  is assigned to a slot in a shadow tree of closed mode
+- offsetParent must skip multiple offset parents of an element when the context object
+  is assigned to a slot in a shadow tree of open mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in a shadow tree of closed mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in a shadow tree of open mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in nested shadow trees of closed mode
+- offsetParent must skip offset parents of an element when the context object is assigned
+  to a slot in nested shadow trees of open mode
+shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
+- Verifies that HTMLElement.offsetLeft accounts for shadow boundaries.
+- Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested in
+  multiple shadow roots.
+- Verifies that HTMLElement.offsetTop accounts for shadow boundaries.
+shadow-dom/reference-target/tentative/commandfor.html:
+- Shadow root reference target works with .commandForElement property.
+- Shadow root reference target works with commandfor attribute via options.
+- Shadow root reference target works with commandfor attribute.
+shadow-dom/reference-target/tentative/dom-mutation.html:
+- ".labels property is updated when ID changes on input"
+- ".labels property is updated when for attribute changes on label outside of shadow
+  root"
+- ".labels property is updated when reference target changes on shadow root"
+- ".labels property is updated when wrapped label changes"
+- Changing the ID of the nested referenced element results in an empty computed label
+- Changing the ID of the referenced element results in an empty computed label
+- Changing the nested referenceTarget to reference a different element updates the
+  computed label
+- Changing the reference target ID updates the computed label
+- New referenced element prepended to the shadow supercedes the existing label
+- Removing the referenced element results in an empty computed label
+- The existing label supercedes new element (with same id as the existing label) appended
+  to the shadow
+shadow-dom/reference-target/tentative/event-path.html:
+- Event path includes all shadow hosts and shadow roots up to the root of the source,
+  but non-bubbling event fires only Non-bubbling event fires only where currentTarget
+  == retargeted original target
+- Event path should go all the way to window if source is not in a shadow, but should
+  only fire when currentTarget == retargeted original target
+- Event path skips root containing neither source nor target. Non-bubbling event fires
+  only where currentTarget == retargeted original target
+- Event propagates to source tree when source is given in synthetic event, even without
+  reference target
+- Event propagates to source's shadow tree only; source in deeper shadow root
+- Event propagates to source's shadow tree only; target in deeper shadow root
+- beforetoggle event propagates to source's shadow tree only; target in deeper shadow
+  root
+- beforetoggle event propagates to source's shadow tree only; target in deeper shadow
+  root; showPopover called directly with source option
+- interest event propagates to source's shadow tree only; target in deeper shadow
+  root
+- loseinterest event propagates to source's shadow tree only; target in deeper shadow
+  root
+- submit event propagates to submitter's shadow tree only; target in deeper shadow
+  root
+- toggle event propagates to source's shadow tree only; target in deeper shadow root
+shadow-dom/reference-target/tentative/form.html:
+- Changing the reference target of a nested shadow root sets form association
+- Form association is updated when form is inserted in or removed from shadow DOM,
+  including in nested shadow DOM
+- Form association works for image inputs, which aren't in the elements collection
+- Reference target works with form attribute via options.
+- Reference target works with form attribute.
+- Reference target works with form-associated custom element.
+- Reference target works with nested shadow trees.
+- Reference target works with setAttribute('form')
+shadow-dom/reference-target/tentative/gethtml-serialization.html:
+- shadowrootreferencetarget is serialized before shadowrootcustomelementregistry
+- shadowrootreferencetarget is serialized in the expected order
+- shadowrootreferencetarget with no value is serialized as empty string
+shadow-dom/reference-target/tentative/interestfor.tentative.html:
+- Shadow root reference target works with .interestForElement property.
+- Shadow root reference target works with interestfor attribute via options.
+- Shadow root reference target works with interestfor attribute.
+shadow-dom/reference-target/tentative/label-descendant.html:
+- Changing the reference target causes label association to change for .labels
+- Changing the reference target causes label association to change for computed name
+- Implicit <label> association should apply to only the first labelable custom element
+  for .labels
+- Implicit <label> association should apply to only the first labelable custom element
+  for computed name
+- Label applies to descendant custom element that uses shadowrootreferencetarget (Input
+  1 via Options)
+- Label applies to descendant custom element that uses shadowrootreferencetarget (Input
+  1)
+- Label applies to multiple layers of descendant custom elements that use shadowrootreferencetarget
+  (Input 2 via Options)
+- Label applies to multiple layers of descendant custom elements that use shadowrootreferencetarget
+  (Input 2)
+shadow-dom/reference-target/tentative/label-for.html:
+- Attaching a shadow root, inserting and removing a shadow host, and changing reference
+  targets all cause label association to be updated
+- Label for attribute targeting a custom element using shadowrootreferencetarget inside
+  multiple layers of shadow roots works for .labels property
+- Label for attribute targeting a custom element using shadowrootreferencetarget inside
+  multiple layers of shadow roots works for computed name
+- Label for attribute targeting a custom element using shadowrootreferencetarget works
+  for .labels property
+- Label for attribute targeting a custom element using shadowrootreferencetarget works
+  for computed name
+- Modifying the reference target changes .labels when using label/for
+- Modifying the reference target changes the computed label when using label/for
+- Moving an input from one shadow root to another causes its .labels to be updated
+- Multiple labels targeting a custom element using shadowrootreferencetarget inside
+  multiple layers of shadow roots works for .labels property
+- Multiple labels targeting a custom element using shadowrootreferencetarget inside
+  multiple layers of shadow roots works for computed name
+- Setting .htmlFor property to target a custom element using shadowrootreferencetarget
+  works for .labels
+- Setting .htmlFor property to target a custom element using shadowrootreferencetarget
+  works for computed name
+shadow-dom/reference-target/tentative/popovertarget.html:
+- Shadow root reference target works with .popoverTargetElement property.
+- Shadow root reference target works with popovertarget attribute via options.
+- Shadow root reference target works with popovertarget attribute.
+shadow-dom/reference-target/tentative/reference-target-basics.html:
+- "<template> shadowrootreferencetarget sets referenceTarget on shadow root"
+- Empty shadowrootreferencetarget attribute is reflected as empty string
+- Passing empty string referencetarget in ShadowRootInit is reflected as empty string
+- ShadowRoot.referenceTarget defaults to null when shadow is created declaratively
+- ShadowRoot.referenceTarget defaults to null when shadow is created imperatively
+- ShadowRootInitDict can be used to set referenceTarget on shadow root
+shadow-dom/scroll-restore-shadow.html:
+- Scroll position restore on shadow tree
+shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
+- The user agent scroll to the fragment when there is an anchor element with a name
+  attribute exactly equal to the decoded fragid
+- The user agent scroll to the fragment when there is an element with an ID exactly
+  equal to the decoded fragid
+- The user agent should scroll to an anchor element with a name attribute exactly
+  equal to the decoded fragid in the document tree even if there was another element
+  with the same ID inside a closed shadow tree earlier in tree order
+- The user agent should scroll to an anchor element with a name attribute exactly
+  equal to the decoded fragid in the document tree even if there was another element
+  with the same ID inside an open shadow tree earlier in tree order
+- The user agent should scroll to an element with an ID exactly equal to the decoded
+  fragid in the document tree even if there was another element with the same ID inside
+  a closed shadow tree earlier in tree order
+- The user agent should scroll to an element with an ID exactly equal to the decoded
+  fragid in the document tree even if there was another element with the same ID inside
+  an open shadow tree earlier in tree order
+shadow-dom/shadow-root-clonable.html:
+- 'attachShadow with clonable: false'
+- 'attachShadow with clonable: true'
+- 'attachShadow with clonable: undefined'
+- declarative shadow roots can opt in to clonable with shadowrootclonable
+- 'declarative shadow roots do *not* get clonable: true automatically'
+- declarative shadow roots inside templates do *not* get cloned automatically
+shadow-dom/slot-reconciliation-at-node-removal.html:
+- 'Slot reconciliation: assignedNodes should be empty when slot is removed from shadow
+  tree'
+shadow-dom/slotchange-customelements.html:
+- slotchange must fire on initialization of custom elements with slotted children
+shadow-dom/slotchange-event.html:
+- slotchange event must fire at the end of current microtask after mutation observers
+  are invoked inside a closed shadow root  in a document when slots's contents change
+- slotchange event must fire at the end of current microtask after mutation observers
+  are invoked inside a closed shadow root  not in a document when slots's contents
+  change
+- slotchange event must fire at the end of current microtask after mutation observers
+  are invoked inside an open shadow root  in a document when slots's contents change
+- slotchange event must fire at the end of current microtask after mutation observers
+  are invoked inside an open shadow root  not in a document when slots's contents
+  change
+- slotchange event must fire on a default slot element inside a closed shadow root  in
+  a document
+- slotchange event must fire on a default slot element inside a closed shadow root  not
+  in a document
+- slotchange event must fire on a default slot element inside an open shadow root  in
+  a document
+- slotchange event must fire on a default slot element inside an open shadow root  not
+  in a document
+- slotchange event must fire on a named slot element insidea closed shadow root  in
+  a document
+- slotchange event must fire on a named slot element insidea closed shadow root  not
+  in a document
+- slotchange event must fire on a named slot element insidean open shadow root  in
+  a document
+- slotchange event must fire on a named slot element insidean open shadow root  not
+  in a document
+- slotchange event must fire on a slot element inside a closed shadow root  in a document
+  even if the slot was removed immediately after the assigned nodes were mutated
+- slotchange event must fire on a slot element inside a closed shadow root  in a document
+  when innerHTML modifies the children of the shadow host
+- slotchange event must fire on a slot element inside a closed shadow root  in a document
+  when nested slots's contents change
+- slotchange event must fire on a slot element inside a closed shadow root  not in
+  a document even if the slot was removed immediately after the assigned nodes were
+  mutated
+- slotchange event must fire on a slot element inside a closed shadow root  not in
+  a document when innerHTML modifies the children of the shadow host
+- slotchange event must fire on a slot element inside a closed shadow root  not in
+  a document when nested slots's contents change
+- slotchange event must fire on a slot element inside an open shadow root  in a document
+  even if the slot was removed immediately after the assigned nodes were mutated
+- slotchange event must fire on a slot element inside an open shadow root  in a document
+  when innerHTML modifies the children of the shadow host
+- slotchange event must fire on a slot element inside an open shadow root  in a document
+  when nested slots's contents change
+- slotchange event must fire on a slot element inside an open shadow root  not in
+  a document even if the slot was removed immediately after the assigned nodes were
+  mutated
+- slotchange event must fire on a slot element inside an open shadow root  not in
+  a document when innerHTML modifies the children of the shadow host
+- slotchange event must fire on a slot element inside an open shadow root  not in
+  a document when nested slots's contents change
+- slotchange event must fire on a slot element when a shadow host has a slottable
+  and the slot was inserted and must not fire when the shadow host was mutated after
+  the slot was removed inside a closed shadow root  in a document
+- slotchange event must fire on a slot element when a shadow host has a slottable
+  and the slot was inserted and must not fire when the shadow host was mutated after
+  the slot was removed inside a closed shadow root  not in a document
+- slotchange event must fire on a slot element when a shadow host has a slottable
+  and the slot was inserted and must not fire when the shadow host was mutated after
+  the slot was removed inside an open shadow root  in a document
+- slotchange event must fire on a slot element when a shadow host has a slottable
+  and the slot was inserted and must not fire when the shadow host was mutated after
+  the slot was removed inside an open shadow root  not in a document
+- slotchange event must not fire on a slot element inside a closed shadow root  in
+  a document when another slot's assigned nodes change
+- slotchange event must not fire on a slot element inside a closed shadow root  not
+  in a document when another slot's assigned nodes change
+- slotchange event must not fire on a slot element inside an open shadow root  in
+  a document when another slot's assigned nodes change
+- slotchange event must not fire on a slot element inside an open shadow root  not
+  in a document when another slot's assigned nodes change
+shadow-dom/slotchange.html:
+- 'slotchange event: A slot is assigned to another slot.'
+- 'slotchange event: Add a fallback content to nested slots - assignedNodes still
+  empty.'
+- 'slotchange event: Append a child to a host (onslotchange).'
+- 'slotchange event: Append a child to a host.'
+- 'slotchange event: Change fallback content - assignedNodes still empty.'
+- 'slotchange event: Change slot''s name= attribute so that a node is assigned to
+  the slot.'
+- 'slotchange event: Change slot''s name= attribute so that none is assigned.'
+- 'slotchange event: Change slot= attribute to make it assigned.'
+- 'slotchange event: Change slot= attribute to make it un-assigned.'
+- 'slotchange event: Child content is added to nested slots.'
+- 'slotchange event: Insert a slot before an existing slot.'
+- 'slotchange event: Remove a child before adding an event listener.'
+- 'slotchange event: Remove a child from a host.'
+- 'slotchange event: Remove a fallback content - assignedNodes still empty.'
+- 'slotchange event: Remove a fallback content from nested slots - assignedNodes still
+  empty.'
+- 'slotchange event: Remove a preceding slot.'
+- 'slotchange event: Slotchange should be fired if assigned nodes are changed.'
+shadow-dom/slots-fallback-in-document.html:
+- Children of a slot in a document tree should not be counted in flattened assigned
+  nodes.
+- Slot fallback content in shadow tree should be counted in flattened assigned nodes.
+shadow-dom/slots-fallback.html:
+- 'Slots fallback: Basic, elements only.'
+- 'Slots fallback: Basic.'
+- 'Slots fallback: Complex case, elements only.'
+- 'Slots fallback: Complex case.'
+- 'Slots fallback: Fallback contents should not be used if a node is assigned.'
+- 'Slots fallback: Mutation.  Remove a slot which is a fallback content of another
+  slot.'
+- 'Slots fallback: Mutation. Append fallback contents.'
+- 'Slots fallback: Mutation. Assign a node to a slot so that fallback contens are
+  no longer used.'
+- 'Slots fallback: Mutation. Remove an assigned node from a slot so that fallback
+  contens will be used.'
+- 'Slots fallback: Mutation. Remove fallback contents.'
+- 'Slots fallback: Slots in Slots, elements only.'
+- 'Slots fallback: Slots in Slots.'
+- 'Slots fallback: Slots in Slots: Assigned nodes should be used as fallback contents
+  of another slot'
+shadow-dom/slots-outside-shadow-dom.html:
+- Light DOM slot element should be in flattened assignedNodes
+shadow-dom/slots.html:
+- 'Slots: Basic, elements only.'
+- 'Slots: Basic.'
+- 'Slots: Closed > Closed.'
+- 'Slots: Closed > Open.'
+- 'Slots: Complex case: Basi line.'
+- 'Slots: Default Slot.'
+- 'Slots: Distributed nodes for Slots not in a shadow tree.'
+- 'Slots: Mutation: Add a slot: after.'
+- 'Slots: Mutation: Add a slot: before.'
+- 'Slots: Mutation: Change slot name= attribute.'
+- 'Slots: Mutation: Change slot slot= attribute.'
+- 'Slots: Mutation: Change slot= attribute 1.'
+- 'Slots: Mutation: Change slot= attribute 2.'
+- 'Slots: Mutation: Change slot= attribute 3.'
+- 'Slots: Mutation: Remove a child.'
+- 'Slots: Mutation: Remove a slot.'
+- 'Slots: Mutation: appendChild.'
+- 'Slots: Name matching'
+- 'Slots: No direct host child.'
+- 'Slots: Open > Closed.'
+- 'Slots: Slot in Slot does not matter in assignment.'
+- 'Slots: Slot is assigned to another slot'
+- 'Slots: Slots in closed, elements only.'
+- 'Slots: Slots in closed.'
+- 'Slots: Slots not in a shadow tree, elements only.'
+- 'Slots: Slots not in a shadow tree.'
+shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/attributes/test-006.html:
+- A_10_02_01_06_T01
+shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/methods/test-001.html:
+- A_10_02_02_01_T01
+shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/methods/test-002.html:
+- A_10_02_02_02_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/activeElement-confirm-return-null.html:
+- confirm activeElement return null
+- confirm activeElement return null when focus on the element in the outer shadow
+  tree
+- confirm activeElement return null when there is other element in body
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-007.html:
+- A_10_01_01_03_01_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-009.html:
+- A_10_01_01_04_01_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-010.html:
+- A_10_01_01_04_02_T01_01
+- A_10_01_01_04_02_T01_02
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-011.html:
+- A_10_01_01_05_01_T01
+- A_10_01_01_05_01_T02
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-012.html:
+- A_10_01_01_06_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-013.html:
+- A_10_01_01_07_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-001.html:
+- A_10_01_02_01_T01
+- A_10_01_02_01_T02
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-004.html:
+- A_10_01_02_04_T01
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-006.html:
+- A_10_01_02_06_01_T01
+- A_10_01_02_06_01_T02
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-007.html:
+- A_10_01_02_06_02_T01
+- A_10_01_02_06_02_T02
+shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-010.html:
+- A_10_01_02_09_T01
+shadow-dom/untriaged/events/event-dispatch/test-002.html:
+- A_05_05_02_T01
+shadow-dom/untriaged/events/event-dispatch/test-003.html:
+- A_05_05_03_T01
+shadow-dom/untriaged/events/event-retargeting/test-003.html:
+- A_05_01_03_T01
+shadow-dom/untriaged/events/retargeting-focus-events/test-001.html:
+- A_05_03_01_T01
+- A_05_03_01_T02
+- A_05_03_01_T03
+- A_05_03_01_T04
+- A_05_03_01_T05
+- A_05_03_01_T06
+shadow-dom/untriaged/events/retargeting-focus-events/test-002.html:
+- A_05_03_02_T01
+shadow-dom/untriaged/events/retargeting-focus-events/test-003.html:
+- A_05_03_03_T01
+shadow-dom/untriaged/events/retargeting-relatedtarget/test-001.html:
+- A_05_02_01_T1
+shadow-dom/untriaged/events/retargeting-relatedtarget/test-002.html:
+- A_05_02_02_T01
+shadow-dom/untriaged/events/retargeting-relatedtarget/test-003.html:
+- A_05_02_03_T01
+shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-001.html:
+- A_08_02_01_T01
+- A_08_02_01_T02
+shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-002.html:
+- A_08_02_02_T01
+- A_08_02_02_T02
+- A_08_02_02_T03
+shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
+- A_08_02_03_T01
+shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
+- A_08_01_01_T01
+shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-002.html:
+- A_08_01_02_T01
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
+- Elements in a shadow tree should not be accessible from owner document's "all" attribute.
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/ownerdocument-001.html:
+- All children nodes of a shadow root get a valid ownerDocument when added to a shadow
+  tree.
+- Elements added to a shadow tree should automatically get a valid ownerDocument.
+- ownerDocument property of a node should remain the same, even if its child is adopted
+  into a shadow tree.
+- ownerDocument property of a shadow root should be the document of the shadow host,
+  regardless of the location of the shadow host.
+- ownerDocument property of an element in a shadow tree should be the document of
+  the shadow host, even if the host element is created from another document.
+- ownerDocument property of elements in a shadow tree should match the document of
+  the shadow host, regardless of the element's location in a shadow tree.
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/shadow-root-001.html:
+- The parentElement attribute of a shadow root must always return null, even if the
+  shadow root is nested inside another shadow root.
+- The parentElement attribute of a shadow root must always return null.
+- The parentNode attribute of a shadow root must always return null, even if the shadow
+  root is nested inside another shadow root.
+- The parentNode attribute of a shadow root must always return null.
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-005.html:
+- A_04_01_05_T01
+- A_04_01_05_T02
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-007.html:
+- A_04_01_07_T01
+- A_04_01_07_T02
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-009.html:
+- A_04_01_09_T01
+- A_04_01_09_T03
+- A_04_01_09_T05
+- A_04_01_09_T06
+- A_04_01_09_T07
+- A_04_01_09_T08
+- A_04_01_09_T09
+- A_04_01_09_T10
+- A_04_01_09_T11
+- A_04_01_09_T12
+- A_04_01_09_T13
+- A_04_01_09_T14
+- A_04_01_09_T15
+- A_04_01_09_T16
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-011.html:
+- A_04_01_11_T2
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/window-named-properties-001.html:
+- An iframe element in a shadow tree should not be accessible from window's named
+  properties with its "name" attribute value.
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/window-named-properties-002.html:
+- '"a" element with name attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"applet" element with name attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"area" element with name attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"embed" element with name attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"form" element with name attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"frameset" element with name attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"img" element with name attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"object" element with name attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+shadow-dom/untriaged/styles/test-001.html:
+- A_06_00_01_T01
+- A_06_00_01_T02
+shadow-dom/untriaged/styles/test-003.html:
+- A_06_00_03_T01
+- A_06_00_03_T02
+- A_06_00_03_T03
+shadow-dom/untriaged/styles/test-005.html:
+- A_06_00_06_T01
+shadow-dom/untriaged/styles/test-008.html:
+- A_06_00_09_T01
+shadow-dom/untriaged/user-interaction/active-element/test-001.html:
+- A_07_03_01_T01
+shadow-dom/untriaged/user-interaction/active-element/test-002.html:
+- A_07_03_02_T01
+shadow-dom/untriaged/user-interaction/editing/inheritance-of-content-editable-001.html:
+- contentEditable of shadow trees must be undefined when contentEditable attribute
+  of shadow host is "inherit"
+- contentEditable of shadow trees must be undefined when contentEditable attribute
+  of shadow host is "true"
+- contentEditable of shadow trees must be undefined when contentEditable of shadow
+  host is "false"
+shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
+- A_07_07_01_T01
+- A_07_07_01_T02
+shadow-dom/untriaged/user-interaction/ranges-and-selections/test-002.html:
+- A_07_01_02_T01
+- A_07_07_02_T02
+shadow-dom/wheel-event-related-target.html:
+- wheel relatedTarget should be retargeted to shadow host when entering shadow DOM
 url/a-element-origin-xhtml.xhtml:
 - 'Parsing origin: <ftp://%e2%98%83> against <about:blank>'
 - "Parsing origin: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"

@@ -45,7 +45,7 @@ const REF = process.env.WPT_REF || PINNED;
 // timers + microtask-queuing). `resources` is fetched selectively (just the
 // harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
-  'dom', 'domparsing', 'url', 'encoding',
+  'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing'  // queueMicrotask + microtask-checkpoint ordering
 ];
