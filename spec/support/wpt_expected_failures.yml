@@ -47,8 +47,6 @@ dom/events/shadow-relatedTarget.html:
 - relatedTarget should not leak at capturing phase, at window object.
 - relatedTarget should not leak at target.
 dom/interface-objects.html: HARNESS_ERROR
-dom/nodes/Document-constructor.html:
-- 'new Document(): URL parsing'
 dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html:
 - Data URI document.contentType === 'text/html' when data URI MIME type is set
 dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
