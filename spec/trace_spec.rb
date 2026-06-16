@@ -175,6 +175,30 @@ RSpec.describe 'trace network capture' do
     # nil, and the body is never set.
     expect(driver.evaluate_script('document.body.dataset.t || ""')).to eq('{"ok":1}')
   end
+
+  # Regression: Rack response bodies are ASCII-8BIT. A body whose bytes are
+  # valid UTF-8 but stays BINARY-tagged flowed through cap_trace_body still
+  # BINARY; once it exceeded the size cap, the truncation-marker concat (and
+  # otherwise the trace-buffer / JSON serialization) raised
+  # Encoding::CompatibilityError on any byte ≥ 0x80 — the "trace network log
+  # failed: Encoding::CompatibilityError" spam seen on Discourse.
+  it 'reinterprets a binary-tagged (valid UTF-8) body as readable UTF-8, even past the size cap' do
+    browser = Capybara::Simulated::Driver.new(->(_) { [200, {}, ['']] }).browser
+    big = ('日本語のテスト ' * 40_000).b   # ASCII-8BIT, valid UTF-8 bytes, > 256 KiB
+    expect(big.encoding).to eq(Encoding::BINARY)
+
+    out = nil
+    expect { out = browser.send(:cap_trace_body, big) }.not_to raise_error
+    expect(out.encoding).to eq(Encoding::UTF_8)
+    expect(out).to include('日本語')      # readable, not mojibake
+    expect(out).to include('truncated')   # past the 256 KiB cap
+    # Must survive the downstream UTF-8 concat / JSON serialization that used to raise.
+    expect { (+'utf8 ') << out; require 'json'; JSON.generate(b: out) }.not_to raise_error
+
+    # A genuinely binary body still collapses to a placeholder (not mojibake).
+    png = [0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00].pack('C*')
+    expect(browser.send(:cap_trace_body, png)).to match(/\A\[binary, \d+ bytes\]\z/)
+  end
 end
 
 RSpec.describe 'capybara-simulated CLI' do

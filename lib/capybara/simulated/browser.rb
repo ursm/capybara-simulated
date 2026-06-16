@@ -3554,9 +3554,16 @@ module Capybara
       # JSON-safe body for the trace: binary (non-UTF-8) bodies become a
       # placeholder rather than mojibake, and long bodies are truncated
       # (scrubbed so a mid-codepoint cut can't yield invalid UTF-8).
+      #
+      # Rack response bodies are ASCII-8BIT (BINARY); reinterpret the bytes as
+      # UTF-8 up front and keep working in UTF-8 throughout. Otherwise a body
+      # whose bytes ARE valid UTF-8 but stays BINARY-tagged would flow out of
+      # here still BINARY, and the first concat with a UTF-8 string (the
+      # truncation marker here, or the trace-buffer / JSON serialization
+      # downstream) raises Encoding::CompatibilityError on any byte ≥ 0x80.
       def cap_trace_body(body)
-        s = body.to_s
-        return "[binary, #{s.bytesize} bytes]" unless s.dup.force_encoding('UTF-8').valid_encoding?
+        s = body.to_s.dup.force_encoding('UTF-8')
+        return "[binary, #{s.bytesize} bytes]" unless s.valid_encoding?
         s.bytesize > NETWORK_BODY_CAP ? (s.byteslice(0, NETWORK_BODY_CAP).scrub + "\n…[truncated, #{s.bytesize} bytes total]") : s
       end
 
