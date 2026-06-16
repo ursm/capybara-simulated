@@ -64,10 +64,6 @@ dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 dom/events/event-global.html:
 - window.event is set to the current event, which is the event passed to dispatch
   (2)
-- window.event is undefined if the target is in a shadow tree (event dispatched inside
-  shadow tree)
-- window.event is undefined inside window.onerror if the target is in a shadow tree
-  (ErrorEvent dispatched inside shadow tree)
 dom/events/event-handler-attribute-replace-preserves-passive.html:
 - Replacing a wheel event handler attribute on body via setAttribute preserves its
   passive flag
@@ -1665,23 +1661,6 @@ shadow-dom/Element-interface-attachShadow-custom-element.html:
   should throw a NotSupportedError
 shadow-dom/Element-interface-attachShadow.html:
 - Element.attachShadow must throw a NotSupportedError for non-safelisted elements
-shadow-dom/Extensions-to-Event-Interface.html:
-- The event must not propagate out of closed mode shadow tree of the target but must
-  propagate out of inner shadow trees when the scoped flag is set
-- The event must not propagate out of open mode shadow tree of the target but must
-  propagate out of inner shadow trees when the scoped flag is set
-- The event must propagate out of closed mode shadow boundaries when the composed
-  flag is set
-- The event must propagate out of closed mode shadow tree in which the relative target
-  and the relative related target are the same
-- The event must propagate out of open mode shadow boundaries when the composed flag
-  is set
-- The event must propagate out of open mode shadow tree in which the relative target
-  and the relative related target are the same
-- composedPath() must contain and only contain the unclosed nodes of target in closed
-  mode shadow trees
-- composedPath() must contain and only contain the unclosed nodes of target in open
-  mode shadow trees
 shadow-dom/HTMLSlotElement-interface.html:
 - HTMLSlotElement must be defined on window
 shadow-dom/HighlightRegistry-highlightsFromPoint.html:
@@ -1713,8 +1692,6 @@ shadow-dom/accesskey.tentative.html:
 - button element with accesskey in the shadow tree of closed mode
 - button element with accesskey in the shadow tree of open mode
 shadow-dom/capturing-and-bubbling-event-listeners-across-shadow-trees.html:
-- Capturing event listeners should be invoked before bubbling event listeners on the
-  target without shadow trees
 - Capturing event listeners should be invoked before bubbling event listeners when
   an event is dispatched inside a doubly nested shadow tree
 - Capturing event listeners should be invoked before bubbling event listeners when
@@ -1722,8 +1699,6 @@ shadow-dom/capturing-and-bubbling-event-listeners-across-shadow-trees.html:
 - Capturing event listeners should be invoked before bubbling event listeners when
   an event is dispatched inside a shadow tree which passes through another shadow
   tree
-- Capturing event listeners should be invoked before bubbling event listeners when
-  an event is dispatched via a slot
 shadow-dom/declarative/declarative-after-attachshadow.html:
 - 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
   called'
@@ -1920,141 +1895,6 @@ shadow-dom/dragenter-related-target.html:
 shadow-dom/dragleave-related-target.html:
 - dragleave relatedTarget should be retargeted to shadow host when entering shadow
   DOM
-shadow-dom/event-composed-path-with-related-target.html:
-- Event path for an event with a relatedTarget which is identical to target. Event
-  should be dispatched and should stop at the shadow root.
-- Event path for an event with a relatedTarget. Event should be dispatched at every
-  slots.
-- Event path for an event with a relatedTarget. Event should be dispatched at every
-  slots. relatedTarget should be correctly retargeted.
-- Event path for an event with a relatedTarget. Event should be dispatched even when
-  target and relatedTarget are same.
-- Event path for an event with a relatedTarget. Event should stop at the shadow root
-- Event path for an event with a relatedTarget. relatedTarget != target.
-- Event path for an event with a relatedTarget. relatedTarget is a shadow-including
-  ancestor of target.
-- Event path for an event with a relatedTarget. relatedTarget is assigned to a slot.
-- Event path for an event with a relatedTarget. target and relaterTarget do not share
-  any shadow-including ancestor. target is in a shadow tree.
-- Event path for an event with a relatedTarget. target and relaterTarget do not share
-  any shadow-including ancestor. target is not in a shadow tree
-- Event path for an event with a relatedTarget. target and relaterTarget share the
-  same shadow-including ancestor. Both are in shadow trees.
-- Event path for an event with a relatedTarget. target is a shadow-including ancestor
-  of relatedTarget.
-- Event path for an event with a relatedTarget. target is assigned to a slot.
-shadow-dom/event-composed-path.html:
-- Event Path with a closed ShadowRoot.
-- Event Path with a slot in a closed Shadow Root.
-- Event Path with a slot in an open Shadow Root.
-- Event Path with an open ShadowRoot.
-- 'Event Path with nested ShadowRoots: closed > closed.'
-- 'Event Path with nested ShadowRoots: closed > open.'
-- 'Event Path with nested ShadowRoots: open > closed.'
-- 'Event Path with nested ShadowRoots: open > open.'
-- 'Event Path with slots in nested ShadowRoots: closed > closed.'
-- 'Event Path with slots in nested ShadowRoots: open > open.'
-- Event Path without ShadowRoots.
-shadow-dom/event-composed.html:
-- A UA click event should not be scoped
-- A synthetic FocusEvent with composed=true should not be scoped
-- A synthetic MouseEvent with composed=true should not be scoped
-- An event should not be scoped if composed is specified
-shadow-dom/event-dispatch-order.tentative.html:
-- 'Event dispatch order: capture listerns should be called in capturing phase at a
-  shadow host'
-shadow-dom/event-inside-slotted-node.html:
-- Firing an event inside a grand child of a detached closed mode shadow host
-- Firing an event inside a grand child of a detached open mode shadow host
-- Firing an event inside a grand child of an in-document closed mode shadow host
-- Firing an event inside a grand child of an in-document open mode shadow host
-- Firing an event on a node with two ancestors with a detached closed and closed shadow
-  trees with an inner closed shadow tree
-- Firing an event on a node with two ancestors with a detached closed and closed shadow
-  trees with an inner open shadow tree
-- Firing an event on a node with two ancestors with a detached closed and open shadow
-  trees with an inner closed shadow tree
-- Firing an event on a node with two ancestors with a detached closed and open shadow
-  trees with an inner open shadow tree
-- Firing an event on a node with two ancestors with a detached open and closed shadow
-  trees with an inner closed shadow tree
-- Firing an event on a node with two ancestors with a detached open and closed shadow
-  trees with an inner open shadow tree
-- Firing an event on a node with two ancestors with a detached open and open shadow
-  trees with an inner closed shadow tree
-- Firing an event on a node with two ancestors with a detached open and open shadow
-  trees with an inner open shadow tree
-- Firing an event on a node within a closed shadow tree that is itself a closed shadow
-  tree (the latter being the descendent of a host for a separate closed shadow tree)
-- Firing an event on a node within a closed shadow tree that is itself a closed shadow
-  tree (the latter being the descendent of a host for a separate open shadow tree)
-- Firing an event on a node within a closed shadow tree that is itself a open shadow
-  tree (the latter being the descendent of a host for a separate closed shadow tree)
-- Firing an event on a node within a closed shadow tree that is itself a open shadow
-  tree (the latter being the descendent of a host for a separate open shadow tree)
-- Firing an event on a node within a open shadow tree that is itself a closed shadow
-  tree (the latter being the descendent of a host for a separate closed shadow tree)
-- Firing an event on a node within a open shadow tree that is itself a closed shadow
-  tree (the latter being the descendent of a host for a separate open shadow tree)
-- Firing an event on a node within a open shadow tree that is itself a open shadow
-  tree (the latter being the descendent of a host for a separate closed shadow tree)
-- Firing an event on a node within a open shadow tree that is itself a open shadow
-  tree (the latter being the descendent of a host for a separate open shadow tree)
-shadow-dom/event-post-dispatch-no-listeners.html:
-- 'Event properties post dispatch with a closed ShadowRoot and no listeners (composed:
-  true)'
-- 'Event properties post dispatch with a disabled element in shadow tree and no listeners
-  (composed: true)'
-- 'Event properties post dispatch with an open ShadowRoot and no listeners (composed:
-  false)'
-- 'Event properties post dispatch with an open ShadowRoot and no listeners (composed:
-  true)'
-- 'Event properties post dispatch with nested open ShadowRoots and no listeners (composed:
-  true)'
-shadow-dom/event-post-dispatch.html:
-- Event properties post dispatch when target get moved out of the shadow tree by event
-  listener
-- 'Event properties post dispatch with a closed ShadowRoot (composed: false).'
-- 'Event properties post dispatch with a closed ShadowRoot (composed: true).'
-- 'Event properties post dispatch with an open ShadowRoot (composed: false).'
-- 'Event properties post dispatch with an open ShadowRoot (composed: true).'
-- 'Event properties post dispatch with nested ShadowRoots (composed: false).'
-- 'Event properties post dispatch with nested ShadowRoots (composed: true).'
-- 'Event properties post dispatch with relatedTarget in the different shadow trees.
-  (composed: false)'
-- 'Event properties post dispatch with relatedTarget in the different shadow trees.
-  (composed: true)'
-- 'Event properties post dispatch with relatedTarget in the document tree and the
-  shadow tree. (composed: false)'
-- 'Event properties post dispatch with relatedTarget in the document tree and the
-  shadow tree. (composed: true)'
-- 'Event properties post dispatch with relatedTarget in the same shadow tree. (composed:
-  false)'
-- 'Event properties post dispatch with relatedTarget in the same shadow tree. (composed:
-  true)'
-shadow-dom/event-with-related-target.html:
-- Firing an event at A1a with relatedNode at B1a (detached) with closed mode shadow
-  trees
-- Firing an event at A1a with relatedNode at B1a (detached) with open mode shadow
-  trees
-- Firing an event at A1a with relatedNode at B1a with closed mode shadow trees
-- Firing an event at A1a with relatedNode at B1a with open mode shadow trees
-- Firing an event at B1a with relatedNode at A1a (detached) with closed mode shadow
-  trees
-- Firing an event at B1a with relatedNode at A1a (detached) with open mode shadow
-  trees
-- Firing an event at B1a with relatedNode at A1a with closed mode shadow trees
-- Firing an event at B1a with relatedNode at A1a with open mode shadow trees
-- Firing an event at B1a with relatedNode at B1 with closed mode shadow trees
-- Firing an event at B1a with relatedNode at B1 with open mode shadow trees
-- Firing an event at B1a with relatedNode at B1b1 with closed mode shadow trees
-- Firing an event at B1a with relatedNode at B1b1 with open mode shadow trees
-- Firing an event at B1a with relatedNode at D1 with closed mode shadow trees
-- Firing an event at B1a with relatedNode at D1 with open mode shadow trees
-- Firing an event at B1b1 with relatedNode at B1a with closed mode shadow trees
-- Firing an event at B1b1 with relatedNode at B1a with open mode shadow trees
-- Firing an event at D1 with relatedNode at B1a with closed mode shadow trees
-- Firing an event at D1 with relatedNode at B1a with open mode shadow trees
 shadow-dom/execcommand-insertList-in-shadow.html:
 - Toggle off List for all the child nodes in the ShadowRoot
 shadow-dom/focus-navigation/delegatesFocus-highlight-sibling.html:
@@ -2532,15 +2372,6 @@ shadow-dom/shadow-root-clonable.html:
 - declarative shadow roots inside templates do *not* get cloned automatically
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
-shadow-dom/slotchange-event.html:
-- slotchange event must fire on a slot element inside a closed shadow root  in a document
-  when nested slots's contents change
-- slotchange event must fire on a slot element inside a closed shadow root  not in
-  a document when nested slots's contents change
-- slotchange event must fire on a slot element inside an open shadow root  in a document
-  when nested slots's contents change
-- slotchange event must fire on a slot element inside an open shadow root  not in
-  a document when nested slots's contents change
 shadow-dom/slotchange.html:
 - 'slotchange event: Add a fallback content to nested slots - assignedNodes still
   empty.'
