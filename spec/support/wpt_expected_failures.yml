@@ -213,8 +213,6 @@ dom/nodes/Document-doctype.html:
 dom/nodes/Element-closest.html:
 - Element.closest with context node 'test11' and selector ':invalid'
 - Element.closest with context node 'test4' and selector ':has(> :scope)'
-dom/nodes/Element-firstElementChild-entity-xhtml.xhtml:
-- Entity References
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/MutationObserver-document.html:
@@ -333,10 +331,6 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
 - NodeFilter is cross-realm plain object without 'acceptNode' property
 domparsing/DOMParser-parseFromString-encoding.html:
 - 'HTML: meta charset'
-domparsing/DOMParser-parseFromString-xml-doctype.html:
-- Doctype parsing of System Id must fail on ommitted value
-domparsing/DOMParser-parseFromString-xml-internal-subset.html:
-- Parsing and serialization of doctype internal subset
 domparsing/XMLSerializer-serializeToString.html:
 - Check if a prefix bound to an empty namespace URI ("no namespace") serialize
 - Check if no special handling for XLink namespace unlike HTML serializer.
@@ -378,8 +372,6 @@ domparsing/innerhtml-mxss.sub.html:
 - 'href before setter: 2028'
 - 'href before setter: 205f'
 - 'href before setter: 3000'
-domparsing/insert_adjacent_html-xhtml.xhtml:
-- insertAdjacentHTML in HTML
 domparsing/style_attribute_html.html:
 - Parsing of invalid style attribute
 domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
