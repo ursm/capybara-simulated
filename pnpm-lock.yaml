@@ -5,15 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  css-select@7.0.0:
-    hash: a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5
-    path: patches/css-select@7.0.0.patch
-  css-tree@3.2.1:
-    hash: adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8
-    path: patches/css-tree@3.2.1.patch
-  css-what@8.0.0:
-    hash: 8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d
-    path: patches/css-what@8.0.0.patch
+  css-select@7.0.0: a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5
+  css-tree@3.2.1: adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8
+  css-what@8.0.0: 53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596
 
 importers:
 
@@ -27,7 +21,7 @@ importers:
         version: 3.2.1(patch_hash=adf9cf27fafbb61aade81ede6b969b85d38fa9253dbf4eb38a17ee8776c942a8)
       css-what:
         specifier: ^8.0.0
-        version: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
+        version: 8.0.0(patch_hash=53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596)
       xpathway:
         specifier: ^1.0.4
         version: 1.0.4
@@ -387,7 +381,7 @@ snapshots:
   css-select@7.0.0(patch_hash=a8602d5d1798502a943c173464b649513dc18595a3c288545bf4d710b18e83f5):
     dependencies:
       boolbase: 2.0.0
-      css-what: 8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d)
+      css-what: 8.0.0(patch_hash=53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596)
       domhandler: 6.0.1
       domutils: 4.0.2
       nth-check: 3.0.1
@@ -397,7 +391,7 @@ snapshots:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
 
-  css-what@8.0.0(patch_hash=8e7bc46fd2eb27541e917f8cb2ab9b1ba118ba0839519506e188c6d544662c4d): {}
+  css-what@8.0.0(patch_hash=53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596): {}
 
   dom-serializer@3.1.1:
     dependencies:

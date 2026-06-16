@@ -6,7 +6,7 @@ index f598b5c129a91c1f047f1312710793aa85211cb1..a9a25f569337af1e5845a5d2bf41ae5c
  import { AttributeAction, SelectorType, } from "./types.js";
 -const reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}\s?|.)|[\w\u00B0-\uFFFF-])+/;
 -const reEscape = /\\([\da-f]{1,6}\s?|(\s)|.)/gi;
-+const reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}(?:\r\n|\s)?|.|$)|[\w\u00B0-\uFFFF-])+/i;
++const reName = /^[^#\\]?(?:\\(?:[\da-f]{1,6}(?:\r\n|\s)?|.|$)|[\w\u0080-\uFFFF-])+/i;
 +const reEscape = /\\([\da-f]{1,6}(?:\r\n|\s)?|(\s)|.|$)/gi;
  var CharCode;
  (function (CharCode) {

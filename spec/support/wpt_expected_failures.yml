@@ -75,8 +75,6 @@ dom/nodes/MutationObserver-document.html:
 dom/nodes/Node-mutation-adoptNode.html:
 - Adopting an element into a different document update's the element's owner doc as
   well as the owner docs of it's attributes
-dom/nodes/ParentNode-querySelector-escapes.html:
-- '" " should match with "# "'
 dom/nodes/ParentNode-querySelectors-namespaces.html:
 - querySelectorAll must work with namespace attribute selectors on SVG
 dom/nodes/ProcessingInstruction-escapes-1.xhtml:
