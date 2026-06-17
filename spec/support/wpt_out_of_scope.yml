@@ -4197,15 +4197,9 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
   reason: Needs cross-consumer CSS-module map failure state between import() and declarative
     attribute; no async module-loading runtime modeled.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-failure.html:
-- name: 'Async fetch failure: JS-duplicated references all remain after failure.'
-  reason: Requires synchronous placeholder sheet in adoptedStyleSheets (driver stub
-    discards) surviving async CSS-module fetch failure; unmodeled module-loading.
 - name: 'Async fetch failure: bare module specifier contributes no sheet.'
   reason: Needs bare-specifier resolution + import() rejecting with TypeError, plus
     adoptedStyleSheets state; unmodeled CSS-module-loading runtime.
-- name: 'Async fetch failure: empty placeholder sheet remains in adoptedStyleSheets.'
-  reason: Requires synchronous empty placeholder CSSStyleSheet in adoptedStyleSheets
-    (driver stub returns []) persisting through async fetch failure; unmodeled module-loading.
 - name: 'Async fetch failure: failed sheet remains empty; valid specifier still works.'
   reason: Requires async CSS-module fetch populating one of two adoptedStyleSheets
     entries + getComputedStyle cascade; driver stub discards, no module-loading.
@@ -4341,12 +4335,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - name: Sheet identity does not change after fetch completes.
   reason: Awaits fetchAndWait and asserts the pre-fetch placeholder sheet object survives
     the async CSS fetch; async-fetch outcome.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-with-declarative-module.html:
-- name: adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
-    attribute.
-  reason: 'Needs declarative CSS-module-script registry: <style type=module specifier>
-    registering a named module resolved by shadowrootadoptedstylesheets; module-loading
-    outcome.'
 shadow-dom/dragenter-related-target.html:
 - name: dragleave relatedTarget should be retargeted to shadow host when entering
     shadow DOM

@@ -198,20 +198,10 @@ shadow-dom/declarative/script-access.html:
 - 'Streaming Declarative Shadow DOM: template .content() should be null'
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-basic.html:
 - Styles from the adoptedStyleSheets are applied to elements.
-- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
-  attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode.html:
 - cloneNode(true) followed by getHTML() round-trips the shadowrootadoptedstylesheets
   attribute.
-- cloneNode(true) on a non-clonable host does not produce a shadow root regardless
-  of shadowrootadoptedstylesheets.
-- cloneNode(true) with absent shadowrootadoptedstylesheets does not crash and produces
-  an empty adoptedStyleSheets.
-- cloneNode(true) with empty shadowrootadoptedstylesheets produces an empty adoptedStyleSheets
-  on the clone.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-absent-and-empty.html:
-- Declarative shadow roots with absent or empty shadowrootadoptedstylesheets adopt
-  no stylesheets.
 - shadowRootAdoptedStyleSheets reflects absent and authored-empty content attributes
   correctly.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-feature-detection.html:
@@ -222,8 +212,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - shadowRootAdoptedStyleSheets reflects the shadowrootadoptedstylesheets content attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-multiple.html:
 - Styles from the sheets applied via shadowrootadoptedstylesheets are applied to elements.
-- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
-  attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-sync.html:
 - 'Nested sync: shadow roots independently resolve specifiers and apply styles.'
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-serialization.html:
