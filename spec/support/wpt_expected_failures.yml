@@ -134,8 +134,6 @@ encoding/utf-32.html:
 shadow-dom/Element-interface-attachShadow-custom-element.html:
 - Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
-shadow-dom/Element-interface-attachShadow.html:
-- Element.attachShadow must throw a NotSupportedError for non-safelisted elements
 shadow-dom/HTMLSlotElement-interface.html:
 - HTMLSlotElement must be defined on window
 shadow-dom/accesskey.tentative.html:
@@ -144,23 +142,155 @@ shadow-dom/accesskey.tentative.html:
 shadow-dom/declarative/declarative-after-attachshadow.html:
 - 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
   called'
+shadow-dom/declarative/declarative-shadow-dom-attachment.html:
+- Declarative Shadow DOM as a child of <area>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <area>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <area>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <area>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <base>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <base>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <base>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <base>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <br>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <br>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <br>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <br>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <col>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <col>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <col>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <col>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <embed>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <embed>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <embed>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <embed>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <head>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <head>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <head>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <head>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <hr>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <hr>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <hr>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <hr>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <html>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <html>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <html>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <html>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <img>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <img>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <img>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <img>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <input>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <input>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <input>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <input>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <link>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <link>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <link>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <link>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <meta>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <meta>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <meta>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <meta>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <param>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <param>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <param>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <param>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <source>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <source>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <source>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <source>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <track>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <track>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <track>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <track>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <wbr>, with mode=closed, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <wbr>, with mode=closed, delegatesFocus=true.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <wbr>, with mode=open, delegatesFocus=false.
+  Should be disallowed.
+- Declarative Shadow DOM as a child of <wbr>, with mode=open, delegatesFocus=true.
+  Should be disallowed.
 shadow-dom/declarative/declarative-shadow-dom-available-to-element-internals.html:
 - 'Declarative Shadow DOM: shadow root should be available to element internals'
+shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
+- XMLHttpRequest - not supported
+- document.write allowed from synchronous script loaded from main document
+- document.write disallowed on fresh document
+- iframe
+- iframe with no sandbox allows declarative Shadow DOM
+- iframe, no sandbox
+- sandboxed iframe allows declarative Shadow DOM
 shadow-dom/declarative/declarative-shadow-dom-repeats-slot-assignment.html:
 - attachShadow() on declarative shadow root does not change slotAssignment
 - attachShadow() on declarative shadow root with manual slotAssignment
 shadow-dom/declarative/declarative-shadow-dom-repeats.html:
 - Calling attachShadow() on declarative shadow root must match all parameters
-- Calling attachShadow() on declarative shadow root must match mode
-shadow-dom/declarative/declarative-shadow-dom-serialization.html:
-- nested elements inside shadow root are serialized
-- shadow root children are serialized inside template
 shadow-dom/declarative/declarative-shadow-dom-slot-assignment-serialization.html:
 - shadowrootslotassignment=manual is serialized and appears before shadowrootclonable
   and shadowrootserializable
 - shadowrootslotassignment=manual serializes between shadowrootdelegatesfocus and
   shadowrootclonable
-- shadowrootslotassignment=named is not serialized as it's the default
 shadow-dom/declarative/declarative-shadow-dom-slot-assignment.html:
 - 'Declarative Shadow DOM: shadowrootslotassignment is case insensitive'
 - 'Declarative Shadow DOM: shadowrootslotassignment on closed shadows can be set to
@@ -202,7 +332,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-serialization.html:
 - Element.getHTML() round-trips shadowrootadoptedstylesheets across absent, empty,
   basic, and whitespace values.
-- ShadowRoot.getHTML() returns children-only markup (no wrapping template).
 - getHTML() ignores script-added entries in adoptedStyleSheets and emits only the
   authored shadowrootadoptedstylesheets value.
 - getHTML() with an empty authored shadowrootadoptedstylesheets value is unaffected
@@ -265,144 +394,25 @@ shadow-dom/input-element-list.html:
 - Input element's list attribute should point to the datalist element in Shadow DOM.
 shadow-dom/input-type-radio.html:
 - input type=radio elements should form a group inside shadow DOM.
-shadow-dom/reference-target/tentative/interestfor.tentative.html:
-- Shadow root reference target works with .interestForElement property.
-- Shadow root reference target works with interestfor attribute via options.
-- Shadow root reference target works with interestfor attribute.
-shadow-dom/reference-target/tentative/label-descendant.html:
-- Changing the reference target causes label association to change for .labels
-- Changing the reference target causes label association to change for computed name
-- Implicit <label> association should apply to only the first labelable custom element
-  for .labels
-- Implicit <label> association should apply to only the first labelable custom element
-  for computed name
-- Label applies to descendant custom element that uses shadowrootreferencetarget (Input
-  1 via Options)
-- Label applies to descendant custom element that uses shadowrootreferencetarget (Input
-  1)
-- Label applies to multiple layers of descendant custom elements that use shadowrootreferencetarget
-  (Input 2 via Options)
-- Label applies to multiple layers of descendant custom elements that use shadowrootreferencetarget
-  (Input 2)
-shadow-dom/reference-target/tentative/label-for.html:
-- Attaching a shadow root, inserting and removing a shadow host, and changing reference
-  targets all cause label association to be updated
-- Label for attribute targeting a custom element using shadowrootreferencetarget inside
-  multiple layers of shadow roots works for .labels property
-- Label for attribute targeting a custom element using shadowrootreferencetarget inside
-  multiple layers of shadow roots works for computed name
-- Label for attribute targeting a custom element using shadowrootreferencetarget works
-  for .labels property
-- Label for attribute targeting a custom element using shadowrootreferencetarget works
-  for computed name
-- Modifying the reference target changes .labels when using label/for
-- Modifying the reference target changes the computed label when using label/for
-- Moving an input from one shadow root to another causes its .labels to be updated
-- Multiple labels targeting a custom element using shadowrootreferencetarget inside
-  multiple layers of shadow roots works for .labels property
-- Multiple labels targeting a custom element using shadowrootreferencetarget inside
-  multiple layers of shadow roots works for computed name
-- Setting .htmlFor property to target a custom element using shadowrootreferencetarget
-  works for .labels
-- Setting .htmlFor property to target a custom element using shadowrootreferencetarget
-  works for computed name
-shadow-dom/reference-target/tentative/popovertarget.html:
-- Shadow root reference target works with .popoverTargetElement property.
-- Shadow root reference target works with popovertarget attribute via options.
-- Shadow root reference target works with popovertarget attribute.
-shadow-dom/reference-target/tentative/reference-target-basics.html:
-- "<template> shadowrootreferencetarget sets referenceTarget on shadow root"
-- Empty shadowrootreferencetarget attribute is reflected as empty string
-- Passing empty string referencetarget in ShadowRootInit is reflected as empty string
-- ShadowRoot.referenceTarget defaults to null when shadow is created declaratively
-- ShadowRoot.referenceTarget defaults to null when shadow is created imperatively
-- ShadowRootInitDict can be used to set referenceTarget on shadow root
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
-shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/attributes/test-006.html:
-- A_10_02_01_06_T01
-shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/methods/test-001.html:
-- A_10_02_02_01_T01
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/activeElement-confirm-return-null.html:
-- confirm activeElement return null
-- confirm activeElement return null when focus on the element in the outer shadow
-  tree
-- confirm activeElement return null when there is other element in body
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-007.html:
-- A_10_01_01_03_01_T01
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-009.html:
-- A_10_01_01_04_01_T01
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-010.html:
-- A_10_01_01_04_02_T01_01
-- A_10_01_01_04_02_T01_02
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-011.html:
-- A_10_01_01_05_01_T01
-- A_10_01_01_05_01_T02
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-012.html:
-- A_10_01_01_06_T01
 shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-013.html:
 - A_10_01_01_07_T01
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-001.html:
-- A_10_01_02_01_T01
-- A_10_01_02_01_T02
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-006.html:
-- A_10_01_02_06_01_T01
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-010.html:
-- A_10_01_02_09_T01
-shadow-dom/untriaged/events/event-dispatch/test-002.html:
-- A_05_05_02_T01
 shadow-dom/untriaged/events/event-dispatch/test-003.html:
 - A_05_05_03_T01
 shadow-dom/untriaged/events/event-retargeting/test-003.html:
 - A_05_01_03_T01
-shadow-dom/untriaged/events/retargeting-focus-events/test-002.html:
-- A_05_03_02_T01
-shadow-dom/untriaged/events/retargeting-focus-events/test-003.html:
-- A_05_03_03_T01
-shadow-dom/untriaged/events/retargeting-relatedtarget/test-001.html:
-- A_05_02_01_T1
-shadow-dom/untriaged/events/retargeting-relatedtarget/test-002.html:
-- A_05_02_02_T01
-shadow-dom/untriaged/events/retargeting-relatedtarget/test-003.html:
-- A_05_02_03_T01
-shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-001.html:
-- A_08_02_01_T01
-- A_08_02_01_T02
-shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-002.html:
-- A_08_02_02_T01
-- A_08_02_02_T02
-- A_08_02_02_T03
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
-shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-002.html:
-- A_08_01_02_T01
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
 - Elements in a shadow tree should not be accessible from owner document's "all" attribute.
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-005.html:
 - A_04_01_05_T01
-- A_04_01_05_T02
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-007.html:
 - A_04_01_07_T01
 - A_04_01_07_T02
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-009.html:
-- A_04_01_09_T01
-- A_04_01_09_T03
-- A_04_01_09_T05
-- A_04_01_09_T06
-- A_04_01_09_T07
-- A_04_01_09_T08
-- A_04_01_09_T09
-- A_04_01_09_T10
-- A_04_01_09_T11
-- A_04_01_09_T12
-- A_04_01_09_T13
-- A_04_01_09_T14
-- A_04_01_09_T15
-- A_04_01_09_T16
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-011.html:
-- A_04_01_11_T2
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/window-named-properties-001.html:
 - An iframe element in a shadow tree should not be accessible from window's named
   properties with its "name" attribute value.
@@ -423,21 +433,231 @@ shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/window-named-prop
   window object''s named property.'
 - '"object" element with name attribute in a shadow tree should not be accessible
   from window object''s named property.'
-shadow-dom/untriaged/styles/test-003.html:
-- A_06_00_03_T01
-- A_06_00_03_T02
-- A_06_00_03_T03
-shadow-dom/untriaged/user-interaction/active-element/test-001.html:
-- A_07_03_01_T01
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/window-named-properties-003.html:
+- '"a" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"abbr" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"address" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"area" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"article" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"aside" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"audio" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"b" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"base" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"bdi" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"bdo" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"blockquote" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"body" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"br" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"button" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"canvas" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"caption" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"cite" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"code" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"col" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"colgroup" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"data" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"datalist" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"dd" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"del" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"details" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"dfn" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"dialog" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"div" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"dl" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"dt" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"em" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"embed" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"fieldset" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"figcaption" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"figure" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"footer" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"form" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"h1" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"h2" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"h3" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"h4" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"h5" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"h6" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"head" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"header" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"hr" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"html" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"i" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"iframe" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"img" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"input" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"ins" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"kbd" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"label" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"legend" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"li" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"link" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"main" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"map" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"mark" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"menu" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"meta" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"meter" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"nav" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"noscript" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"object" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"ol" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"optgroup" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"option" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"output" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"p" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"param" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"pre" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"progress" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"q" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"rp" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"rt" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"ruby" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"s" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"samp" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"script" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"search" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"section" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"select" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"slot" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"small" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"source" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"span" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"strong" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"style" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"sub" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"summary" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"sup" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"table" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"tbody" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"td" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"template" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"textarea" element with id attribute in a shadow tree should not be accessible
+  from window object''s named property.'
+- '"tfoot" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"th" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"thead" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"time" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"title" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"tr" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"track" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"u" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"ul" element with id attribute in a shadow tree should not be accessible from window
+  object''s named property.'
+- '"var" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"video" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
+- '"wbr" element with id attribute in a shadow tree should not be accessible from
+  window object''s named property.'
 shadow-dom/untriaged/user-interaction/active-element/test-002.html:
 - A_07_03_02_T01
-shadow-dom/untriaged/user-interaction/editing/inheritance-of-content-editable-001.html:
-- contentEditable of shadow trees must be undefined when contentEditable attribute
-  of shadow host is "inherit"
-- contentEditable of shadow trees must be undefined when contentEditable attribute
-  of shadow host is "true"
-- contentEditable of shadow trees must be undefined when contentEditable of shadow
-  host is "false"
 shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
 - A_07_07_01_T01
 - A_07_07_01_T02

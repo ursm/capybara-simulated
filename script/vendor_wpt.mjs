@@ -53,6 +53,12 @@ const TREES = [
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
 // resolve at serve time, but the runner does NOT scan them for test files.
 const SUPPORT_TREES = ['common'];
+// Individual support files (outside the vendored trees) that tests include via
+// `<script src>`. Kept across re-vendoring so local includes resolve.
+// `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument
+// / HTML5_ELEMENTS / HTML5_SHADOW_DISALLOWED_ELEMENTS used pervasively by the
+// shadow-dom/untriaged suite and gethtml/attachShadow tests.
+const SUPPORT_FILES = ['html/resources/common.js'];
 
 const CONCURRENCY = 24;
 
@@ -127,6 +133,7 @@ async function main() {
     paths.push(...blobs);
   }
   paths.push('resources/testharness.js');
+  paths.push(...SUPPORT_FILES);
 
   console.error(`Downloading ${paths.length} files (concurrency ${CONCURRENCY})…`);
   await pool(paths, CONCURRENCY, (p) => vendorPath(sha, p));
@@ -134,7 +141,7 @@ async function main() {
   await writeFile(
     join(OUT, 'WPT_VERSION'),
     `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}` +
-      `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js\n`
+      `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}\n`
   );
   console.error(`Done. Pinned SHA written to spec/wpt/WPT_VERSION.`);
   console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_spec.rb  # refresh the allowlist`);
