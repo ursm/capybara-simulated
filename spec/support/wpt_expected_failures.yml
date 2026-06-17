@@ -531,5 +531,3 @@ url/javascript-urls.window.js:
 - 'javascript: URL containing a JavaScript string split over path and query and has
   a U+000A in scheme'
 - 'javascript: URL without an opaque path'
-url/urlsearchparams-constructor.any.js:
-- URLSearchParams constructor, DOMException as argument
