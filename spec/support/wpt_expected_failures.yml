@@ -32,10 +32,6 @@ dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS
 dom/interface-objects.html: HARNESS_ERROR
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
-dom/nodes/MutationObserver-document.html:
-- parser insertion mutations
-- parser script insertion mutation
-- removal of parent during parsing
 dom/nodes/ProcessingInstruction-escapes-1.xhtml:
 - ProcessingInstruction numeric escapes
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
@@ -109,19 +105,9 @@ shadow-dom/declarative/declarative-shadow-dom-slot-assignment.html:
 - shadowrootslotassignment reflection, setter
 shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
 - "`document.write` on inner iframe handles declarative shadow DOM"
-shadow-dom/declarative/declarative-with-disabled-shadow.html:
-- 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
-  called'
-shadow-dom/declarative/innerhtml-before-closing-tag.html:
-- 'Declarative Shadow DOM: innerHTML should work while parsing streaming declarative
-  shadow root <template>'
 shadow-dom/declarative/innerhtml-on-ordinary-template.html:
 - 'Declarative Shadow DOM: innerHTML should work on <template shadowroot> that is
   left over'
-shadow-dom/declarative/move-template-before-closing-tag.html:
-- Moving the template node from invalid parent to valid parent should still not attach
-shadow-dom/declarative/script-access.html:
-- 'Streaming Declarative Shadow DOM: template .content() should be null'
 shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
