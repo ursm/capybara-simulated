@@ -34,11 +34,6 @@ dom/events/EventListener-incumbent-global-2.sub.html:
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
-dom/events/event-handler-attribute-replace-preserves-passive.html:
-- Replacing a wheel event handler attribute on body via setAttribute preserves its
-  passive flag
-- Replacing a wheel event handler attribute on document element via setAttribute preserves
-  its passive flag
 dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
 dom/events/shadow-relatedTarget.html:
 - relatedTarget should not leak at capturing phase, at window object.
