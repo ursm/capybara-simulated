@@ -174,8 +174,6 @@ shadow-dom/input-type-radio.html:
 - input type=radio elements should form a group inside shadow DOM.
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-attributes/test-013.html:
-- A_10_01_01_07_T01
 shadow-dom/untriaged/events/event-dispatch/test-003.html:
 - A_05_05_03_T01
 shadow-dom/untriaged/events/event-retargeting/test-003.html:
