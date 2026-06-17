@@ -34,9 +34,6 @@ dom/events/EventListener-incumbent-global-2.sub.html:
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
-dom/events/event-global.html:
-- window.event is set to the current event, which is the event passed to dispatch
-  (2)
 dom/events/event-handler-attribute-replace-preserves-passive.html:
 - Replacing a wheel event handler attribute on body via setAttribute preserves its
   passive flag
