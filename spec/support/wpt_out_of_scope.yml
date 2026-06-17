@@ -4259,11 +4259,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - name: Async-fetched CSS module replaces placeholder and applies styles.
   reason: Asserts async-fetched CSS module replaces a placeholder sheet and applies
     styles; requires real async fetch + CSS-module loading the driver doesn't model.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-basic.html:
-- name: adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
-    attribute.
-  reason: Populating shadowRoot.adoptedStyleSheets from a specifier requires import-map
-    -> CSS-module resolution into a CSSStyleSheet; module loading not modeled.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode-async-fetch.html:
 - name: cloneNode handles both placeholder and resolved async-fetched adoptedStyleSheets.
   reason: Drives an async CSS-module fetch to resolve placeholder->resolved sheet
@@ -4980,11 +4975,6 @@ shadow-dom/reference-target/tentative/gethtml-serialization.html:
 - name: shadowrootreferencetarget with no value is serialized as empty string
   reason: getHTML serialization of tentative non-standard shadowrootreferencetarget
     attr; not modeled
-shadow-dom/scroll-restore-shadow.html:
-- name: Scroll position restore on shadow tree
-  reason: 'requires real overflow:auto scroll geometry: scrollTop on a 500px content
-    box clamped + preserved across a display-change layout-tree rebuild. No layout
-    engine.'
 shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
 - name: The user agent scroll to the fragment when there is an anchor element with
     a name attribute exactly equal to the decoded fragid

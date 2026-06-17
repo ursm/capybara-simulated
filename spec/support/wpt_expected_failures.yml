@@ -144,8 +144,6 @@ shadow-dom/Document-prototype-importNode.html:
 shadow-dom/Element-interface-attachShadow-custom-element.html:
 - Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
-- Element.attachShadow for an autonomous custom element with disabledFeatures=["shadow"]
-  should throw a NotSupportedError
 shadow-dom/Element-interface-attachShadow.html:
 - Element.attachShadow must throw a NotSupportedError for non-safelisted elements
 shadow-dom/HTMLSlotElement-interface.html:
@@ -161,39 +159,12 @@ shadow-dom/declarative/declarative-after-attachshadow.html:
   called'
 shadow-dom/declarative/declarative-shadow-dom-available-to-element-internals.html:
 - 'Declarative Shadow DOM: shadow root should be available to element internals'
-shadow-dom/declarative/declarative-shadow-dom-basic.html:
-- 'Declarative Shadow DOM: Basic test'
-- 'Declarative Shadow DOM: Closed shadow root attribute'
-- 'Declarative Shadow DOM: Feature detection'
-- 'Declarative Shadow DOM: Fragment parser basic test'
-- 'Declarative Shadow DOM: Missing closing tag'
-- 'Declarative Shadow DOM: Multiple roots'
-- 'Declarative Shadow DOM: clonable attribute'
-- 'Declarative Shadow DOM: delegates focus attribute'
-- 'Declarative Shadow DOM: template containing (deeply nested) declarative shadow
-  root'
-- 'Declarative Shadow DOM: template containing a template containing declarative shadow
-  root'
-- 'Declarative Shadow DOM: template containing declarative shadow root (with shadowrootclonable)'
-- 'Declarative Shadow DOM: template containing declarative shadow root and UA shadow
-  root'
-- Shadowrootclonable reflection
-- Shadowrootclonable reflection, setter
-- Shadowrootdelegatesfocus reflection
-- Shadowrootdelegatesfocus reflection, setter
-- Shadowrootmode reflection
-- Shadowrootmode reflection, setter
-shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
-- Non-fragment parsing needs no opt-in
-shadow-dom/declarative/declarative-shadow-dom-repeats-2.html:
-- Repeated declarative shadow roots keep only the first
 shadow-dom/declarative/declarative-shadow-dom-repeats-slot-assignment.html:
 - attachShadow() on declarative shadow root does not change slotAssignment
 - attachShadow() on declarative shadow root with manual slotAssignment
 shadow-dom/declarative/declarative-shadow-dom-repeats.html:
 - Calling attachShadow() on declarative shadow root must match all parameters
 - Calling attachShadow() on declarative shadow root must match mode
-- Repeated declarative shadow roots keep only the first
 shadow-dom/declarative/declarative-shadow-dom-serialization.html:
 - nested elements inside shadow root are serialized
 - shadow root children are serialized inside template
@@ -204,21 +175,17 @@ shadow-dom/declarative/declarative-shadow-dom-slot-assignment-serialization.html
   shadowrootclonable
 - shadowrootslotassignment=named is not serialized as it's the default
 shadow-dom/declarative/declarative-shadow-dom-slot-assignment.html:
-- 'Declarative Shadow DOM: missing shadowrootslotassignment defaults to named'
-- 'Declarative Shadow DOM: shadowrootslotassignment invalid value defaults to named'
 - 'Declarative Shadow DOM: shadowrootslotassignment is case insensitive'
 - 'Declarative Shadow DOM: shadowrootslotassignment on closed shadows can be set to
   manual'
 - 'Declarative Shadow DOM: shadowrootslotassignment=manual'
-- 'Declarative Shadow DOM: shadowrootslotassignment=named'
 - shadowrootslotassignment reflection
 - shadowrootslotassignment reflection, setter
 shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
 - "`document.write` on inner iframe handles declarative shadow DOM"
-shadow-dom/declarative/gethtml-ordering.html:
-- attribute position
-- both template and attribute position
-- template position
+shadow-dom/declarative/declarative-with-disabled-shadow.html:
+- 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
+  called'
 shadow-dom/declarative/innerhtml-before-closing-tag.html:
 - 'Declarative Shadow DOM: innerHTML should work while parsing streaming declarative
   shadow root <template>'
@@ -226,14 +193,16 @@ shadow-dom/declarative/innerhtml-on-ordinary-template.html:
 - 'Declarative Shadow DOM: innerHTML should work on <template shadowroot> that is
   left over'
 shadow-dom/declarative/move-template-before-closing-tag.html:
-- Moving the template node during parsing should attach to initial parent (content
-  after observer)
-- Moving the template node during parsing should attach to initial parent (content
-  before observer)
 - Moving the template node from invalid parent to valid parent should still not attach
 shadow-dom/declarative/script-access.html:
 - 'Streaming Declarative Shadow DOM: template .content() should be null'
+shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-basic.html:
+- Styles from the adoptedStyleSheets are applied to elements.
+- adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
+  attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode.html:
+- cloneNode(true) followed by getHTML() round-trips the shadowrootadoptedstylesheets
+  attribute.
 - cloneNode(true) on a non-clonable host does not produce a shadow root regardless
   of shadowrootadoptedstylesheets.
 - cloneNode(true) with absent shadowrootadoptedstylesheets does not crash and produces
@@ -252,11 +221,14 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - Empty-string assignment and removeAttribute() are distinguishable on shadowRootAdoptedStyleSheets.
 - shadowRootAdoptedStyleSheets reflects the shadowrootadoptedstylesheets content attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-multiple.html:
+- Styles from the sheets applied via shadowrootadoptedstylesheets are applied to elements.
 - adoptedStyleSheets is populated from a <template> element's shadowrootadoptedstylesheets
   attribute.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-sync.html:
 - 'Nested sync: shadow roots independently resolve specifiers and apply styles.'
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-serialization.html:
+- Element.getHTML() round-trips shadowrootadoptedstylesheets across absent, empty,
+  basic, and whitespace values.
 - ShadowRoot.getHTML() returns children-only markup (no wrapping template).
 - getHTML() ignores script-added entries in adoptedStyleSheets and emits only the
   authored shadowrootadoptedstylesheets value.
@@ -285,10 +257,6 @@ shadow-dom/focus/DocumentOrShadowRoot-activeElement.html:
 - activeElement on document & shadow root when focused element is in the shadow tree
 - activeElement when focused element is in a nested shadow tree
 - activeElement when focused element is in a parent shadow tree
-shadow-dom/focus/ShadowRoot-delegatesFocus.html:
-- default delegatesFocus value
-- delegatesFocus set to false in init dict
-- delegatesFocus set to true in init dict
 shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
 - Calling blur() on shadow host with delegatesFocus should remove the focus.
 shadow-dom/focus/delegatesFocus-tabindex-change.html:
@@ -376,10 +344,6 @@ shadow-dom/reference-target/tentative/reference-target-basics.html:
 - ShadowRoot.referenceTarget defaults to null when shadow is created declaratively
 - ShadowRoot.referenceTarget defaults to null when shadow is created imperatively
 - ShadowRootInitDict can be used to set referenceTarget on shadow root
-shadow-dom/shadow-root-clonable.html:
-- declarative shadow roots can opt in to clonable with shadowrootclonable
-- 'declarative shadow roots do *not* get clonable: true automatically'
-- declarative shadow roots inside templates do *not* get cloned automatically
 shadow-dom/slotchange-customelements.html:
 - slotchange must fire on initialization of custom elements with slotted children
 shadow-dom/untriaged/elements-and-dom-objects/extensions-to-element-interface/attributes/test-006.html:
