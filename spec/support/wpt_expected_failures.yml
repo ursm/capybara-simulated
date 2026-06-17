@@ -21,12 +21,6 @@ dom/events/Event-dispatch-throwing-multiple-globals.html:
 dom/events/Event-timestamp-high-resolution.https.html:
 - Constructed GamepadEvent timestamp should be high resolution and have the same time
   origin as performance.now()
-dom/events/EventListener-handleEvent-cross-realm.html:
-- EventListener is cross-realm callable revoked Proxy
-- EventListener is cross-realm non-callable revoked Proxy
-- EventListener is cross-realm plain object with non-callable 'handleEvent' property
-- EventListener is cross-realm plain object with revoked Proxy as 'handleEvent' property
-- EventListener is cross-realm plain object without 'handleEvent' property
 dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
@@ -90,12 +84,6 @@ dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
 - Range in shadow should stay in the shadow after the host parent is removed
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
 - 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
-dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
-- NodeFilter is cross-realm callable revoked Proxy
-- NodeFilter is cross-realm non-callable revoked Proxy
-- NodeFilter is cross-realm plain object with non-callable 'acceptNode' property
-- NodeFilter is cross-realm plain object with revoked Proxy as 'acceptNode' property
-- NodeFilter is cross-realm plain object without 'acceptNode' property
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 domparsing/tentative/stream-positional.html:
