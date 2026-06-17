@@ -108,8 +108,6 @@ shadow-dom/innerHTML-setter.xhtml:
 - InnerHTML behavior on custom element in default 'foo' namespace
 - InnerHTML behavior on custom element in default XHTML namespace
 - InnerHTML behavior with prefixes on custom element
-shadow-dom/slotchange-customelements.html:
-- slotchange must fire on initialization of custom elements with slotted children
 shadow-dom/untriaged/events/event-dispatch/test-003.html:
 - A_05_05_03_T01
 shadow-dom/untriaged/events/event-retargeting/test-003.html:
