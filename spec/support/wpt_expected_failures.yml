@@ -194,8 +194,6 @@ shadow-dom/declarative/move-template-before-closing-tag.html:
 - Moving the template node from invalid parent to valid parent should still not attach
 shadow-dom/declarative/script-access.html:
 - 'Streaming Declarative Shadow DOM: template .content() should be null'
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-basic.html:
-- Styles from the adoptedStyleSheets are applied to elements.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode.html:
 - cloneNode(true) followed by getHTML() round-trips the shadowrootadoptedstylesheets
   attribute.
