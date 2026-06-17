@@ -86,23 +86,11 @@ shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - iframe with no sandbox allows declarative Shadow DOM
 - iframe, no sandbox
 - sandboxed iframe allows declarative Shadow DOM
-shadow-dom/declarative/declarative-shadow-dom-repeats-slot-assignment.html:
-- attachShadow() on declarative shadow root does not change slotAssignment
-- attachShadow() on declarative shadow root with manual slotAssignment
 shadow-dom/declarative/declarative-shadow-dom-repeats.html:
 - Calling attachShadow() on declarative shadow root must match all parameters
-shadow-dom/declarative/declarative-shadow-dom-slot-assignment-serialization.html:
-- shadowrootslotassignment=manual is serialized and appears before shadowrootclonable
-  and shadowrootserializable
-- shadowrootslotassignment=manual serializes between shadowrootdelegatesfocus and
-  shadowrootclonable
 shadow-dom/declarative/declarative-shadow-dom-slot-assignment.html:
-- 'Declarative Shadow DOM: shadowrootslotassignment is case insensitive'
 - 'Declarative Shadow DOM: shadowrootslotassignment on closed shadows can be set to
   manual'
-- 'Declarative Shadow DOM: shadowrootslotassignment=manual'
-- shadowrootslotassignment reflection
-- shadowrootslotassignment reflection, setter
 shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
 - "`document.write` on inner iframe handles declarative shadow DOM"
 shadow-dom/declarative/innerhtml-on-ordinary-template.html:
