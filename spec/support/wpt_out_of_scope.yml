@@ -407,6 +407,23 @@ dom/nodes/remove-and-adopt-thcrash.html:
     doesn't crash.
   reason: window.open() aux windows are URL-only by design (no per-window VM/document);
     popup.document.body.appendChild(document.body) has no real second-window document.
+domparsing/XMLSerializer-serializeToString.html:
+- name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
+  reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
+    dropped'' subtests in this same file, which we PASS: this one wants a redundant
+    xmlns="" KEPT, those want redundant xmlns DROPPED. No serializer passes all —
+    verified against Chrome, which keeps xmlns="" here (passing this subtest) but
+    then fails both drop subtests. We follow the aggressive-drop spec revision, which
+    passes strictly more of the file.'
+- name: Check if the prefix of an attribute is NOT preserved in a case where neither
+    its prefix nor its namespace URI is not already used.
+  reason: Encodes the abandoned DOM-Parsing issue-#29 revision that generated an ns1
+    prefix; real browsers (verified against Chrome/Firefox) preserve the attribute's
+    author prefix instead, so this subtest fails in real browsers too.
+- name: Drop inconsistent xmlns="..." by matching on local name
+  reason: Encodes an abandoned DOM-Parsing revision; real browsers (verified against
+    Chrome) keep the literal xmlns attributes rather than dropping them by local-name
+    match, so this subtest fails in real browsers too.
 domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
 - name: streamAfterHTML with trusted types and no default policy returns a WritableStream.
   reason: WICG declarative-partial-updates stream* methods return WritableStream +
