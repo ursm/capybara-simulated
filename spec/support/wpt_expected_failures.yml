@@ -166,14 +166,10 @@ shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
 - Order with different tabindex on host
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
 - Order with different tabindex on host
-shadow-dom/form-control-form-attribute.html:
-- Shadow form control's form attribute should work also in shadow DOM.
 shadow-dom/innerHTML-setter.xhtml:
 - InnerHTML behavior on custom element in default 'foo' namespace
 - InnerHTML behavior on custom element in default XHTML namespace
 - InnerHTML behavior with prefixes on custom element
-shadow-dom/input-element-list.html:
-- Input element's list attribute should point to the datalist element in Shadow DOM.
 shadow-dom/input-type-radio.html:
 - input type=radio elements should form a group inside shadow DOM.
 shadow-dom/slotchange-customelements.html:
@@ -190,11 +186,6 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.
 - A_08_01_01_T01
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
 - Elements in a shadow tree should not be accessible from owner document's "all" attribute.
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-005.html:
-- A_04_01_05_T01
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/test-007.html:
-- A_04_01_07_T01
-- A_04_01_07_T02
 shadow-dom/untriaged/user-interaction/active-element/test-002.html:
 - A_07_03_02_T01
 shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
