@@ -96,8 +96,6 @@ dom/nodes/query-target-in-load-event.html:
 dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
 - Range in shadow should stay in the shadow after the host is removed
 - Range in shadow should stay in the shadow after the host parent is removed
-dom/ranges/Range-intersectsNode-shadow.html:
-- Range.intersectsNode() doesn't return true for shadow children in other trees
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
 - 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
