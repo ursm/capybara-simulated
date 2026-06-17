@@ -194,12 +194,6 @@ shadow-dom/focus-navigation/focus-navigation-slot-fallback-default-tabindex.html
 - Default tabindex for a slot node should be 0.
 shadow-dom/focus-navigation/focus-navigation-slot-fallback.html:
 - Focus should jump to fallback elements when a slot does not have any assigned nodes.
-shadow-dom/focus-navigation/focus-reverse-unassigned-slot.html:
-- Verifies that focusing backwards from a button inside a slot which has no assigned
-  nodes goes to the previous focusable element.
-shadow-dom/focus-navigation/focus-unassignable-slot.html:
-- Verifies that focusing forwards from an input inside a slot which has no shadow
-  root goes to the next focusable element in light DOM.
 shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
@@ -238,6 +232,10 @@ shadow-dom/focus/focus-selector-delegatesFocus.html:
   tree with delegatesFocus=true is focused"
 - ":focus applies to host with delegatesFocus=true when the shadow root's descendant
   has focus"
+shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
+- Order with different tabindex on host
+shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
+- Order with different tabindex on host
 shadow-dom/form-control-form-attribute.html:
 - Shadow form control's form attribute should work also in shadow DOM.
 shadow-dom/innerHTML-setter.xhtml:

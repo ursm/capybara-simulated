@@ -40,6 +40,35 @@
     return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, 0); });
   }
 
+  // ---- keyboard: WebDriver PUA codes + trusted-input default actions -------
+  // testdriver send_keys / Actions pass raw WebDriver "Normalised key" chars in
+  // the U+E000.. PUA block; real input surfaces the named `key`. Map at least the
+  // keys whose default action this driver models (Tab → focus navigation).
+  var WD_KEYS = {
+    '': 'Backspace', '': 'Tab', '': 'Enter', '': 'Enter',
+    '': 'Shift', '': 'Shift', '': 'Control', '': 'Control',
+    '': 'Alt', '': 'Alt', '': 'Escape', '': ' ', '': 'Delete',
+    '': 'PageUp', '': 'PageDown', '': 'End', '': 'Home',
+    '': 'ArrowLeft', '': 'ArrowUp', '': 'ArrowRight', '': 'ArrowDown'
+  };
+  function keyName(ch) { return WD_KEYS[ch] || ch; }
+  var __shiftHeld = false;
+  // Track modifier state across a key transition; returns true for a pure
+  // modifier key (no text / no further default action).
+  function trackModifier(name, down) {
+    if (name === 'Shift') { __shiftHeld = down; return true; }
+    return name === 'Control' || name === 'Alt' || name === 'Meta';
+  }
+  // The default action this driver ties to a trusted key press. Today: Tab moves
+  // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
+  // Only runs when the keydown wasn't preventDefault'd — matching real browsers.
+  function keyDefaultAction(name, keydownEv) {
+    if (name === 'Tab' && keydownEv && !keydownEv.defaultPrevented &&
+        typeof W.__csimAdvanceFocus === 'function') {
+      W.__csimAdvanceFocus(__shiftHeld);
+    }
+  }
+
   // ---- cancelable-when-passive --------------------------------------------
   // A trusted wheel / touchstart / touchmove event is cancelable iff some
   // listener on its propagation path is NON-passive. (The spec marks the event
@@ -172,14 +201,22 @@
         t = (a.origin && a.origin.nodeType) ? a.origin : null;
         fireWheelOn(t, a.dx, a.dy);
         break;
-      case 'keyDown':
+      case 'keyDown': {
+        var dkn = keyName(a.key);
+        var dmod = trackModifier(dkn, true);   // sets __shiftHeld before the event/default
         t = (D() && D().activeElement) || (D() && D().body);
-        dispatch(t, new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: a.key }));
+        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld });
+        dispatch(t, dEv);
+        if (!dmod) keyDefaultAction(dkn, dEv);
         break;
-      case 'keyUp':
+      }
+      case 'keyUp': {
+        var ukn = keyName(a.key);
+        trackModifier(ukn, false);
         t = (D() && D().activeElement) || (D() && D().body);
-        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: a.key }));
+        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ukn, shiftKey: __shiftHeld }));
         break;
+      }
       case 'pause':
       default:
         break;
@@ -187,6 +224,7 @@
   }
 
   function action_sequence(actions) {
+    __shiftHeld = false;   // each action chain starts with no keys depressed
     var state = Object.create(null);
     for (var i = 0; i < actions.length; i++) {
       var a = actions[i];
@@ -264,6 +302,9 @@
     send_keys: function (element, keys) {
       try { if (element && typeof element.focus === 'function') element.focus(); } catch (e) {}
       var str = String(keys == null ? '' : keys);
+      __shiftHeld = false;   // start fresh; a modifier in `keys` stays held for
+                             // the rest of THIS call (WebDriver sticky), but does
+                             // not leak into a later send_keys / Actions chain
       for (var i = 0; i < str.length; i++) {
         var ch = str[i];
         var cp = str.codePointAt(i);
@@ -271,9 +312,12 @@
         // block U+E000..U+F8FF. They produce keydown/keyup but DON'T insert text
         // — so no keypress, no value mutation, no `input` event for them.
         var special = cp >= 0xE000 && cp <= 0xF8FF;
-        dispatch(element, new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: ch }));
+        var kn = keyName(ch);
+        var isMod = trackModifier(kn, true);   // sets __shiftHeld for a held Shift
+        var kdEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld });
+        dispatch(element, kdEv);
         if (!special) {
-          dispatch(element, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: ch }));
+          dispatch(element, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld }));
           try {
             if (element && 'value' in element) {
               element.value = (element.value || '') + ch;
@@ -281,8 +325,10 @@
               dispatch(element, new InputCtor('input', { bubbles: true, composed: true, data: ch }));
             }
           } catch (e) {}
+        } else if (!isMod) {
+          keyDefaultAction(kn, kdEv);          // Tab → sequential focus navigation
         }
-        dispatch(element, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ch }));
+        dispatch(element, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld }));
       }
       return settled();
     },
