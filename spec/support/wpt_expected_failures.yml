@@ -60,8 +60,6 @@ dom/nodes/Document-contentType/contentType/contenttype_png.html:
 - PNG document.contentType === 'image/png'
 dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
-dom/nodes/Element-closest.html:
-- Element.closest with context node 'test4' and selector ':has(> :scope)'
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/MutationObserver-document.html:
