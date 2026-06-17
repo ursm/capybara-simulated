@@ -29,9 +29,6 @@ dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HAR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
 dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
-dom/events/shadow-relatedTarget.html:
-- relatedTarget should not leak at capturing phase, at window object.
-- relatedTarget should not leak at target.
 dom/interface-objects.html: HARNESS_ERROR
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
