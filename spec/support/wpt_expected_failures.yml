@@ -128,29 +128,6 @@ shadow-dom/declarative/move-template-before-closing-tag.html:
 - Moving the template node from invalid parent to valid parent should still not attach
 shadow-dom/declarative/script-access.html:
 - 'Streaming Declarative Shadow DOM: template .content() should be null'
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-clonenode.html:
-- cloneNode(true) followed by getHTML() round-trips the shadowrootadoptedstylesheets
-  attribute.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-absent-and-empty.html:
-- shadowRootAdoptedStyleSheets reflects absent and authored-empty content attributes
-  correctly.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-feature-detection.html:
-- shadowRootAdoptedStyleSheets is exposed as a configurable, enumerable accessor on
-  HTMLTemplateElement.prototype.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-reflection.html:
-- Empty-string assignment and removeAttribute() are distinguishable on shadowRootAdoptedStyleSheets.
-- shadowRootAdoptedStyleSheets reflects the shadowrootadoptedstylesheets content attribute.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-multiple.html:
-- Styles from the sheets applied via shadowrootadoptedstylesheets are applied to elements.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-sync.html:
-- 'Nested sync: shadow roots independently resolve specifiers and apply styles.'
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-serialization.html:
-- Element.getHTML() round-trips shadowrootadoptedstylesheets across absent, empty,
-  basic, and whitespace values.
-- getHTML() ignores script-added entries in adoptedStyleSheets and emits only the
-  authored shadowrootadoptedstylesheets value.
-- getHTML() with an empty authored shadowrootadoptedstylesheets value is unaffected
-  by script mutations.
 shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
