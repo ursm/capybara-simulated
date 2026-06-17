@@ -106,8 +106,6 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm.html:
 - NodeFilter is cross-realm plain object without 'acceptNode' property
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-domparsing/style_attribute_html.html:
-- Parsing of invalid style attribute
 domparsing/tentative/stream-positional.html:
 - streamAfterHTML throw if parent is a Document
 - streamAfterHTML throw if parent is a DocumentFragment
