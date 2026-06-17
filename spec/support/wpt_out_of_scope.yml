@@ -436,6 +436,19 @@ dom/nodes/remove-and-adopt-thcrash.html:
     doesn't crash.
   reason: window.open() aux windows are URL-only by design (no per-window VM/document);
     popup.document.body.appendChild(document.body) has no real second-window document.
+dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
+- name: Range in shadow should stay in the shadow after the host is removed
+  reason: Uses <meta name=variant content='?mode=open|closed'> + location.search to
+    pick the shadow mode; WptRunner does not pass variant query strings, so mode resolves
+    to null and attachShadow throws. A test-harness limitation (variant support would
+    re-key every variant file — a separate infra task), not a driver gap; only this
+    one in-scope file needs it.
+- name: Range in shadow should stay in the shadow after the host parent is removed
+  reason: Uses <meta name=variant content='?mode=open|closed'> + location.search to
+    pick the shadow mode; WptRunner does not pass variant query strings, so mode resolves
+    to null and attachShadow throws. A test-harness limitation (variant support would
+    re-key every variant file — a separate infra task), not a driver gap; only this
+    one in-scope file needs it.
 domparsing/XMLSerializer-serializeToString.html:
 - name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
   reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
@@ -15020,6 +15033,14 @@ shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-metho
 - name: A_10_01_02_06_02_T02
   reason: ShadowRoot.elementFromPoint(1,-1)==null negative-coord hit-testing semantics;
     requires layout/geometry engine not modeled.
+shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
+- name: Elements in a shadow tree should not be accessible from owner document's "all"
+    attribute.
+  reason: 'Needs document.all, whose modern-browser identity is the [[IsHTMLDDA]]
+    platform exotic (== undefined, typeof ''undefined'', falsy) — not expressible
+    in pure JS. A plain-object document.all would be truthy and break legacy `if (document.all)`
+    feature-detection (rule 1: platform exotic object). The other accessors (getElementsByTagName/NS/ClassName/getElementById)
+    in this file already pass.'
 shadow-dom/untriaged/styles/test-001.html:
 - name: A_06_00_01_T01
   reason: Asserts s.querySelector('#shd').offsetTop > 0 to prove style not applied;
