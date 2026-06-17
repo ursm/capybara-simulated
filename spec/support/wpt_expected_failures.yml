@@ -126,8 +126,6 @@ domparsing/tentative/stream-positional.html:
 - streamReplaceWithHTML throw if parent is a DocumentFragment
 - streamReplaceWithHTMLUnsafe throw if parent is a Document
 - streamReplaceWithHTMLUnsafe throw if parent is a DocumentFragment
-domparsing/xmldomparser.html:
-- XML Dom Parse readyState Test
 encoding/bom-handling.html:
 - document.characterSet should match the BOM
 encoding/encodeInto.any.js:
