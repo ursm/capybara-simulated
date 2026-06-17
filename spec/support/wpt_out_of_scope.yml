@@ -1,3 +1,16 @@
+# WPT OUT-OF-SCOPE failures — subtests that fail because they need a subsystem we
+# deliberately do NOT model (per CLAUDE.md rule 1): a layout/rendering engine, a
+# real async runtime / streams, IDNA / legacy-multibyte encoding tables, or a spec
+# edge no real library/app depends on. These are NOT a backlog; each carries the
+# reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
+#
+# The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
+# symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
+# it to the in-scope file / delete it). Format per file: a list of {name, reason}.
+#
+# regen_wpt_expected_failures.rb PRESERVES these classifications + reasons across
+# runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
+#
 ---
 dom/collections/HTMLCollection-supported-property-indices.html:
 - name: Handling of property names that look like integers around 2^32
@@ -275,14 +288,43 @@ dom/nodes/Document-contentType/contentType/contenttype_bmp.html:
 - name: BMP document.contentType === 'image/bmp'
   reason: Loading a binary image into an iframe makes the UA synthesize an image-viewer
     document; image-document synthesis is a rendering/UA concern no lib depends on.
+dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html:
+- name: Data URI document.contentType === 'text/html' when data URI MIME type is set
+  reason: 'Navigating an iframe to a data: URL of a typed resource and reading document.contentType;
+    iframe data:-navigation content-type tracking is not modeled.'
 dom/nodes/Document-contentType/contentType/contenttype_gif.html:
 - name: GIF document.contentType === 'image/gif'
   reason: Binary image in an iframe yields a UA-synthesized image-viewer document;
     image-document rendering is a non-modeled UA concern no app relies on.
+dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
+- name: Javascript URI document.contentType === 'text/html'
+  reason: 'Navigating an iframe to a javascript: URL and reading the resulting document.contentType
+    (''text/html''); javascript:-URL document creation + content-type tracking on
+    iframe navigation is not modeled.'
 dom/nodes/Document-contentType/contentType/contenttype_jpg.html:
 - name: JPG document.contentType === 'image/jpeg'
   reason: Binary image in an iframe yields a UA-synthesized image-viewer document;
     image-document rendering is a non-modeled UA concern no app relies on.
+dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html:
+- name: Custom document.contentType === 'text/xml' when explicitly set to this value
+  reason: document.contentType must reflect the server's Content-Type header (text/xml);
+    requires a CGI/header-controlling server response, not available in-process (rule
+    1).
+dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html:
+- name: Custom document.contentType === 'text/html' when explicitly set to this value
+    and an attempt is made to override this value in an HTML meta header
+  reason: document.contentType must reflect the server's Content-Type header (text/html);
+    requires a CGI/header-controlling server response, not available in-process (rule
+    1).
+dom/nodes/Document-contentType/contentType/contenttype_png.html:
+- name: PNG document.contentType === 'image/png'
+  reason: Loading a binary PNG into an iframe yields a UA-synthesised image document
+    with contentType image/png; image-document synthesis is a non-modeled UA construct
+    (rule 1).
+dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
+- name: 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
+  reason: XMLHttpRequest responseType='document' must expose responseXML.contentType
+    from the response; XHR document-response content-type is not modeled.
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
@@ -3189,129 +3231,226 @@ domparsing/tentative/stream-insertion-logic.html:
     runtime (deliberately unmodeled) — tentative WICG declarative-partial-updates,
     no released lib.
 domparsing/tentative/stream-positional.html:
+- name: streamAfterHTML throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamAfterHTML throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({"runScripts":false}) should not run scripts
-  reason: Requires WritableStream writer to deliver chunks asynchronously; async-streams
-    runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({"runScripts":true}) should not run scripts
-  reason: Requires WritableStream writer async chunk delivery; async-streams runtime
-    not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({}) with <p>A</p> and <p>B</p>
-  reason: Method returns a WritableStream driven by getWriter().write/close; async-streams
-    runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTML({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamAfterHTMLUnsafe throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamAfterHTMLUnsafe throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({"runScripts":true}) should run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAfterHTMLUnsafe({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({"runScripts":true}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTML({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({"runScripts":true}) should run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamAppendHTMLUnsafe({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamBeforeHTML throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamBeforeHTML throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({"runScripts":true}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTML({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamBeforeHTMLUnsafe throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamBeforeHTMLUnsafe throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({"runScripts":true}) should run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamBeforeHTMLUnsafe({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({"runScripts":true}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTML({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({"runScripts":true}) should run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamPrependHTMLUnsafe({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamReplaceWithHTML throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamReplaceWithHTML throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({"runScripts":true}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTML({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamReplaceWithHTMLUnsafe throw if parent is a Document
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+- name: streamReplaceWithHTMLUnsafe throw if parent is a DocumentFragment
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({"runScripts":false}) should not run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({"runScripts":true}) should run scripts
-  reason: WritableStream writer async chunk delivery; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({}) with <p>A</p> and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({}) with <p>A</p> and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({}) with A and <p>B</p>
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
 - name: streamReplaceWithHTMLUnsafe({}) with A and B
-  reason: WritableStream-backed positional streaming; async-streams runtime not modeled.
+  reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
+    the async-streams runtime is not modeled (rule 1, real async runtime / streams).
+encoding/bom-handling.html:
+- name: document.characterSet should match the BOM
+  reason: Byte-order-mark detection / stripping during document decode is not modeled
+    — rule 1 (encoding subsystem).
 encoding/replacement-encodings.any.js:
 - name: csiso2022kr - empty input decodes to empty output.
   reason: Legacy CJK 'replacement' encoding label table (ISO-2022/HZ family) deliberately
@@ -3340,6 +3479,10 @@ encoding/replacement-encodings.any.js:
 - name: replacement - non-empty input decodes to one replacement character.
   reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
     tables.
+encoding/sniffing.html:
+- name: No (UTF-8) sniffing allowed
+  reason: HTML encoding sniffing (byte-level BOM / meta charset detection of the document's
+    bytes) is not modeled; responses are handled as decoded text — rule 1.
 encoding/streams/backpressure.any.js:
 - name: additional writes should wait for backpressure to be relieved for class TextDecoderStream
   reason: TextDecoderStream backpressure ordering needs real ReadableStream/WritableStream
@@ -3808,6 +3951,41 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
+encoding/utf-32-from-win1252.html:
+- name: Expect resources/utf-32-big-endian-bom.html to parse as windows-1252
+  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
+    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
+    during navigation is not modeled (responses are handled as decoded text) — rule
+    1 (encoding/legacy subsystem).'
+- name: Expect resources/utf-32-big-endian-nobom.html to parse as windows-1252
+  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
+    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
+    during navigation is not modeled (responses are handled as decoded text) — rule
+    1 (encoding/legacy subsystem).'
+- name: Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
+  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
+    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
+    during navigation is not modeled (responses are handled as decoded text) — rule
+    1 (encoding/legacy subsystem).'
+- name: Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
+  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
+    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
+    during navigation is not modeled (responses are handled as decoded text) — rule
+    1 (encoding/legacy subsystem).'
+- name: Expect resources/utf-32-little-endian-nobom.html to parse as windows-1252
+  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
+    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
+    during navigation is not modeled (responses are handled as decoded text) — rule
+    1 (encoding/legacy subsystem).'
+encoding/utf-32.html:
+- name: Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
+  reason: 'Document encoding detection: a utf-32 little-endian BOM must parse as UTF-16LE
+    (its leading bytes are a UTF-16LE BOM). Byte-level BOM sniffing during navigation
+    is not modeled — rule 1.'
+- name: Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
+  reason: 'Document encoding detection: a utf-32 little-endian BOM must parse as UTF-16LE
+    (its leading bytes are a UTF-16LE BOM). Byte-level BOM sniffing during navigation
+    is not modeled — rule 1.'
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
@@ -4146,6 +4324,13 @@ shadow-dom/MouseEvent-prototype-offsetX-offsetY.html:
     rendered geometry we don't model.
 - name: MouseEvent's offsetX and offsetY attributes must be relative to the target.
   reason: offsetX/offsetY truthiness depends on element box layout; out-of-scope layout-rendering.
+shadow-dom/accesskey.tentative.html:
+- name: button element with accesskey in the shadow tree of closed mode
+  reason: Tentative accesskey activation, driven via testdriver input injection (WebDriver);
+    neither the tentative accesskey behaviour nor real input injection is modeled.
+- name: button element with accesskey in the shadow tree of open mode
+  reason: Tentative accesskey activation, driven via testdriver input injection (WebDriver);
+    neither the tentative accesskey behaviour nor real input injection is modeled.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-disconnect-iframe.html:
 - name: Destroying iframe during async adoptedStyleSheets fetch does not crash.
   reason: Asserts an in-flight async CSS module fetch from shadowrootadoptedstylesheets
@@ -4340,6 +4525,21 @@ shadow-dom/focus-navigation/delegatesFocus-highlight-sibling.html:
 - name: crbug/474687 :focus style should properly be applied to shadow hosts.
   reason: assert_background_color reads rendered :host(:focus)/li:focus computed background;
     depends on focus-state styling/repaint not modeled.
+shadow-dom/focus-navigation/focus-navigation-slot-fallback-default-tabindex.html:
+- name: Default tabindex for a slot node should be 0.
+  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
+    async hops) exceeds the WPT runner's normal async-drain budget before the forced
+    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
+    (single-direction variants pass). A runner async-drain-budget limit, not a focus-engine
+    gap.
+shadow-dom/focus-navigation/focus-navigation-slot-fallback.html:
+- name: Focus should jump to fallback elements when a slot does not have any assigned
+    nodes.
+  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
+    async hops) exceeds the WPT runner's normal async-drain budget before the forced
+    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
+    (single-direction variants pass). A runner async-drain-budget limit, not a focus-engine
+    gap.
 shadow-dom/focus-navigation/focus-navigation-slot-nested-2levels.html:
 - name: Focus controller should treat each slot as a focus scope.
   reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
@@ -4455,6 +4655,10 @@ shadow-dom/focus-navigation/focus-nested-slots.html:
     harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
     (forward order verified against the spec, single-direction variants pass). A runner
     async-drain-budget limit, not a focus-engine gap.
+shadow-dom/focus-navigation/menu/tentative/focus-menu-elements.html:
+- name: Focus navigation should skip over other menuitems in menubars.
+  reason: Tentative <menu>-element focus navigation via testdriver Tab keypresses;
+    tentative feature + WebDriver input injection not modeled.
 shadow-dom/focus-navigation/reading-flow/tentative/carousel-grid-order.html:
 - name: Grid items in carousel should follow grid-order reading flow
   reason: reading-flow:grid-order resolves Tab order through grid layout (grid-auto-flow
@@ -4633,6 +4837,13 @@ shadow-dom/focus-navigation/tentative/focus-scroller-layout-update.html:
     to date.
   reason: Asserts focus() refuses a no-longer-scrollable scroller after a height change;
     scrollability is layout/scroll-geometry derived, not modeled.
+shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
+- name: Calling blur() on shadow host with delegatesFocus should remove the focus.
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
 shadow-dom/focus/click-focus-slot-ancestor.html:
 - name: Clicking on non-focusable slot inside focusable div will make the flat-tree
     focusable ancestor get focused
@@ -4645,10 +4856,88 @@ shadow-dom/focus/click-focus-slot-ancestor.html:
 - name: Select on non-focusable slot inside focusable div will select text
   reason: Pointer drag-select across coordinates builds a text Selection by hit-testing
     rendered geometry; requires layout/visual hit-testing.
+shadow-dom/focus/delegatesFocus-tabindex-change.html:
+- name: Setting tabindex on the shadow host of a focused element with delegatesFocus
+    should not change focus.
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+shadow-dom/focus/focus-autofocus.html:
+- name: Focus should be delegated to the autofocus element when the inner host has
+    delegates focus
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: Focus should be delegated to the nested div which has autofocus based on the
+    tree order
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: Focus should not be delegated to the slotted elements
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: The second input should be focused since it has autofocus
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
 shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
 - name: delegatesFocus shouldn't cause extra focus steps
   reason: Asserts on scroll/scrollend events and fragment-navigation scroll geometry
     under delegatesFocus; needs scroll geometry + scroll events we don't model.
+shadow-dom/focus/focus-selector-delegatesFocus.html:
+- name: ":focus applies to host with delegatesFocus=false when an element in a nested
+    shadow tree with delegatesFocus=false is focused"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: ":focus applies to host with delegatesFocus=false when an element in a nested
+    shadow tree with delegatesFocus=true is focused"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: ":focus applies to host with delegatesFocus=false when the shadow root's descendant
+    has focus"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: ":focus applies to host with delegatesFocus=true when an element in a nested
+    shadow tree with delegatesFocus=false is focused"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: ":focus applies to host with delegatesFocus=true when an element in a nested
+    shadow tree with delegatesFocus=true is focused"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
+- name: ":focus applies to host with delegatesFocus=true when the shadow root's descendant
+    has focus"
+  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
+    must redirect focus to the first focusable in its shadow tree, and sequential
+    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
+    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
+    unimplemented feature.'
 shadow-dom/focus/focus-shadowhost-display-none.html:
 - name: when shadow host itself is focused, it should match display:none, lose focus
     then becomes display:block again.

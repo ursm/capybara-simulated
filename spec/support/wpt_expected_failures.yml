@@ -33,19 +33,6 @@ dom/events/shadow-relatedTarget.html:
 - relatedTarget should not leak at capturing phase, at window object.
 - relatedTarget should not leak at target.
 dom/interface-objects.html: HARNESS_ERROR
-dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html:
-- Data URI document.contentType === 'text/html' when data URI MIME type is set
-dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
-- Javascript URI document.contentType === 'text/html'
-dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html:
-- Custom document.contentType === 'text/xml' when explicitly set to this value
-dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html:
-- Custom document.contentType === 'text/html' when explicitly set to this value and
-  an attempt is made to override this value in an HTML meta header
-dom/nodes/Document-contentType/contentType/contenttype_png.html:
-- PNG document.contentType === 'image/png'
-dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
-- 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
 dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
 - Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/MutationObserver-document.html:
@@ -86,42 +73,13 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.htm
 - 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-domparsing/tentative/stream-positional.html:
-- streamAfterHTML throw if parent is a Document
-- streamAfterHTML throw if parent is a DocumentFragment
-- streamAfterHTMLUnsafe throw if parent is a Document
-- streamAfterHTMLUnsafe throw if parent is a DocumentFragment
-- streamBeforeHTML throw if parent is a Document
-- streamBeforeHTML throw if parent is a DocumentFragment
-- streamBeforeHTMLUnsafe throw if parent is a Document
-- streamBeforeHTMLUnsafe throw if parent is a DocumentFragment
-- streamReplaceWithHTML throw if parent is a Document
-- streamReplaceWithHTML throw if parent is a DocumentFragment
-- streamReplaceWithHTMLUnsafe throw if parent is a Document
-- streamReplaceWithHTMLUnsafe throw if parent is a DocumentFragment
-encoding/bom-handling.html:
-- document.characterSet should match the BOM
 encoding/encodeInto.any.js:
 - encodeInto() and a detached output buffer
-encoding/sniffing.html:
-- No (UTF-8) sniffing allowed
-encoding/utf-32-from-win1252.html:
-- Expect resources/utf-32-big-endian-bom.html to parse as windows-1252
-- Expect resources/utf-32-big-endian-nobom.html to parse as windows-1252
-- Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
-- Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
-- Expect resources/utf-32-little-endian-nobom.html to parse as windows-1252
-encoding/utf-32.html:
-- Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
-- Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
 shadow-dom/Element-interface-attachShadow-custom-element.html:
 - Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
 shadow-dom/HTMLSlotElement-interface.html:
 - HTMLSlotElement must be defined on window
-shadow-dom/accesskey.tentative.html:
-- button element with accesskey in the shadow tree of closed mode
-- button element with accesskey in the shadow tree of open mode
 shadow-dom/declarative/declarative-after-attachshadow.html:
 - 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
   called'
@@ -190,16 +148,10 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
   authored shadowrootadoptedstylesheets value.
 - getHTML() with an empty authored shadowrootadoptedstylesheets value is unaffected
   by script mutations.
-shadow-dom/focus-navigation/focus-navigation-slot-fallback-default-tabindex.html:
-- Default tabindex for a slot node should be 0.
-shadow-dom/focus-navigation/focus-navigation-slot-fallback.html:
-- Focus should jump to fallback elements when a slot does not have any assigned nodes.
 shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
   moves in tree order.'
-shadow-dom/focus-navigation/menu/tentative/focus-menu-elements.html:
-- Focus navigation should skip over other menuitems in menubars.
 shadow-dom/focus-within-shadow.html:
 - Don't clear focus within shadow root if light DOM children are cleared
 shadow-dom/focus/DocumentOrShadowRoot-activeElement.html:
@@ -207,31 +159,6 @@ shadow-dom/focus/DocumentOrShadowRoot-activeElement.html:
 - activeElement on document & shadow root when focused element is in the shadow tree
 - activeElement when focused element is in a nested shadow tree
 - activeElement when focused element is in a parent shadow tree
-shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
-- Calling blur() on shadow host with delegatesFocus should remove the focus.
-shadow-dom/focus/delegatesFocus-tabindex-change.html:
-- Setting tabindex on the shadow host of a focused element with delegatesFocus should
-  not change focus.
-shadow-dom/focus/focus-autofocus.html:
-- Focus should be delegated to the autofocus element when the inner host has delegates
-  focus
-- Focus should be delegated to the nested div which has autofocus based on the tree
-  order
-- Focus should not be delegated to the slotted elements
-- The second input should be focused since it has autofocus
-shadow-dom/focus/focus-selector-delegatesFocus.html:
-- ":focus applies to host with delegatesFocus=false when an element in a nested shadow
-  tree with delegatesFocus=false is focused"
-- ":focus applies to host with delegatesFocus=false when an element in a nested shadow
-  tree with delegatesFocus=true is focused"
-- ":focus applies to host with delegatesFocus=false when the shadow root's descendant
-  has focus"
-- ":focus applies to host with delegatesFocus=true when an element in a nested shadow
-  tree with delegatesFocus=false is focused"
-- ":focus applies to host with delegatesFocus=true when an element in a nested shadow
-  tree with delegatesFocus=true is focused"
-- ":focus applies to host with delegatesFocus=true when the shadow root's descendant
-  has focus"
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
 - Order with different tabindex on host
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
