@@ -46,4 +46,12 @@ const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeW
 // as whatwg-url's URL-impl does.
 import * as urlEngine from 'whatwg-url/lib/url-state-machine.js';
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine };
+// web-streams-polyfill: spec-compliant pure-JS WHATWG Streams (ReadableStream /
+// WritableStream / TransformStream + queuing strategies), defined entirely over
+// promises + microtask queuing — which our event loop models. The ponyfill entry
+// exports the classes WITHOUT installing globals; the bridge wires them onto
+// globalThis (and layers TextDecoderStream / TextEncoderStream over
+// TransformStream + our existing TextDecoder/TextEncoder).
+import * as streams from 'web-streams-polyfill';
+
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, streams };

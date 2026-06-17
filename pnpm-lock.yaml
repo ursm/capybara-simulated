@@ -22,6 +22,9 @@ importers:
       css-what:
         specifier: ^8.0.0
         version: 8.0.0(patch_hash=53222faccb4d5bbacfef85d16fc9a23d88f52dd7321b662eedd704abc7525596)
+      web-streams-polyfill:
+        specifier: ^4.3.0
+        version: 4.3.0
       xpathway:
         specifier: ^1.0.4
         version: 1.0.4
@@ -274,6 +277,10 @@ packages:
   url-polyfill@1.1.14:
     resolution: {integrity: sha512-p4f3TTAG6ADVF3mwbXw7hGw+QJyw5CnNGvYh5fCuQQZIiuKUswqcznyV3pGDP9j0TSmC4UvRKm8kl1QsX1diiQ==}
 
+  web-streams-polyfill@4.3.0:
+    resolution: {integrity: sha512-/Gnggvj9oSrEvJbDyyPtAnxBt5fGQM2iWOKQNu7ie1OxDgK40iZpyV3TKaRiEzVj1oA1UxKnEy9XPXh6PW3eVw==}
+    engines: {node: '>= 8'}
+
   webidl-conversions@8.0.1:
     resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
     engines: {node: '>=20'}
@@ -457,6 +464,8 @@ snapshots:
       punycode: 2.3.1
 
   url-polyfill@1.1.14: {}
+
+  web-streams-polyfill@4.3.0: {}
 
   webidl-conversions@8.0.1: {}
 
