@@ -89,8 +89,6 @@ dom/nodes/moveBefore/focus-within.html:
 - ":focus-within should be eventually up to date when moving to an inert subtree"
 dom/nodes/moveBefore/modal-dialog.html:
 - when reparenting a modal dialog, the dialog should stay modal
-dom/nodes/moveBefore/nonce.html:
-- Element nonce content attribute is not cleared after move
 dom/nodes/moveBefore/popover-preserve.html:
 - when reparenting an open popover, it shouldn't be closed automatically
 dom/nodes/moveBefore/select-option-optgroup.html:
