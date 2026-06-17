@@ -131,9 +131,6 @@ encoding/utf-32-from-win1252.html:
 encoding/utf-32.html:
 - Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
 - Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
-shadow-dom/Document-prototype-importNode.html:
-- importNode on a shadow root in closed mode must throw a NotSupportedError
-- importNode on a shadow root in open mode must throw a NotSupportedError
 shadow-dom/Element-interface-attachShadow-custom-element.html:
 - Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
@@ -141,9 +138,6 @@ shadow-dom/Element-interface-attachShadow.html:
 - Element.attachShadow must throw a NotSupportedError for non-safelisted elements
 shadow-dom/HTMLSlotElement-interface.html:
 - HTMLSlotElement must be defined on window
-shadow-dom/Node-prototype-cloneNode.html:
-- cloneNode on a shadow root in closed mode must throw a NotSupportedError
-- cloneNode on a shadow root in open mode must throw a NotSupportedError
 shadow-dom/accesskey.tentative.html:
 - button element with accesskey in the shadow tree of closed mode
 - button element with accesskey in the shadow tree of open mode
