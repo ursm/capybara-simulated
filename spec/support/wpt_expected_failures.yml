@@ -23,7 +23,6 @@ dom/events/EventListener-incumbent-global-2.sub.html:
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
-dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
 dom/interface-objects.html: HARNESS_ERROR
 dom/nodes/MutationObserver-document.html:
 - parser insertion mutations
@@ -44,8 +43,174 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.html:
 - A script inserted atomically before an iframe (using a div) does not observe the
   iframe's contentWindow, since the 'script running' and 'iframe setup' both happen
   in order, after DOM insertion completes
+dom/nodes/moveBefore/live-range-updates.html:
+- moveBefore still causes range endContainer to snap up to parent, when endContainer
+  ancestor is moved
+- moveBefore still causes range startContainer to snap up to parent, when startContainer
+  ancestor is moved
+- moveBefore still results in range startContainer snapping up to parent when startContainer
+  is moved
+dom/nodes/moveBefore/moveBefore-name-map.html:
+- moveBefore() correctly updates name map ordering in document
+- moveBefore() correctly updates name map when moving into shadow root
+dom/nodes/moveBefore/select-option-optgroup.html:
+- Moving options between select elements.
 dom/nodes/query-target-in-load-event.html:
 - document.querySelector(":target") must work when called in the window.load event
+dom/ranges/tentative/OpaqueRange-auto-disconnect.html:
+- All OpaqueRanges disconnected on element removal (input)
+- All OpaqueRanges disconnected on element removal (textarea)
+- Element accepts new OpaqueRanges after re-insertion (input)
+- Element accepts new OpaqueRanges after re-insertion (textarea)
+- Input accepts new OpaqueRanges after type changes back to text.
+- No error when element removed after manual disconnect (input)
+- No error when element removed after manual disconnect (textarea)
+- OpaqueRange disconnected on ancestor removal (input)
+- OpaqueRange disconnected on ancestor removal (textarea)
+- OpaqueRange disconnected on element removal (input)
+- OpaqueRange disconnected on element removal (textarea)
+- OpaqueRange disconnected on implicit removal via innerHTML (input)
+- OpaqueRange disconnected on implicit removal via innerHTML (textarea)
+- OpaqueRange disconnected on input type change to "color".
+- OpaqueRange disconnected on input type change to "search".
+- OpaqueRange disconnected when element adopted into another document (input)
+- OpaqueRange disconnected when element adopted into another document (textarea)
+dom/ranges/tentative/OpaqueRange-basic.html:
+- OpaqueRange handles createValueRange correctly.
+- OpaqueRange handles empty value correctly.
+- Tests createValueRange returns OpaqueRange that extends AbstractRange.
+dom/ranges/tentative/OpaqueRange-disconnect.html:
+- Element accepts new ranges after a prior range is disconnected.
+- disconnect() is idempotent.
+- disconnect() only affects the target range.
+- disconnect() resets range state and geometry.
+- disconnect() stops live offset updates.
+dom/ranges/tentative/OpaqueRange-display-none.html:
+- Collapsed range insertion during display:none (input)
+- Collapsed range insertion during display:none (textarea)
+- OpaqueRange offsets survive repeated display:none cycles (input)
+- OpaqueRange offsets survive repeated display:none cycles (textarea)
+- createValueRange works on display:none element (input)
+- createValueRange works on display:none element (textarea)
+- disconnect() works during display:none (input)
+- disconnect() works during display:none (textarea)
+- element.value replacement updates range during display:none (input)
+- element.value replacement updates range during display:none (textarea)
+- setRangeText insert before range works during display:none (input)
+- setRangeText insert before range works during display:none (textarea)
+- setRangeText overlapping delete works during display:none (input)
+- setRangeText overlapping delete works during display:none (textarea)
+- setRangeText updates range during display:none (input)
+- setRangeText updates range during display:none (textarea)
+dom/ranges/tentative/OpaqueRange-geometry-basic.html:
+- Backwards offsets collapse (input)
+- Backwards offsets collapse (textarea)
+dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html:
+- Deletion collapses selection (input explicit)
+- Shrink/grow end offset clamping (input)
+- Shrink/grow end offset clamping (textarea)
+- Tail deletion clamps end offset (input)
+- Tail deletion clamps end offset (textarea)
+dom/ranges/tentative/OpaqueRange-highlight.html:
+- Disconnected OpaqueRange remains in Highlight but is collapsed (input)
+- Disconnected OpaqueRange remains in Highlight but is collapsed (textarea)
+- OpaqueRange can be added to and deleted from a Highlight (input)
+- OpaqueRange can be added to and deleted from a Highlight (textarea)
+- OpaqueRange in Highlight is collapsed after element removal (input)
+- OpaqueRange in Highlight is collapsed after element removal (textarea)
+- OpaqueRange mixed with DOM Range in same Highlight (input)
+- OpaqueRange mixed with DOM Range in same Highlight (textarea)
+dom/ranges/tentative/OpaqueRange-interactive-basic.html:
+- 'Deletion: backspace at control start is no-op (input).'
+- 'Deletion: backspace at control start is no-op (textarea).'
+- 'Deletion: backspace before range shifts both left (input).'
+- 'Deletion: backspace before range shifts both left (textarea).'
+- 'Deletion: forward delete at end boundary no effect on range (input).'
+- 'Deletion: forward delete at end boundary no effect on range (textarea).'
+- 'Deletion: forward delete inside range contracts end by 1 (input).'
+- 'Deletion: forward delete inside range contracts end by 1 (textarea).'
+- 'Equal-length replacement: single char inside range (input).'
+- 'Equal-length replacement: single char inside range (textarea).'
+- 'Insertion: at end boundary leaves offsets unchanged (multi-char) (input).'
+- 'Insertion: at end boundary leaves offsets unchanged (multi-char) (textarea).'
+- 'Insertion: at start boundary keeps start; end extends (multi-char) (input).'
+- 'Insertion: at start boundary keeps start; end extends (multi-char) (textarea).'
+- 'Insertion: inside range extends end by length (input).'
+- 'Insertion: inside range extends end by length (textarea).'
+dom/ranges/tentative/OpaqueRange-interactive-overlap-and-selection.html:
+- Boundary forward delete shifts range left (input).
+- Boundary forward delete shifts range left (textarea).
+- 'Overlap: partial overlap at end (delete selection) (input).'
+- 'Overlap: partial overlap at end (delete selection) (textarea).'
+- 'Overlap: partial overlap at start (delete selection) (input).'
+- 'Overlap: partial overlap at start (delete selection) (textarea).'
+- 'Selection deletion: delete selection exactly equal to range (collapse) (input).'
+- 'Selection deletion: delete selection exactly equal to range (collapse) (textarea).'
+- 'Selection deletion: delete subset inside range (contract end) (input).'
+- 'Selection deletion: delete subset inside range (contract end) (textarea).'
+dom/ranges/tentative/OpaqueRange-offset.html:
+- createValueRange boundary positions in input.
+- createValueRange boundary positions in textarea.
+- createValueRange ignores malformed input child nodes.
+- createValueRange on textarea with whitespace in light DOM.
+- createValueRange with Unicode characters in input.
+- createValueRange with Unicode characters in textarea.
+- createValueRange with empty control in input.
+- createValueRange with empty control in textarea.
+- createValueRange with single character in input.
+- createValueRange with single character in textarea.
+- createValueRange works correctly with weirdly formed light DOM structure.
+dom/ranges/tentative/OpaqueRange-programmatic-updates.html:
+- After-range grow leaves range unchanged (input)
+- After-range grow leaves range unchanged (textarea)
+- Before-range shrink shifts left (input)
+- Before-range shrink shifts left (textarea)
+- Chained interior edits cumulatively adjust range (input)
+- Chained interior edits cumulatively adjust range (textarea)
+- Full replace (equal length) collapses to 0 (input)
+- Full replace (equal length) collapses to 0 (textarea)
+- Full replace collapses to start (shorter & longer) (input)
+- Full replace collapses to start (shorter & longer) (textarea)
+- Full replace from whole-old range collapses to 0 (input)
+- Full replace from whole-old range collapses to 0 (textarea)
+- Insert at range.end leaves range unchanged (input)
+- Insert at range.end leaves range unchanged (textarea)
+- Insert at range.start extends end (input)
+- Insert at range.start extends end (textarea)
+- Insertion before range shifts both endpoints (input)
+- Insertion before range shifts both endpoints (textarea)
+- Interior deletion shrinks end (input)
+- Interior deletion shrinks end (textarea)
+- No-op leaves range unchanged (input)
+- No-op leaves range unchanged (textarea)
+- Partial replacement adjusts end (input)
+- Partial replacement adjusts end (textarea)
+- Superset replacement collapses to change start (input)
+- Superset replacement collapses to change start (textarea)
+- Surrogate pair expansion grows end (input)
+- Surrogate pair expansion grows end (textarea)
+dom/ranges/tentative/OpaqueRange-range-updates.html:
+- OpaqueRange collapses on full .value= replacement.
+- createValueRange creates independent ranges on same element.
+- createValueRange works on different form controls.
+- createValueRange works with disconnected form controls.
+dom/ranges/tentative/OpaqueRange-supported-elements.html:
+- createValueRange should work on input[type=password].
+- createValueRange should work on input[type=search].
+- createValueRange should work on input[type=tel].
+- createValueRange should work on input[type=text].
+- createValueRange should work on input[type=url].
+- createValueRange should work on textarea.
+dom/ranges/tentative/OpaqueRange-unsupported-elements.html:
+- createValueRange throws NotSupportedError for unsupported input types.
+dom/ranges/tentative/OpaqueRange-update-event-order.html:
+- Canceled beforeinput leaves OpaqueRange unchanged (input).
+- Canceled beforeinput leaves OpaqueRange unchanged (textarea).
+- 'Event order: OpaqueRange updates between beforeinput and input (input).'
+- 'Event order: OpaqueRange updates between beforeinput and input (textarea).'
+dom/ranges/tentative/OpaqueRange-validation.html:
+- 'createValueRange handles all range types correctly: forward, backwards, and out-of-bounds.'
+- createValueRange throws IndexSizeError for out-of-bounds offsets.
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
 - 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
 domparsing/innerhtml-05.xhtml:
@@ -81,6 +246,48 @@ shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
   moves in tree order.'
+shadow-dom/focus/click-focus-delegatesFocus-click.html:
+- click on the host with delegatesFocus with another host with delegatesFocus and
+  a focusable child
+- click on the host with delegatesFocus with another host with no delegatesFocus and
+  a focusable child
+shadow-dom/focus/click-focus-delegatesFocus-tabindex-varies.html:
+- 'click on host with delegatesFocus, #aboveSlot tabindex = 2, #slot and #slotted
+  tabindex = 1'
+shadow-dom/focus/click-focus-delegatesFocus-tabindex-zero.html:
+- click on host with delegatesFocus, all tabindex=0 except spacer
+shadow-dom/focus/focus-click-on-shadow-host.html:
+- ":focus should be applied to the host and the child node when the focus is moved
+  by mouse click"
+shadow-dom/focus/focus-method-delegatesFocus.html:
+- focus() on host with delegatesFocus & no tabindex, all other tabindex=0
+- focus() on host with delegatesFocus & tabindex = 0, all other tabindex=-1
+- focus() on host with delegatesFocus & tabindex =-1, all other tabindex=0
+- 'focus() on host with delegatesFocus & tabindex=0, #aboveSlots and #belowSlots with
+  tabindex=0'
+- 'focus() on host with delegatesFocus & tabindex=0, #aboveSlots with tabindex=0 and
+  #belowSlots with tabindex=1'
+- 'focus() on host with delegatesFocus & tabindex=0, #belowSlots with tabindex=0'
+- 'focus() on host with delegatesFocus & tabindex=0, #outside with tabindex=0'
+- 'focus() on host with delegatesFocus & tabindex=0, #slottedToFirstSlot, #slottedToSecondSlot,
+  #belowSlots  with tabindex=0'
+- focus() on host with delegatesFocus and slotted focusable children
+- focus() on host with delegatesFocus with another host with delegatesFocus and a
+  focusable child
+- focus() on host with delegatesFocus with another host with no delegatesFocus and
+  a focusable child
+- focus() on host with delegatesFocus, all tabindex=-1
+- focus() on host with delegatesFocus, all tabindex=0
+shadow-dom/focus/focus-method-with-delegatesFocus.html:
+- If no element is focusable within a delegatesFocus shadow root, the host can't get
+  focus regardless of host's tabIndex.
+- on focus(), focusable xshadow2 with delegatesFocus=true delegates focus into its
+  inner element.
+- 'xshadow2.focus() shouldn''t move focus to #one when its inner element is already
+  focused.'
+shadow-dom/focus/focus-tab-on-shadow-host.html:
+- ":focus should be applied to the host and :focus-visible should be applied to the
+  child node when the focus is moved by <tab>"
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
 - Order with different tabindex on host
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
@@ -89,6 +296,11 @@ shadow-dom/innerHTML-setter.xhtml:
 - InnerHTML behavior on custom element in default 'foo' namespace
 - InnerHTML behavior on custom element in default XHTML namespace
 - InnerHTML behavior with prefixes on custom element
+shadow-dom/leaktests/html-collection.html:
+- document.all should not contain shadow nodes
+- document.applets should not contain any nodes
+shadow-dom/leaktests/window-frames.html:
+- window.frames should not leak frames in Shadow DOM.
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:

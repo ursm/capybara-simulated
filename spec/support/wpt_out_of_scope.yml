@@ -97,15 +97,268 @@ dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.htm
 - name: scrolling state is false at the end of the test
   reason: Needs scroll geometry + scrollend event firing after instant scroll; scroll/scrollend
     is a layout subsystem we deliberately don't model.
+dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html:
+- name: Move down, up and down again, receive scrollend event only once
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Move right, left and right again, receive scrollend event only once
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-after-snap.html:
+- name: Tests that scrollend is fired after fling snap animation completion.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that scrollend is fired after scroll snap animation completion.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
 - name: scrollend event fired after load for mandatory snap point
-  reason: Requires CSS scroll-snap layout to compute snap point and fire scrollend;
-    scroll-snap geometry is an unmodeled layout subsystem.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html:
+- name: Tests scrollend event for calling scrollBy with behavior 'auto' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollBy with behavior 'auto' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollBy with behavior 'smooth' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollBy with behavior 'smooth' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollTo with behavior 'auto' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollTo with behavior 'auto' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollTo with behavior 'smooth' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for calling scrollTo with behavior 'smooth' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html:
+- name: Tests scrollend event for [scrollLeft] behavior:'auto' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollLeft] behavior:'auto' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollLeft] behavior:'smooth' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollLeft] behavior:'smooth' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollTop] behavior:'auto' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollTop] behavior:'auto' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollTop] behavior:'smooth' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for [scrollTop] behavior:'smooth' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
+- name: Tests scrollend event for nested scrollIntoView.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for scrollIntoView with behavior 'auto' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for scrollIntoView with behavior 'auto' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for scrollIntoView with behavior 'smooth' on root.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event for scrollIntoView with behavior 'smooth' on subframe.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-to-document.html:
+- name: testing, horizontal
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: testing, vertical
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html:
+- name: Tests that the scroll is not propagated beyond div with non-auto overscroll-behavior.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fired-to-window.html:
+- name: testing, vertical
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html:
 - name: scrollend event is fired after repeated Page Down key presses reach the end
     of the scroll region.
-  reason: Needs scroll-region geometry to detect container end and fire scrollend
-    on key scroll; scroll geometry/events unmodeled.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-fires-to-iframe-window.html:
+- name: Tests that the target_div within iframe gets scrollend event when clicking
+    scrollbar.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div within iframe gets scrollend event when dragging
+    the scrollbar thumb.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div within iframe gets scrollend event when mouse wheel
+    scrolling.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div within iframe gets scrollend event when sending
+    DOWN key to the target.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div within iframe gets scrollend event when touch dragging.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: scrollend fires to iframe window on mousewheelscroll
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-for-user-scroll.html:
+- name: Tests that the target_div gets scrollend event when clicking scrollbar.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div gets scrollend event when dragging the scrollbar
+    thumb.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div gets scrollend event when mouse wheel scrolling.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div gets scrollend event when sending DOWN key to the
+    target.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests that the target_div gets scrollend event when touch dragging.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-handler-content-attributes.html:
+- name: Tests scrollend event is fired to document event handler property
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event is fired to element event handler property
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event is handled by event handler content attribute.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Tests scrollend event is not fired to document body event handler content
+    attribute.
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
+- name: No scrollend is received after removing scrolling element
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: scrollend is received after removing descendant div
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
 dom/events/scrolling/scrollend-fires-to-text-input.html:
 - name: scrolled input field should receive scrollend when setting scrollLeft.
   reason: Requires real scroll geometry on input + scrollend event; scroll/scrollend
@@ -130,6 +383,60 @@ dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html:
 - name: snap to fractional offset fires scrollend exactly once.
   reason: Requires CSS scroll-snap layout at fractional offsets to fire scrollend
     once; scroll-snap geometry unmodeled.
+dom/events/scrolling/wheel-event-transactions-basic.html:
+- name: The wheel event transactions target may not be a scroll frame
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: 'Wheel events should be captured to one target #1'
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: 'Wheel events should be captured to one target #2'
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html:
+- name: Two separate webdriver action chains should have different wheel event transactions
+  reason: Needs test_driver wheel-input simulation + scroll geometry — the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1).
+dom/events/scrolling/wheel-event-transactions-target-display-change.html:
+- name: Modify the initial wheel event target to display:contents
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Modify the initial wheel event target to display:none
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+dom/events/scrolling/wheel-event-transactions-target-elements.html:
+- name: Wheel event transactions target elements
+  reason: Needs test_driver wheel-input simulation + scroll geometry — the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1).
+dom/events/scrolling/wheel-event-transactions-target-move.html:
+- name: Move the initial wheel event target.
+  reason: Needs test_driver wheel-input simulation + scroll geometry — the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1).
+dom/events/scrolling/wheel-event-transactions-target-removal.html:
+- name: Remove the initial wheel event target.
+  reason: Needs test_driver wheel-input simulation + scroll geometry — the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1).
+dom/events/scrolling/wheel-event-transactions-target-resize.html:
+- name: Resize the initial target and use a passive:false listener
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
+- name: Resize the initial target and use a passive:true listener
+  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
+    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
+    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
+    is activated; previously vacuous.
 dom/events/webkit-animation-end-event.html:
 - name: event types for prefixed and unprefixed animationend event handlers should
     be named appropriately
@@ -380,6 +687,13 @@ dom/nodes/moveBefore/fullscreen-preserve.html:
 - name: Document#fullscreenElement
   reason: Needs requestFullscreen()/fullscreenElement fullscreen subsystem + trusted_click
     testdriver; fullscreen is a deliberately unmodeled rendering surface.
+dom/nodes/moveBefore/hover-style-update.html:
+- name: Element loses hover when moved to different position
+  reason: Drives :hover from a pixel pointerMove and reads computed-style geometry
+    — needs the deliberately-unmodeled layout/hit-test subsystem.
+- name: Hover works immediately after moved
+  reason: Drives :hover from a pixel pointerMove and reads computed-style geometry
+    — needs the deliberately-unmodeled layout/hit-test subsystem.
 dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
 - name: moveBefore-from-light-to-shadow
   reason: Asserts getBoundingClientRect().width>0 then ==0 after slotting into display:none;
@@ -404,6 +718,28 @@ dom/nodes/moveBefore/relevant-mutations.html:
 - name: Moving <source> out of <picture> triggers a relevant mutation on sibling <img>
   reason: Requires srcset/media resource-selection on move re-firing <img> load; depends
     on image fetch subsystem we deliberately don't model.
+dom/nodes/moveBefore/selection-preserve.html:
+- name: moveBefore anchor node moved up to expand selection and absorb nodes
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: moveBefore focus node moved up to shrink selection and exclude nodes; focus
+    node gets reset
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: moveBefore move intersecting nodes out of a selection
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: moveBefore resets selection that enters a subtree, when the whole selection
+    is moved
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: moveBefore selection is not preserved, especially when underlying range gets
+    inverted
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: moveBefore should not reset selection with preceding text
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
 dom/nodes/remove-and-adopt-thcrash.html:
 - name: Check that removing a node and then adopting its parent into a different window/document
     doesn't crash.
@@ -422,6 +758,134 @@ dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
     to null and attachShadow throws. A test-harness limitation (variant support would
     re-key every variant file — a separate infra task), not a driver gap; only this
     one in-scope file needs it.
+dom/ranges/tentative/OpaqueRange-display-none.html:
+- name: Geometry empty during display:none, restored after (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Geometry empty during display:none, restored after (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+dom/ranges/tentative/OpaqueRange-geometry-basic.html:
+- name: Collapsed caret at start/middle/end (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Collapsed caret at start/middle/end (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Collapsed caret geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Collapsed caret geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Full selection bounding box inside element (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Full selection bounding box inside element (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Geometry empty after control removal (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Geometry empty after control removal (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Simple selection geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Simple selection geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: display:none empty geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: display:none empty geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+dom/ranges/tentative/OpaqueRange-geometry-complexity-and-visibility.html:
+- name: Bidirectional mixed text full selection geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Bidirectional mixed text full selection geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Surrogate pair width normalization invariants (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Surrogate pair width normalization invariants (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: visibility:hidden caret geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: visibility:hidden caret geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+dom/ranges/tentative/OpaqueRange-geometry-multiline-and-mutations.html:
+- name: Collapsed caret across newline parity (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Deletion collapses geometry (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Deletion collapses geometry (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Input live insertion/deletion adjustments
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Insertion inside expands width (input)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Insertion inside expands width (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Partial hard-newline selection (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Selection spanning blank line (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Soft-wrapped long single line (textarea)
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+- name: Textarea interior deletion & insertion adjustments
+  reason: Form-control value-text geometry (caret box / selection client rects / glyph
+    widths) — needs the deliberately-unmodeled layout/rendering engine.
+dom/ranges/tentative/OpaqueRange-highlightsFromPoint.html:
+- name: OpaqueRange and DOM Range in same shadow root behave consistently
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint for textarea inside an author shadow root
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns OpaqueRange highlight (input)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns OpaqueRange highlight (textarea)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns empty for disconnected OpaqueRange (input)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns empty for disconnected OpaqueRange (textarea)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns empty outside control (input)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint returns empty outside control (textarea)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint with mixed OpaqueRange and DOM Range in one Highlight
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint with multiple and overlapping OpaqueRanges (input)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
+- name: highlightsFromPoint with multiple and overlapping OpaqueRanges (textarea)
+  reason: highlightsFromPoint performs pixel hit-testing of rendered highlight boxes
+    — needs the deliberately-unmodeled layout/rendering engine.
 domparsing/XMLSerializer-serializeToString.html:
 - name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
   reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
@@ -4710,6 +5174,22 @@ shadow-dom/focus/focus-tabindex-order-shadow-zero-delegatesFocus.html:
     navigation treats the host as a delegating scope. The base flat-tree focus-navigation
     engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
     unimplemented feature.'
+shadow-dom/focus/text-selection-with-delegatesFocus-on-slotted-content.html:
+- name: select slotted text in shadow root with delegatesFocus.
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+shadow-dom/focus/text-selection-with-delegatesFocus-text-control.html:
+- name: shadow root has selectable text when focus is delegated. Selection goes to
+    text control if it is the delegated focusable area.
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+shadow-dom/focus/text-selection-with-delegatesFocus.html:
+- name: shadow root has selectable text when focus is delegated
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+- name: shadow root has selectable text when focus is not delegated
+  reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
+    — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
 shadow-dom/imperative-slot-fallback-clear.html:
 - name: Element fallback should be cleared in a subsequent layout
   reason: Assertion is host.offsetHeight===0 after slot.assign; verifies fallback
@@ -4717,6 +5197,10 @@ shadow-dom/imperative-slot-fallback-clear.html:
 - name: Text node fallback should be cleared in a subsequently layout
   reason: Assertion is host.offsetHeight===0 after slot.assign; verifies fallback
     not rendered via layout truthiness we don't model.
+shadow-dom/leaktests/selection.html:
+- name: selection API should not leak nodes in Shadow DOM.
+  reason: Drag-select resolves pointer coordinates against rendered text geometry
+    — deliberately-unmodeled layout/hit-test subsystem.
 shadow-dom/offsetParent-across-shadow-boundaries.html:
 - name: offsetParent must find the first offset parent which is a shadow-including
     ancestor of the context object even some shadow tree of closed mode did not have

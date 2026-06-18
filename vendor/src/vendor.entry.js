@@ -64,9 +64,11 @@ import * as streams from 'web-streams-polyfill';
 // DOM nodes. Pure JS, no runtime deps; safe in the V8 snapshot build.
 //
 // Import ONLY the `Parser` class, NOT the `parse5` barrel: re-exporting the
-// whole namespace (accessed dynamically as `__csimVendor.parse5.x`) defeats
-// tree-shaking and pulls in parse5's serializer + default tree adapter, which
-// we replace. A named `Parser` import lets esbuild drop those subtrees.
+// whole namespace (accessed dynamically as `__csimVendor.parse5.x`) would defeat
+// tree-shaking and also pull in parse5's serializer. The named `Parser` import
+// lets esbuild drop the serializer. (The default tree adapter is NOT dropped —
+// `Parser`'s constructor default-initialises `options.treeAdapter` to it — but
+// it's small; our custom adapter is what actually drives the parse.)
 import { Parser as Parse5Parser } from 'parse5';
 const parse5 = { Parser: Parse5Parser };
 

@@ -81,3 +81,12 @@
   the driver's event path into unbounded recursion — "Maximum call stack size
   exceeded" repeated, ~90s wall before completing. Driver bug in cross-document
   dispatch; excluded until the recursion is bounded.
+
+"dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html": >-
+  Scroll-on-arrow-key test: its <body onload=runTest()> now runs (window-forwarded
+  handler activation), but runTest awaits a test_driver arrow-key scroll that the
+  driver can't satisfy (no scroll geometry / key-driven scrolling), and the wait
+  never resolves — testharness's own timeout can't fire either, so the harness
+  hangs instead of completing. Out-of-scope layout/input subsystem (CLAUDE.md
+  rule 1); excluded so it doesn't burn force-timeout cycles every run. Sibling
+  scrollend/wheel tests that DO complete are listed in wpt_out_of_scope.yml.
