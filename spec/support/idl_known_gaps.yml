@@ -72,7 +72,6 @@ EventTarget:
 HTMLAnchorElement:
   - attributionSourceId
 HTMLElement:
-  - attachInternals
   - attributeStyleMap
   - editContext
   - headingOffset
