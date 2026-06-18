@@ -403,25 +403,6 @@ dom/nodes/moveBefore/css-transition-trigger.html:
 - name: Node.moveBefore should trigger CSS transition state (left) if needed
   reason: Awaits transitionstart event and asserts mid-transition getBoundingClientRect.x==200;
     CSS transition firing + layout geometry not modeled.
-dom/nodes/moveBefore/fire-focusin-focusout.html:
-- name: Don't fire focusin and then correct when moving to a tree that is made inert
-    using style
-  reason: Inertness via display:none(:has) + async focusout fixup after rAF; depends
-    on rendered-visibility-derived inertness not modeled.
-dom/nodes/moveBefore/focus-preserve.html:
-- name: when reparenting a focused element into a hidden parent, reset the document
-    focus
-  reason: hidden/display:none parent must async-blur focused element to document.body;
-    rendered-visibility-driven focus reset not modeled.
-- name: when reparenting an ancestor of an focused element into a hidden parent, reset
-    the document focus
-  reason: hidden parent async-blurs descendant-focused element; rendered-visibility-driven
-    focus reset not modeled.
-dom/nodes/moveBefore/focus-within.html:
-- name: ":focus-within should be eventually up to date when moving to a subtree that
-    would become inert via style"
-  reason: display:none(:has) makes subtree inert and clears :focus-within after rAF;
-    rendered-visibility-derived inertness/focus not modeled.
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - name: Document#fullscreenElement
   reason: Needs requestFullscreen()/fullscreenElement fullscreen subsystem + trusted_click

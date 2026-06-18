@@ -47,16 +47,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.html:
 - A script inserted atomically before an iframe (using a div) does not observe the
   iframe's contentWindow, since the 'script running' and 'iframe setup' both happen
   in order, after DOM insertion completes
-dom/nodes/moveBefore/fire-focusin-focusout.html:
-- Don't fire focusin and then correct when moving to an inert subtree
-dom/nodes/moveBefore/focus-preserve.html:
-- when reparenting a focused element into an inert parent, reset the document focus
-dom/nodes/moveBefore/focus-within.html:
-- ":focus-within should be eventually up to date when moving to an inert subtree"
-dom/nodes/moveBefore/modal-dialog.html:
-- when reparenting a modal dialog, the dialog should stay modal
-dom/nodes/moveBefore/popover-preserve.html:
-- when reparenting an open popover, it shouldn't be closed automatically
 dom/nodes/query-target-in-load-event.html:
 - document.querySelector(":target") must work when called in the window.load event
 dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
