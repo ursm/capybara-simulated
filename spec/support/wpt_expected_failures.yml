@@ -72,8 +72,6 @@ shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - iframe with no sandbox allows declarative Shadow DOM
 - iframe, no sandbox
 - sandboxed iframe allows declarative Shadow DOM
-shadow-dom/declarative/declarative-shadow-dom-repeats.html:
-- Calling attachShadow() on declarative shadow root must match all parameters
 shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
 - "`document.write` on inner iframe handles declarative shadow DOM"
 shadow-dom/declarative/innerhtml-on-ordinary-template.html:
