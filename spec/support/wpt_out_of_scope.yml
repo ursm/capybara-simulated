@@ -34,10 +34,6 @@ dom/events/Event-dispatch-on-disabled-elements.html:
 - name: Real clicks on disabled elements must not dispatch events.
   reason: Uses test_driver.click for a real hit-tested click on a rendered element;
     depends on visual hit-testing we do not model.
-dom/events/Event-dispatch-redispatch.html:
-- name: Redispatching mouseup event whose default action dispatches a click event
-  reason: Driven by test_driver.click synthesizing a real trusted mouse click with
-    default activation; depends on visual hit-testing we do not model.
 dom/events/EventListener-invoke-legacy.html:
 - name: Legacy listener of animationend
   reason: Requires real CSS animation/transition timeline to fire animationend; we
@@ -72,10 +68,6 @@ dom/events/no-focus-events-at-clicking-editable-content-in-link.html:
 - name: Click editable link
   reason: Drives input via test_driver.Actions() pointerMove/Down/Up at pixel coords
     with origin element; needs hit-testing/synthetic-input subsystem we don't model.
-dom/events/pointer-event-document-move.html:
-- name: Moving a node to new document should move the registered event listeners together
-  reason: Assertion (listeners survive adopt) is DOM-core but only reachable via test_driver.click
-    pixel input injection, which needs hit-testing we don't model.
 dom/events/scrolling/iframe-chains.html:
 - name: Wheel scroll in iframe chains to containing element.
   reason: Wheel scroll chaining across nested iframes needs scroll geometry, wheel

@@ -118,7 +118,13 @@
   // ---- low-level dispatch --------------------------------------------------
   function dispatch(target, ev) {
     if (!target) return true;
-    ev.isTrusted = true;   // UA-synthesized; writable own prop (Event ctor sets false)
+    // WebDriver input injection is a user-agent action → trusted. Route through
+    // the driver's trusted-dispatch hook so the public dispatchEvent() IDL
+    // path (which sets isTrusted=false) doesn't strip the trusted flag.
+    if (typeof W.__csimDispatchTrusted === 'function') {
+      try { return W.__csimDispatchTrusted(target, ev); } catch (e) { return true; }
+    }
+    ev.isTrusted = true;
     try { return target.dispatchEvent(ev); } catch (e) { return true; }
   }
 
@@ -292,11 +298,17 @@
     Actions: Actions,
     action_sequence: function (actions) { return action_sequence(actions); },
     click: function (element) {
-      try { if (element && typeof element.click === 'function') { element.click(); return settled(); } } catch (e) {}
+      // A WebDriver click is real input injection: a full pointer sequence
+      // (pointerdown/mousedown, pointerup/mouseup) then a TRUSTED click. We
+      // dispatch all of them through `dispatch()` (trusted), and the engine's
+      // activation behaviour (checkbox toggle, form submit, anchor navigation,
+      // <summary> toggle, …) runs inside the click's dispatch. We deliberately
+      // do NOT call element.click(): that IDL method fires an UNtrusted click
+      // (per spec), which would defeat the injection's trusted semantics.
       var t = element || (D() && D().body);
       firePointer(t, 'pointerdown', 'mousedown');
       firePointer(t, 'pointerup', 'mouseup');
-      dispatch(t, new W.MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+      dispatch(t, new W.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, button: 0 }));
       return settled();
     },
     send_keys: function (element, keys) {

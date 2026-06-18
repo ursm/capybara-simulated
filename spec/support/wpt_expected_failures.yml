@@ -11,8 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-dom/events/Event-dispatch-redispatch.html:
-- Redispatching DOMContentLoaded event after being dispatched
 dom/events/Event-dispatch-throwing-multiple-globals.html:
 - exception thrown in event listener function should result in error event on listener's
   global
