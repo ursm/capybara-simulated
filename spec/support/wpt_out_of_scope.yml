@@ -325,25 +325,6 @@ dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
 - name: 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
   reason: XMLHttpRequest responseType='document' must expose responseXML.contentType
     from the response; XHR document-response content-type is not modeled.
-dom/nodes/MutationObserver-document.html:
-- name: parser insertion mutations
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
-- name: parser script insertion mutation
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
-- name: removal of parent during parsing
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
@@ -4028,37 +4009,6 @@ shadow-dom/accesskey.tentative.html:
 - name: button element with accesskey in the shadow tree of open mode
   reason: Tentative accesskey activation, driven via testdriver input injection (WebDriver);
     neither the tentative accesskey behaviour nor real input injection is modeled.
-shadow-dom/declarative/declarative-with-disabled-shadow.html:
-- name: 'Declarative Shadow DOM: declarative shadow should fail if attachShadow()
-    already called'
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
-shadow-dom/declarative/innerhtml-before-closing-tag.html:
-- name: 'Declarative Shadow DOM: innerHTML should work while parsing streaming declarative
-    shadow root <template>'
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
-shadow-dom/declarative/move-template-before-closing-tag.html:
-- name: Moving the template node from invalid parent to valid parent should still
-    not attach
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
-shadow-dom/declarative/script-access.html:
-- name: 'Streaming Declarative Shadow DOM: template .content() should be null'
-  reason: Requires an incremental/streaming HTML parser — interleaved tree construction,
-    <script> execution, and per-insertion MutationObserver records DURING parsing.
-    The driver bulk-parses (one-shot tree construction via Nokogiri), a deliberate
-    load-bearing design, so parse-time mutation records / mid-stream DSD state / parse-vs-script
-    ordering aren't modeled (rule 1; consistent with stream-positional / streamHTML).
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-disconnect-iframe.html:
 - name: Destroying iframe during async adoptedStyleSheets fetch does not crash.
   reason: Asserts an in-flight async CSS module fetch from shadowrootadoptedstylesheets
