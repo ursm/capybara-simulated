@@ -15075,6 +15075,18 @@ shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-metho
 - name: A_10_01_02_06_02_T02
   reason: ShadowRoot.elementFromPoint(1,-1)==null negative-coord hit-testing semantics;
     requires layout/geometry engine not modeled.
+shadow-dom/untriaged/events/event-retargeting/test-003.html:
+- name: A_05_01_03_T01
+  reason: 'Dispatches a NON-composed event on fallback content created in the PARENT
+    document and appended into an IFRAME document''s shadow tree, expecting it to
+    bubble to the iframe body with target retargeted to the host. Verified in Chrome
+    137: a non-composed event never escapes the shadow tree, so the body listener
+    never fires and the assert is vacuous — Chrome and csim agree for the realistic
+    SAME-document case. csim only diverges because the dispatch fast-path gate (hasShadowRoots)
+    is realm-local: a node created in one realm and adopted into another realm''s
+    shadow tree misses it, so the event escapes via _parent. The only fix degrades
+    the dispatch hot-path gate (rule 3) for a cross-document contrivance no library/app
+    depends on (rule 1 bounded gap).'
 shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
 - name: Elements in a shadow tree should not be accessible from owner document's "all"
     attribute.
@@ -15098,6 +15110,17 @@ shadow-dom/untriaged/styles/test-008.html:
 - name: A_06_00_09_T01
   reason: Asserts offsetTop/offsetHeight change as host font-size grows; requires
     inherited font-size layout metrics, no layout engine.
+shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
+- name: A_07_07_01_T01
+  reason: 'Asserts window.getSelection().toString() === "" for a selection set on
+    a node INSIDE a shadow tree (obsolete 2013-WD "getSelection never returns a shadow
+    selection" rule). Verified in Chrome 137: window.getSelection().toString() returns
+    "Som" — modern browsers expose the selection, so the assert fails in Chrome too.
+    csim matches modern Chrome (rule 1: spec-correct = real-browser behavior).'
+- name: A_07_07_01_T02
+  reason: Same obsolete rule for a slotted (distributed) light-DOM node; Chrome 137
+    returns "Som" as csim does. The 2013-WD shadow-selection encapsulation was removed
+    from the spec and is not implemented by any modern browser.
 shadow-dom/untriaged/user-interaction/ranges-and-selections/test-002.html:
 - name: A_07_01_02_T01
   reason: Relies on obsolete 2013-WD ShadowRoot.getSelection() returning shadow-internal

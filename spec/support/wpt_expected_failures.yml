@@ -91,17 +91,10 @@ shadow-dom/innerHTML-setter.xhtml:
 - InnerHTML behavior on custom element in default 'foo' namespace
 - InnerHTML behavior on custom element in default XHTML namespace
 - InnerHTML behavior with prefixes on custom element
-shadow-dom/untriaged/events/event-dispatch/test-003.html:
-- A_05_05_03_T01
-shadow-dom/untriaged/events/event-retargeting/test-003.html:
-- A_05_01_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
-shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
-- A_07_07_01_T01
-- A_07_07_01_T02
 url/data-uri-fragment.html:
 - Data URI parsing of fragments
 url/javascript-urls.window.js:
