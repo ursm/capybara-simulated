@@ -4006,6 +4006,17 @@ shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
     regarding HTML element
   reason: elementsFromPoint requires visual hit-testing geometry at a coordinate;
     layout engine not modeled.
+shadow-dom/HTMLSlotElement-interface.html:
+- name: HTMLSlotElement must be defined on window
+  reason: The failing assert is Object.getPrototypeOf(HTMLSlotElement.prototype) ===
+    HTMLElement.prototype. 'HTMLSlotElement' in window, the instanceof checks, and
+    member existence all pass — only the per-interface prototype CHAIN differs. By
+    deliberate design (dom-class-aliases.js) every HTML interface ctor shares the
+    single Element.prototype so feature-detection probes ('download' in HTMLAnchorElement.prototype)
+    and Object.getPrototypeOf(el) === HTMLXxxElement.prototype hold uniformly; the
+    spec-accurate chain (HTMLSlotElement.prototype -> HTMLElement.prototype -> Element.prototype)
+    would require per-tag instance prototypes — the same load-bearing collapse as
+    HTMLCollection extends Array (rule 1 bounded gap).
 shadow-dom/HighlightRegistry-highlightsFromPoint.html:
 - name: CSS.highlights.highlightsFromPoint() doesn't return Highlights that are not
     painted at the given coordinates even when they fall inside the Highlights' ranges

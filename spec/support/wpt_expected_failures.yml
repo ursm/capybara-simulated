@@ -71,8 +71,6 @@ encoding/streams/decode-utf8.any.js:
 shadow-dom/Element-interface-attachShadow-custom-element.html:
 - Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
   should throw a NotSupportedError
-shadow-dom/HTMLSlotElement-interface.html:
-- HTMLSlotElement must be defined on window
 shadow-dom/declarative/declarative-after-attachshadow.html:
 - 'Declarative Shadow DOM: declarative shadow should fail if attachShadow() already
   called'
