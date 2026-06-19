@@ -4906,13 +4906,6 @@ shadow-dom/focus-navigation/tentative/focus-scroller-layout-update.html:
     to date.
   reason: Asserts focus() refuses a no-longer-scrollable scroller after a height change;
     scrollability is layout/scroll-geometry derived, not modeled.
-shadow-dom/focus/blur-on-shadow-host-delegatesFocus.html:
-- name: Calling blur() on shadow host with delegatesFocus should remove the focus.
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
 shadow-dom/focus/click-focus-slot-ancestor.html:
 - name: Clicking on non-focusable slot inside focusable div will make the flat-tree
     focusable ancestor get focused
@@ -4925,88 +4918,10 @@ shadow-dom/focus/click-focus-slot-ancestor.html:
 - name: Select on non-focusable slot inside focusable div will select text
   reason: Pointer drag-select across coordinates builds a text Selection by hit-testing
     rendered geometry; requires layout/visual hit-testing.
-shadow-dom/focus/delegatesFocus-tabindex-change.html:
-- name: Setting tabindex on the shadow host of a focused element with delegatesFocus
-    should not change focus.
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-shadow-dom/focus/focus-autofocus.html:
-- name: Focus should be delegated to the autofocus element when the inner host has
-    delegates focus
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: Focus should be delegated to the nested div which has autofocus based on the
-    tree order
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: Focus should not be delegated to the slotted elements
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: The second input should be focused since it has autofocus
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
 shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
 - name: delegatesFocus shouldn't cause extra focus steps
   reason: Asserts on scroll/scrollend events and fragment-navigation scroll geometry
     under delegatesFocus; needs scroll geometry + scroll events we don't model.
-shadow-dom/focus/focus-selector-delegatesFocus.html:
-- name: ":focus applies to host with delegatesFocus=false when an element in a nested
-    shadow tree with delegatesFocus=false is focused"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: ":focus applies to host with delegatesFocus=false when an element in a nested
-    shadow tree with delegatesFocus=true is focused"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: ":focus applies to host with delegatesFocus=false when the shadow root's descendant
-    has focus"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: ":focus applies to host with delegatesFocus=true when an element in a nested
-    shadow tree with delegatesFocus=false is focused"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: ":focus applies to host with delegatesFocus=true when an element in a nested
-    shadow tree with delegatesFocus=true is focused"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-- name: ":focus applies to host with delegatesFocus=true when the shadow root's descendant
-    has focus"
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
 shadow-dom/focus/focus-shadowhost-display-none.html:
 - name: when shadow host itself is focused, it should match display:none, lose focus
     then becomes display:block again.
@@ -5021,27 +4936,6 @@ shadow-dom/focus/focus-slot-box-generated-tabindex-0.html:
 - name: slot with tabindex=0 that generates a box should be focusable
   reason: Focusability gated on slot 'generating a box' (display:inline-block layout)
     + testdriver Tab navigation; both need a rendering/focus-geometry engine.
-shadow-dom/focus/focus-tabindex-order-shadow-negative-delegatesFocus.html:
-- name: Order when all tabindex=-1 is and delegatesFocus = true
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-shadow-dom/focus/focus-tabindex-order-shadow-varying-delegatesFocus.html:
-- name: Order when tabindex varies and delegatesFocus = true
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
-shadow-dom/focus/focus-tabindex-order-shadow-zero-delegatesFocus.html:
-- name: Order when all tabindex=0 is and delegatesFocus = true
-  reason: 'Shadow-host delegatesFocus is not modeled: focusing a delegatesFocus host
-    must redirect focus to the first focusable in its shadow tree, and sequential
-    navigation treats the host as a delegating scope. The base flat-tree focus-navigation
-    engine works (non-delegatesFocus variants pass); delegatesFocus is a separate
-    unimplemented feature.'
 shadow-dom/focus/text-selection-with-delegatesFocus-on-slotted-content.html:
 - name: select slotted text in shadow root with delegatesFocus.
   reason: Builds a text Selection from a pointer drag across rendered pixel coordinates

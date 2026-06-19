@@ -82,38 +82,19 @@ shadow-dom/focus/click-focus-delegatesFocus-tabindex-varies.html:
   tabindex = 1'
 shadow-dom/focus/click-focus-delegatesFocus-tabindex-zero.html:
 - click on host with delegatesFocus, all tabindex=0 except spacer
+shadow-dom/focus/focus-autofocus.html:
+- Focus should be delegated to the autofocus element when the inner host has delegates
+  focus
+- Focus should be delegated to the nested div which has autofocus based on the tree
+  order
+- The second input should be focused since it has autofocus
 shadow-dom/focus/focus-click-on-shadow-host.html:
 - ":focus should be applied to the host and the child node when the focus is moved
   by mouse click"
-shadow-dom/focus/focus-method-delegatesFocus.html:
-- focus() on host with delegatesFocus & no tabindex, all other tabindex=0
-- focus() on host with delegatesFocus & tabindex = 0, all other tabindex=-1
-- focus() on host with delegatesFocus & tabindex =-1, all other tabindex=0
-- 'focus() on host with delegatesFocus & tabindex=0, #aboveSlots and #belowSlots with
-  tabindex=0'
-- 'focus() on host with delegatesFocus & tabindex=0, #aboveSlots with tabindex=0 and
-  #belowSlots with tabindex=1'
-- 'focus() on host with delegatesFocus & tabindex=0, #belowSlots with tabindex=0'
-- 'focus() on host with delegatesFocus & tabindex=0, #outside with tabindex=0'
-- 'focus() on host with delegatesFocus & tabindex=0, #slottedToFirstSlot, #slottedToSecondSlot,
-  #belowSlots  with tabindex=0'
-- focus() on host with delegatesFocus and slotted focusable children
-- focus() on host with delegatesFocus with another host with delegatesFocus and a
-  focusable child
-- focus() on host with delegatesFocus with another host with no delegatesFocus and
-  a focusable child
-- focus() on host with delegatesFocus, all tabindex=-1
-- focus() on host with delegatesFocus, all tabindex=0
-shadow-dom/focus/focus-method-with-delegatesFocus.html:
-- If no element is focusable within a delegatesFocus shadow root, the host can't get
-  focus regardless of host's tabIndex.
-- on focus(), focusable xshadow2 with delegatesFocus=true delegates focus into its
-  inner element.
-- 'xshadow2.focus() shouldn''t move focus to #one when its inner element is already
-  focused.'
-shadow-dom/focus/focus-tab-on-shadow-host.html:
-- ":focus should be applied to the host and :focus-visible should be applied to the
-  child node when the focus is moved by <tab>"
+shadow-dom/focus/focus-tabindex-order-shadow-negative-delegatesFocus.html:
+- Order when all tabindex=-1 is and delegatesFocus = true
+shadow-dom/focus/focus-tabindex-order-shadow-varying-delegatesFocus.html:
+- Order when tabindex varies and delegatesFocus = true
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
 - Order with different tabindex on host
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
