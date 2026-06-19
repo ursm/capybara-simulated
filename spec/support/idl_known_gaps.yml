@@ -14,8 +14,11 @@
 # labels/valueAs*), element-reference ARIA reflection, and Document write-stream.
 Document:
   - activeViewTransition
+  # `all` is intentionally NOT exposed: its [[IsHTMLDDA]] falsy/typeof-'undefined'
+  # behaviour is unmodellable in plain JS and a normal object would break real
+  # feature detection — see shadow-dom/leaktests/html-collection.html in
+  # spec/support/wpt_out_of_scope.yml.
   - all
-  - applets
   - ariaNotify
   - caretPositionFromPoint
   - close

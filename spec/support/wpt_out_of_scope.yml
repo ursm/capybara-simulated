@@ -4952,6 +4952,15 @@ shadow-dom/imperative-slot-fallback-clear.html:
 - name: Text node fallback should be cleared in a subsequently layout
   reason: Assertion is host.offsetHeight===0 after slot.assign; verifies fallback
     not rendered via layout truthiness we don't model.
+shadow-dom/leaktests/html-collection.html:
+- name: document.all should not contain shadow nodes
+  reason: We deliberately do not expose document.all. Its defining behaviour is the
+    [[IsHTMLDDA]] exotic slot (falsy in boolean context, `typeof` === 'undefined'),
+    unmodellable in plain JS; a normal object would break the `if (document.all)` /
+    `typeof document.all` feature-detection real libraries rely on (rule 2). The
+    shadow-exclusion this subtest checks is already covered by the other document.*
+    collections in this file (scripts/forms/images/links/anchors/embeds/plugins),
+    which pass. document.applets (always-empty per spec) is supported and passes.
 shadow-dom/leaktests/selection.html:
 - name: selection API should not leak nodes in Shadow DOM.
   reason: Drag-select resolves pointer coordinates against rendered text geometry
