@@ -165,7 +165,31 @@
     if (pType && W.PointerEvent) {
       dispatch(target, new W.PointerEvent(pType, { bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }));
     }
-    if (mType) dispatch(target, new W.MouseEvent(mType, { bubbles: true, cancelable: true, composed: true }));
+    if (mType) {
+      var ev = new W.MouseEvent(mType, { bubbles: true, cancelable: true, composed: true });
+      dispatch(target, ev);
+      // HTML mousedown default action: move focus to the clicked element, or — if
+      // it isn't a focus target — reset focus to the body. The Capybara click path
+      // runs the focus half in __csimClickResolve; the testdriver-injected pointer
+      // sequence needs both halves. target.focus() is self-gating: it focuses a
+      // focusable target, delegates into a (possibly closed) delegatesFocus shadow
+      // host, and no-ops otherwise. After it, document.activeElement === target iff
+      // the target took (or delegated) focus; if not, the click landed on
+      // non-focusable content and focus moves to the body (blur the prior focus).
+      // Only blur when the prior active element is STILL focused — if focus()'s
+      // focusin handler moved focus elsewhere, that new focus is legitimate and
+      // must not be clobbered.
+      // (shadow-dom/focus/click-focus-delegatesFocus-*, focus-click-on-shadow-host)
+      if (mType === 'mousedown' && !ev.defaultPrevented && typeof target.focus === 'function') {
+        var doc = D();
+        var prevActive = doc && doc._activeElement;
+        try { target.focus(); } catch (e) {}
+        if (doc && doc.activeElement !== target && doc._activeElement === prevActive &&
+            prevActive && typeof prevActive.blur === 'function') {
+          try { prevActive.blur(); } catch (e) {}
+        }
+      }
+    }
   }
 
   // ---- action replay -------------------------------------------------------

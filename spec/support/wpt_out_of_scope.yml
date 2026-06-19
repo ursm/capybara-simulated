@@ -61,13 +61,6 @@ dom/events/mouse-event-retarget.html:
 - name: offsetX is correctly adjusted
   reason: Asserts ev.offsetX==42 derived from clientX minus target box position; requires
     layout geometry (offsetX truthiness) not modeled.
-dom/events/no-focus-events-at-clicking-editable-content-in-link.html:
-- name: Click editable element in link
-  reason: Drives input via test_driver.Actions().pointerMove(x,y).pointerDown/Up at
-    pixel coords; needs visual hit-testing/synthetic-input subsystem we don't model.
-- name: Click editable link
-  reason: Drives input via test_driver.Actions() pointerMove/Down/Up at pixel coords
-    with origin element; needs hit-testing/synthetic-input subsystem we don't model.
 dom/events/scrolling/iframe-chains.html:
 - name: Wheel scroll in iframe chains to containing element.
   reason: Wheel scroll chaining across nested iframes needs scroll geometry, wheel
