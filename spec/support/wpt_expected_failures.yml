@@ -72,12 +72,6 @@ shadow-dom/focus-navigation/focus-with-negative-index.html:
 - Focus controller should treat slots as a focus scope.
 - 'This is a regression test: After focusing negative tabindex-ed elements, focus
   moves in tree order.'
-shadow-dom/focus/focus-autofocus.html:
-- Focus should be delegated to the autofocus element when the inner host has delegates
-  focus
-- Focus should be delegated to the nested div which has autofocus based on the tree
-  order
-- The second input should be focused since it has autofocus
 shadow-dom/focus/focus-click-on-shadow-host.html:
 - ":focus should be applied to the host and the child node when the focus is moved
   by mouse click"
