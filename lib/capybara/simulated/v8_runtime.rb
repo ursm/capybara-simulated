@@ -625,7 +625,10 @@ module Capybara
       # `CSIM_V8_CALL_TIMEOUT_MS=30000` for long-running suites where an
       # occasional JS-side infinite loop would otherwise stall the whole
       # run; the timeout converts the hang into a
-      # `RustyRacer::ScriptTerminatedError` on that one example. The
+      # `RustyRacer::ScriptTerminatedError` on that one example — whose
+      # `#message` / `#js_backtrace` (rusty >= 0.1.10) name the looping JS
+      # frame (function + source position), so an in-V8 hang is diagnosable
+      # from the failure alone, no live debugger attach needed. The
       # terminate escalates through any nested frames (it is
       # isolate-global by design), and the isolate itself stays healthy
       # for subsequent calls — csim treats a terminated call as fatal to
