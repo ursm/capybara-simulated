@@ -28,8 +28,6 @@ dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
 dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html: HARNESS_ERROR
 dom/interface-objects.html: HARNESS_ERROR
-dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html:
-- Element-getElementsByTagName-change-document-HTMLNess
 dom/nodes/MutationObserver-document.html:
 - parser insertion mutations
 - parser script insertion mutation
