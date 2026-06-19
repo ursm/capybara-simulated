@@ -90,3 +90,23 @@
   hangs instead of completing. Out-of-scope layout/input subsystem (CLAUDE.md
   rule 1); excluded so it doesn't burn force-timeout cycles every run. Sibling
   scrollend/wheel tests that DO complete are listed in wpt_out_of_scope.yml.
+
+# Tentative WICG `Element.createValueRange()` — an opaque Range over a form
+# control's value text (input/textarea). The whole `dom/ranges/tentative/` tree
+# is 18 createValueRange files (~140 subtests). Out of scope (rule 1): an
+# unshipped feature whose core is getBoundingClientRect/getClientRects geometry
+# over the control's INTERNAL text layout + CSS Custom Highlight API integration
+# — a layout / text-geometry / rendering engine we deliberately don't model; no
+# library or app uses it. The geometry / display-none files additionally have
+# layout-dependent, NON-DETERMINISTIC failing sets that can't be name-allowlisted
+# (they re-leak past wpt_expected_failures every regen), so skip the whole
+# subtree in one entry — same treatment as the encoding / IDNA structural
+# non-goals above. (Exposed once parse5 stopped silently dropping the trailing
+# `<script>` these files load; before that they registered zero subtests.)
+"dom/ranges/tentative/": >-
+  Tentative WICG Element.createValueRange() (opaque Range over form-control value
+  text). Out of scope — getBoundingClientRect/getClientRects geometry over the
+  control's internal text layout + CSS Custom Highlight API, i.e. a layout /
+  rendering engine we don't model (rule 1); unshipped, no library/app uses it.
+  Several files have non-deterministic layout-dependent failing sets that can't be
+  name-allowlisted, so the whole 18-file subtree is skipped.
