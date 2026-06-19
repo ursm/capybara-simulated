@@ -4135,17 +4135,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
     on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
     modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
     IDL-reflection/serialization surface is part of the same unshipped feature.
-- name: document.importNode does NOT inherit the source document's import map resolution.
-  reason: Tentative WICG shadowrootadoptedstylesheets proposal (declarative adoptedStyleSheets
-    on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
-    modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
-    IDL-reflection/serialization surface is part of the same unshipped feature.
-- name: document.importNode resolves shadowrootadoptedstylesheets against the destination
-    document.
-  reason: Tentative WICG shadowrootadoptedstylesheets proposal (declarative adoptedStyleSheets
-    on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
-    modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
-    IDL-reflection/serialization surface is part of the same unshipped feature.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-idl-absent-and-empty.html:
 - name: shadowRootAdoptedStyleSheets reflects absent and authored-empty content attributes
     correctly.

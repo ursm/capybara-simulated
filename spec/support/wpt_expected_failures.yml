@@ -63,9 +63,7 @@ shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - XMLHttpRequest - not supported
 - document.write allowed from synchronous script loaded from main document
 - document.write disallowed on fresh document
-- iframe
 - iframe with no sandbox allows declarative Shadow DOM
-- iframe, no sandbox
 - sandboxed iframe allows declarative Shadow DOM
 shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
 - "`document.write` on inner iframe handles declarative shadow DOM"
