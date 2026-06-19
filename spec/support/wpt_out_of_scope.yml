@@ -4173,10 +4173,6 @@ shadow-dom/Document-caretPositionFromPoint.tentative.html:
     engine not modeled.
 shadow-dom/Document-prototype-currentScript.html:
 - name: document.currentScript must be set to a script element that loads an external
-    script in a document tree
-  reason: Requires fetching+executing an external <script src> and a callback into
-    it; dynamic external-script async load/exec not modeled.
-- name: document.currentScript must be set to a script element that loads an external
     script in a document tree (2)
   reason: Requires fetching+executing an external <script src>; dynamic external-script
     async load/exec not modeled.
