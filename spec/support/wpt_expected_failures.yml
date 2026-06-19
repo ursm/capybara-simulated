@@ -57,9 +57,6 @@ dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.htm
 - 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-shadow-dom/Element-interface-attachShadow-custom-element.html:
-- Element.attachShadow for a customized built-in element with disabledFeatures=["shadow"]
-  should throw a NotSupportedError
 shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - XMLHttpRequest - not supported
 - document.write allowed from synchronous script loaded from main document
