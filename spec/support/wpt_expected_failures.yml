@@ -16,9 +16,6 @@ dom/events/Event-dispatch-throwing-multiple-globals.html:
   global
 - exception thrown in event listener interface object should result in error event
   on listener's global
-dom/events/Event-timestamp-high-resolution.https.html:
-- Constructed GamepadEvent timestamp should be high resolution and have the same time
-  origin as performance.now()
 dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
