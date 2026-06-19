@@ -2309,6 +2309,13 @@ module Capybara
         reset_hijacked_fetches
         reset_websockets
         @window_inbox.clear
+        # Dispose the JS runtime/isolate itself — for an auxiliary window this
+        # Browser is the isolate's last owner, but V8Runtime registers every
+        # isolate in a process-wide `@@live` set (for at_exit cleanup), which
+        # pins it past a bare GC. Without this, each closed window leaked a live
+        # V8 isolate (RSS climbed across a long suite). Only reached on teardown,
+        # never on the per-test `reset!` path (which keeps the runtime).
+        @runtime.dispose if @runtime.respond_to?(:dispose)
       rescue StandardError
         nil
       end

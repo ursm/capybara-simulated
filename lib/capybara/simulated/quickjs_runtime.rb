@@ -216,6 +216,15 @@ module Capybara
       # already the inter-test reset point.
       def reset_page = rebuild_ctx
 
+      # NOTE: intentionally NO `dispose` — Browser#dispose gates its
+      # `@runtime.dispose` call on `respond_to?(:dispose)`, so QuickJS skips it.
+      # QuickJS VMs aren't pinned by a process-wide registry the way V8 isolates
+      # are in V8Runtime's `@@live`; an aux window's Browser becomes unreferenced
+      # on close and Ruby GC's dfree frees its `@vm` (the same lifecycle
+      # `rebuild_ctx` already relies on). Adding a `@vm = nil` dispose would only
+      # introduce a NoMethodError window for any stray post-close call (eval/call
+      # don't all nil-guard `@vm`) with no leak benefit.
+
       # bridge.js patches `Intl.DateTimeFormat`; rusty_racer ships ICU
       # built-in but QuickJS gates it behind a polyfill flag. Other JS
       # surfaces bridge.js touches (URL / TextEncoder / atob/btoa /

@@ -544,14 +544,7 @@ module Capybara
         # `ctx`), which rusty_racer's thread-confined isolates require. This
         # cold path is only the rare reset-failure fallback, so the inline
         # teardown isn't on the steady-state path.
-        if old
-          @@live_lock.synchronize { @@live.delete(old) }
-          begin
-            old.terminate rescue nil
-            old.dispose
-          rescue StandardError
-          end
-        end
+        dispose_ctx(old) if old
         @ctx = build_and_track_ctx
       end
 
@@ -611,6 +604,7 @@ module Capybara
       # every isolate confined to one thread for its whole life. The one-time
       # synchronous build is ~3 ms.
       def ctx
+        return @ctx if @disposed   # don't resurrect a disposed runtime (closed window)
         @ctx ||= build_and_track_ctx
       end
 
@@ -619,6 +613,38 @@ module Capybara
         c = build_ctx
         @@live_lock.synchronize { @@live << c }
         c
+      end
+
+      # Terminate + dispose a tracked isolate and drop it from the at-exit
+      # `@@live` registry. Dispose FIRST and de-register only on success: if
+      # `dispose` raises (rescued), the isolate stays in `@@live` so the at_exit
+      # sweep retries it instead of leaking it un-disposed. Shared by the
+      # cold-rebuild fallback (`rebuild_ctx`) and `#dispose`.
+      def dispose_ctx(c)
+        return unless c
+        c.terminate rescue nil
+        c.dispose
+        @@live_lock.synchronize { @@live.delete(c) }
+      rescue StandardError
+      end
+
+      # Tear this runtime's isolate down for good. Each auxiliary window
+      # (`window.open` / a switched-into `target=_blank`) is its own Browser +
+      # V8Runtime + isolate; without this, closing the window reaped its
+      # background threads (Browser#dispose) but left the isolate ALIVE — the
+      # `@@live` at-exit registry holds a strong reference, so a bare GC never
+      # reclaimed it. Over a long suite those isolates (and their RSS)
+      # accumulated (measured: V8 isolate count 2 → 10, RSS ~2.7 → 6.6 GB across
+      # the Discourse suite). Idempotent; only ever called on teardown
+      # (Browser#dispose) — never on the per-test `reset_page` path, which
+      # reuses the isolate via `Context#reset`. The `ctx` getter stops rebuilding
+      # once `@disposed`, so a stray post-close call can't resurrect the isolate.
+      def dispose
+        return if @disposed
+        @disposed = true
+        dispose_frame_realms rescue nil
+        c, @ctx = @ctx, nil
+        dispose_ctx(c)
       end
 
       # Per-call wall-clock cap (ms). Off by default. Opt in via
