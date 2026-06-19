@@ -106,7 +106,17 @@ module Capybara
           @ctx        = @iso.context
           @attached   = []
           @generation = 0
+          # rusty's heap-accounting API (heap_statistics / low_memory_notification)
+          # landed in 0.1.9. Probe the real Isolate once here — the Ctx wrapper
+          # delegates these unconditionally, so a `respond_to?` on the wrapper
+          # would always be true and never gate the version. Cached so the
+          # per-visit pressure check (rule 3) is an ivar read, not a dispatch.
+          @heap_accounting = @iso.respond_to?(:heap_statistics)
         end
+
+        # True iff the underlying rusty Isolate exposes the 0.1.9 heap-accounting
+        # API. Drives `relieve_heap_pressure`'s version gate.
+        def heap_accounting? = @heap_accounting
 
         # ── Context surface ─────────────────────────────────────────
         # rusty drains microtasks at call-depth zero (V8's default kAuto
@@ -152,6 +162,10 @@ module Capybara
         def terminate                        = @iso.terminate
         def dispose                          = @iso.dispose
         def perform_microtask_checkpoint     = @iso.perform_microtask_checkpoint
+        # rusty >= 0.1.9: V8 heap accounting + a forced full GC. Used by the
+        # per-visit heap-pressure relief in `rebuild_ctx` (see there).
+        def heap_statistics                  = @iso.heap_statistics
+        def low_memory_notification          = @iso.low_memory_notification
 
         def dynamic_import_resolver=(prc)
           @iso.dynamic_import_resolver = prc
@@ -499,6 +513,16 @@ module Capybara
         if @ctx
           begin
             @ctx.reset
+            # `@ctx.reset` swaps in a snapshot-fresh realm and `dispose_frame_realms`
+            # above tore down the visit's iframe realms — but V8 keeps those dead
+            # contexts as RECLAIMABLE GARBAGE: a per-frame realm (within_frame /
+            # `Isolate#create_context`) is a large GC root that V8's incremental
+            # GC won't collect between visits. Over a long run (esp. iframe-heavy
+            # pages) they pile toward the old-space cap, where the near-heap-limit
+            # GC thrashes instead of reclaiming. A full GC under pressure drops the
+            # used heap back to baseline (measured: ~450 MB -> ~150 MB, native
+            # contexts N -> 1). See `relieve_heap_pressure`.
+            relieve_heap_pressure
             attach_host_fns(@ctx)
             @ctx.eval('__csim_installWorker();')
             return @ctx
@@ -535,6 +559,48 @@ module Capybara
       # here. With per-visit rebuild already running, the inter-test
       # path is the same operation.
       def reset_page = rebuild_ctx
+
+      # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
+      # GC to reclaim dead per-frame realms (see the call site). Measured
+      # against used heap **+ external** (ArrayBuffer backing stores, image
+      # pixel buffers) — `used_heap_size` alone misses the external component,
+      # which on image-heavy specs is the bulk of the footprint. Default 1 GB:
+      # far above a normal single visit (~200-500 MB) so ordinary specs never
+      # trigger it, far below the 4 GB old-space cap so a multi-visit spec
+      # reclaims long before the near-heap-limit GC would thrash. `0` disables.
+      GC_PRESSURE_MB = (ENV['CSIM_V8_GC_PRESSURE_MB'] || '1024').to_i
+
+      # Opt-in heap accounting on every rebuild (CSIM_HEAP_DIAG). Resolved once
+      # at load (rule 3: don't re-read env per call); zero cost when off.
+      HEAP_DIAG = !ENV['CSIM_HEAP_DIAG'].nil?
+
+      # Forced full GC when V8-managed memory (used heap + external) crosses
+      # GC_PRESSURE_MB. The stat read is cheap (a counter snapshot every visit);
+      # the GC itself only fires once a multi-visit spec has actually piled up
+      # dead realms — measured at ~once per 25-50 iframe-heavy visits, reclaiming
+      # native contexts back to 1 and the heap to baseline — so the amortized
+      # cost is negligible while memory stays bounded. No-op on rusty < 0.1.9
+      # (no heap_statistics) or when disabled.
+      def relieve_heap_pressure
+        return unless GC_PRESSURE_MB.positive? && @ctx.heap_accounting?
+        s    = @ctx.heap_statistics
+        over = (s[:used_heap_size].to_i + s[:external_memory].to_i) > GC_PRESSURE_MB * 1_048_576
+        if HEAP_DIAG
+          warn(format('[csim heap] used=%dMB ext=%dMB native_ctx=%d over=%s',
+                      s[:used_heap_size].to_i >> 20, s[:external_memory].to_i >> 20,
+                      s[:number_of_native_contexts].to_i, over))
+        end
+        return unless over
+        @ctx.low_memory_notification
+        if HEAP_DIAG
+          a = @ctx.heap_statistics
+          warn(format('[csim heap]   -> after GC used=%dMB native_ctx=%d',
+                      a[:used_heap_size].to_i >> 20, a[:number_of_native_contexts].to_i))
+        end
+      rescue StandardError
+        # Older rusty without the diagnostics API, or a transient read failure —
+        # heap relief is best-effort, never fail a visit over it.
+      end
 
       # Built lazily on first use, on the calling (main) thread. There is no
       # pool / background pre-warm: under warm-compile the steady-state visit
