@@ -24,8 +24,6 @@ dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HAR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
 dom/interface-objects.html: HARNESS_ERROR
-dom/nodes/ProcessingInstruction-escapes-1.xhtml:
-- ProcessingInstruction numeric escapes
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
 - Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
   steps
@@ -33,8 +31,6 @@ dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 dom/nodes/query-target-in-load-event.html:
 - document.querySelector(":target") must work when called in the window.load event
-dom/traversal/TreeWalker-acceptNode-filter-cross-realm-null-browsing-context.html:
-- 'TreeWalker: NodeFilter from detached iframe doesn''t get called'
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
@@ -54,7 +50,3 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.
 - A_08_01_01_T01
 url/data-uri-fragment.html:
 - Data URI parsing of fragments
-url/javascript-urls.window.js:
-- 'javascript: URL containing a JavaScript string split over path and query and has
-  a U+000A in scheme'
-- 'javascript: URL without an opaque path'
