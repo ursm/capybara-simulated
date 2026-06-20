@@ -39,16 +39,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-iframe.html:
 - A script inserted atomically before an iframe (using a div) does not observe the
   iframe's contentWindow, since the 'script running' and 'iframe setup' both happen
   in order, after DOM insertion completes
-dom/nodes/moveBefore/live-range-updates.html:
-- moveBefore still causes range endContainer to snap up to parent, when endContainer
-  ancestor is moved
-- moveBefore still causes range startContainer to snap up to parent, when startContainer
-  ancestor is moved
-- moveBefore still results in range startContainer snapping up to parent when startContainer
-  is moved
-dom/nodes/moveBefore/moveBefore-name-map.html:
-- moveBefore() correctly updates name map ordering in document
-- moveBefore() correctly updates name map when moving into shadow root
 dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 dom/nodes/query-target-in-load-event.html:
