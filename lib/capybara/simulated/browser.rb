@@ -881,6 +881,7 @@ module Capybara
           # downloads from `click_link` complete inside the click
           # action.
           consume_pending_location
+          consume_pending_frame_nav
           return
         end
         case action['kind']
@@ -943,6 +944,7 @@ module Capybara
           # pending; if `@current_url` already changed mid-drain (the
           # navigate landed during a timer fire), skip the form submit
           # entirely — its form handle is in a stale VM by now.
+          consume_pending_frame_nav
           if @pending_location
             consume_pending_location
           elsif @current_url != submit_baseline_url
@@ -3692,6 +3694,42 @@ module Capybara
           navigate(url)
         end
       end
+      # A nested browsing context navigating its OWN `location` (the frame's
+      # `location.href`/assign/replace/`location=`, incl. cross-frame
+      # `iframe.contentWindow.location.href = …`). `realm_id` is the frame's realm.
+      # Deferred like location_assign: applying it re-navigates the owning iframe,
+      # which disposes that realm — illegal while the frame's location setter is
+      # still on the V8 stack — so we stash and drain from `tick_real_time`.
+      def frame_navigate_self(url, realm_id)
+        return if realm_id.nil? || realm_id.zero?
+        # Keyed by realm id (last URL wins per frame) so two different frames each
+        # navigating in one turn both apply — a single slot would drop one.
+        (@pending_frame_nav ||= {})[realm_id] = url.to_s
+      end
+      def consume_pending_frame_nav
+        return if @pending_frame_nav.nil? || @pending_frame_nav.empty?
+        navs = @pending_frame_nav
+        @pending_frame_nav = nil
+        navs.each do |realm_id, url|
+          invalidate_find_cache
+          # If this frame is on the entered `within_frame` stack, navigate it
+          # through `navigate_frame` — it does the full fetch (redirects /
+          # downloads / cookies) AND updates `@frame_stack` / `@current_realm_id`
+          # so the enclosing `within_frame` block sees the new document. Otherwise
+          # (a parent's `iframe.contentWindow.location.href = …`) re-navigate the
+          # owning iframe by realm id via the src-reassignment path. Top-level
+          # frames live in the main document; a nested non-entered frame's element
+          # is in its parent realm's DOM (not yet routed — documented gap).
+          entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
+          if entry
+            navigate_frame(url, entry: entry)
+          else
+            @runtime.call('__csimNavigateFrameByRealm', realm_id, url)
+          end
+        rescue StandardError => e
+          log_console('warn', "frame self-navigation failed: #{e.message}")
+        end
+      end
       # Mirror of `location_assign`'s deferral for `location.reload()`:
       # the JS call lands here from `__locationReload`; running
       # `browser.refresh` directly would `navigate` (rebuilding the
@@ -3706,6 +3744,7 @@ module Capybara
       end
       def drain_pending_navigation
         consume_pending_location
+        consume_pending_frame_nav
         consume_pending_reload
         consume_pending_history_traverse
       end
@@ -4094,9 +4133,10 @@ module Capybara
       # timer can't abort loading the next page (the page it would affect is
       # being discarded on the very next line).
       def flush_outgoing_page_init
-        saved_location = @pending_location
-        saved_reload   = @pending_reload
-        saved_traverse = @pending_history_traverse
+        saved_location  = @pending_location
+        saved_reload    = @pending_reload
+        saved_traverse  = @pending_history_traverse
+        saved_frame_nav = @pending_frame_nav
         begin
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         rescue StandardError
@@ -4105,6 +4145,9 @@ module Capybara
           @pending_location         = saved_location
           @pending_reload           = saved_reload
           @pending_history_traverse = saved_traverse
+          # Don't let a frame-nav intent stashed by an outgoing-page timer leak
+          # into the fresh page (its realm id belongs to the discarded page).
+          @pending_frame_nav        = saved_frame_nav
         end
       end
 

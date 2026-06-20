@@ -15,7 +15,8 @@ dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
 - Check the incumbent global EventListeners  are called with
-dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
+dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html:
+- window.event is still set when 'beforeunload' result is coerced to string
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
 - Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
   steps

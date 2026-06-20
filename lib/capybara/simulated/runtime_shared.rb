@@ -45,6 +45,10 @@ module Capybara
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0]) },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0]); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
+        # A nested browsing context navigating its OWN location (a[1] = the frame's
+        # realm id). Deferred + applied by re-navigating the owning iframe, so a
+        # frame's `location.href = …` navigates the frame, not the top page.
+        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1]); nil },
