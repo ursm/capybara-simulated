@@ -56,8 +56,6 @@ shadow-dom/focus/focus-tabindex-order-shadow-negative-delegatesFocus.html:
 - Order when all tabindex=-1 is and delegatesFocus = true
 shadow-dom/focus/focus-tabindex-order-shadow-varying-delegatesFocus.html:
 - Order when tabindex varies and delegatesFocus = true
-shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-2.html:
-- Order with different tabindex on host
 shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
 - Order with different tabindex on host
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
