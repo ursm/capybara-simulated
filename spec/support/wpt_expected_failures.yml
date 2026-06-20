@@ -18,8 +18,6 @@ dom/events/EventListener-incumbent-global-2.sub.html:
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
 - Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
   steps
-dom/nodes/moveBefore/select-option-optgroup.html:
-- Moving options between select elements.
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
