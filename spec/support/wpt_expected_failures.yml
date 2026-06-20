@@ -23,9 +23,6 @@ dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
-shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
-- iframe with no sandbox allows declarative Shadow DOM
-- sandboxed iframe allows declarative Shadow DOM
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
