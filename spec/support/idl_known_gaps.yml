@@ -21,7 +21,6 @@ Document:
   - all
   - ariaNotify
   - caretPositionFromPoint
-  - close
   - convertPointFromNode
   - convertQuadFromNode
   - convertRectFromNode
@@ -35,7 +34,6 @@ Document:
   - measureElement
   - measureText
   - namedFlows
-  - open
   - permissionsPolicy
   - pictureInPictureEnabled
   - prerendering
@@ -43,8 +41,6 @@ Document:
   - startViewTransition
   - timeline
   - wasDiscarded
-  - write
-  - writeln
 Element:
   - activeViewTransition
   - ariaNotify

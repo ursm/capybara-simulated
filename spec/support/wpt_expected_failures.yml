@@ -35,12 +35,8 @@ domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - XMLHttpRequest - not supported
-- document.write allowed from synchronous script loaded from main document
-- document.write disallowed on fresh document
 - iframe with no sandbox allows declarative Shadow DOM
 - sandboxed iframe allows declarative Shadow DOM
-shadow-dom/declarative/declarative-shadow-dom-write-to-iframe.html:
-- "`document.write` on inner iframe handles declarative shadow DOM"
 shadow-dom/focus/focus-click-on-shadow-host.html:
 - ":focus should be applied to the host and the child node when the focus is moved
   by mouse click"
