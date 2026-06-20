@@ -11,11 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-dom/events/Event-dispatch-throwing-multiple-globals.html:
-- exception thrown in event listener function should result in error event on listener's
-  global
-- exception thrown in event listener interface object should result in error event
-  on listener's global
 dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
