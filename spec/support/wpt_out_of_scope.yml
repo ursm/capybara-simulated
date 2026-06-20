@@ -82,10 +82,6 @@ dom/events/scrolling/scroll-event-fired-to-element.html:
 - name: scrollTop and scrollLeft when scrolling above maximum offset.
   reason: Clamping scrollTop/scrollLeft to scrollable max requires layout-computed
     content/overflow dimensions we don't model.
-dom/events/scrolling/scroll-event-fired-to-iframe.html:
-- name: scrollX and scrollY when scrolling above maximum Scroll.
-  reason: Clamping iframe scrollX/scrollY to max requires viewport + content layout
-    dimensions and scroll geometry we don't model.
 dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html:
 - name: scrolling state is false at the end of the test
   reason: Needs scroll geometry + scrollend event firing after instant scroll; scroll/scrollend
@@ -342,11 +338,6 @@ dom/events/scrolling/scrollend-event-handler-content-attributes.html:
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
-- name: No scrollend is received after removing scrolling element
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
 - name: scrollend is received after removing descendant div
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
@@ -4583,185 +4574,6 @@ shadow-dom/execcommand-insertList-in-shadow.html:
 - name: Toggle off List for all the child nodes in the ShadowRoot
   reason: Pointer Actions use offsetLeft/Top/Width/Height geometry to select text,
     plus execCommand list editing; depends on layout that is not modeled.
-shadow-dom/focus-navigation/delegatesFocus-highlight-sibling.html:
-- name: crbug/474687 :focus style should properly be applied to shadow hosts.
-  reason: assert_background_color reads rendered :host(:focus)/li:focus computed background;
-    depends on focus-state styling/repaint not modeled.
-shadow-dom/focus-navigation/focus-navigation-slot-fallback-default-tabindex.html:
-- name: Default tabindex for a slot node should be 0.
-  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (single-direction variants pass). A runner async-drain-budget limit, not a focus-engine
-    gap.
-shadow-dom/focus-navigation/focus-navigation-slot-fallback.html:
-- name: Focus should jump to fallback elements when a slot does not have any assigned
-    nodes.
-  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (single-direction variants pass). A runner async-drain-budget limit, not a focus-engine
-    gap.
-shadow-dom/focus-navigation/focus-navigation-slot-nested-2levels.html:
-- name: Focus controller should treat each slot as a focus scope.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slot-nested-delegatesFocus.html:
-- name: Focus controller should treat each slot as a focus scope.
-  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout. The scope-relative sequential-focus-navigation engine now models
-    shadow focus scopes + slots + delegatesFocus + tabindex order; a runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slot-nested-fallback.html:
-- name: Focus should cover assigned elements of an assigned slot espacially there
-    are fallback contents.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slot-nested.html:
-- name: Focus controller should treat each slot as a focus scope.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slot-with-tabindex.html:
-- name: Slots tabindex should be considred in focus navigation.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slots-in-slot.html:
-- name: Focus should cover assigned nodes of slot, especially for nested slots in
-    slot scope.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-slots.html:
-- name: Focus should cover assigned elements of an assigned slot, as well as elements
-    that are directly assigned to a slot.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-web-component-radio.html:
-- name: Focus for web component input type elements should be bound by <form> inside
-    shadow DOM
-  reason: Bidirectional Tab navigation of a radio group inside a shadow-DOM <form>
-    (forward + backward sequential testdriver async hops) exceeds the WPT runner's
-    async-drain budget before the forced harness timeout. The scope-relative
-    focus-navigation engine now models shadow focus scopes + tabindex order; a runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-navigation-with-delegatesFocus.html:
-- name: Testing tab navigation order with mode closed, no tabindex and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, no tabindex and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=true.
-  reason: Positive-tabindex ordering inside shadow scope with delegatesFocus; driver
-    has no such sequential-navigation model.
-- name: Testing tab navigation order with mode open, no tabindex and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=true.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=false.
-  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
-    subtest exhausts the WPT runner's async-drain budget before the forced harness
-    timeout and the remaining subtests never run. The scope-relative
-    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
-    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
-- name: Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=true.
-  reason: Positive-tabindex ordering inside shadow scope with delegatesFocus; driver
-    has no such sequential-navigation model.
-shadow-dom/focus-navigation/focus-navigation.html:
-- name: Focus controller should treat slots as a focus scope.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
-shadow-dom/focus-navigation/focus-nested-slots.html:
-- name: Verifies that focus order goes in flat tree order with buttons inside nested
-    slots which have a mixture of assigned and unassigned states.
-  reason: Bidirectional Tab navigation (forward + backward = ~24 sequential testdriver
-    async hops) exceeds the WPT runner's normal async-drain budget before the forced
-    harness timeout; the flat-tree sequential-focus-navigation engine itself is correct
-    (forward order verified against the spec, single-direction variants pass). A runner
-    async-drain-budget limit, not a focus-engine gap.
 shadow-dom/focus-navigation/menu/tentative/focus-menu-elements.html:
 - name: Focus navigation should skip over other menuitems in menubars.
   reason: Tentative <menu>-element focus navigation via testdriver Tab keypresses;
@@ -4896,9 +4708,6 @@ shadow-dom/focus-navigation/reading-flow/tentative/grid-order.html:
     reading flow item, but can affect its descendants.
   reason: reading-flow order plus tabindex interplay over grid-resolved order needs
     layout engine; not modeled.
-- name: Grid items without `order` property
-  reason: reading-flow:grid-order focus order requires grid layout engine to sequence
-    items; not modeled.
 - name: Items in display block are not in parent grid container.
   reason: grid-item membership vs display:block flow plus reading-flow order need
     layout engine; not modeled.
@@ -4906,13 +4715,6 @@ shadow-dom/focus-navigation/reading-flow/tentative/grid-rows.html:
 - name: Grid items in grid template columns should follow grid-rows reading flow
   reason: grid-rows reading-flow needs grid template column/row placement from layout
     engine; not modeled.
-shadow-dom/focus-navigation/reading-flow/tentative/normal.html:
-- name: Block elements. Focus should be in DOM tabindexed-order.
-  reason: Sequential focus order under CSS reading-flow/order on display:block/grid
-    layout boxes; needs layout-derived reading-flow tab-order we don't model.
-- name: Grid items. Focus should be in DOM tabindexed-order.
-  reason: Tab order across grid items with order/reading-order requires grid layout
-    + reading-flow focus navigation, a rendering subsystem we don't model.
 shadow-dom/focus-navigation/reading-flow/tentative/source-order-valid.html:
 - name: Block elements. Focus should be in DOM tabindexed-order, but reading-order
     takes effect.

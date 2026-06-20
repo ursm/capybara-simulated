@@ -34,8 +34,26 @@ module WptRunner
   # no-op unless the file opted into `explicit_timeout`, so it can't be used to
   # force this.) Big virtual jumps are ~free in wall-clock — they only run the
   # few timers actually due — so the suite still runs in seconds.
-  DRAIN_STEP_MS      = 250
-  DRAIN_STEPS        = 8   # 8 × 250 ms = 2 s virtual before forcing the timeout
+  # Progress-aware normal drain: pump one render phase (≈ one animation frame) at
+  # a time and keep going while the page makes progress (a task fired, a DOM/URL
+  # change bumped settleGen, or an rAF callback is still queued), up to a generous
+  # frame cap. This lets a test that legitimately needs MANY sequential
+  # animation frames — e.g. focus-navigation's `await waitForRender()` (double
+  # rAF) per Tab hop, ~40 frames for a bidirectional sweep — run to completion
+  # within its virtual-time budget, instead of giving up after a fixed few frames
+  # and force-jumping the clock past testharness's own 10 s timeout (which would
+  # mark a still-progressing test TIMEOUT). A genuinely idle test (only far-future
+  # timers like the harness timeout remain) shows no progress and bails to the
+  # force-timeout below within DRAIN_IDLE_BAIL frames; a self-rescheduling
+  # animation loop is bounded by DRAIN_MAX_STEPS. The step is small (50 ms) so a
+  # frame-hungry test gets many render phases; in practice the loop terminates
+  # well before the cap because every evaluate_script also advances the virtual
+  # clock (tick_real_time), so testharness's own 10 s timeout fires and completes
+  # the file. DRAIN_MAX_STEPS is a generous backstop for a page that never idles
+  # AND never lets the clock reach that timeout (e.g. a perpetual rAF loop).
+  DRAIN_STEP_MS      = 50
+  DRAIN_MAX_STEPS    = 160  # frame cap — animation-loop backstop (harness timeout normally ends it first)
+  DRAIN_IDLE_BAIL    = 2    # consecutive no-progress frames → idle → force-timeout
   FORCE_TIMEOUT_MS   = 12_000  # > the 10 s normal harness timeout (+ margin)
   LONG_TIMEOUT_MS    = 55_000  # cumulative ≈ 67 s > the 60 s `meta timeout=long`
   POST_TIMEOUT_STEPS = 3   # let a completion that chains through a final
@@ -232,10 +250,27 @@ module WptRunner
     s.evaluate_script("window.dispatchEvent(new Event('load'))")
 
     res = nil
-    DRAIN_STEPS.times do
-      s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{DRAIN_STEP_MS}, #{DRAIN_ITER}) : null")
-      res = s.evaluate_script('globalThis.__wptResults')
+    idle = 0
+    DRAIN_MAX_STEPS.times do
+      step = s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(#{DRAIN_STEP_MS}, #{DRAIN_ITER}, false) : null")
+      res  = s.evaluate_script('globalThis.__wptResults')
       break unless res.nil?
+      # Progress = a task fired, a DOM/URL change bumped settleGen, or an rAF
+      # callback is still queued (an animation-frame chain is mid-flight). No
+      # progress for DRAIN_IDLE_BAIL consecutive frames → the page is idling on
+      # something we can't advance (only far-future timers like the harness
+      # timeout remain) → stop and let the force-timeout below fire it.
+      # (`step` already folds in child-realm fired/dirtied via drainChildRealms;
+      # __csimHasPendingRAF only sees the main realm — a child-realm-only rAF that
+      # produces no observable fired/dirtied would not register, but the
+      # force-timeout backstops it. No vendored test relies on that.)
+      raf = s.evaluate_script("typeof __csimHasPendingRAF === 'function' ? __csimHasPendingRAF() : false")
+      if (step && (step['fired'].to_i.positive? || step['dirtied'])) || raf
+        idle = 0
+      else
+        idle += 1
+        break if idle >= DRAIN_IDLE_BAIL
+      end
     end
 
     if res.nil?
