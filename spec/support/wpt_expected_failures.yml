@@ -34,7 +34,6 @@ dom/nodes/query-target-in-load-event.html:
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
-- XMLHttpRequest - not supported
 - iframe with no sandbox allows declarative Shadow DOM
 - sandboxed iframe allows declarative Shadow DOM
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:

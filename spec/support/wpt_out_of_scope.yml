@@ -604,10 +604,6 @@ dom/nodes/Document-contentType/contentType/contenttype_png.html:
   reason: Loading a binary PNG into an iframe yields a UA-synthesised image document
     with contentType image/png; image-document synthesis is a non-modeled UA construct
     (rule 1).
-dom/nodes/Document-contentType/contentType/xhr_responseType_document.html:
-- name: 'XHR - retrieve HTML document: document.contentType === ''application/xml'''
-  reason: XMLHttpRequest responseType='document' must expose responseXML.contentType
-    from the response; XHR document-response content-type is not modeled.
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
@@ -3758,30 +3754,16 @@ encoding/bom-handling.html:
   reason: Byte-order-mark detection / stripping during document decode is not modeled
     — rule 1 (encoding subsystem).
 encoding/replacement-encodings.any.js:
-- name: csiso2022kr - empty input decodes to empty output.
-  reason: Legacy CJK 'replacement' encoding label table (ISO-2022/HZ family) deliberately
-    not modeled.
 - name: csiso2022kr - non-empty input decodes to one replacement character.
-  reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
-- name: hz-gb-2312 - empty input decodes to empty output.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
 - name: hz-gb-2312 - non-empty input decodes to one replacement character.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
-- name: iso-2022-cn - empty input decodes to empty output.
-  reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
 - name: iso-2022-cn - non-empty input decodes to one replacement character.
-  reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
-- name: iso-2022-cn-ext - empty input decodes to empty output.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
 - name: iso-2022-cn-ext - non-empty input decodes to one replacement character.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
-- name: iso-2022-kr - empty input decodes to empty output.
-  reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
 - name: iso-2022-kr - non-empty input decodes to one replacement character.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
-- name: replacement - empty input decodes to empty output.
-  reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
-    tables.
 - name: replacement - non-empty input decodes to one replacement character.
   reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
     tables.
