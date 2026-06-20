@@ -412,6 +412,7 @@ module Capybara
 
       def dispose_frame_realms
         @realm_module_handles&.clear
+        @frame_realm_depths&.clear
         return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
@@ -434,6 +435,7 @@ module Capybara
       def dispose_frame_realm(id)
         return if id.nil? || id.zero?
         @realm_module_handles&.delete(id)
+        @frame_realm_depths&.delete(id)
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         nil
@@ -703,6 +705,7 @@ module Capybara
         # Disposing a non-executing child realm mid-callback is safe.
         c.attach('__csim_disposeFrameRealm', ->(id) {
           @realm_module_handles&.delete(id)
+          @frame_realm_depths&.delete(id)
           fr = frame_realms.delete(id)
           fr.dispose rescue nil if fr
           nil
@@ -715,8 +718,27 @@ module Capybara
       # state, point it at its own URL with the top frame as parent/top, then
       # load its document (running its scripts in the realm). Tracked for
       # event-loop draining + teardown.
+      # Browsers cap nested browsing-context depth; with eager frame building a
+      # self-referential or pathologically nested iframe (`<iframe src=self>`)
+      # would otherwise build realms without bound and stall the settle loop.
+      # Depth is one more than the parent realm's (the main frame is depth 0).
+      MAX_FRAME_DEPTH = 16
+
+      def frame_realm_depths = (@frame_realm_depths ||= {})
+
       def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0)
+        depth = (frame_realm_depths[parent_id] || 0) + 1
+        if depth > MAX_FRAME_DEPTH
+          @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
+          return nil
+        end
         realm = parent_ctx.create_context
+        # Record depth BEFORE loading the document: the frame's own scripts run
+        # during __csimLoadDocument below and may synchronously build NESTED frames
+        # (their create_frame_realm looks up this realm's depth as their parent's),
+        # so it must already be set or the nested depth undercounts and the cap
+        # never trips.
+        frame_realm_depths[realm.id] = depth
         # Re-evaling the snapshot source would redefine snapshot globals (e.g.
         # the `scrollX` accessor) and throw — re-entrantly. Only eval the
         # source on a bare no-snapshot dev ctx, where the realm boots empty.
@@ -752,6 +774,14 @@ module Capybara
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         frame_realms[realm.id] = realm
+        # Fire the nested document's window `load`. The frame's inline scripts ran
+        # during __csimLoadDocument and registered their `window.onload` (the usual
+        # `window.onload = () => parent.postMessage(...)` a frame reports back
+        # through); without firing it, an eagerly-built frame that the parent never
+        # touches would never run its load handler. Safe if no handler is set
+        # (dispatches to an empty listener list). Guarded so a frame whose load
+        # handler throws doesn't abort the build.
+        realm.call('__csimFireWindowLoad') rescue nil
         realm.id
       rescue StandardError => e
         @browser.log_console('warn', "frame realm load failed: #{e.message}")

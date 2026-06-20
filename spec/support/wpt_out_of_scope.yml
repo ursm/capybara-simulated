@@ -571,10 +571,6 @@ dom/nodes/Document-contentType/contentType/contenttype_bmp.html:
 - name: BMP document.contentType === 'image/bmp'
   reason: Loading a binary image into an iframe makes the UA synthesize an image-viewer
     document; image-document synthesis is a rendering/UA concern no lib depends on.
-dom/nodes/Document-contentType/contentType/contenttype_datauri_02.html:
-- name: Data URI document.contentType === 'text/html' when data URI MIME type is set
-  reason: 'Navigating an iframe to a data: URL of a typed resource and reading document.contentType;
-    iframe data:-navigation content-type tracking is not modeled.'
 dom/nodes/Document-contentType/contentType/contenttype_gif.html:
 - name: GIF document.contentType === 'image/gif'
   reason: Binary image in an iframe yields a UA-synthesized image-viewer document;

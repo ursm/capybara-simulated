@@ -21,8 +21,6 @@ dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-met
   steps
 dom/nodes/moveBefore/select-option-optgroup.html:
 - Moving options between select elements.
-dom/nodes/query-target-in-load-event.html:
-- document.querySelector(":target") must work when called in the window.load event
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
@@ -32,5 +30,3 @@ shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
-url/data-uri-fragment.html:
-- Data URI parsing of fragments
