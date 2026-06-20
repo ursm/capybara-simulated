@@ -37,9 +37,6 @@ shadow-dom/declarative/declarative-shadow-dom-opt-in.html:
 - XMLHttpRequest - not supported
 - iframe with no sandbox allows declarative Shadow DOM
 - sandboxed iframe allows declarative Shadow DOM
-shadow-dom/focus/focus-click-on-shadow-host.html:
-- ":focus should be applied to the host and the child node when the focus is moved
-  by mouse click"
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
