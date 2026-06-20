@@ -23,7 +23,6 @@ dom/events/EventListener-incumbent-global-2.sub.html:
 dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html: HARNESS_ERROR
 dom/events/event-global-is-still-set-when-reporting-exception-onerror.html:
 - window.onerror handler restores window.event after it reports an exception
-dom/interface-objects.html: HARNESS_ERROR
 dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
 - Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
   steps

@@ -246,8 +246,13 @@ module WptRunner
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
     s.visit(sub ? "#{SUB_ORIGIN}/#{visit}" : "/#{visit}")
     # The driver doesn't auto-fire window 'load'; testharness completes its
-    # sync tests off that event (then a setTimeout(0) sets `all_loaded`).
-    s.evaluate_script("window.dispatchEvent(new Event('load'))")
+    # sync tests off that event (then a setTimeout(0) sets `all_loaded`). Prefer
+    # the bridge's `__csimFireWindowLoad`, which uses a module-captured `Event`
+    # constructor — a test that does `delete window.Event` (interface-objects.html)
+    # would otherwise make `new Event('load')` throw and the harness never finish.
+    s.evaluate_script(
+      "typeof __csimFireWindowLoad === 'function' ? __csimFireWindowLoad() : window.dispatchEvent(new Event('load'))"
+    )
 
     res = nil
     idle = 0
