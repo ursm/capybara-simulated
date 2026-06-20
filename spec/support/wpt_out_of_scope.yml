@@ -4611,8 +4611,11 @@ shadow-dom/focus-navigation/focus-navigation-slot-nested-2levels.html:
     async-drain-budget limit, not a focus-engine gap.
 shadow-dom/focus-navigation/focus-navigation-slot-nested-delegatesFocus.html:
 - name: Focus controller should treat each slot as a focus scope.
-  reason: Tab-key sequential focus navigation through delegatesFocus slot scopes via
-    test_driver; depends on flattened-tree focus tab-order, not modeled.
+  reason: Bidirectional Tab navigation (forward + backward = many sequential testdriver
+    async hops) exceeds the WPT runner's normal async-drain budget before the forced
+    harness timeout. The scope-relative sequential-focus-navigation engine now models
+    shadow focus scopes + slots + delegatesFocus + tabindex order; a runner
+    async-drain-budget limit, not a focus-engine gap.
 shadow-dom/focus-navigation/focus-navigation-slot-nested-fallback.html:
 - name: Focus should cover assigned elements of an assigned slot espacially there
     are fallback contents.
@@ -4654,51 +4657,93 @@ shadow-dom/focus-navigation/focus-navigation-slots.html:
 shadow-dom/focus-navigation/focus-navigation-web-component-radio.html:
 - name: Focus for web component input type elements should be bound by <form> inside
     shadow DOM
-  reason: Sequential focus navigation of radio group bound by shadow-DOM <form>; needs
-    UA form-scoped tab-order model the driver does not implement.
+  reason: Bidirectional Tab navigation of a radio group inside a shadow-DOM <form>
+    (forward + backward sequential testdriver async hops) exceeds the WPT runner's
+    async-drain budget before the forced harness timeout. The scope-relative
+    focus-navigation engine now models shadow focus scopes + tabindex order; a runner
+    async-drain-budget limit, not a focus-engine gap.
 shadow-dom/focus-navigation/focus-navigation-with-delegatesFocus.html:
 - name: Testing tab navigation order with mode closed, no tabindex and delegatesFocus=false.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, no tabindex and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=false.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=-1 and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=false.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=0 and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=false.
-  reason: Positive-tabindex ordering inside shadow scope; driver __csimAdvanceFocus
-    ignores tabindex ordering and shadow focus scopes.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode closed, tabindex=1 and delegatesFocus=true.
   reason: Positive-tabindex ordering inside shadow scope with delegatesFocus; driver
     has no such sequential-navigation model.
 - name: Testing tab navigation order with mode open, no tabindex and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=false.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=-1 and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=false.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=0 and delegatesFocus=true.
-  reason: Tab-order through shadow scope with delegatesFocus; driver has no focus-scope/delegatesFocus
-    sequential-navigation model.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=false.
-  reason: Positive-tabindex ordering inside shadow scope; driver __csimAdvanceFocus
-    ignores tabindex ordering and shadow focus scopes.
+  reason: Bidirectional Tab navigation across delegatesFocus shadow scopes; the first
+    subtest exhausts the WPT runner's async-drain budget before the forced harness
+    timeout and the remaining subtests never run. The scope-relative
+    sequential-focus-navigation engine now models shadow focus scopes + delegatesFocus
+    + tabindex order; a runner async-drain-budget limit, not a focus-engine gap.
 - name: Testing tab navigation order with mode open, tabindex=1 and delegatesFocus=true.
   reason: Positive-tabindex ordering inside shadow scope with delegatesFocus; driver
     has no such sequential-navigation model.

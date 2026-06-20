@@ -52,12 +52,6 @@ shadow-dom/focus-navigation/focus-with-negative-index.html:
 shadow-dom/focus/focus-click-on-shadow-host.html:
 - ":focus should be applied to the host and the child node when the focus is moved
   by mouse click"
-shadow-dom/focus/focus-tabindex-order-shadow-negative-delegatesFocus.html:
-- Order when all tabindex=-1 is and delegatesFocus = true
-shadow-dom/focus/focus-tabindex-order-shadow-varying-delegatesFocus.html:
-- Order when tabindex varies and delegatesFocus = true
-shadow-dom/focus/focus-tabindex-order-shadow-varying-tabindex-3.html:
-- Order with different tabindex on host
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
 - A_08_02_03_T01
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
