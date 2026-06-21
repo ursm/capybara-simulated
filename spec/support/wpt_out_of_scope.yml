@@ -4574,16 +4574,6 @@ shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
 - name: delegatesFocus shouldn't cause extra focus steps
   reason: Asserts on scroll/scrollend events and fragment-navigation scroll geometry
     under delegatesFocus; needs scroll geometry + scroll events we don't model.
-shadow-dom/focus/focus-shadowhost-display-none.html:
-- name: when shadow host itself is focused, it should match display:none, lose focus
-    then becomes display:block again.
-  reason: Asserts dynamic :focus{display:none} computed-style recompute + display:none
-    focusability/blur (crbug.com/482830); needs layout/focusability engine we don't
-    model.
-- name: when shadow host with delegatesFocus=true has focused element inside the shadow,
-    it should also match display:none, then lose focus and become display:block again.
-  reason: Same :focus{display:none} dynamic-layout + delegatesFocus blur interaction;
-    depends on rendered display recompute and display:none focusability.
 shadow-dom/focus/focus-slot-box-generated-tabindex-0.html:
 - name: slot with tabindex=0 that generates a box should be focusable
   reason: Focusability gated on slot 'generating a box' (display:inline-block layout)
