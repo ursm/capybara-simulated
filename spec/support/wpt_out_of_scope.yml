@@ -751,6 +751,19 @@ domparsing/XMLSerializer-serializeToString.html:
   reason: Encodes an abandoned DOM-Parsing revision; real browsers (verified against
     Chrome) keep the literal xmlns attributes rather than dropping them by local-name
     match, so this subtest fails in real browsers too.
+domparsing/innerhtml-05.xhtml:
+- name: innerHTML in XHTML
+  reason: 'Legacy test: it reads window[0].document of an <iframe src="data:text/xml,…">,
+    but a data: URL iframe has an opaque origin, so that access is cross-origin-blocked
+    (SecurityError) at the test''s setup in real browsers — verified failing in both
+    Chrome 149 and Firefox 152. It relies on the removed data:-URL-inherits-parent-origin
+    behavior. Our driver doesn''t model cross-origin enforcement, but even permitting
+    the access the malformed-XML innerHTML throws the IFRAME realm''s DOMException
+    (as real browsers do), while assert_throws_dom checks e.constructor === the MAIN
+    realm''s DOMException — unsatisfiable without faking cross-realm exception identity,
+    which would itself diverge from browsers. The underlying behavior the test targets
+    (XML innerHTML throws SyntaxError on non-well-formed input) already works in the
+    driver; only this harness is unsatisfiable in a browser-matching way.'
 domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
 - name: streamAfterHTML with trusted types and no default policy returns a WritableStream.
   reason: WICG declarative-partial-updates stream* methods return WritableStream +
