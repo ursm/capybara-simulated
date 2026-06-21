@@ -32,8 +32,12 @@ dom/events/Event-dispatch-on-disabled-elements.html:
   reason: Requires CSS transition events fired on getComputedStyle flush, which needs
     the layout/transition engine we do not model.
 - name: Real clicks on disabled elements must not dispatch events.
-  reason: Uses test_driver.click for a real hit-tested click on a rendered element;
-    depends on visual hit-testing we do not model.
+  reason: NOTRUN — blocked upstream. The CSS Transitions / Animations promise_tests
+    earlier in this file await transition/animation end events that never fire
+    without the layout/animation engine we don't model (rule 1); they time out and
+    hang the sequential promise_test queue, so this later subtest never runs. (The
+    disabled-click behaviour itself — test_driver.click no-op on a disabled control
+    — is satisfiable, but moot while the file's animation tests block the queue.)
 dom/events/EventListener-incumbent-global-1.sub.html:
 - name: Check the incumbent global EventListeners  are called with
   reason: Needs the WebIDL incumbent settings object — when a listener fires, the
