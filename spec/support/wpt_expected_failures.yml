@@ -15,9 +15,6 @@ dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
 - Check the incumbent global EventListeners  are called with
-dom/nodes/insertion-removing-steps/Node-appendChild-script-and-default-style-meta-from-fragment.html:
-- Inserting <meta> that uses alternate stylesheets, applies the style during DOM post-insertion
-  steps
 domparsing/innerhtml-05.xhtml:
 - innerHTML in XHTML
 shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
