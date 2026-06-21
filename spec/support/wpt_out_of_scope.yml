@@ -14948,17 +14948,6 @@ shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessor
     in pure JS. A plain-object document.all would be truthy and break legacy `if (document.all)`
     feature-detection (rule 1: platform exotic object). The other accessors (getElementsByTagName/NS/ClassName/getElementById)
     in this file already pass.'
-shadow-dom/untriaged/styles/test-001.html:
-- name: A_06_00_01_T01
-  reason: Asserts s.querySelector('#shd').offsetTop > 0 to prove style not applied;
-    relies on offsetTop layout truthiness, no layout engine.
-- name: A_06_00_01_T02
-  reason: Asserts offsetTop > 0 for shadow span (display:none not applied); requires
-    offsetTop layout geometry, out of scope.
-shadow-dom/untriaged/styles/test-005.html:
-- name: A_06_00_06_T01
-  reason: Asserts offsetTop > 0 (doc span visible) and offsetTop === 0 (shadow span
-    hidden); relies on offsetTop layout geometry.
 shadow-dom/untriaged/styles/test-008.html:
 - name: A_06_00_09_T01
   reason: Asserts offsetTop/offsetHeight change as host font-size grows; requires
