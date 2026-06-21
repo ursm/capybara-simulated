@@ -519,11 +519,6 @@ dom/events/webkit-transition-end-event.html:
 - name: webkitTransitionEnd event listener should trigger for an animation
   reason: Requires a running CSS transition to emit transitionend; transition firing
     not modeled.
-dom/lists/DOMTokenList-iteration.html:
-- name: classList inheritance from Array.prototype
-  reason: Asserts DOMTokenList iterator/keys/values/forEach are the IDENTICAL Array.prototype
-    functions; our DOMTokenList intentionally does not subclass Array (no lib needs
-    object identity).
 dom/nodes/Document-URL.html:
 - name: Document.URL with redirect
   reason: Requires iframe to follow a real HTTP 302 redirect to redirect.py, fire
