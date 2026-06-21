@@ -37,26 +37,25 @@ dom/events/Event-dispatch-on-disabled-elements.html:
 dom/events/EventListener-incumbent-global-1.sub.html:
 - name: Check the incumbent global EventListeners  are called with
   reason: Needs the WebIDL incumbent settings object — when a listener fires, the
-    message posted inside it must carry the origin of the realm that CALLED
-    addEventListener (subframe-1), not the listener function's own realm
-    (subsubframe). The test is built specifically to distinguish those two, so the
-    function-realm is no shortcut. Recovering the addEventListener caller's realm
-    requires V8 GetIncumbentContext; rusty_racer exposes no such API (surface is
-    contextOf/contextGlobal/drainMicrotasks/…), contextOf inside a cross-realm
-    method returns the callee, and the call is a direct cross-realm V8 reference
-    with no Ruby interception point. Passing would also need distinct cross-origin
-    frame origins + document.domain relaxation + postMessage origin attribution —
-    subsystems we deliberately don't model (postMessage origin is hard-coded '').
-    A spec edge no real library/app depends on; satisfying it needs a binding
-    extension or a library-shaped hack. Earned out-of-scope per rule 1.
+    message posted inside it must carry the origin of the realm that CALLED addEventListener
+    (subframe-1), not the listener function's own realm (subsubframe). The test is
+    built specifically to distinguish those two, so the function-realm is no shortcut.
+    Recovering the addEventListener caller's realm requires V8 GetIncumbentContext;
+    rusty_racer exposes no such API (surface is contextOf/contextGlobal/drainMicrotasks/…),
+    contextOf inside a cross-realm method returns the callee, and the call is a direct
+    cross-realm V8 reference with no Ruby interception point. Passing would also need
+    distinct cross-origin frame origins + document.domain relaxation + postMessage
+    origin attribution — subsystems we deliberately don't model (postMessage origin
+    is hard-coded ''). A spec edge no real library/app depends on; satisfying it needs
+    a binding extension or a library-shaped hack. Earned out-of-scope per rule 1.
 dom/events/EventListener-incumbent-global-2.sub.html:
 - name: Check the incumbent global EventListeners  are called with
-  reason: Same incumbent-settings-object requirement as
-    EventListener-incumbent-global-1.sub.html (this variant gets the listener via
-    frames[0].getTheListener() instead of a direct bind, but still asserts the
-    incumbent is the addEventListener caller, not the function's home realm).
-    Unsatisfiable without V8 GetIncumbentContext (not exposed by rusty_racer) plus
-    cross-origin frame origins we don't model. Earned out-of-scope per rule 1.
+  reason: Same incumbent-settings-object requirement as EventListener-incumbent-global-1.sub.html
+    (this variant gets the listener via frames[0].getTheListener() instead of a direct
+    bind, but still asserts the incumbent is the addEventListener caller, not the
+    function's home realm). Unsatisfiable without V8 GetIncumbentContext (not exposed
+    by rusty_racer) plus cross-origin frame origins we don't model. Earned out-of-scope
+    per rule 1.
 dom/events/EventListener-invoke-legacy.html:
 - name: Legacy listener of animationend
   reason: Requires real CSS animation/transition timeline to fire animationend; we
@@ -105,10 +104,6 @@ dom/events/scrolling/scroll-event-fired-to-element.html:
 - name: scrollTop and scrollLeft when scrolling above maximum offset.
   reason: Clamping scrollTop/scrollLeft to scrollable max requires layout-computed
     content/overflow dimensions we don't model.
-dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html:
-- name: scrolling state is false at the end of the test
-  reason: Needs scroll geometry + scrollend event firing after instant scroll; scroll/scrollend
-    is a layout subsystem we deliberately don't model.
 dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html:
 - name: Move down, up and down again, receive scrollend event only once
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
@@ -163,11 +158,6 @@ dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html:
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollTo with behavior 'auto' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
 - name: Tests scrollend event for calling scrollTo with behavior 'smooth' on root.
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
@@ -194,11 +184,6 @@ dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html:
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
-- name: Tests scrollend event for [scrollLeft] behavior:'smooth' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
 - name: Tests scrollend event for [scrollTop] behavior:'auto' on root.
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
@@ -210,11 +195,6 @@ dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html:
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
 - name: Tests scrollend event for [scrollTop] behavior:'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollTop] behavior:'smooth' on subframe.
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
@@ -349,47 +329,6 @@ dom/events/scrolling/scrollend-event-handler-content-attributes.html:
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
-- name: Tests scrollend event is handled by event handler content attribute.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event is not fired to document body event handler content
-    attribute.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
-- name: scrollend is received after removing descendant div
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-dom/events/scrolling/scrollend-fires-to-text-input.html:
-- name: scrolled input field should receive scrollend when setting scrollLeft.
-  reason: Requires real scroll geometry on input + scrollend event; scroll/scrollend
-    is a deliberately unmodeled layout subsystem.
-- name: 'scrolled input field should receive scrollend with scrollBy({ behavior: ''instant''
-    }).'
-  reason: Requires scroll geometry + scrollend after scrollBy; scroll/scrollend layout
-    subsystem unmodeled.
-- name: 'scrolled input field should receive scrollend with scrollBy({ behavior: ''smooth''
-    }).'
-  reason: Requires smooth-scroll animation geometry + scrollend after scrollBy; scroll/scrollend
-    layout subsystem unmodeled.
-- name: 'scrolled input field should receive scrollend with scrollTo({ behavior: ''instant''
-    }).'
-  reason: Requires scroll geometry + scrollend after scrollTo; scroll/scrollend layout
-    subsystem unmodeled.
-- name: 'scrolled input field should receive scrollend with scrollTo({ behavior: ''smooth''
-    }).'
-  reason: Requires smooth-scroll animation geometry + scrollend after scrollTo; scroll/scrollend
-    layout subsystem unmodeled.
-dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html:
-- name: snap to fractional offset fires scrollend exactly once.
-  reason: Requires CSS scroll-snap layout at fractional offsets to fire scrollend
-    once; scroll-snap geometry unmodeled.
 dom/events/scrolling/wheel-event-transactions-basic.html:
 - name: The wheel event transactions target may not be a scroll frame
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
@@ -3808,10 +3747,6 @@ encoding/streams/decode-non-utf8.any.js:
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
     legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
     (rule 1) — only utf-8/utf-16/windows-1252 are.
-- name: TextDecoderStream should be able to decode ISO-8859-14
-  reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
-    legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
-    (rule 1) — only utf-8/utf-16/windows-1252 are.
 - name: TextDecoderStream should be able to decode Shift_JIS
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
     legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
@@ -3837,27 +3772,6 @@ encoding/textdecoder-mistakes.any.js:
 - name: Concatenating two ISO-2022-JP outputs is not always valid
   reason: iso-2022-jp legacy multibyte escape-state decoding; deliberately not modeled
     (degrades to utf-8 path).
-- name: 'Fast path misdetection: windows-1250'
-  reason: windows-1250 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-1253'
-  reason: windows-1253 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-1254'
-  reason: windows-1254 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-1255'
-  reason: windows-1255 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-1257'
-  reason: windows-1257 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-1258'
-  reason: windows-1258 single-byte table not modeled; only utf-8/16/win-1252 byte
-    tables exist.
-- name: 'Fast path misdetection: windows-874'
-  reason: windows-874 single-byte table not modeled; only utf-8/16/win-1252 byte tables
-    exist.
 - name: 'Replacement, push back ASCII characters: big5'
   reason: big5 legacy multibyte decoding + push-back not modeled; degrades to utf-8
     path.
@@ -3900,36 +3814,6 @@ encoding/textdecoder-mistakes.any.js:
     path.
 - name: gbk version and ranges
   reason: gbk pointer-range decoding table not modeled; degrades to utf-8 path.
-- name: 'selected single-byte: iso-8859-16'
-  reason: iso-8859-16 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: iso-8859-8-i'
-  reason: iso-8859-8-i single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: koi8-u'
-  reason: koi8-u single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: macintosh'
-  reason: macintosh single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1250'
-  reason: windows-1250 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1251'
-  reason: windows-1251 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1253'
-  reason: windows-1253 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1254'
-  reason: windows-1254 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1255'
-  reason: windows-1255 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1257'
-  reason: windows-1257 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-1258'
-  reason: windows-1258 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: windows-874'
-  reason: windows-874 single-byte table not modeled; only win-1252 single-byte exists.
-- name: 'selected single-byte: x-mac-cyrillic'
-  reason: x-mac-cyrillic single-byte table not modeled; only win-1252 single-byte
-    exists.
-- name: 'specific: x-user-defined'
-  reason: x-user-defined (0x80+ -> U+F780+) byte mapping not modeled; degrades to
-    utf-8 path.
 - name: 'stream: big5'
   reason: big5 legacy multibyte decoder + streaming not modeled.
 - name: 'stream: euc-jp'
@@ -4817,8 +4701,8 @@ shadow-dom/leaktests/html-collection.html:
 - name: document.all should not contain shadow nodes
   reason: We deliberately do not expose document.all. Its defining behaviour is the
     [[IsHTMLDDA]] exotic slot (falsy in boolean context, `typeof` === 'undefined'),
-    unmodellable in plain JS; a normal object would break the `if (document.all)` /
-    `typeof document.all` feature-detection real libraries rely on (rule 2). The
+    unmodellable in plain JS; a normal object would break the `if (document.all)`
+    / `typeof document.all` feature-detection real libraries rely on (rule 2). The
     shadow-exclusion this subtest checks is already covered by the other document.*
     collections in this file (scripts/forms/images/links/anchors/embeds/plugins),
     which pass. document.applets (always-empty per spec) is supported and passes.
@@ -15104,17 +14988,6 @@ shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-metho
 - name: A_10_01_02_04_T01
   reason: ShadowRoot.getSelection() is a removed legacy-spec method no modern browser
     implements (use document/window getSelection); no library depends on it.
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-006.html:
-- name: A_10_01_02_06_01_T02
-  reason: Asserts ShadowRoot.elementFromPoint(1,1) returns an object (a hit element);
-    requires layout/visual hit-testing we deliberately don't model.
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-007.html:
-- name: A_10_01_02_06_02_T01
-  reason: ShadowRoot.elementFromPoint(-1,1)==null negative-coord hit-testing semantics;
-    requires layout/geometry engine not modeled.
-- name: A_10_01_02_06_02_T02
-  reason: ShadowRoot.elementFromPoint(1,-1)==null negative-coord hit-testing semantics;
-    requires layout/geometry engine not modeled.
 shadow-dom/untriaged/events/event-retargeting/test-003.html:
 - name: A_05_01_03_T01
   reason: 'Dispatches a NON-composed event on fallback content created in the PARENT

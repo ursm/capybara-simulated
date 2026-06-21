@@ -46,11 +46,11 @@
 "encoding/legacy-mb-tchinese/": >-
   Legacy Traditional Chinese (Big5). Out of scope — see above.
 "encoding/single-byte-decoder.window.js": >-
-  All single-byte legacy decoders (ISO-8859-2..16, KOI8, mac, windows-125x
-  except 1252). Out of scope — ~500 exhaustive per-byte cases per encoding.
-"encoding/textdecoder-fatal-single-byte.any.js": >-
-  Fatal-mode decode for every single-byte legacy encoding. Out of scope —
-  ~3300 data-driven cases over encodings we don't ship.
+  Single-byte decoders ARE now modeled (TextDecoder variant passes). The
+  remaining variants need byte-level XHR responseText + iframe
+  document.characterSet/inputEncoding decoding (single-byte-raw.py /
+  text-plain-charset.py CGI), an unmodeled byte-transport layer — kept skipped
+  for those ~336 transport-dependent cases, not the decoder tables.
 "encoding/iso-2022-jp-decoder.any.js": >-
   ISO-2022-JP stateful decoder. Out of scope — legacy multibyte, see above.
 "encoding/iso-2022-jp-encoder.html": >-
