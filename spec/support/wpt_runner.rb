@@ -74,7 +74,13 @@ module WptRunner
     '.js'   => 'text/javascript',
     '.json' => 'application/json',
     '.svg'  => 'image/svg+xml',
-    '.css'  => 'text/css'
+    '.css'  => 'text/css',
+    '.gif'  => 'image/gif',
+    '.png'  => 'image/png',
+    '.jpg'  => 'image/jpeg',
+    '.jpeg' => 'image/jpeg',
+    '.bmp'  => 'image/bmp',
+    '.webp' => 'image/webp'
   }.freeze
 
   # Canonical WPT server identity for `.sub.*` template substitution. wptserve
@@ -128,6 +134,21 @@ module WptRunner
         if path.end_with?('/encoding.py')
           label = req.params['label'].to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;')
           next [200, {'content-type' => 'text/html'}, [%{<!doctype html><meta charset="#{label}">}]]
+        end
+        # `contenttype_setter.py` — WPT's Content-Type CGI (Document-contentType
+        # tests). Emulate its behaviour: set Content-Type from type/subtype, with
+        # an optional `mime` <meta http-equiv> in the body (a non-authoritative
+        # override the response header is meant to win over) and a removeContentType
+        # escape. No Python; the driver's contentType reflection is what's tested.
+        if path.end_with?('/contenttype_setter.py')
+          headers = {'content-type' => 'text/html'}
+          type = req.params['type']; subtype = req.params['subtype']
+          headers['content-type'] = "#{type}/#{subtype}" if type && subtype
+          headers.delete('content-type') if req.params['removeContentType']
+          body = String.new('<head>')
+          body << %{<meta http-equiv="Content-Type" content="#{req.params['mime']}; charset=utf-8"/>} if req.params['mime']
+          body << '</head>'
+          next [200, headers, [body]]
         end
         # `.any.js` / `.window.js` multi-global tests ship only the JS source; WPT
         # generates the per-global HTML wrapper at serve time. Synthesize the

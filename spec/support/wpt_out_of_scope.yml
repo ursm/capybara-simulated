@@ -529,39 +529,11 @@ dom/nodes/Document-URL.html:
   reason: Requires iframe to follow a real HTTP 302 redirect to redirect.py, fire
     onload, then read contentDocument.URL as the final URL; needs true network async
     navigation.
-dom/nodes/Document-contentType/contentType/contenttype_bmp.html:
-- name: BMP document.contentType === 'image/bmp'
-  reason: Loading a binary image into an iframe makes the UA synthesize an image-viewer
-    document; image-document synthesis is a rendering/UA concern no lib depends on.
-dom/nodes/Document-contentType/contentType/contenttype_gif.html:
-- name: GIF document.contentType === 'image/gif'
-  reason: Binary image in an iframe yields a UA-synthesized image-viewer document;
-    image-document rendering is a non-modeled UA concern no app relies on.
 dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
 - name: Javascript URI document.contentType === 'text/html'
   reason: 'Navigating an iframe to a javascript: URL and reading the resulting document.contentType
     (''text/html''); javascript:-URL document creation + content-type tracking on
     iframe navigation is not modeled.'
-dom/nodes/Document-contentType/contentType/contenttype_jpg.html:
-- name: JPG document.contentType === 'image/jpeg'
-  reason: Binary image in an iframe yields a UA-synthesized image-viewer document;
-    image-document rendering is a non-modeled UA concern no app relies on.
-dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html:
-- name: Custom document.contentType === 'text/xml' when explicitly set to this value
-  reason: document.contentType must reflect the server's Content-Type header (text/xml);
-    requires a CGI/header-controlling server response, not available in-process (rule
-    1).
-dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html:
-- name: Custom document.contentType === 'text/html' when explicitly set to this value
-    and an attempt is made to override this value in an HTML meta header
-  reason: document.contentType must reflect the server's Content-Type header (text/html);
-    requires a CGI/header-controlling server response, not available in-process (rule
-    1).
-dom/nodes/Document-contentType/contentType/contenttype_png.html:
-- name: PNG document.contentType === 'image/png'
-  reason: Loading a binary PNG into an iframe yields a UA-synthesised image document
-    with contentType image/png; image-document synthesis is a non-modeled UA construct
-    (rule 1).
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
