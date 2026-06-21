@@ -3701,10 +3701,6 @@ encoding/replacement-encodings.any.js:
 - name: replacement - non-empty input decodes to one replacement character.
   reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
     tables.
-encoding/sniffing.html:
-- name: No (UTF-8) sniffing allowed
-  reason: HTML encoding sniffing (byte-level BOM / meta charset detection of the document's
-    bytes) is not modeled; responses are handled as decoded text — rule 1.
 encoding/streams/decode-non-utf8.any.js:
 - name: TextDecoderStream should be able to decode ISO-2022-JP
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);

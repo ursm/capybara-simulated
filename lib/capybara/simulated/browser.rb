@@ -3646,6 +3646,35 @@ module Capybara
       # hot path: just a 2–3 byte prefix check). One BOM is consumed; any further
       # BOMs are ordinary U+FEFF characters in the decoded text (per spec the
       # parser does not strip them again).
+      # An XML-family document (XHTML / SVG / application+text/xml). Its encoding
+      # default is UTF-8 — the windows-1252 locale default is HTML-only.
+      def xml_content_type?(content_type)
+        mime = content_type.to_s.split(';', 2).first.to_s.strip.downcase
+        mime.end_with?('+xml') || mime == 'application/xml' || mime == 'text/xml'
+      end
+
+      # Does the response carry an explicit encoding signal (so the default
+      # windows-1252 decode must NOT apply)? A `charset=` in the Content-Type, or
+      # a `<meta charset>` / `<meta http-equiv=content-type … charset=…>` in the
+      # HTML prescan window (the first 1024 bytes, per the HTML sniffing algorithm).
+      # The `charset` must start a real attribute / content-charset (preceded by
+      # whitespace, a quote, or `;`), so hyphenated look-alikes — `data-charset=`,
+      # `accept-charset=` — don't false-trigger the signal.
+      def html_charset_signal?(content_type, raw)
+        return true if /;\s*charset\s*=/i.match?(content_type.to_s)
+        head = raw.to_s.b[0, 1024].to_s
+        /<meta\b[^>]*[\s"';]charset\s*=/i.match?(head)
+      end
+
+      # Decode bytes as windows-1252 (the HTML locale-default encoding) to a UTF-8
+      # Ruby string. Replaces undefined slots rather than raising.
+      def decode_windows1252(s)
+        s.to_s.b.dup.force_encoding(Encoding::WINDOWS_1252)
+         .encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+      rescue StandardError
+        RuntimeShared.utf8_text(s)
+      end
+
       def decode_response_bom(s)
         b = s.b
         if b.start_with?("\xEF\xBB\xBF".b)
@@ -4206,13 +4235,31 @@ module Capybara
         # `within_frame` scope is now stale — fall back to the main document.
         reset_frame_scope
         reset_timer_state
-        # The DOCUMENT is text; the Rack body arrives BINARY-tagged (see
-        # `RuntimeShared.utf8_text`). A leading BOM selects the encoding (over any
-        # <meta charset>) and is stripped here; the detected charset rides `opts`
-        # to pin `document.characterSet`. Non-BOM bodies decode as UTF-8 + scrub,
-        # matching observable browser behavior for the suites we run.
-        decoded, bom_charset = decode_response_bom(html)
-        html = RuntimeShared.utf8_text(decoded)
+        # The response content type drives both the parser choice (XML vs HTML —
+        # XHTML/XML/SVG parse case-sensitively, no html/head/body skeleton,
+        # `isHtmlDocument` false) and the encoding's HTTP-charset signal.
+        ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
+        ct = ct.first if ct.is_a?(Array)
+        # HTML document encoding sniffing (the body arrives BINARY-tagged; see
+        # `RuntimeShared.utf8_text`). A leading BOM wins (over <meta charset>) and
+        # is stripped. Otherwise, for an HTML document with NO encoding signal — no
+        # charset in the Content-Type AND no <meta charset> in the prescan — the
+        # locale default is windows-1252 and the bytes decode as such; there is NO
+        # UTF-8 sniffing (WPT encoding/sniffing). A declared charset keeps the
+        # UTF-8 + scrub path (the JS side reports it from the meta; a declared
+        # non-UTF-8 multibyte charset is still UTF-8-decoded — legacy multibyte
+        # tables are out of scope). The windows-1252 default is HTML-only: an XML
+        # document (XHTML/SVG/application+text/xml) defaults to UTF-8, and an empty
+        # body (about:blank, a blank 200) stays UTF-8 too.
+        decoded, doc_charset = decode_response_bom(html)
+        if doc_charset
+          html = RuntimeShared.utf8_text(decoded)
+        elsif html.to_s.empty? || xml_content_type?(ct) || html_charset_signal?(ct, html)
+          html = RuntimeShared.utf8_text(html)
+        else
+          html = decode_windows1252(html)
+          doc_charset = 'windows-1252'
+        end
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
@@ -4220,14 +4267,9 @@ module Capybara
           'url'                => @current_url.to_s,
           'html'               => html
         }
-        # Carry the response content type so the JS side can pick the XML vs
-        # HTML parser (XHTML / XML / SVG documents parse case-sensitively, with
-        # no html/head/body skeleton, and report `isHtmlDocument` false).
-        ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
-        ct = ct.first if ct.is_a?(Array)
         opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
-        # A leading-BOM-detected encoding pins document.characterSet (over meta).
-        opts['charset'] = bom_charset if bom_charset
+        # The detected document encoding pins document.characterSet (over meta).
+        opts['charset'] = doc_charset if doc_charset
         if @viewport_width && @viewport_height
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height
