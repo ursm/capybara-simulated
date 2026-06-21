@@ -3617,7 +3617,14 @@ module Capybara
         # encoding per the HTML "decode" algorithm and is removed). The real
         # bytes for binary consumers ride `body_b64`; the Rack body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
-        text = RuntimeShared.utf8_text(is_text ? decode_response_bom(raw) : raw)
+        bom_charset = nil
+        text =
+          if is_text
+            decoded, bom_charset = decode_response_bom(raw)
+            RuntimeShared.utf8_text(decoded)
+          else
+            RuntimeShared.utf8_text(raw)
+          end
         out = {
           'status'     => status,
           'headers'    => hdrs,
@@ -3626,29 +3633,37 @@ module Capybara
           'redirected' => redirected,
           'type'       => 'basic'
         }
+        # The BOM-detected encoding (if any) — a frame load pins its document's
+        # characterSet to it (see __csimFrameWindow); highest-precedence signal.
+        out['charset']  = bom_charset if bom_charset
         out['body_b64'] = Base64.strict_encode64(raw) unless is_text
         out
       end
 
-      # Strip + decode a single leading byte-order mark, mapping the body to a
-      # UTF-8 Ruby string. No BOM → return the bytes untouched (the hot path:
-      # just a 2–3 byte prefix check). One BOM is consumed; any further BOMs are
-      # ordinary U+FEFF characters in the decoded text (per spec the parser does
-      # not strip them again).
+      # Strip + decode a single leading byte-order mark, returning
+      # `[utf8_text, charset]` — `charset` is the BOM-selected Encoding-standard
+      # name (highest-precedence encoding signal) or nil when there's no BOM (the
+      # hot path: just a 2–3 byte prefix check). One BOM is consumed; any further
+      # BOMs are ordinary U+FEFF characters in the decoded text (per spec the
+      # parser does not strip them again).
       def decode_response_bom(s)
         b = s.b
         if b.start_with?("\xEF\xBB\xBF".b)
-          b.byteslice(3..).force_encoding(Encoding::UTF_8)
+          [b.byteslice(3..).force_encoding(Encoding::UTF_8), 'UTF-8']
         elsif b.start_with?("\xFF\xFE".b) || b.start_with?("\xFE\xFF".b)
           # Generic UTF-16: the BOM picks endianness and is dropped by the decoder.
           # Replace malformed units rather than raising (a truncated/odd-length
           # body still yields readable UTF-8 instead of falling back to raw bytes).
-          b.force_encoding(Encoding::UTF_16).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+          # A UTF-32LE BOM (FF FE 00 00) is matched here as UTF-16LE too — which is
+          # exactly what browsers do (UTF-32 unsupported; the leading FF FE is read
+          # as the UTF-16LE BOM).
+          charset = b.start_with?("\xFF\xFE".b) ? 'UTF-16LE' : 'UTF-16BE'
+          [b.force_encoding(Encoding::UTF_16).encode(Encoding::UTF_8, invalid: :replace, undef: :replace), charset]
         else
-          s
+          [s, nil]
         end
       rescue StandardError
-        s
+        [s, nil]
       end
 
       def text_response?(headers)
@@ -4192,10 +4207,12 @@ module Capybara
         reset_frame_scope
         reset_timer_state
         # The DOCUMENT is text; the Rack body arrives BINARY-tagged (see
-        # `RuntimeShared.utf8_text`). Charset-header-driven decode is the
-        # fuller story; UTF-8 + scrub matches observable browser behavior
-        # for the suites we run.
-        html = RuntimeShared.utf8_text(html)
+        # `RuntimeShared.utf8_text`). A leading BOM selects the encoding (over any
+        # <meta charset>) and is stripped here; the detected charset rides `opts`
+        # to pin `document.characterSet`. Non-BOM bodies decode as UTF-8 + scrub,
+        # matching observable browser behavior for the suites we run.
+        decoded, bom_charset = decode_response_bom(html)
+        html = RuntimeShared.utf8_text(decoded)
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
@@ -4209,6 +4226,8 @@ module Capybara
         ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
         ct = ct.first if ct.is_a?(Array)
         opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
+        # A leading-BOM-detected encoding pins document.characterSet (over meta).
+        opts['charset'] = bom_charset if bom_charset
         if @viewport_width && @viewport_height
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height

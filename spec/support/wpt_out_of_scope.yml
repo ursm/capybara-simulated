@@ -3687,10 +3687,6 @@ domparsing/tentative/stream-positional.html:
 - name: streamReplaceWithHTMLUnsafe({}) with A and B
   reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
     the async-streams runtime is not modeled (rule 1, real async runtime / streams).
-encoding/bom-handling.html:
-- name: document.characterSet should match the BOM
-  reason: Byte-order-mark detection / stripping during document decode is not modeled
-    — rule 1 (encoding subsystem).
 encoding/replacement-encodings.any.js:
 - name: csiso2022kr - non-empty input decodes to one replacement character.
   reason: Legacy CJK 'replacement' encoding label table deliberately not modeled.
@@ -3806,30 +3802,11 @@ encoding/utf-32-from-win1252.html:
     decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
     during navigation is not modeled (responses are handled as decoded text) — rule
     1 (encoding/legacy subsystem).'
-- name: Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
-  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
-    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
-    during navigation is not modeled (responses are handled as decoded text) — rule
-    1 (encoding/legacy subsystem).'
-- name: Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
-  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
-    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
-    during navigation is not modeled (responses are handled as decoded text) — rule
-    1 (encoding/legacy subsystem).'
 - name: Expect resources/utf-32-little-endian-nobom.html to parse as windows-1252
   reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
     decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
     during navigation is not modeled (responses are handled as decoded text) — rule
     1 (encoding/legacy subsystem).'
-encoding/utf-32.html:
-- name: Expect resources/utf-32-little-endian-bom.html to parse as UTF-16LE
-  reason: 'Document encoding detection: a utf-32 little-endian BOM must parse as UTF-16LE
-    (its leading bytes are a UTF-16LE BOM). Byte-level BOM sniffing during navigation
-    is not modeled — rule 1.'
-- name: Expect resources/utf-32-little-endian-bom.xml to parse as UTF-16LE
-  reason: 'Document encoding detection: a utf-32 little-endian BOM must parse as UTF-16LE
-    (its leading bytes are a UTF-16LE BOM). Byte-level BOM sniffing during navigation
-    is not modeled — rule 1.'
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
