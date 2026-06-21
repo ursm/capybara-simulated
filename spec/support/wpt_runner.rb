@@ -135,6 +135,17 @@ module WptRunner
           label = req.params['label'].to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;')
           next [200, {'content-type' => 'text/html'}, [%{<!doctype html><meta charset="#{label}">}]]
         end
+        # `redirect.py` — WPT's redirect CGI: respond `status` (default 302) with
+        # a `Location` header from the `location` param. rack_fetch follows it, so
+        # a frame's document.URL becomes the final target (WPT dom/nodes/Document-URL).
+        if path.end_with?('/redirect.py')
+          loc = req.params['location'].to_s
+          # A real redirect needs a target; a blank Location would self-loop
+          # (rack_fetch follows an empty-but-truthy Location back to here).
+          next [400, {'content-type' => 'text/plain'}, ['missing location']] if loc.empty?
+          status = req.params['status'].to_s =~ /\A3\d\d\z/ ? req.params['status'].to_i : 302
+          next [status, {'content-type' => 'text/plain', 'location' => loc}, []]
+        end
         # `contenttype_setter.py` — WPT's Content-Type CGI (Document-contentType
         # tests). Emulate its behaviour: set Content-Type from type/subtype, with
         # an optional `mime` <meta http-equiv> in the body (a non-authoritative
