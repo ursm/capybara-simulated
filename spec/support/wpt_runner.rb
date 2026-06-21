@@ -161,8 +161,9 @@ module WptRunner
             ''
           end
           refs = decoded.each_codepoint.map {|cp| format('&#x%X;', cp) }.join
-          ct   = encoding.empty? ? 'text/html' : "text/html;charset=#{encoding}"
-          next [200, {'content-type' => ct}, [%{<!doctype html>\n<a href="https://doesnotmatter.invalid/?#{refs}##{refs}">test</a>\n}]]
+          # Match percent-encoding.py byte-for-byte: it unconditionally emits
+          # `text/html;charset=<encoding>` (the encoding param is always present).
+          next [200, {'content-type' => "text/html;charset=#{encoding}"}, [%{<!doctype html>\n<a href="https://doesnotmatter.invalid/?#{refs}##{refs}">test</a>\n}]]
         end
         # `contenttype_setter.py` — WPT's Content-Type CGI (Document-contentType
         # tests). Emulate its behaviour: set Content-Type from type/subtype, with

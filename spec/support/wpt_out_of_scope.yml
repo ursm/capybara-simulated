@@ -4229,12 +4229,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
     on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
     modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
     IDL-reflection/serialization surface is part of the same unshipped feature.
-- name: cloneNode(true) followed by getHTML() round-trips the shadowrootadoptedstylesheets
-    attribute.
-  reason: Tentative WICG shadowrootadoptedstylesheets proposal (declarative adoptedStyleSheets
-    on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
-    modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
-    IDL-reflection/serialization surface is part of the same unshipped feature.
 - name: cloneNode(true) preserves order of multiple shadowrootadoptedstylesheets specifiers.
   reason: Tentative WICG shadowrootadoptedstylesheets proposal (declarative adoptedStyleSheets
     on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
