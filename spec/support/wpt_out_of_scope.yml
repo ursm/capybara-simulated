@@ -3777,22 +3777,6 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
-encoding/utf-32-from-win1252.html:
-- name: Expect resources/utf-32-big-endian-bom.html to parse as windows-1252
-  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
-    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
-    during navigation is not modeled (responses are handled as decoded text) — rule
-    1 (encoding/legacy subsystem).'
-- name: Expect resources/utf-32-big-endian-nobom.html to parse as windows-1252
-  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
-    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
-    during navigation is not modeled (responses are handled as decoded text) — rule
-    1 (encoding/legacy subsystem).'
-- name: Expect resources/utf-32-little-endian-nobom.html to parse as windows-1252
-  reason: 'Document encoding detection: a utf-32 BOM must be sniffed and the document
-    decoded as windows-1252/UTF-16LE. Raw-byte BOM sniffing + encoding-label resolution
-    during navigation is not modeled (responses are handled as decoded text) — rule
-    1 (encoding/legacy subsystem).'
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
