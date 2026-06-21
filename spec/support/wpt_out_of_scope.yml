@@ -132,73 +132,6 @@ dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.h
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
-dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html:
-- name: Tests scrollend event for calling scrollBy with behavior 'auto' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollBy with behavior 'auto' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollBy with behavior 'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollBy with behavior 'smooth' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollTo with behavior 'auto' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollTo with behavior 'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for calling scrollTo with behavior 'smooth' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-dom/events/scrolling/scrollend-event-fired-for-scroll-attr-change.html:
-- name: Tests scrollend event for [scrollLeft] behavior:'auto' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollLeft] behavior:'auto' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollLeft] behavior:'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollTop] behavior:'auto' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollTop] behavior:'auto' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for [scrollTop] behavior:'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
 - name: Tests scrollend event for nested scrollIntoView.
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
@@ -314,17 +247,6 @@ dom/events/scrolling/scrollend-event-for-user-scroll.html:
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
 - name: Tests that the target_div gets scrollend event when touch dragging.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-dom/events/scrolling/scrollend-event-handler-content-attributes.html:
-- name: Tests scrollend event is fired to document event handler property
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event is fired to element event handler property
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
@@ -640,19 +562,6 @@ dom/nodes/remove-and-adopt-thcrash.html:
     doesn't crash.
   reason: window.open() aux windows are URL-only by design (no per-window VM/document);
     popup.document.body.appendChild(document.body) has no real second-window document.
-dom/ranges/Range-in-shadow-after-the-shadow-removed.html:
-- name: Range in shadow should stay in the shadow after the host is removed
-  reason: Uses <meta name=variant content='?mode=open|closed'> + location.search to
-    pick the shadow mode; WptRunner does not pass variant query strings, so mode resolves
-    to null and attachShadow throws. A test-harness limitation (variant support would
-    re-key every variant file — a separate infra task), not a driver gap; only this
-    one in-scope file needs it.
-- name: Range in shadow should stay in the shadow after the host parent is removed
-  reason: Uses <meta name=variant content='?mode=open|closed'> + location.search to
-    pick the shadow mode; WptRunner does not pass variant query strings, so mode resolves
-    to null and attachShadow throws. A test-harness limitation (variant support would
-    re-key every variant file — a separate infra task), not a driver gap; only this
-    one in-scope file needs it.
 domparsing/XMLSerializer-serializeToString.html:
 - name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
   reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
@@ -14927,22 +14836,53 @@ url/a-element-xhtml.xhtml:
 - name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a­b/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a­b/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
     against <about:blank>"
   reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
     deliberately not modeled (tr46 ASCII stub)
+- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
+    against <about:blank>"
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://xn--/p> against <about:blank>'
   reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
     deliberately not modeled (tr46 stub)
+- name: 'Parsing: <file://xn--/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://­/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://­/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <ftp://%e2%98%83> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
@@ -15043,22 +14983,53 @@ url/a-element.html:
 - name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a­b/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a­b/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
     against <about:blank>"
   reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
     deliberately not modeled (tr46 ASCII stub)
+- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
+    against <about:blank>"
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://xn--/p> against <about:blank>'
   reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
     deliberately not modeled (tr46 stub)
+- name: 'Parsing: <file://xn--/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://­/p> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://­/p> against <about:blank>'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <ftp://%e2%98%83> against <about:blank>'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
@@ -15178,22 +15149,53 @@ url/url-constructor.any.js:
 - name: 'Parsing: <file://%C2%AD/p> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://%C2%AD/p> without base'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a%C2%ADb/p> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a%C2%ADb/p> without base'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://a­b/p> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://a­b/p> without base'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
     without base"
   reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
     deliberately not modeled (tr46 ASCII stub)
+- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
+    without base"
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://xn--/p> without base'
   reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
     deliberately not modeled (tr46 stub)
+- name: 'Parsing: <file://xn--/p> without base'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <file://­/p> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
+- name: 'Parsing: <file://­/p> without base'
+  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
+    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
+    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
+    1; same family as IdnaTestV2 / toascii).'
 - name: 'Parsing: <ftp://%e2%98%83> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)

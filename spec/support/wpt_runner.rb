@@ -280,10 +280,48 @@ module WptRunner
     skip.key?(rel) || skip_prefixes.any? {|p| rel.start_with?(p) }
   end
 
-  # Run one test file. Returns a Hash:
+  # Run a test file. Returns a Hash:
   #   { completed: true,  failing: ["subtest name", …] }   # harness finished
   #   { completed: false, error: "…" | nil }               # never completed
+  #
+  # A file declaring `<meta name=variant>` / `// META: variant=` is run ONCE PER
+  # VARIANT (the way WPT itself executes it), with each variant's query string
+  # appended to the URL; the subtest results are MERGED under the bare `rel` key
+  # so the allowlists stay keyed by file, not by variant. A variant query either
+  # PARTITIONS a data-driven test's cases (?include= / ?exclude= / ?N-M — the
+  # union equals the no-query run) or SELECTS a mode (?mode=open) the no-query run
+  # would otherwise miss. A file with no variants runs once (the no-query URL).
+  # If any variant fails to complete, the whole file is reported not-completed.
   def run(rel)
+    variants = variant_queries(rel)
+    return run_one(rel) if variants.empty?
+    merged = []
+    variants.each do |q|
+      r = run_one(rel, q)
+      return {completed: false, error: r[:error]} unless r[:completed]
+      merged.concat(r[:failing])
+    end
+    {completed: true, failing: merged}
+  end
+
+  # A file's declared variant query strings: `<meta name=variant content="?…">`
+  # (HTML) or `// META: variant=?…` (`.any.js` / `.window.js`). Empty → no variants.
+  def variant_queries(rel)
+    path = File.join(ROOT, rel)
+    return [] unless File.file?(path) && File.size(path).positive?
+    head = File.read(path, 65536).to_s
+    qs = if rel.end_with?('.any.js', '.window.js')
+      head.scan(%r{^\s*//\s*META:\s*variant=(\S+)}).flatten
+    else
+      head.scan(/<meta\s+name=["']?variant["']?\s+content=["']([^"']*)["']/i).flatten
+    end
+    qs.map(&:strip).reject(&:empty?)
+  rescue StandardError
+    []
+  end
+
+  # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
+  def run_one(rel, query = '')
     # `.sub.` files are served with wptserve `{{…}}` substitution and visited at
     # the canonical wptserve origin so their substituted host:port matches the
     # document origin (resolved-URL assertions depend on it). Crossing origins on
@@ -293,8 +331,10 @@ module WptRunner
     sub = File.basename(rel).include?('.sub.')
     @session = nil if sub
     s = session
-    # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper.
+    # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
+    # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
+    visit = "#{visit}#{query}"
     s.visit(sub ? "#{SUB_ORIGIN}/#{visit}" : "/#{visit}")
     # The driver doesn't auto-fire window 'load'; testharness completes its
     # sync tests off that event (then a setTimeout(0) sets `all_loaded`). Prefer
