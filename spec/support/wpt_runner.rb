@@ -146,6 +146,24 @@ module WptRunner
           status = req.params['status'].to_s =~ /\A3\d\d\z/ ? req.params['status'].to_i : 302
           next [status, {'content-type' => 'text/plain', 'location' => loc}, []]
         end
+        # `percent-encoding.py` — WPT's URL query/fragment encoder CGI. It
+        # base64-decodes the `value` param (UTF-8), emits each code point as a
+        # numeric character reference inside `<a href="…?REFS#REFS">`, and serves
+        # it as `text/html;charset=<encoding>`. The HTML parser turns the refs back
+        # into code points; the driver's URL parser then percent-encodes the query
+        # per the document charset (UTF-8 here) and the fragment always as UTF-8.
+        if path.end_with?('/percent-encoding.py')
+          value    = req.params['value'].to_s.tr(' ', '+')   # undo Rack's +→space
+          encoding = req.params['encoding'].to_s
+          decoded  = begin
+            value.unpack1('m0').force_encoding('UTF-8')
+          rescue ArgumentError
+            ''
+          end
+          refs = decoded.each_codepoint.map {|cp| format('&#x%X;', cp) }.join
+          ct   = encoding.empty? ? 'text/html' : "text/html;charset=#{encoding}"
+          next [200, {'content-type' => ct}, [%{<!doctype html>\n<a href="https://doesnotmatter.invalid/?#{refs}##{refs}">test</a>\n}]]
+        end
         # `contenttype_setter.py` — WPT's Content-Type CGI (Document-contentType
         # tests). Emulate its behaviour: set Content-Type from type/subtype, with
         # an optional `mime` <meta http-equiv> in the body (a non-authoritative

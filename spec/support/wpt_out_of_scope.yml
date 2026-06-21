@@ -15228,54 +15228,30 @@ url/a-element.html:
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
     host mapping+validation; IDNA not modeled (tr46 stub)
 url/percent-encoding.window.js:
-- name: "Input \x0EA with encoding big5"
-  reason: query percent-encoding per big5 needs a legacy (non-utf-8) encoder table
-    plus the .py CGI endpoint; not modeled
 - name: "Input \x0EA with encoding iso-2022-jp"
   reason: query percent-encoding per iso-2022-jp needs a legacy (non-utf-8) encoder
     table plus the .py CGI endpoint; not modeled
-- name: "Input \x0EA with encoding utf-8"
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 - name: Input ¢ with encoding iso-8859-2
   reason: query percent-encoding per iso-8859-2 needs a legacy (non-utf-8) encoder
     table plus the .py CGI endpoint; not modeled
-- name: Input ¢ with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
-- name: Input á| with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 - name: Input † with encoding big5
   reason: query percent-encoding per big5 needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
 - name: Input † with encoding euc-kr
   reason: query percent-encoding per euc-kr needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
-- name: Input † with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 - name: Input † with encoding windows-1252
   reason: query percent-encoding per windows-1252 needs a legacy (non-utf-8) encoder
     table plus the .py CGI endpoint; not modeled
 - name: Input ‾\ with encoding iso-2022-jp
   reason: query percent-encoding per iso-2022-jp needs a legacy (non-utf-8) encoder
     table plus the .py CGI endpoint; not modeled
-- name: Input ‾\ with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 - name: Input − with encoding shift_jis
   reason: query percent-encoding per shift_jis needs a legacy (non-utf-8) encoder
     table plus the .py CGI endpoint; not modeled
-- name: Input − with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 - name: Input  with encoding gb18030
   reason: query percent-encoding per gb18030 needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
-- name: Input  with encoding utf-8
-  reason: needs resources/percent-encoding.py CGI server response rendered as a document;
-    in-process driver has no CGI runtime
 url/url-constructor.any.js:
 - name: 'Parsing: <file://%C2%AD/p> without base'
   reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
