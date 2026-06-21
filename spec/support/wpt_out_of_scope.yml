@@ -528,11 +528,6 @@ dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fra
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
     .py resource; needs true network async runtime not modeled.
-dom/nodes/insertion-removing-steps/Node-appendChild-script-and-source-from-fragment.html:
-- name: Empty <source> immediately sets media.networkState during DOM insertion, so
-    that an earlier-running script can observe networkState
-  reason: Needs HTMLMediaElement resource-selection / media-load algorithm setting
-    networkState=NETWORK_NO_SOURCE; media subsystem not modeled, no lib depends.
 dom/nodes/moveBefore/child-style-preserve.html:
 - name: child-style-preserve
   reason: Asserts getBoundingClientRect().width equals 100 then 200 after style change;
