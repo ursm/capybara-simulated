@@ -10,8 +10,10 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
+# CURRENTLY EMPTY: the in-scope roadmap is drained — every vendored WPT subtest
+# either PASSes or is earned out-of-scope (wpt_out_of_scope.yml). A new real gap
+# (a regression, or a newly-vendored test) goes here until it's fixed or shown to
+# be an earned non-goal. The gate still loads this file; an empty map is fine.
+#
 ---
-dom/events/EventListener-incumbent-global-1.sub.html:
-- Check the incumbent global EventListeners  are called with
-dom/events/EventListener-incumbent-global-2.sub.html:
-- Check the incumbent global EventListeners  are called with
+{}

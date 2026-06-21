@@ -34,6 +34,29 @@ dom/events/Event-dispatch-on-disabled-elements.html:
 - name: Real clicks on disabled elements must not dispatch events.
   reason: Uses test_driver.click for a real hit-tested click on a rendered element;
     depends on visual hit-testing we do not model.
+dom/events/EventListener-incumbent-global-1.sub.html:
+- name: Check the incumbent global EventListeners  are called with
+  reason: Needs the WebIDL incumbent settings object — when a listener fires, the
+    message posted inside it must carry the origin of the realm that CALLED
+    addEventListener (subframe-1), not the listener function's own realm
+    (subsubframe). The test is built specifically to distinguish those two, so the
+    function-realm is no shortcut. Recovering the addEventListener caller's realm
+    requires V8 GetIncumbentContext; rusty_racer exposes no such API (surface is
+    contextOf/contextGlobal/drainMicrotasks/…), contextOf inside a cross-realm
+    method returns the callee, and the call is a direct cross-realm V8 reference
+    with no Ruby interception point. Passing would also need distinct cross-origin
+    frame origins + document.domain relaxation + postMessage origin attribution —
+    subsystems we deliberately don't model (postMessage origin is hard-coded '').
+    A spec edge no real library/app depends on; satisfying it needs a binding
+    extension or a library-shaped hack. Earned out-of-scope per rule 1.
+dom/events/EventListener-incumbent-global-2.sub.html:
+- name: Check the incumbent global EventListeners  are called with
+  reason: Same incumbent-settings-object requirement as
+    EventListener-incumbent-global-1.sub.html (this variant gets the listener via
+    frames[0].getTheListener() instead of a direct bind, but still asserts the
+    incumbent is the addEventListener caller, not the function's home realm).
+    Unsatisfiable without V8 GetIncumbentContext (not exposed by rusty_racer) plus
+    cross-origin frame origins we don't model. Earned out-of-scope per rule 1.
 dom/events/EventListener-invoke-legacy.html:
 - name: Legacy listener of animationend
   reason: Requires real CSS animation/transition timeline to fire animationend; we
