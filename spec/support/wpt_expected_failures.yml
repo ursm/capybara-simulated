@@ -15,7 +15,3 @@ dom/events/EventListener-incumbent-global-1.sub.html:
 - Check the incumbent global EventListeners  are called with
 dom/events/EventListener-incumbent-global-2.sub.html:
 - Check the incumbent global EventListeners  are called with
-shadow-dom/untriaged/html-elements-in-shadow-trees/html-forms/test-003.html:
-- A_08_02_03_T01
-shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
-- A_08_01_01_T01

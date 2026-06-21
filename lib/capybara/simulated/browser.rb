@@ -3742,9 +3742,105 @@ module Capybara
         @pending_reload = false
         refresh
       end
+      # A <form> submitted from INSIDE a nested browsing context (a frame realm
+      # reached via `contentWindow`, not an entered `within_frame` block). The
+      # pending-submit slot lives on the initiating realm's globalThis, which no
+      # top-page drain reads, so the JS side flags the realm here (mirrors
+      # `frame_navigate_self`). Keyed by realm id; deferred + drained from
+      # `drain_pending_navigation` so we never serialize/navigate while the
+      # form's `submit()` is still on the V8 stack.
+      def frame_submit_self(realm_id)
+        return if realm_id.nil? || realm_id.zero?
+        (@pending_frame_submit ||= []) << realm_id
+      end
+      def consume_pending_frame_submit
+        return if @pending_frame_submit.nil? || @pending_frame_submit.empty?
+        realm_ids = @pending_frame_submit.uniq
+        @pending_frame_submit = nil
+        realm_ids.each do |realm_id|
+          next unless @runtime.frame_realm_alive?(realm_id)
+          sub = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
+          next unless sub.is_a?(Hash) && sub['formHandle']
+          invalidate_find_cache
+          submit_form_in_realm(realm_id, sub['formHandle'], sub['submitterHandle'])
+        rescue StandardError => e
+          log_console('warn', "nested-context form submission failed: #{e.message}")
+        end
+      end
+      # Serialize + route a form submitted inside frame realm `realm_id`. We
+      # serialize in the INITIATING realm (so shadow-tree controls are excluded
+      # and relative URLs resolve against that document), then route by target:
+      #   - a NAMED frame within that context (a sibling iframe) — reassign its src;
+      #   - self / _self / '' — navigate the initiating frame itself, same as a
+      #     self-targeted link there (within_frame → navigate_frame; a frame
+      #     reached via contentWindow → re-navigate its owning iframe by realm id).
+      # GET fully supported. POST to a self frame needs the entered stack
+      # (navigate_frame_post); POST-to-named and other targets from a nested
+      # context aren't modeled (no in-scope need) — logged rather than dropped.
+      def submit_form_in_realm(realm_id, form_handle, submitter_handle)
+        spec = @runtime.realm_call(realm_id, '__csimFormSerialize', form_handle, submitter_handle || 0)
+        return unless spec.is_a?(Hash)
+        method = spec['method'].to_s.upcase
+        method = 'GET' if method.empty?
+        target = spec['target'].to_s
+        action = spec['action'].to_s
+        fields = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
+        # Non-multipart file inputs contribute the filename only (mirror submit_form_handle's GET path).
+        (spec['fileInputs'] || []).each do |fi|
+          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
+          fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
+        end
+        body    = URI.encode_www_form(fields)
+        get_url = form_get_url(action, body)
+        if frame_self_target?(target)
+          navigate_realm_self(realm_id, get_url, action, method, body, spec['enctype'].to_s)
+        elsif %w[_parent _top _blank].include?(target.downcase)
+          log_console('warn', "nested-context form submit (target=#{target.inspect}) is not modeled")
+        elsif method == 'GET'
+          # Named sibling frame, GET. realm_call returns false when no frame of
+          # that name exists in the initiating document (e.g. it lives in an
+          # ancestor/top context, which HTML target resolution would reach but
+          # we don't); surface it rather than dropping silently.
+          found = @runtime.realm_call(realm_id, '__csimNavigateNamedFrame', target, get_url)
+          log_console('warn', "nested-context form submit: no frame named #{target.inspect} in the submitting document") unless found
+        else
+          log_console('warn', "nested-context form submit (target=#{target.inspect}, method=POST) is not modeled")
+        end
+      end
+      # HTML form-submission "mutate action URL" for GET: REPLACE the action
+      # URL's query with the serialized entry list (dropping any pre-existing
+      # query), preserving a trailing #fragment. String-based so it works on the
+      # raw (possibly relative) action attribute without URI.parse fragility;
+      # the absolute equivalent of submit_form_handle's `uri.query = body`.
+      def form_get_url(action, body)
+        return action if body.empty?
+        base, _hash, frag = action.partition('#')
+        path = base.split('?', 2).first
+        url  = "#{path}?#{body}"
+        frag.empty? ? url : "#{url}##{frag}"
+      end
+      # Navigate the initiating frame realm itself (a self-targeted form submit).
+      def navigate_realm_self(realm_id, get_url, action, method, body, enctype)
+        entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
+        if method == 'GET'
+          if entry
+            navigate_frame(resolve_against_current(get_url), entry: entry)
+          else
+            # A frame reached via contentWindow (not on the entered stack): its
+            # owning iframe lives in the parent document — re-navigate by realm id
+            # (relative get_url resolves against the frame's base on rebuild).
+            @runtime.call('__csimNavigateFrameByRealm', realm_id, get_url)
+          end
+        elsif entry
+          navigate_frame_post(resolve_against_current(action), body, enctype, entry: entry)
+        else
+          log_console('warn', "nested-context self-form POST (realm #{realm_id}) is not modeled")
+        end
+      end
       def drain_pending_navigation
         consume_pending_location
         consume_pending_frame_nav
+        consume_pending_frame_submit
         consume_pending_reload
         consume_pending_history_traverse
       end
@@ -4133,10 +4229,11 @@ module Capybara
       # timer can't abort loading the next page (the page it would affect is
       # being discarded on the very next line).
       def flush_outgoing_page_init
-        saved_location  = @pending_location
-        saved_reload    = @pending_reload
-        saved_traverse  = @pending_history_traverse
-        saved_frame_nav = @pending_frame_nav
+        saved_location     = @pending_location
+        saved_reload       = @pending_reload
+        saved_traverse     = @pending_history_traverse
+        saved_frame_nav    = @pending_frame_nav
+        saved_frame_submit = @pending_frame_submit
         begin
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         rescue StandardError
@@ -4145,9 +4242,12 @@ module Capybara
           @pending_location         = saved_location
           @pending_reload           = saved_reload
           @pending_history_traverse = saved_traverse
-          # Don't let a frame-nav intent stashed by an outgoing-page timer leak
-          # into the fresh page (its realm id belongs to the discarded page).
+          # Don't let a frame-nav / frame-submit intent stashed by an outgoing-
+          # page timer leak into the fresh page — its realm id belongs to the
+          # discarded page (and a reused context id could mis-fire against an
+          # unrelated realm on the new page).
           @pending_frame_nav        = saved_frame_nav
+          @pending_frame_submit     = saved_frame_submit
         end
       end
 
