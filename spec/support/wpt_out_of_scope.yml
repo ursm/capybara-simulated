@@ -3860,27 +3860,6 @@ shadow-dom/Document-caretPositionFromPoint.tentative.html:
     location when the non-intersecting shadow tree is specified as an argument
   reason: caretPositionFromPoint requires point hit-testing + caret geometry; layout
     engine not modeled.
-shadow-dom/Document-prototype-currentScript.html:
-- name: document.currentScript must be set to a script element that loads an external
-    script in a document tree (2)
-  reason: Requires fetching+executing an external <script src>; dynamic external-script
-    async load/exec not modeled.
-- name: document.currentScript must be set to a script element that loads an external
-    script that was in a closed shadow tree and then removed
-  reason: Requires fetching+executing an external <script src> from a shadow tree;
-    dynamic external-script async load/exec not modeled.
-- name: document.currentScript must be set to a script element that loads an external
-    script that was in an open shadow tree and then removed
-  reason: Requires fetching+executing an external <script src> from a shadow tree;
-    dynamic external-script async load/exec not modeled.
-- name: document.currentScript must not be set to a script element that loads an external
-    script in a closed shadow tree
-  reason: Requires fetching+executing an external <script src> from a shadow tree;
-    dynamic external-script async load/exec not modeled.
-- name: document.currentScript must not be set to a script element that loads an external
-    script in an open shadow tree
-  reason: Requires fetching+executing an external <script src> from a shadow tree;
-    dynamic external-script async load/exec not modeled.
 shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
 - name: 'document.elementFromPoint and shadow.ElementFromPoint must return the shadow
     host of the hit-tested text node when the hit-tested text node is a direct child
