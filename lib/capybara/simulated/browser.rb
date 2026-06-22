@@ -352,6 +352,9 @@ module Capybara
         # `message` event the next time it's active and settles/ticks. Plain
         # array (same thread — windows aren't background-threaded like workers).
         @window_inbox         = []
+        # Cross-window BroadcastChannel messages from OTHER windows, delivered to
+        # this window's matching channels on settle. [{name, data}] (same thread).
+        @broadcast_inbox      = []
       end
 
       # Worker thread polling and termination intervals — split so a
@@ -916,7 +919,7 @@ module Capybara
           # to `noopener` (so `window.opener` is null), unlike JS `window.open`
           # which keeps the opener — see `open_window_from_js`.
           elsif !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
-            @driver.open_aux_window(resolve_against_current(url, use_base: true))
+            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, blob_snapshot: action['blob'])
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
@@ -1471,7 +1474,7 @@ module Capybara
         url    = pending['url'].to_s
         target = pending['target'].to_s
         if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
-          @driver.open_aux_window(resolve_against_current(url, use_base: true))
+          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, blob_snapshot: pending['blob'])
         elsif pure_fragment_navigation?(url)
           update_current_hash(url)
         else
@@ -2291,6 +2294,7 @@ module Capybara
         reset_workers
         reset_websockets
         @window_inbox.clear
+        @broadcast_inbox.clear
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
@@ -2323,6 +2327,7 @@ module Capybara
         reset_hijacked_fetches
         reset_websockets
         @window_inbox.clear
+        @broadcast_inbox.clear
         # Dispose the JS runtime/isolate itself — for an auxiliary window this
         # Browser is the isolate's last owner, but V8Runtime registers every
         # isolate in a process-wide `@@live` set (for at_exit cleanup), which
@@ -3156,14 +3161,34 @@ module Capybara
         @window_inbox << {'data' => data, 'origin' => origin.to_s, 'sourceHandle' => source_handle.to_s}
       end
 
-      def window_message_pending? = !@window_inbox.empty?
+      # Covers both cross-window postMessage AND BroadcastChannel — the two
+      # cross-window event channels share these drain/pending hooks.
+      def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty?
 
-      # Fire queued cross-window messages as `message` events on window.
+      # A BroadcastChannel message from another window, queued for delivery to
+      # this window's channels with the same name.
+      def enqueue_broadcast(name, data) = (@broadcast_inbox << {'name' => name.to_s, 'data' => data})
+
+      # Fire queued cross-window messages (postMessage + BroadcastChannel).
       def deliver_window_messages
-        return 0 if @window_inbox.empty?
-        events = @window_inbox.slice!(0, @window_inbox.length)
-        @runtime.call('__csim_deliverWindowMessages', events)
-        events.size
+        n = 0
+        unless @window_inbox.empty?
+          events = @window_inbox.slice!(0, @window_inbox.length)
+          @runtime.call('__csim_deliverWindowMessages', events)
+          n += events.size
+        end
+        unless @broadcast_inbox.empty?
+          events = @broadcast_inbox.slice!(0, @broadcast_inbox.length)
+          @runtime.call('__csim_deliverBroadcasts', events)
+          n += events.size
+        end
+        n
+      end
+
+      # `BroadcastChannel.postMessage` in THIS window — fan out to every OTHER
+      # window's matching channels (same-window delivery happens in-VM).
+      def broadcast_to_windows(name, data)
+        @driver.broadcast_channel(self, name.to_s, data) if @driver.respond_to?(:broadcast_channel)
       end
 
       # ── Image decode (libvips) ─────────────────────────────────────
@@ -3249,6 +3274,33 @@ module Capybara
 
       def blob_resolve(url)
         @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
+      end
+
+      # Read a blob URL's bytes + content type from THIS window's VM (its local
+      # blob store) — the Driver uses it to load a blob: document into a fresh aux
+      # window opened by this window. Returns {bytes:, type:} or nil.
+      def read_blob_for_window(url)
+        r = @runtime.call('__csimReadBlobForWindow', url.to_s)
+        return nil unless r.is_a?(Hash) && r['b64']
+        { bytes: Base64.decode64(r['b64'].to_s), type: r['type'].to_s }
+      rescue StandardError
+        nil
+      end
+
+      # Load a blob: document (bytes from the opener) as THIS window's top-level
+      # document — for `window.open(blobURL)` / a blob: aux-window navigation,
+      # where the blob isn't rack-navigable and lives in the opener's isolate.
+      def boot_blob_document(url, bytes, content_type)
+        @current_url = url.to_s
+        ct = content_type.to_s.empty? ? 'text/html' : content_type.to_s
+        # Blob string parts are UTF-8-encoded; when the Blob type carries no
+        # charset, decode the document as UTF-8 (not the windows-1252 HTML locale
+        # default, which is an HTTP concept that doesn't apply to in-memory blobs —
+        # matches the iframe blob: path's decodeBlobBody). A charset in the Blob
+        # type (url-charset) is preserved so it can override <meta charset>.
+        ct = "#{ct};charset=utf-8" unless ct.downcase.include?('charset')
+        record_response(200, {'content-type' => ct})
+        boot_response_into_ctx(bytes)
       end
 
       def blob_unregister(url)
@@ -4025,6 +4077,20 @@ module Capybara
         consume_pending_frame_reload
         consume_pending_reload
         consume_pending_history_traverse
+        consume_pending_aux_window
+      end
+
+      # A script-driven `anchor.click()` / `target=_blank` navigation with no
+      # Capybara action behind it (e.g. a WPT test) — open the aux window from the
+      # event-loop drain. Safe mid-call (builds a separate Browser). Same-window /
+      # frame navs are left untouched (handled by drain_after_user_action).
+      def consume_pending_aux_window
+        pending = @runtime.call('__csimTakePendingAuxWindow')
+        return unless pending.is_a?(Hash) && pending['url'] && @driver.respond_to?(:open_aux_window)
+        @driver.open_aux_window(resolve_against_current(pending['url'].to_s, use_base: true),
+                                source: self, blob_snapshot: pending['blob'])
+      rescue StandardError => e
+        log_console('warn', "aux-window open failed: #{e.message}")
       end
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.

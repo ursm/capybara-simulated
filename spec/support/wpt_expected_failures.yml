@@ -15,8 +15,4 @@ FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.
 - Blob charset should override any auto-detected charset.
 FileAPI/url/url-in-tags-revoke.window.js:
-- Opening a blob URL in a new window by clicking an <a> tag works immediately before
-  revoking the URL.
 - Opening a blob URL in a new window immediately before revoking it works.
-- Opening a blob URL in a noopener about:blank window immediately before revoking
-  it works.

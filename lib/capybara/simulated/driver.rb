@@ -264,10 +264,10 @@ module Capybara
       # matches an existing window navigates that window instead of opening a
       # new one (HTML window-name targeting); `opener_handle` records the
       # opener so the new window's `window.opener` resolves back to it.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil)
         name = name.to_s
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
-          navigate_window(existing[:browser], url)
+          navigate_window(existing[:browser], url, source: source)
           return existing[:handle]
         end
         @next_window_seq += 1
@@ -278,7 +278,15 @@ module Capybara
         # `window.opener`, which resolves through this entry — so the entry
         # (with its opener) must exist before `visit` runs those scripts.
         @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
-        aux.visit(url) if url && !url.empty?
+        if url && !url.empty?
+          # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
+          # isolate — load the document directly from a click-time snapshot (a
+          # deferred target=_blank nav may revoke the URL first) or, failing that,
+          # the opener's blob store.
+          unless url.to_s.start_with?('blob:') && load_blob_into_window(aux, url, source, snapshot: blob_snapshot)
+            aux.visit(url)
+          end
+        end
         handle
       rescue StandardError => e
         # Aux window URL-load failure (binary content, network error, …)
@@ -298,7 +306,23 @@ module Capybara
       # against the opener's document and records the opener relationship.
       def open_window_from_js(opener_browser, url, name)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
-        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser))
+        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser)
+      end
+
+      # Load a blob: document into aux window `aux` from `source`'s (the opener's)
+      # local blob store — the bytes live in the opener's isolate, not the aux's.
+      # Returns false if `source`/bytes are unavailable (caller falls back).
+      private def load_blob_into_window(aux, url, source, snapshot: nil)
+        data = if snapshot.is_a?(Hash) && snapshot['b64']
+          { bytes: Base64.decode64(snapshot['b64'].to_s), type: snapshot['type'].to_s }
+        elsif source.respond_to?(:read_blob_for_window)
+          source.read_blob_for_window(url)
+        end
+        return false unless data
+        aux.boot_blob_document(url, data[:bytes], data[:type])
+        true
+      rescue StandardError
+        false
       end
 
       # `targetWindow.postMessage(data, origin)` — queue on the target window's
@@ -308,10 +332,19 @@ module Capybara
         target.enqueue_window_message(data, _origin, handle_for(source_browser))
       end
 
+      # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels
+      # with the same name (same-window delivery is handled in-VM by the sender).
+      def broadcast_channel(source_browser, name, data)
+        window_entries.each do |w|
+          next if w[:browser].equal?(source_browser)
+          w[:browser].enqueue_broadcast(name, data)
+        end
+      end
+
       def window_location(handle)        = (window_browser(handle)&.current_url).to_s
       def window_set_location(handle, url)
         b = window_browser(handle) or return
-        navigate_window(b, b.resolve_document_url(url))
+        navigate_window(b, b.resolve_document_url(url), source: current_browser)
       end
       def window_closed?(handle)         = window_browser(handle).nil?
       def opener_handle_of(browser)
@@ -326,8 +359,15 @@ module Capybara
       # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
       # V8 context mid-call and abort the running handler. A non-active window
       # can navigate immediately (its VM isn't on the stack).
-      private def navigate_window(browser, url)
+      private def navigate_window(browser, url, source: nil)
         return if url.nil? || url.to_s.empty?
+        # A blob: navigation loads directly from the opener's blob bytes (not
+        # rack-navigable, cross-isolate). Only when the target isn't the active
+        # window (boot rebuilds its ctx — unsafe mid-call on the running window).
+        if url.to_s.start_with?('blob:') && !browser.equal?(current_browser) &&
+           load_blob_into_window(browser, url, source)
+          return
+        end
         if browser.equal?(current_browser)
           browser.location_assign(url)
         else

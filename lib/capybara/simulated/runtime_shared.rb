@@ -88,6 +88,7 @@ module Capybara
         # the target window's Browser.
         '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1]) },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
+        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1]); nil },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
