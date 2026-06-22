@@ -139,6 +139,16 @@ FileAPI/file/send-file-form-x-user-defined.html:
 - name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
   reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
     (rule 1).
+FileAPI/url/multi-global-origin-serialization.sub.html:
+- name: Blob URL serialization (specifically the origin) in multi-global situations
+  reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
+    global) Blob URL origin attribution — a cross-origin multi-global navigation/origin
+    model we don't implement (single-origin in-process driver).
+FileAPI/url/unicode-origin.sub.html:
+- name: Verify serialization of non-ascii origin in Blob URLs
+  reason: Needs IDNA/Unicode-host serialization (the non-ascii domain 天気の良い日 → xn--
+    punycode) plus a real cross-origin iframe at that host. IDNA / Unicode-host encoding
+    is a deliberately unmodeled subsystem (CLAUDE.md rule 1).
 dom/collections/HTMLCollection-supported-property-indices.html:
 - name: Handling of property names that look like integers around 2^32
   reason: Exactly the 2^32 index-boundary exotic-object edge cited in rule 2; no real

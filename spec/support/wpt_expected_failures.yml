@@ -11,8 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/Blob-methods-from-detached-frame.html:
-- slice()
 FileAPI/BlobURL/opaque-origin.html:
 - Blob URL created from data URL dedicated worker should have 'null' origin
 - Blob URL created from data URL shared worker should have 'null' origin
@@ -74,19 +72,10 @@ FileAPI/file/send-file-form-utf-8.html:
 - Upload file-for-upload-in-form.txt (ASCII) in UTF-8 form
 FileAPI/file/send-file-form.html:
 - Upload file-for-upload-in-form.txt (ASCII) in UTF-8 form
-FileAPI/filelist-section/filelist.html:
-- Check if FileList.length is 0
-- Check if item is a method of fileList
-- Check if length is fileList's attribute
-- Check if window has a FileList property
 FileAPI/url/cross-global-revoke.sub.html:
 - It is not possible to revoke cross-origin blob URLs.
 - It is possible to revoke same-origin blob URLs from a different worker global.
 - It is possible to revoke same-origin blob URLs from different frames.
-FileAPI/url/multi-global-origin-serialization.sub.html:
-- Blob URL serialization (specifically the origin) in multi-global situations
-FileAPI/url/unicode-origin.sub.html:
-- Verify serialization of non-ascii origin in Blob URLs
 FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.
 - Blob charset should override any auto-detected charset.
