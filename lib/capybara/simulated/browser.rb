@@ -328,6 +328,10 @@ module Capybara
         # workers resolve them through a host fn.
         @blob_registry = {}
         @blob_registry_lock = Mutex.new
+        # url => owning worker handle, for blob URLs created INSIDE a worker. A
+        # worker's blob URL store dies with it, so terminating the worker revokes
+        # them (url-lifetime "Terminating worker revokes its URLs").
+        @blob_owners = {}
         # Postmessage transferable-buffer store. Large Uint8Array /
         # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
         # rather than a JSON base64 string, so peak JS heap stays flat.
@@ -2290,7 +2294,7 @@ module Capybara
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
-        @blob_registry_lock.synchronize { @blob_registry.clear }
+        @blob_registry_lock.synchronize { @blob_registry.clear; @blob_owners.clear }
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
         # the app on subsequent visits. Fingerprinted assets
@@ -3088,13 +3092,21 @@ module Capybara
         return unless w
         w[:inbox] << :terminate
         # Most clean shutdowns are <10 ms; the kill is the fallback
-        # for blocked workers.
+        # for blocked workers. Join again AFTER the kill so the thread is actually
+        # dead before we revoke its URLs — `Thread#kill` is async, and a worker
+        # still running a `createObjectURL` could otherwise re-register a URL after
+        # the revoke and leak it.
         w[:thread].join(WORKER_TERMINATE_GRACE)
-        w[:thread].kill if w[:thread].alive?
+        if w[:thread].alive?
+          w[:thread].kill
+          w[:thread].join(WORKER_TERMINATE_GRACE)
+        end
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
         @worker_in_flight = 0 if @workers.empty?
+        # The worker is gone — revoke the blob URLs it created.
+        revoke_worker_blobs(handle.to_i)
       end
 
       def deliver_worker_messages
@@ -3215,7 +3227,17 @@ module Capybara
       end
 
       def blob_register(url, body_b64)
-        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = body_b64.to_s }
+        # `blob_register` runs on the calling isolate's thread; a worker thread
+        # tags itself via `Thread.current[:csim_worker_handle]` so its blob URLs
+        # are revoked when it terminates (url-lifetime "Terminating worker").
+        owner = Thread.current[:csim_worker_handle]
+        @blob_registry_lock.synchronize do
+          @blob_registry[url.to_s] = body_b64.to_s
+          # Keep ownership in sync both ways: a (re-)registration from the main
+          # thread must DROP any prior worker owner, else terminating that worker
+          # would wrongly revoke a now-page-owned URL.
+          if owner then @blob_owners[url.to_s] = owner else @blob_owners.delete(url.to_s) end
+        end
         nil
       end
 
@@ -3224,8 +3246,17 @@ module Capybara
       end
 
       def blob_unregister(url)
-        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s) }
+        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
         nil
+      end
+
+      # Revoke every blob URL created inside the given worker — its blob URL store
+      # is part of the worker global that's going away.
+      def revoke_worker_blobs(handle)
+        @blob_registry_lock.synchronize do
+          urls = @blob_owners.select {|_url, owner| owner == handle }.keys
+          urls.each {|url| @blob_registry.delete(url); @blob_owners.delete(url) }
+        end
       end
 
       # ── postMessage transferable-buffer registry ───────────────────
@@ -3376,6 +3407,9 @@ module Capybara
           initializing = false
           @worker_init_lock.synchronize { @worker_initializing -= 1 }
         end
+        # Tag this thread so blob URLs created by the worker's script are owned by
+        # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
+        Thread.current[:csim_worker_handle] = handle
         rt = nil
         raise "worker script not found: #{url}" unless body
         # The worker SCRIPT is text; the Rack-fetched body arrives
