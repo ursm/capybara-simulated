@@ -3054,7 +3054,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url)
+      def worker_spawn(url, shared: false)
         handle       = (@worker_seq += 1)
         inbox        = Thread::Queue.new
         outbox       = @worker_outbox
@@ -3070,7 +3070,7 @@ module Capybara
         @worker_init_lock.synchronize { @worker_initializing += 1 }
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_worker(handle, target, body, inbox, outbox, engine_class)
+          run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared)
         end
         @workers[handle] = {thread: thread, inbox: inbox}
         handle
@@ -3366,7 +3366,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -3390,6 +3390,13 @@ module Capybara
         rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
         rt.eval(body)
         rt.drain_microtasks
+        # A SharedWorker fires `connect` AFTER its script set `self.onconnect`; the
+        # connect handler's port post lands in the outbox before release_init, so
+        # worker_pending? stays true until it's delivered.
+        if shared
+          rt.eval('typeof __csimFireSharedWorkerConnect === "function" && __csimFireSharedWorkerConnect();')
+          rt.drain_microtasks
+        end
         # Initial script has run (and any immediate postMessage is in the outbox).
         release_init.call
         # A worker that called `self.close()` in its top-level script stops here —

@@ -11,8 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/BlobURL/opaque-origin.html:
-- Blob URL created from data URL shared worker should have 'null' origin
 FileAPI/blob/Blob-constructor-dom.window.js:
 - Passing an platform object that supports indexed properties as the blobParts array
   should work (select).

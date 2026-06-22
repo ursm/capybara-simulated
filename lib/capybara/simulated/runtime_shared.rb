@@ -89,7 +89,7 @@ module Capybara
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
         '__csimWindowClose'          => ->(b, *a) { b.close_child_window(a[0]); nil },
         '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
-        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0]) },
+        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },

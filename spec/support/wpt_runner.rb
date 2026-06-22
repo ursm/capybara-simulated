@@ -394,6 +394,11 @@ module WptRunner
       )
       if (step && (step['fired'].to_i.positive? || step['dirtied'])) || flags['raf'] || flags['async']
         idle = 0
+        # An async channel in flight is usually a WORKER thread. The drain loop
+        # otherwise spins holding the GVL, starving that thread; yield briefly so
+        # it makes progress deterministically (otherwise its first postMessage
+        # lands non-deterministically — a flaky SharedWorker connect, etc.).
+        sleep(0.001) if flags['async']
       else
         idle += 1
         break if idle >= DRAIN_IDLE_BAIL
