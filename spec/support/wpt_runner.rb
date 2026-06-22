@@ -180,6 +180,28 @@ module WptRunner
           body << '</head>'
           next [200, headers, [body]]
         end
+        # `echo-content.py` — WPT's request-body echo CGI (the FileAPI
+        # send-file-formdata tests POST a multipart body here and assert on the
+        # echoed bytes). Emulate it: return the raw request body verbatim as
+        # text/plain so the test can compare the serialized multipart structure.
+        if path.end_with?('/echo-content.py')
+          body = req.body ? req.body.read.to_s : ''
+          next [200, {'content-type' => 'text/plain'}, [body]]
+        end
+        # `echo-content-escaped.py` — like echo-content.py but escapes control /
+        # non-ASCII bytes as `\xNN` and doubles backslashes (so a form-target-frame
+        # navigation isn't sniffed as a download), restoring CRLF. The FileAPI
+        # send-file-form (form-submission) tests read it back from an iframe.
+        if path.end_with?('/echo-content-escaped.py')
+          raw = (req.body ? req.body.read.to_s : '').b
+          out = raw.bytes.map {|byte|
+            if byte <= 0x1F || byte >= 0x7F then format('\\x%02x', byte)
+            elsif byte == 0x5C              then '\\\\'
+            else byte.chr
+            end
+          }.join.gsub('\\x0d\\x0a', "\r\n")
+          next [200, {'content-type' => 'text/plain; charset=UTF-8'}, [out]]
+        end
         # `.any.js` / `.window.js` multi-global tests ship only the JS source; WPT
         # generates the per-global HTML wrapper at serve time. Synthesize the
         # window-variant wrapper (`X.any.html` ← `X.any.js`) on request: testharness
