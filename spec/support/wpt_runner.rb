@@ -382,8 +382,17 @@ module WptRunner
       # __csimHasPendingRAF only sees the main realm — a child-realm-only rAF that
       # produces no observable fired/dirtied would not register, but the
       # force-timeout backstops it. No vendored test relies on that.)
-      raf = s.evaluate_script("typeof __csimHasPendingRAF === 'function' ? __csimHasPendingRAF() : false")
-      if (step && (step['fired'].to_i.positive? || step['dirtied'])) || raf
+      # `raf` (a queued animation frame) and `async` (a non-timer async channel —
+      # a freshly-spawned worker that hasn't posted yet, SSE, a hijacked fetch, …)
+      # both mean there's progress `step` can't see, so keep draining rather than
+      # bailing to the force-timeout. Read BOTH in one evaluate_script: each
+      # evaluate_script ticks the virtual clock, so a separate probe would advance
+      # time an extra step per frame and shift timing-sensitive tests (scrollend).
+      flags = s.evaluate_script(
+        "({ raf: typeof __csimHasPendingRAF === 'function' ? !!__csimHasPendingRAF() : false," \
+        "   async: typeof __csim_asyncIoPending === 'function' ? !!__csim_asyncIoPending() : false })"
+      )
+      if (step && (step['fired'].to_i.positive? || step['dirtied'])) || flags['raf'] || flags['async']
         idle = 0
       else
         idle += 1

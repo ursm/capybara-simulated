@@ -315,6 +315,14 @@ module Capybara
         # so long-running compute (e.g. mozjpeg over an 8900×8900 frame)
         # isn't starved by the settle_gen idle gate.
         @worker_in_flight = 0
+        # Workers whose initial script hasn't finished running yet. A worker that
+        # posts immediately on spawn (no main->worker message first) would leave
+        # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
+        # between spawn and that first post — and settle / tick_real_time would
+        # stop waiting before the message lands. Count spawned-but-not-initialised
+        # workers so the async drain holds until the initial script has run.
+        @worker_initializing = 0
+        @worker_init_lock = Mutex.new
         # Cross-isolate `blob:` store. Worker isolates can't see the
         # main scope's `__csimBlobs` Map, so we mirror bytes here and
         # workers resolve them through a host fn.
@@ -3058,6 +3066,8 @@ module Capybara
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
         body = fetch_worker_script(target)
+        # Pending until the worker's initial script has run (see @worker_initializing).
+        @worker_init_lock.synchronize { @worker_initializing += 1 }
         thread = Thread.new do
           Thread.current.report_on_exception = false
           run_worker(handle, target, body, inbox, outbox, engine_class)
@@ -3098,7 +3108,7 @@ module Capybara
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0
+      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -3357,6 +3367,16 @@ module Capybara
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
       private def run_worker(handle, url, body, inbox, outbox, engine_class)
+        # Release the spawn-time `@worker_initializing` count exactly once, however
+        # this method exits (normal start, `self.close()`, or an exception), so
+        # worker_pending? doesn't stay stuck true forever.
+        initializing = true
+        release_init = lambda do
+          next unless initializing
+          initializing = false
+          @worker_init_lock.synchronize { @worker_initializing -= 1 }
+        end
+        rt = nil
         raise "worker script not found: #{url}" unless body
         # The worker SCRIPT is text; the Rack-fetched body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
@@ -3369,16 +3389,27 @@ module Capybara
         # the snapshot-time `http://placeholder/`.
         rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
         rt.eval(body)
-        loop do
-          msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
-          break if msg == :terminate
-          rt.call('__csim_workerOnMessage', msg) if msg
-          rt.drain_microtasks
-          rt.drain_timers if rt.has_ready_timer?
+        rt.drain_microtasks
+        # Initial script has run (and any immediate postMessage is in the outbox).
+        release_init.call
+        # A worker that called `self.close()` in its top-level script stops here —
+        # the script ran (and may have posted), but no further messages are pulled.
+        unless rt.eval('!!globalThis.__csimWorkerClosed')
+          loop do
+            msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
+            break if msg == :terminate
+            if msg
+              rt.call('__csim_workerOnMessage', msg)
+              rt.drain_microtasks
+              rt.drain_timers if rt.has_ready_timer?
+              break if rt.eval('!!globalThis.__csimWorkerClosed')
+            end
+          end
         end
       rescue StandardError => e
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       ensure
+        release_init.call   # guarantee the init count is released on an early raise
         rt&.dispose
       end
 
@@ -3388,10 +3419,31 @@ module Capybara
       # circuit to the JS-side blob registry instead. Http(s) URLs
       # fall through to the regular Rack path.
       private def fetch_worker_script(url)
-        return rack_fetch_body(url) unless url.to_s.start_with?('blob:')
-        b64 = @runtime.call('__csimReadBlobBase64', url)
-        return nil unless b64
-        Base64.decode64(b64.to_s)
+        u = url.to_s
+        if u.start_with?('blob:')
+          b64 = @runtime.call('__csimReadBlobBase64', u)
+          return nil unless b64
+          return Base64.decode64(b64.to_s)
+        end
+        # `data:[<mediatype>][;base64],<data>` worker scripts (a worker created
+        # from a data: URL — its origin is opaque, so its blob: URLs serialize
+        # with a 'null' origin). Decode inline; Rack can't serve a data: URL.
+        return decode_data_url_body(u) if u.start_with?('data:')
+        rack_fetch_body(u)
+      end
+
+      # The decoded body of a `data:[<mediatype>][;base64],<data>` URL (RFC 2397):
+      # base64-decoded when the `;base64` flag is present, else percent-decoded.
+      private def decode_data_url_body(url)
+        comma = url.index(',')
+        return '' unless comma
+        meta    = url[5...comma]
+        payload = url[(comma + 1)..]
+        if meta =~ /;base64\s*\z/i
+          Base64.decode64(payload)
+        else
+          CGI.unescape(payload)
+        end
       end
 
       # `Thread::Queue#pop(timeout:)` blocks releasing the GVL — fine

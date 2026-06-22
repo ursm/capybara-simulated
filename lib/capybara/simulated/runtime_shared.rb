@@ -96,6 +96,11 @@ module Capybara
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1]); nil },
         '__csim_blobResolve'         => ->(b, *a) { b.blob_resolve(a[0]) },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
+        # Any non-timer async channel (worker / SSE / hijacked fetch / window
+        # message / websocket) still in flight — the WPT runner's drain consults
+        # this so it doesn't bail before an async message (e.g. a freshly-spawned
+        # worker's first postMessage) has had a chance to land.
+        '__csim_asyncIoPending'      => ->(b, *_a) { b.async_io_pending? },
         '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
         '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch_for_js(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
