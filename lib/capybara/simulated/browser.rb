@@ -3226,17 +3226,23 @@ module Capybara
         }
       end
 
-      def blob_register(url, body_b64)
-        # `blob_register` runs on the calling isolate's thread; a worker thread
-        # tags itself via `Thread.current[:csim_worker_handle]` so its blob URLs
-        # are revoked when it terminates (url-lifetime "Terminating worker").
-        owner = Thread.current[:csim_worker_handle]
+      def blob_register(url, body_b64, owner_realm = nil)
+        # Tag the creating context so the URL is revoked when that context goes
+        # away: a WORKER (separate thread, tagged via Thread.current) when it
+        # terminates ("Terminating worker"), or a FRAME REALM (owner_realm passed
+        # from JS createObjectURL) when the iframe is removed ("Removing an
+        # iframe"). Namespaced ('w:' / 'r:') so a worker handle and a realm id
+        # never collide. Main-realm blobs (no owner) live until clear_volatile.
+        worker = Thread.current[:csim_worker_handle]
+        key = if worker then "w:#{worker}"
+              elsif owner_realm && owner_realm.to_i != 0 then "r:#{owner_realm.to_i}"
+              end
         @blob_registry_lock.synchronize do
           @blob_registry[url.to_s] = body_b64.to_s
-          # Keep ownership in sync both ways: a (re-)registration from the main
-          # thread must DROP any prior worker owner, else terminating that worker
-          # would wrongly revoke a now-page-owned URL.
-          if owner then @blob_owners[url.to_s] = owner else @blob_owners.delete(url.to_s) end
+          # Keep ownership in sync both ways: a (re-)registration with no owner
+          # (main thread / main realm) must DROP any prior owner, else revoking
+          # that context would wrongly revoke a now-page-owned URL.
+          if key then @blob_owners[url.to_s] = key else @blob_owners.delete(url.to_s) end
         end
         nil
       end
@@ -3250,14 +3256,18 @@ module Capybara
         nil
       end
 
-      # Revoke every blob URL created inside the given worker — its blob URL store
-      # is part of the worker global that's going away.
-      def revoke_worker_blobs(handle)
+      # Revoke every blob URL owned by a context that's going away (its blob URL
+      # store is part of the global being torn down).
+      def revoke_owned_blobs(key)
         @blob_registry_lock.synchronize do
-          urls = @blob_owners.select {|_url, owner| owner == handle }.keys
+          urls = @blob_owners.select {|_url, owner| owner == key }.keys
           urls.each {|url| @blob_registry.delete(url); @blob_owners.delete(url) }
         end
       end
+      # Keys are normalized with `.to_i` on BOTH sides (register tags
+      # "r:#{owner_realm.to_i}") so a marshalled Float/String id still matches.
+      def revoke_worker_blobs(handle) = revoke_owned_blobs("w:#{handle.to_i}")
+      def revoke_realm_blobs(realm_id) = revoke_owned_blobs("r:#{realm_id.to_i}")
 
       # ── postMessage transferable-buffer registry ───────────────────
       #

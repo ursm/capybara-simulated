@@ -434,6 +434,9 @@ module Capybara
       # ancestor frame re-navigates). No-op for nil/0/unknown ids.
       def dispose_frame_realm(id)
         return if id.nil? || id.zero?
+        # The frame's browsing context is going away — revoke the blob URLs it
+        # created (url-lifetime "Removing an iframe").
+        @browser.revoke_realm_blobs(id) rescue nil
         @realm_module_handles&.delete(id)
         @frame_realm_depths&.delete(id)
         fr = frame_realms.delete(id)
@@ -704,10 +707,7 @@ module Capybara
         # linger in @frame_realms and get re-drained on every poll tick.
         # Disposing a non-executing child realm mid-callback is safe.
         c.attach('__csim_disposeFrameRealm', ->(id) {
-          @realm_module_handles&.delete(id)
-          @frame_realm_depths&.delete(id)
-          fr = frame_realms.delete(id)
-          fr.dispose rescue nil if fr
+          dispose_frame_realm(id)   # also revokes the realm's blob URLs
           nil
         })
       end

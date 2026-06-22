@@ -20,5 +20,3 @@ FileAPI/url/url-in-tags-revoke.window.js:
 - Opening a blob URL in a new window immediately before revoking it works.
 - Opening a blob URL in a noopener about:blank window immediately before revoking
   it works.
-FileAPI/url/url-lifetime.html:
-- Removing an iframe revokes its URLs
