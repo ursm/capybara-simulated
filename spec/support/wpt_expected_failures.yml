@@ -72,33 +72,10 @@ html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 - Script script-load-error
 - Script script-window-error
 - Script xhr-test
-html/dom/documents/dom-tree-accessors/document.embeds-document.plugins-01.html:
-- Document.embeds should be a live collection
-- Document.plugins should be a live collection
-- No plugins
-- One plugin
-- Two plugins
-html/dom/documents/dom-tree-accessors/document.forms.html:
-- Document.forms should be a live collection
-- document.forms iteration
-html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-interface.html:
-- 'Document.getElementsByName: interfaces'
-html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-liveness.html:
-- Document.getElementsByName() should be a live collection
 html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-namespace-xhtml.xhtml:
 - getElementsByName and foreign namespaces
 html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-namespace.html:
 - getElementsByName and foreign namespaces
-html/dom/documents/dom-tree-accessors/document.head-02.html:
-- document.head
-html/dom/documents/dom-tree-accessors/document.images.html:
-- Document.images should be a live collection
-- Foreign element should not be in the collection
-- document.images should contain all HTML img elements
-html/dom/documents/dom-tree-accessors/document.links.html:
-- Document.links should be a live collection
-html/dom/documents/dom-tree-accessors/document.scripts.html:
-- Document.scripts should be a live collection
 html/dom/documents/dom-tree-accessors/document.title-01.html:
 - FAIL 2
 - FAIL 3
