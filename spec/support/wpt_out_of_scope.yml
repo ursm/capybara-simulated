@@ -63,6 +63,14 @@ FileAPI/BlobURL/cross-partition.https.html:
 - name: Blob URL shouldn't be revocable from a service worker
   reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
     is not modeled.'
+FileAPI/blob/Blob-constructor-dom.window.js:
+- name: A platform object that supports indexed properties should be treated as a
+    sequence for the blobParts argument (overwritten 'length'.)
+  reason: HTMLCollection extends Array (load-bearing per CLAUDE.md rule 1, for framework
+    array-iteration compat), so the live collection's array `length` slot is read
+    by the array iterator instead of an overridden `length` accessor — the test's
+    throwing `length` getter is never consulted. Fixing this would require dropping
+    the Array base.
 FileAPI/file/send-file-form-iso-2022-jp.html:
 - name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
     (Unicode) in ISO-2022-JP form"

@@ -71,16 +71,15 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   it 'createImageBitmap decodes a PNG blob via libvips and drawImage copies pixels' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
-    # Build a Blob from a known PNG (atob to latin-1 string then
-    # wrap). Matches the real-world `input.files[0]` path the OCR
-    # flow takes — `_parts` carries latin-1 bytes, not UTF-8-decoded
-    # text. Our fetch's `r.blob()` returns a body string that's
-    # already gone through UTF-8 reinterpretation, so isn't a clean
-    # source for binary content.
+    # Build a Blob from a known PNG. A string blobPart is UTF-8-encoded
+    # per the WHATWG Blob spec (`new Blob(['€']).size === 3`), which would
+    # corrupt raw binary bytes >0x7F — so binary content must go through a
+    # BufferSource, exactly as real apps do: `Uint8Array.from(atob(b64), …)`
+    # turns the base64 into a byte array the constructor copies verbatim.
     b64 = Base64.strict_encode64(png_bytes)
     out = session.evaluate_async_script(<<~JS)
       const cb = arguments[arguments.length - 1];
-      const blob = new Blob([atob('#{b64}')], { type: 'image/png' });
+      const blob = new Blob([Uint8Array.from(atob('#{b64}'), c => c.charCodeAt(0))], { type: 'image/png' });
       createImageBitmap(blob).then(bm => {
         const c   = new OffscreenCanvas(bm.width, bm.height);
         const ctx = c.getContext('2d');
