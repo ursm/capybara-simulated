@@ -7466,9 +7466,6 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaSort (<div aria-sort>): typeof IDL attribute'
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
-- name: 'div.tabIndex: setAttribute() to "-0"'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
 html/dom/documents/dom-tree-accessors/nameditem-names.html:
 - name: An embed name does not appears in a document's property names if the embed
     is inside another embed.
