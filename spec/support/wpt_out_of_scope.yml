@@ -7596,6 +7596,103 @@ html/dom/elements/global-attributes/dir-slots-directionality.html:
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
     model (rule 1).
+html/dom/elements/global-attributes/the-lang-attribute-001.html:
+- name: The browser will recognize a language declared in a lang attribute on the
+    html tag.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-002.html:
+- name: The browser will NOT recognize a language declared in an xml:lang attribute
+    on the html tag.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-003.html:
+- name: The browser will recognize a language declared in the HTTP header, when there
+    is no internal language declaration.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-004.html:
+- name: The browser will recognize a language declared in a meta element in the head
+    using http-equiv='Content-Language' content='..' (with a single language tag value),
+    when there is no other language declaration inside the document.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-005.html:
+- name: If there is a conflict between the language declarations in the HTTP header
+    and the html element using lang, the browser will recognize the language declared
+    in the html element.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-006.html:
+- name: If there is a conflict between the language declarations in the HTTP header
+    and the Content-Language meta element, the UA will recognize the language declared
+    in the meta element.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-007.html:
+- name: If there is a conflict between the language declared using lang in the html
+    element and that in the meta element, the UA will recognize the language declared
+    in the html element.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-008.html:
+- name: If an element contains a lang attribute with an empty value, the value of
+    a lang attribute higher up the document tree will no longer be applied to the
+    content of that element.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-009.html:
+- name: If the HTTP header contains a language declaration but the html element uses
+    an empty lang value, the UA will not recognize the language declared in the HTTP
+    header.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
+html/dom/elements/global-attributes/the-lang-attribute-010.html:
+- name: If the meta Content-Language element contains a language declaration but the
+    html element uses an empty lang value, the UA will not recognize the language
+    declared in the meta Content-Language element.
+  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
+    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
+    Requires a layout/rendering engine to resolve CSS width into geometry, which we
+    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
+    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
+    Content-Language.
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - name: ' ("<table><tfoot><tr><td>footer</tfoot><thead><tr><td style=''visibility:collapse''>thead</thead><tbody><tr><td>tbody</tbody></table>")'
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space

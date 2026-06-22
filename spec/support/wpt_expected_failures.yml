@@ -93,46 +93,6 @@ html/dom/elements/global-attributes/custom-attrs.html:
   with same name
 html/dom/elements/global-attributes/dataset.html:
 - Should not have a .dataset on random elements
-html/dom/elements/global-attributes/the-lang-attribute-001.html:
-- The browser will recognize a language declared in a lang attribute on the html tag.
-html/dom/elements/global-attributes/the-lang-attribute-002.html:
-- The browser will NOT recognize a language declared in an xml:lang attribute on the
-  html tag.
-html/dom/elements/global-attributes/the-lang-attribute-003.html:
-- The browser will recognize a language declared in the HTTP header, when there is
-  no internal language declaration.
-html/dom/elements/global-attributes/the-lang-attribute-004.html:
-- The browser will recognize a language declared in a meta element in the head using
-  http-equiv='Content-Language' content='..' (with a single language tag value), when
-  there is no other language declaration inside the document.
-html/dom/elements/global-attributes/the-lang-attribute-005.html:
-- If there is a conflict between the language declarations in the HTTP header and
-  the html element using lang, the browser will recognize the language declared in
-  the html element.
-html/dom/elements/global-attributes/the-lang-attribute-006.html:
-- If there is a conflict between the language declarations in the HTTP header and
-  the Content-Language meta element, the UA will recognize the language declared in
-  the meta element.
-html/dom/elements/global-attributes/the-lang-attribute-007.html:
-- If there is a conflict between the language declared using lang in the html element
-  and that in the meta element, the UA will recognize the language declared in the
-  html element.
-html/dom/elements/global-attributes/the-lang-attribute-008.html:
-- If an element contains a lang attribute with an empty value, the value of a lang
-  attribute higher up the document tree will no longer be applied to the content of
-  that element.
-html/dom/elements/global-attributes/the-lang-attribute-009.html:
-- If the HTTP header contains a language declaration but the html element uses an
-  empty lang value, the UA will not recognize the language declared in the HTTP header.
-html/dom/elements/global-attributes/the-lang-attribute-010.html:
-- If the meta Content-Language element contains a language declaration but the html
-  element uses an empty lang value, the UA will not recognize the language declared
-  in the meta Content-Language element.
-html/dom/elements/global-attributes/the-translate-attribute-012.html:
-- If the translate attribute is set to a null string, javascript will detect the translation
-  mode of text as translate-enabled.
-html/dom/elements/global-attributes/translate-enumerated-ascii-case-insensitive.html:
-- keyword yes
 html/dom/elements/images/bypass-cache-revalidation.html:
 - Images can bypass no-cache
 html/dom/historical.html:
