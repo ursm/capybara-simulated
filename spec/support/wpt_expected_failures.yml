@@ -93,13 +93,6 @@ html/dom/elements/global-attributes/custom-attrs.html:
   with same name
 html/dom/elements/global-attributes/dataset.html:
 - Should not have a .dataset on random elements
-html/dom/elements/global-attributes/id-attribute.html:
-- After setting id via id attribute, CSS association is via the new ID.
-- After setting id via setAttribute attribute, CSS association is via the new ID.
-- Association for CSS is exact and therefore case-sensitive.
-- Non-ASCII is allowed in an id and still make an association for CSS.
-- Spaces are allowed in an id and still make an association.
-- User agents must associate the element with an id value for purposes of CSS.
 html/dom/elements/global-attributes/the-lang-attribute-001.html:
 - The browser will recognize a language declared in a lang attribute on the html tag.
 html/dom/elements/global-attributes/the-lang-attribute-002.html:
