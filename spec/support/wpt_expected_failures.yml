@@ -90,10 +90,6 @@ FileAPI/url/unicode-origin.sub.html:
 FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.
 - Blob charset should override any auto-detected charset.
-FileAPI/url/url-format.any.js:
-- Blob URL parses correctly
-- Origin of Blob URL matches our origin
-- Origin of Blob URL matches our origin for Files
 FileAPI/url/url-in-tags-revoke.window.js:
 - Fetching a blob URL immediately before revoking it works in <script> tags.
 - Fetching a blob URL immediately before revoking it works in an iframe navigation.
@@ -113,26 +109,3 @@ FileAPI/url/url-lifetime.html:
 FileAPI/url/url-reload.window.js:
 - Reloading a blob URL succeeds even if the URL was revoked.
 - Reloading a blob URL succeeds.
-FileAPI/url/url-with-fetch.any.js:
-- Revoke blob URL after calling fetch, fetch should succeed
-- Revoke blob URL after creating Request, then clone Request, will fetch
-- Revoke blob URL after creating Request, will fetch
-- fetch with a fragment should succeed
-- fetch with method "CUSTOM" should fail
-- fetch with method "DELETE" should fail
-- fetch with method "HEAD" should fail
-- fetch with method "OPTIONS" should fail
-- fetch with method "POST" should fail
-- fetch with method "PUT" should fail
-FileAPI/url/url-with-xhr.any.js:
-- Appending a path should cause XHR to fail
-- Appending a query string should cause XHR to fail
-- Revoke blob URL after open(), will fetch
-- XHR of a revoked URL should fail
-- XHR with a fragment should succeed
-- XHR with method "CUSTOM" should fail
-- XHR with method "DELETE" should fail
-- XHR with method "HEAD" should fail
-- XHR with method "OPTIONS" should fail
-- XHR with method "POST" should fail
-- XHR with method "PUT" should fail
