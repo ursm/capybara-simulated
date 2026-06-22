@@ -137,27 +137,26 @@ FileAPI/url/cross-global-revoke.sub.html:
     URL must NOT affect the parent's blob (and the cross-origin frame must load its
     document from a remote origin). Storage partitioning / cross-origin frame loading
     is a deliberately unmodeled subsystem (rule 1, single-origin in-process driver).
-    The same-origin sibling ("from different frames") passes via the WindowProxy
-    event.source model.
-FileAPI/url/sandboxed-iframe.html:
-- name: Blob URL fragment is implemented.
-  reason: 'Layout — navigates a blob iframe to #block2 and asserts scrollY === 5000;
-    needs a layout engine (rule 1). Surfaced once the WindowProxy event.source fix
-    let the sandboxed cross-document test collection (fetch_tests_from_window)
-    complete; times out like the standalone url/url-in-tags.window.js sibling.'
-- name: Revoke blob URL after creating Request, then clone Request, will fetch
-  reason: 'Calls garbageCollect() from WPT /common/gc.js, which the test self-built
-    sandboxed-iframe HTML does NOT include (a plain script-src ignores the
-    "META script=/common/gc.js" directive, exactly as a real browser would), so
-    garbageCollect is undefined. A test-harness/GC-helper gap in the constructed
-    iframe, not a driver gap — surfaced once the WindowProxy event.source fix let
-    the collection complete (the standalone url-with-fetch.any.js variant, which
-    loads gc.js, passes).'
+    The same-origin sibling ("from different frames") passes via the WindowProxy event.source
+    model.
 FileAPI/url/multi-global-origin-serialization.sub.html:
 - name: Blob URL serialization (specifically the origin) in multi-global situations
   reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
     global) Blob URL origin attribution — a cross-origin multi-global navigation/origin
     model we don't implement (single-origin in-process driver).
+FileAPI/url/sandboxed-iframe.html:
+- name: Blob URL fragment is implemented.
+  reason: 'Layout — navigates a blob iframe to #block2 and asserts scrollY === 5000;
+    needs a layout engine (rule 1). Surfaced once the WindowProxy event.source fix
+    let the sandboxed cross-document test collection (fetch_tests_from_window) complete;
+    times out like the standalone url/url-in-tags.window.js sibling.'
+- name: Revoke blob URL after creating Request, then clone Request, will fetch
+  reason: Calls garbageCollect() from WPT /common/gc.js, which the test self-built
+    sandboxed-iframe HTML does NOT include (a plain script-src ignores the "META script=/common/gc.js"
+    directive, exactly as a real browser would), so garbageCollect is undefined. A
+    test-harness/GC-helper gap in the constructed iframe, not a driver gap — surfaced
+    once the WindowProxy event.source fix let the collection complete (the standalone
+    url-with-fetch.any.js variant, which loads gc.js, passes).
 FileAPI/url/unicode-origin.sub.html:
 - name: Verify serialization of non-ascii origin in Blob URLs
   reason: Needs IDNA/Unicode-host serialization (the non-ascii domain 天気の良い日 → xn--
@@ -3751,33 +3750,6 @@ encoding/replacement-encodings.any.js:
 - name: replacement - non-empty input decodes to one replacement character.
   reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
     tables.
-encoding/streams/realms.window.js:
-- name: the output chunks when read is called after write should come from the same
-    realm as the constructor of TextEncoderStream
-  reason: Cross-realm constructor-realm attribution of stream chunks/objects. Our
-    TextEncoder/DecoderStream come from a single vendored web-streams-polyfill realm,
-    so readable/writable/chunks/errors don't carry the per-realm constructor identity
-    these tests assert. Surfaced once the WindowProxy event.source fix unblocked the
-    test's iframe handshake (`event.source === window.parent`); the realm-attribution
-    of polyfilled streams is out of scope (rule 1).
-- name: the output chunks when write is called with a pending read should come from
-    the same realm as the constructor of TextEncoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: TypeError for unconvertable chunk should come from constructor realm of TextEncoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: the result object when read is called after write should come from the same
-    realm as the constructor of TextDecoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: the result object when write is called with a pending read should come from
-    the same realm as the constructor of TextDecoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: TypeError for chunk with the wrong type should come from constructor realm
-    of TextDecoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: TypeError for invalid chunk should come from constructor realm of TextDecoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
-- name: TypeError for incomplete input should come from constructor realm of TextDecoderStream
-  reason: Cross-realm stream constructor-realm attribution; see above.
 encoding/streams/decode-non-utf8.any.js:
 - name: TextDecoderStream should be able to decode ISO-2022-JP
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
@@ -3795,6 +3767,33 @@ encoding/streams/decode-non-utf8.any.js:
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
     legacy-multibyte / legacy-single-byte decoder tables are deliberately not modeled
     (rule 1) — only utf-8/utf-16/windows-1252 are.
+encoding/streams/realms.window.js:
+- name: TypeError for chunk with the wrong type should come from constructor realm
+    of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for incomplete input should come from constructor realm of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for invalid chunk should come from constructor realm of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for unconvertable chunk should come from constructor realm of TextEncoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: the output chunks when read is called after write should come from the same
+    realm as the constructor of TextEncoderStream
+  reason: Cross-realm constructor-realm attribution of stream chunks/objects. Our
+    TextEncoder/DecoderStream come from a single vendored web-streams-polyfill realm,
+    so readable/writable/chunks/errors don't carry the per-realm constructor identity
+    these tests assert. Surfaced once the WindowProxy event.source fix unblocked the
+    test's iframe handshake (`event.source === window.parent`); the realm-attribution
+    of polyfilled streams is out of scope (rule 1).
+- name: the output chunks when write is called with a pending read should come from
+    the same realm as the constructor of TextEncoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: the result object when read is called after write should come from the same
+    realm as the constructor of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: the result object when write is called with a pending read should come from
+    the same realm as the constructor of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
 encoding/textdecoder-eof.any.js:
 - name: TextDecoder end-of-queue handling
   reason: UTF-8 assertions pass; the subtest also asserts Big5 lead-byte buffering
@@ -14954,356 +14953,6 @@ shadow-dom/wheel-event-related-target.html:
     DOM
   reason: Drives test_driver.Actions().scroll over an overflow:scroll container; depends
     on real scroll geometry + wheel input driver, not modeled.
-url/a-element-origin-xhtml.xhtml:
-- name: 'Parsing origin: <ftp://%e2%98%83> against <about:blank>'
-  reason: Percent-encoded UTF-8 host (snowman) origin requires IDNA/Unicode host processing;
-    tr46 is an ASCII stub.
-- name: "Parsing origin: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: Host contains zero-width/BOM chars that IDNA mapping must strip; needs Unicode
-    IDNA tables (not modeled).
-- name: 'Parsing origin: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: Ideographic full stop as label separator requires IDNA mapping/normalization
-    tables (not modeled).
-- name: 'Parsing origin: <http://你好你好> against <http://other.com/>'
-  reason: Non-ASCII host needs IDNA-to-ASCII (punycode) conversion for origin; tr46
-    ASCII stub cannot.
-- name: 'Parsing origin: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: Fullwidth digits/dot require IDNA mapping then IPv4 reparse; needs Unicode
-    mapping tables (not modeled).
-- name: 'Parsing origin: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: Fullwidth letters in host require IDNA case-folding/mapping tables (not
-    modeled).
-- name: 'Parsing origin: <https://%e2%98%83> against <about:blank>'
-  reason: Percent-encoded UTF-8 host origin requires IDNA/Unicode host processing;
-    tr46 ASCII stub.
-- name: 'Parsing origin: <https://a%C2%ADb/> against <about:blank>'
-  reason: Soft-hyphen (U+00AD) in host must be removed by IDNA mapping; needs Unicode
-    IDNA tables (not modeled).
-- name: 'Parsing origin: <https://faß.ExAmPlE/> against <about:blank>'
-  reason: Sharp-s + case host needs IDNA mapping/case-fold to ASCII for origin; tr46
-    ASCII stub cannot.
-url/a-element-origin.html:
-- name: 'Parsing origin: <ftp://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: "Parsing origin: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing origin: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing origin: <http://你好你好> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing origin: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing origin: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing origin: <https://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing origin: <https://a%C2%ADb/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing origin: <https://faß.ExAmPlE/> against <about:blank>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-url/a-element-xhtml.xhtml:
-- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a­b/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a­b/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    against <about:blank>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    against <about:blank>"
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://xn--/p> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <file://xn--/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://­/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://­/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <ftp://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%80/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%A0/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%b7%90zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%90%ef%bc%90.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%94%ef%bc%91.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.XN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://GOO 　goo.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://a.b.c.XN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.Xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://你好你好> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://﷐zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://％００.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://％４１.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://%C2%AD/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%EF%BF%BD> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://a%C2%ADb/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%80/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%A0/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://faß.ExAmPlE/> against <about:blank>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://xn--/> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <https://­/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://�> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: "Parsing: <https://\uFFFFy> against <about:blank>"
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-url/a-element.html:
-- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://%C2%AD/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a%C2%ADb/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a­b/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a­b/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    against <about:blank>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    against <about:blank>"
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://xn--/p> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <file://xn--/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://­/p> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://­/p> against <about:blank>'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <ftp://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%80/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%A0/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%b7%90zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%90%ef%bc%90.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%94%ef%bc%91.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.XN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://GOO 　goo.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://a.b.c.XN--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.Xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.xn--pokxncvks> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://你好你好> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://﷐zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://％００.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://％４１.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://%C2%AD/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%EF%BF%BD> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%e2%98%83> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://a%C2%ADb/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%80/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%A0/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://faß.ExAmPlE/> against <about:blank>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://xn--/> against <about:blank>'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <https://­/> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://�> against <about:blank>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: "Parsing: <https://\uFFFFy> against <about:blank>"
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
 url/percent-encoding.window.js:
 - name: "Input \x0EA with encoding iso-2022-jp"
   reason: query percent-encoding per iso-2022-jp needs a legacy (non-utf-8) encoder
@@ -15323,249 +14972,3 @@ url/percent-encoding.window.js:
 - name: Input  with encoding gb18030
   reason: query percent-encoding per gb18030 needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
-url/url-constructor.any.js:
-- name: 'Parsing: <file://%C2%AD/p> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://%C2%AD/p> without base'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a%C2%ADb/p> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a%C2%ADb/p> without base'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://a­b/p> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://a­b/p> without base'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    without base"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <file://loC\U0001D400\U0001D40B\U0001D407\U0001D428\U0001D42C\U0001D42D/usr/bin>
-    without base"
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://xn--/p> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <file://xn--/p> without base'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <file://­/p> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <file://­/p> without base'
-  reason: 'IDNA / Unicode-host file: URL: the host needs UTS-46 / punycode processing
-    (percent-encoded or literal soft-hyphen, xn-- prefix, NFKC case-folding) that
-    the vendored whatwg-url ASCII-only tr46 shim deliberately does not model (rule
-    1; same family as IdnaTestV2 / toascii).'
-- name: 'Parsing: <ftp://%e2%98%83> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%80/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <ftp://example.com%A0/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%b7%90zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%90%ef%bc%90.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://%ef%bc%85%ef%bc%94%ef%bc%91.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.XN--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xN--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://10.0.0.xn--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://GOO 　goo.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: "Parsing: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://a.b.c.XN--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.Xn--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://a.b.c.xn--pokxncvks> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://你好你好> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://﷐zyx.com> against <http://other.com/>'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <http://％００.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://％４１.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://%C2%AD/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%EF%BF%BD> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://%e2%98%83> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://a%C2%ADb/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%80/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://example.com%A0/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://faß.ExAmPlE/> without base'
-  reason: non-ASCII/fullwidth/case-fold host requires IDNA/UTS46 domain-to-ASCII mapping;
-    deliberately not modeled (tr46 ASCII stub)
-- name: 'Parsing: <https://xn--/> without base'
-  reason: punycode (xn--) label decode/validation is part of IDNA host parsing; IDNA
-    deliberately not modeled (tr46 stub)
-- name: 'Parsing: <https://­/> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: 'Parsing: <https://�> without base'
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-- name: "Parsing: <https://\uFFFFy> without base"
-  reason: host contains percent-encoded/forbidden/ignored code points handled by IDNA
-    host mapping+validation; IDNA not modeled (tr46 stub)
-url/url-origin.any.js:
-- name: 'Origin parsing: <ftp://%e2%98%83> without base'
-  reason: percent-decoded non-ASCII host requires IDNA/UTS46 ToASCII domain-to-ASCII
-    processing we deliberately don't model
-- name: "Origin parsing: <http://GOO​⁠\uFEFFgoo.com> against <http://other.com/>"
-  reason: IDNA mapping must strip ignorable/zero-width host codepoints; needs Unicode-host
-    IDNA table
-- name: 'Origin parsing: <http://www.foo。bar.com> against <http://other.com/>'
-  reason: ideographic full stop U+3002 as label separator is IDNA host normalization
-    we don't model
-- name: 'Origin parsing: <http://你好你好> against <http://other.com/>'
-  reason: non-ASCII (CJK) host requires IDNA ToASCII punycode conversion, an out-of-scope
-    subsystem
-- name: 'Origin parsing: <http://０Ｘｃ０．０２５０．０１> against <http://other.com/>'
-  reason: fullwidth digits/dot host requires IDNA mapping + IPv4 normalization via
-    Unicode tables we don't model
-- name: 'Origin parsing: <http://Ｇｏ.com> against <http://other.com/>'
-  reason: fullwidth letter host requires IDNA case-fold/mapping (UTS46) we deliberately
-    don't model
-- name: 'Origin parsing: <https://%e2%98%83> without base'
-  reason: percent-decoded non-ASCII host requires IDNA ToASCII domain-to-ASCII processing
-- name: 'Origin parsing: <https://a%C2%ADb/> without base'
-  reason: soft-hyphen (U+00AD) must be IDNA-mapped/removed from host; needs Unicode-host
-    table
-- name: 'Origin parsing: <https://faß.ExAmPlE/> without base'
-  reason: IDNA Nontransitional sharp-s host processing requires UTS46 mapping tables
-    we don't model
-url/url-setters-a-area.window.js:
-- name: "<a>: Setting <https://example.com/>.host = '%C2%AD'"
-  reason: host setter must IDNA-map percent-decoded soft-hyphen to empty/error; Unicode-host
-    table out of scope
-- name: "<a>: Setting <https://example.com/>.host = 'a%C2%ADb'"
-  reason: host setter IDNA mapping must remove soft-hyphen from label; needs UTS46
-    tables
-- name: "<a>: Setting <https://example.com/>.host = 'xn--'"
-  reason: invalid punycode label must be rejected by IDNA ToUnicode/ToASCII validation
-    we don't model
-- name: "<a>: Setting <https://example.com/>.host = '­'"
-  reason: soft-hyphen host must IDNA-map away; Unicode-host processing out of scope
-- name: "<a>: Setting <https://example.com/>.hostname = '%C2%AD'"
-  reason: hostname setter requires IDNA mapping of percent-decoded soft-hyphen; out-of-scope
-    subsystem
-- name: "<a>: Setting <https://example.com/>.hostname = 'a%C2%ADb'"
-  reason: hostname setter IDNA mapping must strip soft-hyphen; needs UTS46 tables
-- name: "<a>: Setting <https://example.com/>.hostname = 'xn--'"
-  reason: invalid punycode hostname must be rejected by IDNA validation we don't model
-- name: "<a>: Setting <https://example.com/>.hostname = '­'"
-  reason: soft-hyphen hostname must IDNA-map away; Unicode-host processing out of
-    scope
-- name: "<a>: Setting <https://x/>.host = 'ß' IDNA Nontransitional_Processing"
-  reason: IDNA Nontransitional sharp-s mapping requires UTS46 tables we deliberately
-    don't model
-- name: "<area>: Setting <https://example.com/>.host = '%C2%AD'"
-  reason: host setter must IDNA-map percent-decoded soft-hyphen; Unicode-host table
-    out of scope
-- name: "<area>: Setting <https://example.com/>.host = 'a%C2%ADb'"
-  reason: host setter IDNA mapping must remove soft-hyphen from label; needs UTS46
-    tables
-- name: "<area>: Setting <https://example.com/>.host = 'xn--'"
-  reason: invalid punycode label must be rejected by IDNA validation we don't model
-- name: "<area>: Setting <https://example.com/>.host = '­'"
-  reason: soft-hyphen host must IDNA-map away; Unicode-host processing out of scope
-- name: "<area>: Setting <https://example.com/>.hostname = '%C2%AD'"
-  reason: hostname setter requires IDNA mapping of percent-decoded soft-hyphen; out-of-scope
-    subsystem
-- name: "<area>: Setting <https://example.com/>.hostname = 'a%C2%ADb'"
-  reason: hostname setter IDNA mapping must strip soft-hyphen; needs UTS46 tables
-- name: "<area>: Setting <https://example.com/>.hostname = 'xn--'"
-  reason: invalid punycode hostname must be rejected by IDNA validation we don't model
-- name: "<area>: Setting <https://example.com/>.hostname = '­'"
-  reason: soft-hyphen hostname must IDNA-map away; Unicode-host processing out of
-    scope
-- name: "<area>: Setting <https://x/>.host = 'ß' IDNA Nontransitional_Processing"
-  reason: IDNA Nontransitional sharp-s mapping requires UTS46 tables we deliberately
-    don't model
-url/url-setters.any.js:
-- name: 'URL: Setting <https://example.com/>.host = ''%C2%AD'''
-  reason: host setter must IDNA-map percent-decoded soft-hyphen; Unicode-host table
-    out of scope
-- name: 'URL: Setting <https://example.com/>.host = ''a%C2%ADb'''
-  reason: host setter IDNA mapping must remove soft-hyphen from label; needs UTS46
-    tables
-- name: 'URL: Setting <https://example.com/>.host = ''xn--'''
-  reason: invalid punycode label must be rejected by IDNA validation we don't model
-- name: 'URL: Setting <https://example.com/>.host = ''­'''
-  reason: soft-hyphen host must IDNA-map away; Unicode-host processing out of scope
-- name: 'URL: Setting <https://example.com/>.hostname = ''%C2%AD'''
-  reason: hostname setter requires IDNA mapping of percent-decoded soft-hyphen; out-of-scope
-    subsystem
-- name: 'URL: Setting <https://example.com/>.hostname = ''a%C2%ADb'''
-  reason: hostname setter IDNA mapping must strip soft-hyphen; needs UTS46 tables
-- name: 'URL: Setting <https://example.com/>.hostname = ''xn--'''
-  reason: invalid punycode hostname must be rejected by IDNA validation we don't model
-- name: 'URL: Setting <https://example.com/>.hostname = ''­'''
-  reason: soft-hyphen hostname must IDNA-map away; Unicode-host processing out of
-    scope
-- name: 'URL: Setting <https://x/>.host = ''ß'' IDNA Nontransitional_Processing'
-  reason: IDNA Nontransitional sharp-s mapping requires UTS46 tables we deliberately
-    don't model

@@ -101,6 +101,10 @@ module Capybara
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1], a[2]); nil },
+        # WHATWG/UTS46 IDNA for the URL parser's host processing (the JS tr46 stub
+        # delegates non-ASCII / xn-- hosts here; ASCII stays in-VM).
+        '__csim_domainToASCII'       => ->(b, *a) { b.domain_to_ascii(a[0]) },
+        '__csim_domainToUnicode'     => ->(b, *a) { b.domain_to_unicode(a[0]) },
         '__csim_blobResolve'         => ->(b, *a) { b.blob_resolve(a[0]) },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
         # Any non-timer async channel (worker / SSE / hijacked fetch / window

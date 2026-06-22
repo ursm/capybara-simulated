@@ -33,6 +33,10 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'rack',     '>= 2.2'
+  # WHATWG/UTS46 IDNA (domain-to-ASCII/Unicode) for the URL parser's host
+  # processing — the JS tr46 stub delegates non-ASCII / xn-- hosts here so the V8
+  # snapshot doesn't carry the ~600KB Unicode IDNA mapping table.
+  spec.add_dependency 'uri-idna', '~> 0.3'
 
   # JS engine is a soft dependency — add exactly one to your Gemfile.
   # The engine is auto-selected based on which is loadable; `:v8` wins when

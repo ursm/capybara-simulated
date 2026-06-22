@@ -13,6 +13,7 @@ require 'socket'
 require 'thread'
 require 'time'
 require 'uri'
+require 'uri/idna'   # WHATWG/UTS46 domain-to-ASCII/Unicode (uri-idna gem)
 require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'stack_resolver'
@@ -3285,6 +3286,28 @@ module Capybara
 
       def blob_resolve(url)
         @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
+      end
+
+      # WHATWG URL "domain to ASCII" — the JS tr46 stub delegates non-ASCII / xn--
+      # hosts here (the ASCII fast path stays in-VM). Returns the punycode form, or
+      # nil on an IDNA failure (so whatwg-url reports "domain to ASCII failed").
+      # `be_strict: false` is the URL parser's mode (UseSTD3ASCIIRules and
+      # VerifyDnsLength off) — empty middle labels (`x..y`) and `_`/etc. are
+      # allowed, matching whatwg-url's `domainToASCII(domain, false)`.
+      def domain_to_ascii(domain)
+        URI::IDNA.whatwg_to_ascii(domain.to_s, be_strict: false)
+      rescue URI::IDNA::Error
+        nil   # a genuine IDNA failure (bad punycode / disallowed codepoint) — let
+              # whatwg-url report "domain to ASCII failed". Non-IDNA errors propagate.
+      end
+
+      # WHATWG URL "domain to Unicode" — best-effort (never fails the parse per
+      # spec), so on an IDNA error fall back to the input domain (unlike to_ascii,
+      # which signals failure with nil — the asymmetry is intentional).
+      def domain_to_unicode(domain)
+        URI::IDNA.whatwg_to_unicode(domain.to_s, be_strict: false)
+      rescue URI::IDNA::Error
+        domain.to_s
       end
 
       # Read a blob URL's bytes + content type from THIS window's VM (its local

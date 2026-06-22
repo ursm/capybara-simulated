@@ -10,21 +10,23 @@
 # Keep this list as short as possible: a crasher hides every subtest in the
 # file. Prefer fixing the driver over adding here.
 #
-# A second, narrow category also lives here: data-driven tests for a feature
-# that is a deliberate STRUCTURAL non-goal (IDNA / Unicode host names — our
-# vendored whatwg-url uses an ASCII-only tr46 shim, since test hosts are ASCII).
-# Those would otherwise dump thousands of never-fixable per-subtest entries into
-# the allowlist; skipping the whole file keeps the wrong-behaviour backlog
-# focused on things we could actually fix.
-
+# A second, narrow category also lives here: large DATA-DRIVEN conformance
+# tables where a small residual fails. IDNA is now IMPLEMENTED (URL host parsing
+# punycodes correctly via the uri-idna gem on the Ruby host — see Browser#
+# domain_to_ascii; the non-IDNA url-constructor / a-element IDNA cases now PASS).
+# These two files still carry a residual (~74 / ~45) where uri-idna's UTS46
+# conformance level / Unicode version differs from the WPT reference data
+# (bidi/contextj, variation selectors, lenient trailing-`=` punycode, …). Kept
+# skipped — not per-case allowlisted — because the failing set is large + tied to
+# the gem's Unicode version, same convention as the legacy-encoding tables below.
 "url/IdnaTestV2.any.js": >-
-  IDNA/Unicode-host conformance (~2300 data-driven cases). Out of scope: our
-  whatwg-url vendoring aliases tr46 to an ASCII-only shim (test hosts are ASCII).
-"url/IdnaTestV2-removed.any.js": >-
-  IDNA conformance (removed-codepoint cases). Out of scope — see IdnaTestV2.
+  IDNA/Unicode-host conformance (~2300 data-driven cases). IDNA IS implemented
+  (uri-idna); ~95% pass. The residual ~74 are uri-idna's UTS46/Unicode-version
+  gap vs the WPT reference data — kept skipped per the data-driven convention.
 "url/toascii.window.js": >-
-  Host `domainToASCII`/IDNA conversion (~600 cases). Out of scope — ASCII-only
-  tr46 shim; see IdnaTestV2.
+  Host `domainToASCII`/IDNA conversion (~600 cases). IDNA IS implemented
+  (uri-idna); most pass. The residual ~45 are uri-idna's conformance gap vs the
+  WPT reference (lenient trailing-`=` punycode, bidi edge cases) — see IdnaTestV2.
 
 # Legacy multi-byte CJK encodings (Shift_JIS / EUC-JP / ISO-2022-JP /
 # EUC-KR / GBK / gb18030 / Big5) and the single-byte legacy index tables.
@@ -67,15 +69,13 @@
   labels is already covered green by api-invalid-label.any.js.
 
 "url/failure.html": >-
-  The XHR / sendBeacon / Location / window.open sinks now throw synchronously on
-  a malformed URL (708 of the file's subtests pass), so it no longer dominates the
-  wall. What remains is ~114 IDNA / Unicode-host cases (https://<non-ascii>): the
-  vendored whatwg-url uses an ASCII-only tr46 shim, so those hosts aren't rejected
-  (no throw) AND each still drains rack_fetch (URI "must be ascii only") — ~35s.
-  Same structural non-goal + allowlist-noise convention as IdnaTestV2 / toascii:
-  skip the whole file rather than dump 114 never-fixable IDNA entries into the
-  allowlist. The non-IDNA URL-parse-failure behaviour is also covered by
-  url-constructor.any.js.
+  The XHR / sendBeacon / Location / window.open sinks throw synchronously on a
+  malformed URL (most subtests pass). IDNA is now implemented (uri-idna), so many
+  of the former Unicode-host cases now reject correctly; a residual data-driven
+  set remains where uri-idna is more lenient than the WPT reference (accepts hosts
+  the test expects to fail). Large + Unicode-version-tied, so kept skipped per the
+  same data-driven convention as IdnaTestV2 / toascii; the non-IDNA URL-parse-
+  failure behaviour is fully covered (green) by url-constructor.any.js.
 
 "dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html": >-
   Scroll-on-arrow-key test: its <body onload=runTest()> now runs (window-forwarded
