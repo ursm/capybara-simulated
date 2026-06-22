@@ -11,9 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/url/cross-global-revoke.sub.html:
-- It is not possible to revoke cross-origin blob URLs.
-- It is possible to revoke same-origin blob URLs from different frames.
 FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.
 - Blob charset should override any auto-detected charset.

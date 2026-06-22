@@ -131,6 +131,28 @@ FileAPI/file/send-file-form-x-user-defined.html:
 - name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
   reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
     (rule 1).
+FileAPI/url/cross-global-revoke.sub.html:
+- name: It is not possible to revoke cross-origin blob URLs.
+  reason: Needs origin-partitioned blob storage — a cross-origin iframe revoking a
+    URL must NOT affect the parent's blob (and the cross-origin frame must load its
+    document from a remote origin). Storage partitioning / cross-origin frame loading
+    is a deliberately unmodeled subsystem (rule 1, single-origin in-process driver).
+    The same-origin sibling ("from different frames") passes via the WindowProxy
+    event.source model.
+FileAPI/url/sandboxed-iframe.html:
+- name: Blob URL fragment is implemented.
+  reason: 'Layout — navigates a blob iframe to #block2 and asserts scrollY === 5000;
+    needs a layout engine (rule 1). Surfaced once the WindowProxy event.source fix
+    let the sandboxed cross-document test collection (fetch_tests_from_window)
+    complete; times out like the standalone url/url-in-tags.window.js sibling.'
+- name: Revoke blob URL after creating Request, then clone Request, will fetch
+  reason: 'Calls garbageCollect() from WPT /common/gc.js, which the test self-built
+    sandboxed-iframe HTML does NOT include (a plain script-src ignores the
+    "META script=/common/gc.js" directive, exactly as a real browser would), so
+    garbageCollect is undefined. A test-harness/GC-helper gap in the constructed
+    iframe, not a driver gap — surfaced once the WindowProxy event.source fix let
+    the collection complete (the standalone url-with-fetch.any.js variant, which
+    loads gc.js, passes).'
 FileAPI/url/multi-global-origin-serialization.sub.html:
 - name: Blob URL serialization (specifically the origin) in multi-global situations
   reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
@@ -225,15 +247,6 @@ dom/events/scrolling/iframe-chains.html:
 - name: Wheel scroll in iframe chains to containing element.
   reason: Wheel scroll chaining across nested iframes needs scroll geometry, wheel
     events, and viewport layout we deliberately don't model.
-dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html:
-- name: Ensure that the scroll position is not lost when the local iframe is set to
-    display:none and shown again.
-  reason: Requires preserving rendered scroll offset across display:none toggle; depends
-    on scroll geometry/layout engine we don't model.
-- name: Ensure that the scroll position is not lost when the remote iframe is set
-    to display:none and shown again.
-  reason: Cross-origin iframe scroll-offset persistence across display:none; needs
-    scroll geometry + remote frame layout we don't model.
 dom/events/scrolling/scroll-cross-origin-iframes.html:
 - name: Verify sibling cross-origin iframes can wheel-scroll.
   reason: Wheel-scrolling cross-origin iframes needs wheel event + scroll geometry
@@ -3738,6 +3751,33 @@ encoding/replacement-encodings.any.js:
 - name: replacement - non-empty input decodes to one replacement character.
   reason: WHATWG 'replacement' encoding label deliberately not modeled in encoding
     tables.
+encoding/streams/realms.window.js:
+- name: the output chunks when read is called after write should come from the same
+    realm as the constructor of TextEncoderStream
+  reason: Cross-realm constructor-realm attribution of stream chunks/objects. Our
+    TextEncoder/DecoderStream come from a single vendored web-streams-polyfill realm,
+    so readable/writable/chunks/errors don't carry the per-realm constructor identity
+    these tests assert. Surfaced once the WindowProxy event.source fix unblocked the
+    test's iframe handshake (`event.source === window.parent`); the realm-attribution
+    of polyfilled streams is out of scope (rule 1).
+- name: the output chunks when write is called with a pending read should come from
+    the same realm as the constructor of TextEncoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for unconvertable chunk should come from constructor realm of TextEncoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: the result object when read is called after write should come from the same
+    realm as the constructor of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: the result object when write is called with a pending read should come from
+    the same realm as the constructor of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for chunk with the wrong type should come from constructor realm
+    of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for invalid chunk should come from constructor realm of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
+- name: TypeError for incomplete input should come from constructor realm of TextDecoderStream
+  reason: Cross-realm stream constructor-realm attribution; see above.
 encoding/streams/decode-non-utf8.any.js:
 - name: TextDecoderStream should be able to decode ISO-2022-JP
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);

@@ -762,8 +762,22 @@ module Capybara
           if (globalThis.#{HOST_NAMESPACE_NAME} && typeof globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal === 'function') {
             var __parentWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(#{parent_id.to_i});
             if (__parentWin) {
-              globalThis.parent = __parentWin;
-              globalThis.top    = __parentWin.top || __parentWin;
+              // Expose `parent`/`top` as THIS realm's WindowProxy for them (not the
+              // raw parent global) so `e.source === parent` holds and a frame's
+              // `parent.postMessage(...)` attributes the sender. `top` resolves
+              // through the parent's own top (already a proxy if the parent is a
+              // frame), unwrapped to its raw global then re-proxied for this realm.
+              var __NS = globalThis.#{HOST_NAMESPACE_NAME};
+              var __pf = globalThis.__csimFrameWindowProxyFor;
+              if (__pf && __NS && typeof __NS.contextOf === 'function') {
+                var __topRaw = __parentWin.top || __parentWin;
+                if (__topRaw && __topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
+                globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
+                globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
+              } else {
+                globalThis.parent = __parentWin;
+                globalThis.top    = __parentWin.top || __parentWin;
+              }
             }
           }
         JS
