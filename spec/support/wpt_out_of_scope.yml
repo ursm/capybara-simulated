@@ -149,6 +149,11 @@ FileAPI/url/unicode-origin.sub.html:
   reason: Needs IDNA/Unicode-host serialization (the non-ascii domain 天気の良い日 → xn--
     punycode) plus a real cross-origin iframe at that host. IDNA / Unicode-host encoding
     is a deliberately unmodeled subsystem (CLAUDE.md rule 1).
+FileAPI/url/url-in-tags.window.js:
+- name: Blob URL fragment is implemented.
+  reason: 'Navigates an iframe to <blobURL>#block2 and asserts contentWindow.scrollY
+    === 5000 — requires a layout engine to position the 5000px blocks and compute
+    the fragment-scroll offset (rule 1: no layout/rendering engine).'
 dom/collections/HTMLCollection-supported-property-indices.html:
 - name: Handling of property names that look like integers around 2^32
   reason: Exactly the 2^32 index-boundary exotic-object edge cited in rule 2; no real

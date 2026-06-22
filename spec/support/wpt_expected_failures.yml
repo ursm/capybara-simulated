@@ -27,21 +27,13 @@ FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.
 - Blob charset should override any auto-detected charset.
 FileAPI/url/url-in-tags-revoke.window.js:
-- Fetching a blob URL immediately before revoking it works in <script> tags.
 - Fetching a blob URL immediately before revoking it works in an iframe navigation.
-- Fetching a blob URL immediately before revoking it works in an iframe.
 - Opening a blob URL in a new window by clicking an <a> tag works immediately before
   revoking the URL.
 - Opening a blob URL in a new window immediately before revoking it works.
 - Opening a blob URL in a noopener about:blank window immediately before revoking
   it works.
-FileAPI/url/url-in-tags.window.js:
-- Blob URL fragment is implemented.
-- Blob URLs can be used in <script> tags
-- Blob URLs can be used in iframes, and are treated same origin
 FileAPI/url/url-lifetime.html:
 - Removing an iframe revokes its URLs
 - Terminating worker revokes its URLs
-FileAPI/url/url-reload.window.js:
-- Reloading a blob URL succeeds even if the URL was revoked.
-- Reloading a blob URL succeeds.
+FileAPI/url/url-reload.window.js: HARNESS_ERROR
