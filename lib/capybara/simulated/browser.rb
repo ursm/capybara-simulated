@@ -3845,6 +3845,40 @@ module Capybara
         @pending_reload = false
         refresh
       end
+      # `frame.contentWindow.location.reload()` from a nested browsing context.
+      # Like `frame_navigate_self`, the JS side flags the initiating realm here
+      # and we defer (so the child realm isn't disposed mid-reload()). Keyed by
+      # realm id so two frames reloading in one turn both apply.
+      def frame_reload_self(realm_id)
+        return if realm_id.nil? || realm_id.zero?
+        (@pending_frame_reload ||= []) << realm_id
+      end
+      def consume_pending_frame_reload
+        return if @pending_frame_reload.nil? || @pending_frame_reload.empty?
+        realm_ids = @pending_frame_reload.uniq
+        @pending_frame_reload = nil
+        realm_ids.each do |realm_id|
+          invalidate_find_cache
+          # An entered `within_frame` frame reloads through `navigate_frame` (keeps
+          # the frame stack in sync) — re-fetching its current document URL, which
+          # we read from the still-alive realm. (A blob: URL entered this way is
+          # re-fetched through Rack and so does NOT reuse retained bytes — reloading
+          # an *entered* revoked-blob frame is an accepted gap; the common parent-
+          # held path below reuses bytes via reloadFrame.) Otherwise (a parent's
+          # `iframe.contentWindow.location.reload()`, empty href, or a realm torn
+          # down between flag and drain) re-navigate the owning iframe by realm id
+          # JS-side, reusing the retained content so blob bytes survive a revoke.
+          entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
+          url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
+          if entry && !url.empty?
+            navigate_frame(url, entry: entry)
+          else
+            @runtime.call('__csimReloadFrameByRealm', realm_id)
+          end
+        rescue StandardError => e
+          log_console('warn', "frame self-reload failed: #{e.message}")
+        end
+      end
       # A <form> submitted from INSIDE a nested browsing context (a frame realm
       # reached via `contentWindow`, not an entered `within_frame` block). The
       # pending-submit slot lives on the initiating realm's globalThis, which no
@@ -3944,6 +3978,7 @@ module Capybara
         consume_pending_location
         consume_pending_frame_nav
         consume_pending_frame_submit
+        consume_pending_frame_reload
         consume_pending_reload
         consume_pending_history_traverse
       end
@@ -4354,6 +4389,7 @@ module Capybara
         saved_traverse     = @pending_history_traverse
         saved_frame_nav    = @pending_frame_nav
         saved_frame_submit = @pending_frame_submit
+        saved_frame_reload = @pending_frame_reload
         begin
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         rescue StandardError
@@ -4362,12 +4398,13 @@ module Capybara
           @pending_location         = saved_location
           @pending_reload           = saved_reload
           @pending_history_traverse = saved_traverse
-          # Don't let a frame-nav / frame-submit intent stashed by an outgoing-
-          # page timer leak into the fresh page — its realm id belongs to the
-          # discarded page (and a reused context id could mis-fire against an
-          # unrelated realm on the new page).
+          # Don't let a frame-nav / frame-submit / frame-reload intent stashed by
+          # an outgoing-page timer leak into the fresh page — its realm id belongs
+          # to the discarded page (and a reused context id could mis-fire against
+          # an unrelated realm on the new page).
           @pending_frame_nav        = saved_frame_nav
           @pending_frame_submit     = saved_frame_submit
+          @pending_frame_reload     = saved_frame_reload
         end
       end
 

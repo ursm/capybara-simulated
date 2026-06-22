@@ -49,6 +49,10 @@ module Capybara
         # realm id). Deferred + applied by re-navigating the owning iframe, so a
         # frame's `location.href = …` navigates the frame, not the top page.
         '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i); nil },
+        # A nested browsing context reloading its OWN location (a[0] = the frame's
+        # realm id). Deferred + applied by re-navigating the owning iframe to its
+        # current document — see Browser#frame_reload_self.
+        '__csimFrameReload'          => ->(b, *a) { b.frame_reload_self(a[0].to_i); nil },
         # A <form> submitted from inside a nested browsing context (a[0] = the
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.
