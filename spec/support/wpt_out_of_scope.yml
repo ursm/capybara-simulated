@@ -12,6 +12,125 @@
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
 #
 ---
+FileAPI/BlobURL/cross-partition-navigation.https.html:
+- name: Blob URL area element click should enforce noopener for a cross-top-level-site
+    navigation
+  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
+    not modeled.'
+- name: Blob URL link click should enforce noopener for a cross-top-level-site navigation
+  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
+    not modeled.'
+- name: Blob URL should partition subframe navigation.
+  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
+    not modeled.'
+- name: Blob URL window.open should enforce noopener for a cross-top-level-site navigation
+  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
+    not modeled.'
+FileAPI/BlobURL/cross-partition-self-fetch.https.html:
+- name: Blob URL created in a cross-partition context can fetch itself in a same-partition
+    context.
+  reason: 'Storage-partition keying (partitioned blob: URL self-fetch); partitioning
+    not modeled.'
+FileAPI/BlobURL/cross-partition-worker-creation.https.html:
+- name: Cross-partition Dedicated worker shouldn't be created from blob URL.
+  reason: 'Storage-partition keying (partitioned blob: URL worker creation); partitioning
+    not modeled.'
+- name: Cross-partition Shared worker shouldn't be created from blob URL.
+  reason: 'Storage-partition keying (partitioned blob: URL worker creation); partitioning
+    not modeled.'
+FileAPI/BlobURL/cross-partition.https.html:
+- name: Blob URL shouldn't be fetched from a cross-partition dedicated worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be fetched from a cross-partition iframe
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be fetched from a cross-partition service worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be fetched from a cross-partition shared worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be revocable from a cross-partition dedicated worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be revocable from a cross-partition iframe
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be revocable from a cross-partition shared worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+- name: Blob URL shouldn't be revocable from a service worker
+  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
+    is not modeled.'
+FileAPI/file/send-file-form-iso-2022-jp.html:
+- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
+    (Unicode) in ISO-2022-JP form"
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in ISO-2022-JP form
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in ISO-2022-JP
+    form
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in ISO-2022-JP form"
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-.txt (x-user-defined) in ISO-2022-JP form
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form.txt (ASCII) in ISO-2022-JP form
+  reason: multipart/form-data with a legacy ISO-2022-JP charset; legacy multibyte
+    encoder not modeled (rule 1).
+FileAPI/file/send-file-form-windows-1252.html:
+- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
+    (Unicode) in windows-1252 form"
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in windows-1252
+    form
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in windows-1252
+    form
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in windows-1252
+    form"
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form-.txt (x-user-defined) in windows-1252 form
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+- name: Upload file-for-upload-in-form.txt (ASCII) in windows-1252 form
+  reason: multipart/form-data submitted in a windows-1252 form; legacy non-UTF-8 form
+    encoder not modeled (rule 1).
+FileAPI/file/send-file-form-x-user-defined.html:
+- name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
+    (Unicode) in x-user-defined form"
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
+- name: Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in x-user-defined
+    form
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
+- name: Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in x-user-defined
+    form
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
+- name: "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in x-user-defined
+    form"
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
+- name: Upload file-for-upload-in-form-.txt (x-user-defined) in x-user-defined
+    form
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
+- name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
+  reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
+    (rule 1).
 dom/collections/HTMLCollection-supported-property-indices.html:
 - name: Handling of property names that look like integers around 2^32
   reason: Exactly the 2^32 index-boundary exotic-object edge cited in rule 2; no real
@@ -33,11 +152,11 @@ dom/events/Event-dispatch-on-disabled-elements.html:
     the layout/transition engine we do not model.
 - name: Real clicks on disabled elements must not dispatch events.
   reason: NOTRUN — blocked upstream. The CSS Transitions / Animations promise_tests
-    earlier in this file await transition/animation end events that never fire
-    without the layout/animation engine we don't model (rule 1); they time out and
-    hang the sequential promise_test queue, so this later subtest never runs. (The
-    disabled-click behaviour itself — test_driver.click no-op on a disabled control
-    — is satisfiable, but moot while the file's animation tests block the queue.)
+    earlier in this file await transition/animation end events that never fire without
+    the layout/animation engine we don't model (rule 1); they time out and hang the
+    sequential promise_test queue, so this later subtest never runs. (The disabled-click
+    behaviour itself — test_driver.click no-op on a disabled control — is satisfiable,
+    but moot while the file's animation tests block the queue.)
 dom/events/EventListener-incumbent-global-1.sub.html:
 - name: Check the incumbent global EventListeners  are called with
   reason: Needs the WebIDL incumbent settings object — when a listener fires, the

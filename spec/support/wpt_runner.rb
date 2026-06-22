@@ -211,13 +211,13 @@ module WptRunner
   # Top-level trees + the narrow html/ event-loop oracle subtrees (timers +
   # microtask-queuing — the only layout-free slices of html/ we vendor; see
   # script/vendor_wpt.mjs).
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,html/webappapis/timers,html/webappapis/microtask-queuing}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle (all time-probed crasher-free). The dom/ `.any.js` set is
   # still excluded — it has synchronous-infinite-loop crashers that hang the V8
   # call (no virtual-clock timeout catches them) and needs skip-list triage first.
-  JS_TREES = '{url,encoding,html/webappapis/timers,html/webappapis/microtask-queuing}'
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing}'
 
   def test_files
     @test_files ||= begin

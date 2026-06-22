@@ -46,6 +46,7 @@ const REF = process.env.WPT_REF || PINNED;
 // harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
+  'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing'  // queueMicrotask + microtask-checkpoint ordering
 ];

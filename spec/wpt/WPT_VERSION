@@ -1,4 +1,4 @@
 34637df05a42cefd99ecc38e6602f7f64e4c1648
 web-platform-tests/wpt
-trees: dom, domparsing, url, encoding, shadow-dom, html/webappapis/timers, html/webappapis/microtask-queuing
-support: common, resources/testharness.js
+trees: dom, domparsing, url, encoding, shadow-dom, FileAPI, html/webappapis/timers, html/webappapis/microtask-queuing
+support: common, resources/testharness.js, html/resources/common.js

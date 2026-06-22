@@ -10,4 +10,385 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
---- {}
+---
+FileAPI/Blob-methods-from-detached-frame.html:
+- bytes()
+- slice()
+- stream()
+FileAPI/BlobURL/opaque-origin.html:
+- Blob URL created from data URL dedicated worker should have 'null' origin
+- Blob URL created from data URL shared worker should have 'null' origin
+FileAPI/FileReader/workers.html:
+- FileReader created after a worker self.close()
+FileAPI/blob/Blob-bytes.any.js:
+- Blob.bytes()
+- Blob.bytes() concurrent reads
+- Blob.bytes() empty Blob data
+- Blob.bytes() non-ascii input
+- Blob.bytes() non-unicode input
+FileAPI/blob/Blob-constructor-dom.window.js:
+- A platform object that supports indexed properties should be treated as a sequence
+  for the blobParts argument (overwritten 'length'.)
+- Passing an platform object that supports indexed properties as the blobParts array
+  should work (attributes).
+- Passing an platform object that supports indexed properties as the blobParts array
+  should work (select).
+FileAPI/blob/Blob-constructor-endings.any.js:
+- Exception propagation from options
+- 'Invalid "endings" value: ""'
+- 'Invalid "endings" value: "NATIVE"'
+- 'Invalid "endings" value: "Transparent"'
+- 'Invalid "endings" value: "invalidEnumValue"'
+- 'Invalid "endings" value: 0'
+- 'Invalid "endings" value: null'
+- 'Invalid "endings" value: {}'
+- The "endings" options property is used
+- 'Valid "endings" value: "native"'
+- 'Valid "endings" value: "transparent"'
+FileAPI/blob/Blob-constructor-endings.html:
+- CR/LF in adjacent input strings
+- Input CR with endings 'native'
+- Input CRCR with endings 'native'
+- Input CRCRLF with endings 'native'
+- Input CRLF with endings 'native'
+- Input CRLFCR with endings 'native'
+- Input CRLFCRLF with endings 'native'
+- Input CRLFLF with endings 'native'
+- Input LFCR with endings 'native'
+- Input LFCRLFCR with endings 'native'
+FileAPI/blob/Blob-constructor.any.js:
+- A String object should be treated as a sequence for the blobParts argument.
+- A Uint8Array object should be treated as a sequence for the blobParts argument.
+- A plain object with @@iterator and a length property should be treated as a sequence
+  for the blobParts argument.
+- A plain object with @@iterator should be treated as a sequence for the blobParts
+  argument.
+- A plain object with custom @@iterator should be treated as a sequence for the blobParts
+  argument.
+- Blob constructor with no arguments
+- Blob constructor with undefined as first argument
+- Blob interface object
+- Blob with type "A"
+- Blob with type "TEXT/HTML"
+- Blob with type "\timage/gif\t"
+- "Blob with type \"image/gif;\x7F\""
+- Blob with type "image/gif\0"
+- Blob with type "å"
+- Blob with type "İmage/gif"
+- Blob with type "ımage/gif"
+- "Blob with type \"\U0001047E\""
+- Changes to the blobParts array should be reflected in the returned Blob (unshift).
+- Getters and value conversions should happen in order until an exception is thrown.
+- Passing "abc" for options should throw
+- Passing 123 for options should throw
+- Passing 123.4 for options should throw
+- Passing a FrozenArray as the blobParts array should work (FrozenArray<MessagePort>).
+- Passing non-objects, Dates and RegExps for blobParts should throw a TypeError.
+- Passing true for options should throw
+- The length getter should be invoked and any exceptions should be propagated.
+- ToUint32 should be applied to the length and any exceptions should be propagated.
+- options properties should be accessed in lexicographic order.
+FileAPI/blob/Blob-newobject.any.js:
+- Blob.bytes() returns [NewObject]
+- Blob.stream() returns [NewObject]
+FileAPI/blob/Blob-slice.any.js:
+- Invalid contentType ("te\0xt/plain")
+- Invalid contentType ("te\txt/plain")
+- Invalid contentType ("te\x1fxt/plain")
+- "Invalid contentType (\"te\x7Fxt/plain\")"
+- Invalid contentType ("ÿ")
+- 'Slicing test: slice (1,1).'
+- 'Slicing test: slice (1,3).'
+- 'Slicing test: slice (1,5).'
+- 'Slicing test: slice (1,7).'
+- 'Slicing test: slice (1,8).'
+- 'Slicing test: slice (1,9).'
+- 'Slicing test: slice (9,0).'
+- 'Slicing test: slice (9,3).'
+- Valid contentType ("TEXT/PLAIN")
+- Valid contentType ("text/plain;charset = UTF-8")
+- Valid contentType ("text/plain;charset=UTF-8")
+- null type Blob slice
+FileAPI/blob/Blob-stream.any.js:
+- Blob.stream()
+- Blob.stream() empty Blob
+- Blob.stream() garbage collection of blob shouldn't break stream consumption
+- Blob.stream() garbage collection of stream shouldn't break stream consumption
+- Blob.stream() non-unicode input
+- Reading Blob.stream() with BYOB reader
+FileAPI/blob/Blob-text.any.js:
+- Blob.text() concurrent reads
+- Blob.text() different charset param with non-ascii input
+- Blob.text() invalid utf-8 input
+- Blob.text() non-unicode
+FileAPI/file/File-constructor-endings.any.js:
+- Exception propagation from options
+- 'Invalid "endings" value: ""'
+- 'Invalid "endings" value: "NATIVE"'
+- 'Invalid "endings" value: "Transparent"'
+- 'Invalid "endings" value: "invalidEnumValue"'
+- 'Invalid "endings" value: 0'
+- 'Invalid "endings" value: null'
+- 'Invalid "endings" value: {}'
+- The "endings" options property is used
+- 'Valid "endings" value: "native"'
+- 'Valid "endings" value: "transparent"'
+FileAPI/file/File-constructor-endings.html:
+- CR/LF in adjacent input strings
+- Input CR with endings 'native'
+- Input CRCR with endings 'native'
+- Input CRCRLF with endings 'native'
+- Input CRLF with endings 'native'
+- Input CRLFCR with endings 'native'
+- Input CRLFCRLF with endings 'native'
+- Input CRLFLF with endings 'native'
+- Input LFCR with endings 'native'
+- Input LFCRLFCR with endings 'native'
+FileAPI/file/File-constructor.any.js:
+- Custom @@iterator
+- HTMLBodyElement in fileBits
+- 'Invalid bits argument: 0'
+- 'Invalid bits argument: null'
+- 'Invalid property bag: "abc"'
+- 'Invalid property bag: 123'
+- 'Invalid property bag: 123.4'
+- 'Invalid property bag: true'
+- Property bag propagates exceptions
+- Required arguments
+- Unicode DOMString fileBits
+- Using null fileName
+- Using object fileName
+- 'Using type in File constructor: TEXT/PLAIN'
+- "Using type in File constructor: ascii/nonprintable\x1F"
+- "Using type in File constructor: ascii/nonprintable\x7F"
+- 'Using type in File constructor: nonasciiî'
+- 'Using type in File constructor: nonasciiሴ'
+- 'Using type in File constructor: text/plain;charset=UTF-8'
+- "Using type in File constructor: \U0001D4FD\U0001D4EE\U0001D501\U0001D4FD/\U0001D52D\U0001D529\U0001D51E\U0001D526\U0001D52B"
+FileAPI/file/send-file-form-controls.html:
+- "Upload file-for-upload-in-form-BS-[\b].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-CR-LF-[\r\n].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-CR-[\r].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-DEL-[\x7F].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-ESC-[\e].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-FF-[\f].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-HT-[\t].txt (ASCII) in UTF-8 form"
+- "Upload file-for-upload-in-form-LF-CR-[\n\r].txt (ASCII) in UTF-8 form"
+- |-
+  Upload file-for-upload-in-form-LF-[
+  ].txt (ASCII) in UTF-8 form
+- "Upload file-for-upload-in-form-NUL-[\0].txt (ASCII) in UTF-8 form"
+- Upload file-for-upload-in-form-SPACE-[ ].txt (ASCII) in UTF-8 form
+- "Upload file-for-upload-in-form-VT-[\v].txt (ASCII) in UTF-8 form"
+FileAPI/file/send-file-form-punctuation.html:
+- Upload "file-for-upload-in-form-double-quoted.txt" (ASCII) in UTF-8 form
+- Upload 'file-for-upload-in-form-single-quoted.txt' (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-AMPERSAND-[&].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-APOSTROPHE-['].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-ASTERISK-[*].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-CIRCUMFLEX-ACCENT-[^].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-COLON-[:].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-COMMA-[,].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-DOLLAR-SIGN-[$].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-EQUALS-SIGN-[=].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-EXCLAMATION-MARK-[!].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-FULL-STOP-[.].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-LEFT-CURLY-BRACKET-[{].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-LEFT-PARENTHESIS-[(].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-LEFT-SQUARE-BRACKET-[[].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-PERCENT-SIGN-[%].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-PLUS-SIGN-[+].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-QUESTION-MARK-[?].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-QUOTATION-MARK-["].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-REVERSE-SOLIDUS-[\].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-RIGHT-CURLY-BRACKET-[}].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-RIGHT-PARENTHESIS-[)].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-RIGHT-SQUARE-BRACKET-[]].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-SEMICOLON-[;].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-SOLIDUS-[/].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-TILDE-[~].txt (ASCII) in UTF-8 form
+- Upload file-for-upload-in-form-VERTICAL-LINE-[|].txt (ASCII) in UTF-8 form
+FileAPI/file/send-file-form-utf-8.html:
+- "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt (Unicode)
+  in UTF-8 form"
+- Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in UTF-8 form
+- Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in UTF-8 form
+- "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in UTF-8 form"
+- Upload file-for-upload-in-form-.txt (x-user-defined) in UTF-8 form
+- Upload file-for-upload-in-form.txt (ASCII) in UTF-8 form
+FileAPI/file/send-file-form.html:
+- Upload file-for-upload-in-form.txt (ASCII) in UTF-8 form
+FileAPI/file/send-file-formdata-controls.any.js:
+- "Upload file-for-upload-in-form-BS-[\b].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-CR-LF-[\r\n].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-CR-[\r].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-DEL-[\x7F].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-ESC-[\e].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-FF-[\f].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-HT-[\t].txt (ASCII) in fetch with FormData"
+- "Upload file-for-upload-in-form-LF-CR-[\n\r].txt (ASCII) in fetch with FormData"
+- |-
+  Upload file-for-upload-in-form-LF-[
+  ].txt (ASCII) in fetch with FormData
+- "Upload file-for-upload-in-form-NUL-[\0].txt (ASCII) in fetch with FormData"
+- Upload file-for-upload-in-form-SPACE-[ ].txt (ASCII) in fetch with FormData
+- "Upload file-for-upload-in-form-VT-[\v].txt (ASCII) in fetch with FormData"
+FileAPI/file/send-file-formdata-punctuation.any.js:
+- Upload "file-for-upload-in-form-double-quoted.txt" (ASCII) in fetch with FormData
+- Upload 'file-for-upload-in-form-single-quoted.txt' (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-AMPERSAND-[&].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-APOSTROPHE-['].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-ASTERISK-[*].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-CIRCUMFLEX-ACCENT-[^].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-COLON-[:].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-COMMA-[,].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-DOLLAR-SIGN-[$].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-EQUALS-SIGN-[=].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-EXCLAMATION-MARK-[!].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-FULL-STOP-[.].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-LEFT-CURLY-BRACKET-[{].txt (ASCII) in fetch with
+  FormData
+- Upload file-for-upload-in-form-LEFT-PARENTHESIS-[(].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-LEFT-SQUARE-BRACKET-[[].txt (ASCII) in fetch with
+  FormData
+- Upload file-for-upload-in-form-PERCENT-SIGN-[%].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-PLUS-SIGN-[+].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-QUESTION-MARK-[?].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-QUOTATION-MARK-["].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-REVERSE-SOLIDUS-[\].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-RIGHT-CURLY-BRACKET-[}].txt (ASCII) in fetch with
+  FormData
+- Upload file-for-upload-in-form-RIGHT-PARENTHESIS-[)].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-RIGHT-SQUARE-BRACKET-[]].txt (ASCII) in fetch with
+  FormData
+- Upload file-for-upload-in-form-SEMICOLON-[;].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-SOLIDUS-[/].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-TILDE-[~].txt (ASCII) in fetch with FormData
+- Upload file-for-upload-in-form-VERTICAL-LINE-[|].txt (ASCII) in fetch with FormData
+FileAPI/file/send-file-formdata-utf-8.any.js:
+- "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt (Unicode)
+  in fetch with FormData"
+- Upload file-for-upload-in-form-â˜ºðŸ˜‚.txt (windows-1252) in fetch with FormData
+- Upload file-for-upload-in-form-★星★.txt (JIS X 0201 and JIS X 0208) in fetch with
+  FormData
+- "Upload file-for-upload-in-form-☺\U0001F602.txt (Unicode) in fetch with FormData"
+- Upload file-for-upload-in-form-.txt (x-user-defined) in fetch with FormData
+- Upload file-for-upload-in-form.txt (ASCII) in fetch with FormData
+FileAPI/file/send-file-formdata.any.js:
+- Upload file-for-upload-in-form.txt (ASCII) in fetch with FormData
+FileAPI/fileReader.any.js:
+- FileReader States -- abort
+- FileReader States -- events
+FileAPI/filelist-section/filelist.html:
+- Check if FileList.length is 0
+- Check if item is a method of fileList
+- Check if length is fileList's attribute
+- Check if window has a FileList property
+FileAPI/reading-data-section/Determining-Encoding.any.js:
+- Blob Determing Encoding with UTF-16BE BOM
+- Blob Determing Encoding with UTF-16LE BOM
+- Blob Determing Encoding with UTF-8 BOM
+- Blob Determing Encoding with encoding argument
+- Blob Determing Encoding with type attribute
+- Blob Determing Encoding without anything implying charset.
+FileAPI/reading-data-section/FileReader-event-handler-attributes.any.js:
+- 'FileReader.onabort: initial value'
+- 'FileReader.onerror: initial value'
+- 'FileReader.onload: initial value'
+- 'FileReader.onloadend: initial value'
+- 'FileReader.onloadstart: initial value'
+- 'FileReader.onprogress: initial value'
+FileAPI/reading-data-section/FileReader-multiple-reads.any.js:
+- test FileReader InvalidStateError exception for readAsArrayBuffer
+- test FileReader InvalidStateError exception for readAsDataURL
+- test FileReader InvalidStateError exception for readAsText
+- test FileReader InvalidStateError exception in onloadstart event for readAsArrayBuffer
+- test FileReader no InvalidStateError exception in loadend event handler for readAsArrayBuffer
+- test abort and restart in onloadstart event for readAsText
+FileAPI/reading-data-section/filereader_abort.any.js:
+- Aborting after read
+- Aborting before read
+FileAPI/reading-data-section/filereader_error.any.js:
+- filereader_error
+FileAPI/reading-data-section/filereader_events.any.js:
+- events are dispatched in the correct order for a non-empty blob
+- events are dispatched in the correct order for an empty blob
+FileAPI/reading-data-section/filereader_readAsArrayBuffer.any.js:
+- filereader_readAsArrayBuffer
+FileAPI/reading-data-section/filereader_readAsBinaryString.any.js:
+- filereader_readAsBinaryString
+FileAPI/reading-data-section/filereader_readAsDataURL.any.js:
+- FileReader readyState during readAsDataURL
+FileAPI/reading-data-section/filereader_readAsText.any.js:
+- readAsText should correctly read UTF-16.
+FileAPI/reading-data-section/filereader_readystate.any.js:
+- filereader_readystate
+FileAPI/reading-data-section/filereader_result.any.js:
+- result is null during "loadstart" event for readAsArrayBuffer
+- result is null during "loadstart" event for readAsBinaryString
+- result is null during "loadstart" event for readAsDataURL
+- result is null during "loadstart" event for readAsText
+- result is null during "progress" event for readAsArrayBuffer
+- result is null during "progress" event for readAsBinaryString
+- result is null during "progress" event for readAsDataURL
+- result is null during "progress" event for readAsText
+FileAPI/unicode.any.js:
+- Test that unpaired surrogates are replaced by Blob constructor
+- Test that unpaired surrogates are replaced by File constructor
+FileAPI/url/cross-global-revoke.sub.html:
+- It is not possible to revoke cross-origin blob URLs.
+- It is possible to revoke same-origin blob URLs from a different worker global.
+- It is possible to revoke same-origin blob URLs from different frames.
+FileAPI/url/multi-global-origin-serialization.sub.html:
+- Blob URL serialization (specifically the origin) in multi-global situations
+FileAPI/url/unicode-origin.sub.html:
+- Verify serialization of non-ascii origin in Blob URLs
+FileAPI/url/url-charset.window.js:
+- Blob charset should override <meta charset>.
+- Blob charset should override any auto-detected charset.
+FileAPI/url/url-format.any.js:
+- Blob URL parses correctly
+- Origin of Blob URL matches our origin
+- Origin of Blob URL matches our origin for Files
+FileAPI/url/url-in-tags-revoke.window.js:
+- Fetching a blob URL immediately before revoking it works in <script> tags.
+- Fetching a blob URL immediately before revoking it works in an iframe navigation.
+- Fetching a blob URL immediately before revoking it works in an iframe.
+- Opening a blob URL in a new window by clicking an <a> tag works immediately before
+  revoking the URL.
+- Opening a blob URL in a new window immediately before revoking it works.
+- Opening a blob URL in a noopener about:blank window immediately before revoking
+  it works.
+FileAPI/url/url-in-tags.window.js:
+- Blob URL fragment is implemented.
+- Blob URLs can be used in <script> tags
+- Blob URLs can be used in iframes, and are treated same origin
+FileAPI/url/url-lifetime.html:
+- Removing an iframe revokes its URLs
+- Terminating worker revokes its URLs
+FileAPI/url/url-reload.window.js:
+- Reloading a blob URL succeeds even if the URL was revoked.
+- Reloading a blob URL succeeds.
+FileAPI/url/url-with-fetch.any.js:
+- Revoke blob URL after calling fetch, fetch should succeed
+- Revoke blob URL after creating Request, then clone Request, will fetch
+- Revoke blob URL after creating Request, will fetch
+- fetch with a fragment should succeed
+- fetch with method "CUSTOM" should fail
+- fetch with method "DELETE" should fail
+- fetch with method "HEAD" should fail
+- fetch with method "OPTIONS" should fail
+- fetch with method "POST" should fail
+- fetch with method "PUT" should fail
+FileAPI/url/url-with-xhr.any.js:
+- Appending a path should cause XHR to fail
+- Appending a query string should cause XHR to fail
+- Revoke blob URL after open(), will fetch
+- XHR of a revoked URL should fail
+- XHR with a fragment should succeed
+- XHR with method "CUSTOM" should fail
+- XHR with method "DELETE" should fail
+- XHR with method "HEAD" should fail
+- XHR with method "OPTIONS" should fail
+- XHR with method "POST" should fail
+- XHR with method "PUT" should fail
