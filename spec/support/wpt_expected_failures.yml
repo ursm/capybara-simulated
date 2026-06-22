@@ -11,9 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/blob/Blob-constructor-dom.window.js:
-- Passing an platform object that supports indexed properties as the blobParts array
-  should work (select).
 FileAPI/url/cross-global-revoke.sub.html:
 - It is not possible to revoke cross-origin blob URLs.
 - It is possible to revoke same-origin blob URLs from different frames.
