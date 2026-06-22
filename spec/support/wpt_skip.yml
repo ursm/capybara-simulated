@@ -28,19 +28,34 @@
   (uri-idna); most pass. The residual ~45 are uri-idna's conformance gap vs the
   WPT reference (lenient trailing-`=` punycode, bidi edge cases) — see IdnaTestV2.
 
-# Legacy multi-byte CJK encodings (Shift_JIS / EUC-JP / ISO-2022-JP /
-# EUC-KR / GBK / gb18030 / Big5) and the single-byte legacy index tables.
-# Structural non-goal: TextEncoder/TextDecoder ship UTF-8/UTF-16/latin1/
-# windows-1252 only (see js/src/encoding.js) — the multi-byte index tables
-# are large and no in-VM polyfill exists. These are exhaustive data-driven
-# tests (every code point / byte pair), so once they run they dump 200k+
-# never-fixable per-subtest failures into the allowlist. Same treatment as
-# the IDNA tests above: skip the whole subtree to keep the wrong-behaviour
-# backlog focused on encodings we could actually support. Directory-prefix
-# keys (trailing `/`) skip the entire tree in one entry.
+# Legacy MULTIBYTE CJK encodings (Shift_JIS / EUC-JP / ISO-2022-JP /
+# EUC-KR / GBK / gb18030 / Big5). What js/src/encoding.js DOES model: UTF-8,
+# UTF-16LE/BE, x-user-defined, and every WHATWG SINGLE-byte index table
+# (windows-125x, ISO-8859-*, KOI8-*, macintosh, x-mac-cyrillic, IBM866,
+# windows-874). What it does NOT: the multibyte CJK decoder state machines.
+#
+# Why not delegate to Ruby's `Encoding` (the way URL host parsing delegates IDNA
+# to the uri-idna gem)? Investigated 2026-06-22 — Ruby's `Encoding` /
+# `Encoding::Converter` is NOT a viable WHATWG conformance backend, for two
+# evidenced reasons that no encode/decode option closes:
+#   1. Error-byte accounting differs. WHATWG re-emits orphaned bytes during error
+#      recovery (`[1b 24]` -> "�$" — the stray `$` becomes a literal); Ruby's
+#      converter drops them, even driven via `primitive_convert` + putback. 21 of
+#      the 34 iso-2022-jp-decoder subtests probe exactly this recovery.
+#   2. Raw mappings diverge even on VALID input. WHATWG's ISO-2022-JP Roman state
+#      maps 0x5C->¥ (U+00A5) / 0x7E->‾ (U+203E) per JIS X 0201; Ruby maps them to
+#      ASCII \ / ~. Ruby's CJK tables are JIS/iconv-lineage, not WHATWG-index-
+#      lineage, so they differ on a scatter of code points regardless of options.
+# Reproducing these byte-for-byte needs the actual WHATWG decoder state machines +
+# index tables compiled into JS — the ~600KB-per-realm V8 snapshot cost we
+# deliberately defer (NOT a cheap Ruby-host shortcut like IDNA). These are also
+# exhaustive data-driven tables (every code point / byte pair), so once they run
+# they dump 200k+ per-subtest failures into the allowlist. Skip the whole subtree
+# (directory-prefix keys with a trailing `/`) to keep the backlog focused.
 "encoding/legacy-mb-japanese/": >-
-  Legacy Japanese multibyte (Shift_JIS/EUC-JP/ISO-2022-JP). Out of scope —
-  UTF-8/16/latin1/windows-1252 only; exhaustive per-code-point tables.
+  Legacy Japanese multibyte (Shift_JIS/EUC-JP/ISO-2022-JP). Out of scope — needs
+  the WHATWG multibyte decoder state machines + index tables in JS; Ruby Encoding
+  is not WHATWG-conformant (see header). Exhaustive per-code-point tables.
 "encoding/legacy-mb-korean/": >-
   Legacy Korean multibyte (EUC-KR/windows-949). Out of scope — see above.
 "encoding/legacy-mb-schinese/": >-
@@ -48,17 +63,22 @@
 "encoding/legacy-mb-tchinese/": >-
   Legacy Traditional Chinese (Big5). Out of scope — see above.
 "encoding/single-byte-decoder.window.js": >-
-  Single-byte decoders ARE now modeled (TextDecoder variant passes). The
-  remaining variants need byte-level XHR responseText + iframe
+  Single-byte decoders ARE modeled (the TextDecoder variant passes). The remaining
+  variants need byte-level XHR responseText + iframe
   document.characterSet/inputEncoding decoding (single-byte-raw.py /
-  text-plain-charset.py CGI), an unmodeled byte-transport layer — kept skipped
-  for those ~336 transport-dependent cases, not the decoder tables.
+  text-plain-charset.py CGI) — an unmodeled byte-transport layer, deferred to a
+  comprehensive document-charset effort. ~336 transport-dependent cases, NOT the
+  decoder tables (those work).
 "encoding/iso-2022-jp-decoder.any.js": >-
-  ISO-2022-JP stateful decoder. Out of scope — legacy multibyte, see above.
+  ISO-2022-JP stateful decoder. Out of scope — needs the WHATWG decoder state
+  machine; 21/34 subtests probe error-recovery byte accounting Ruby Encoding can't
+  reproduce, and Ruby's Roman-state mapping diverges (see header).
 "encoding/iso-2022-jp-encoder.html": >-
-  ISO-2022-JP encoder. Out of scope — legacy multibyte, see above.
+  ISO-2022-JP encoder (form/href submission in a legacy-charset document). Out of
+  scope — needs the WHATWG encoder + the document-charset path, see header.
 "encoding/big5-encoder.html": >-
-  Big5 encoder. Out of scope — legacy multibyte, see above.
+  Big5 encoder (form/href submission in a legacy-charset document). Out of scope —
+  see iso-2022-jp-encoder above.
 
 "encoding/unsupported-encodings.any.js": >-
   Flaky AND out of scope. It decodes UTF-7 (not a WHATWG encoding) and UTF-32
