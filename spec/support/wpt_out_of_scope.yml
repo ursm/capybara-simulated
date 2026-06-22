@@ -7469,10 +7469,43 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.tabIndex: setAttribute() to "-0"'
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
-html/dom/documents/dom-tree-accessors/nameditem-no-shadowing.tentative.html:
-- name: document.foobar works (sanity check)
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
+html/dom/documents/dom-tree-accessors/nameditem-names.html:
+- name: A document's property names appear in tree order.
+  reason: Object.getOwnPropertyNames(document) listing the named properties needs
+    an ownKeys / [[OwnPropertyKeys]] trap on the live document object itself — i.e.
+    making `document` a Proxy — whose get-trap would then tax every internal `document.<member>`
+    read on the cascade / find hot path (rule 3). The named-property GET / `in` surface
+    (document.<name>) is fully implemented via a prototype-chain exotic; only own-key
+    ENUMERATION is out — which additionally needs the non-ordinary integer-key order
+    so a name like "42" sorts in tree order, impossible for an ordinary object's own
+    keys. No app or library enumerates a document's own named-item keys.
+- name: A document's property names can include integer strings.
+  reason: getOwnPropertyNames enumeration order — see the tree-order entry; needs
+    a document-level ownKeys Proxy (rule 3).
+- name: A form name appears in a document's property names.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An embed name appears in a document's property names if the embed is exposed.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An iframe name appears in a document's property names.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An img id appears in a document's property names when the img has a name.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An img name appears in a document's property names when the img has an id.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An img name appears in a document's property names when the img has no id.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An object id appears in a document's property names if the object is exposed.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
+- name: An object name appears in a document's property names if the object is exposed.
+  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
+    ownKeys Proxy (rule 3).
 html/dom/elements/global-attributes/cdata-dir_auto.html:
 - name: Content of CDATA is ignored for dir=auto in html document
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
