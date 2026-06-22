@@ -76,22 +76,6 @@ html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getEle
 - getElementsByName and foreign namespaces
 html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-namespace.html:
 - getElementsByName and foreign namespaces
-html/dom/documents/dom-tree-accessors/document.title-01.html:
-- FAIL 2
-- FAIL 3
-- document.title with head blown away 1
-html/dom/documents/dom-tree-accessors/document.title-02.xhtml:
-- FAIL 2
-- FAIL 3
-- document.title with head blown away 1
-html/dom/documents/dom-tree-accessors/document.title-09.html:
-- No title element in SVG document
-- Root element not named "svg"
-- Title element in SVG document
-- Title element not child of SVG root
-html/dom/documents/dom-tree-accessors/document.title-not-in-html-svg.html:
-- Should not be able to set document title in XML document
-- Should not be able to set document title in XML document with html:title element
 html/dom/documents/dom-tree-accessors/nameditem-03.html:
 - applet elements are (mostly) gone
 html/dom/documents/resource-metadata-management/document-cookie.html:
