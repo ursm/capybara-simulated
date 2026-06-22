@@ -7470,48 +7470,14 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
 html/dom/documents/dom-tree-accessors/nameditem-names.html:
-- name: A document's property names appear in tree order.
-  reason: Object.getOwnPropertyNames(document) listing the named properties needs
-    an ownKeys / [[OwnPropertyKeys]] trap on the live document object itself — i.e.
-    making `document` a Proxy (an ordinary object reorders an integer-like name such
-    as "42" to the front, so tree order is impossible without an exotic). The
-    named-property GET / `in` surface (document.<name>) is fully implemented via a
-    prototype-chain exotic; only own-key ENUMERATION is out. A measured spike
-    (2026-06-23) wrapped `document` in a thin ownKeys/getOwnPropertyDescriptor Proxy
-    and proved this is NOT a perf problem — the iframe-free Hotwire bench was
-    unchanged (0.69s) and 9/10 of this file passed — but it reproducibly triggered a
-    V8 OutOfMemoryError on the iframe-heavy nameditem-02 scenario. Making `document`
-    a Proxy destabilises the iframe / per-realm-window machinery (the contentWindow /
-    realm wiring assumes the canonical document is a plain object). Hardening that
-    machinery against a document-Proxy is a large, high-risk effort for an enumeration
-    no app or library performs; earned out-of-scope on stability + cost, not perf.
-- name: A document's property names can include integer strings.
-  reason: getOwnPropertyNames enumeration order — see the tree-order entry; needs
-    a document-level ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: A form name appears in a document's property names.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An embed name appears in a document's property names if the embed is exposed.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An iframe name appears in a document's property names.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An img id appears in a document's property names when the img has a name.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An img name appears in a document's property names when the img has an id.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An img name appears in a document's property names when the img has no id.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An object id appears in a document's property names if the object is exposed.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
-- name: An object name appears in a document's property names if the object is exposed.
-  reason: getOwnPropertyNames enumeration — see the tree-order entry; needs a document-level
-    ownKeys Proxy (stability + cost, not perf — see the tree-order entry).
+- name: An embed name does not appears in a document's property names if the embed
+    is inside another embed.
+  reason: "`<embed>` is a void element, so the test's nested `<embed name=not_exposed_embed>`
+    actually parses as a SIBLING of the outer embed (parentNode === body), not a child
+    — verified in Chrome 137, which likewise lists `not_exposed_embed` in Object.getOwnPropertyNames(document).
+    The subtest asserts the opposite, so it matches no real browser; our output (include
+    it) matches Chrome. Independent of the named-properties machinery. The other 9
+    subtests in this file now PASS."
 html/dom/elements/global-attributes/cdata-dir_auto.html:
 - name: Content of CDATA is ignored for dir=auto in html document
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
