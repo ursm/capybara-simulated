@@ -107,18 +107,7 @@ html/dom/documents/resource-metadata-management/document-readyState.html:
 html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name
-html/dom/elements/global-attributes/dataset-delete.html:
-- Deleting element.dataset['-foo'] should not remove an attribute with name 'data--foo'
-  should it exist.
-html/dom/elements/global-attributes/dataset-prototype.html:
-- An elements dataset property is an instance of a DOMStringMap
-- Properties on Object.prototype should shine through.
-html/dom/elements/global-attributes/dataset-set.html:
-- Setting element.dataset['-foo'] should throw a SYNTAX_ERR
 html/dom/elements/global-attributes/dataset.html:
-- HTML elements should have a .dataset
-- MathML elements should have a .dataset
-- SVG elements should have a .dataset
 - Should not have a .dataset on random elements
 html/dom/elements/global-attributes/id-attribute.html:
 - After setting id via id attribute, CSS association is via the new ID.
