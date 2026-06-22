@@ -20,8 +20,6 @@ FileAPI/blob/Blob-constructor-dom.window.js:
 - Passing an platform object that supports indexed properties as the blobParts array
   should work (select).
 FileAPI/url/cross-global-revoke.sub.html:
-- It is not possible to revoke cross-origin blob URLs.
-- It is possible to revoke same-origin blob URLs from a different worker global.
 - It is possible to revoke same-origin blob URLs from different frames.
 FileAPI/url/url-charset.window.js:
 - Blob charset should override <meta charset>.

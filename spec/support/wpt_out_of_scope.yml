@@ -139,6 +139,11 @@ FileAPI/file/send-file-form-x-user-defined.html:
 - name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
   reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
     (rule 1).
+FileAPI/url/cross-global-revoke.sub.html:
+- name: It is not possible to revoke cross-origin blob URLs.
+  reason: Needs a real cross-origin iframe (loaded from HTTP_REMOTE_ORIGIN) plus cross-origin
+    blob-URL isolation — the in-process driver is single-origin and does not model
+    separate origins (rule 1).
 FileAPI/url/multi-global-origin-serialization.sub.html:
 - name: Blob URL serialization (specifically the origin) in multi-global situations
   reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
