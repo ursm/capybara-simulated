@@ -3887,12 +3887,6 @@ encoding/textdecoder-mistakes.any.js:
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
 html/dom/aria-attribute-reflection-enumerated.tentative.html:
-- name: 'div.accessKey: IDL set to null'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
-- name: 'div.accessKey: IDL set to undefined'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
 - name: 'div.ariaAtomic (<div aria-atomic>): IDL set to " \0\x01\x02\x03\x04\x05\x06\x07
     \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo
     "'
@@ -7472,19 +7466,7 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaSort (<div aria-sort>): typeof IDL attribute'
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
-- name: 'div.lang: IDL set to null'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
-- name: 'div.lang: IDL set to undefined'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
 - name: 'div.tabIndex: setAttribute() to "-0"'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
-- name: 'div.title: IDL set to null'
-  reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
-    ships (rule 1).
-- name: 'div.title: IDL set to undefined'
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
 html/dom/documents/dom-tree-accessors/nameditem-no-shadowing.tentative.html:
