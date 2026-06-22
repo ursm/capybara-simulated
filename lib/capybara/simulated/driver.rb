@@ -342,6 +342,12 @@ module Capybara
       end
 
       def window_location(handle)        = (window_browser(handle)&.current_url).to_s
+      # A cross-window property read (`win.foo` / `win.document.foo`) — read the
+      # primitive off the target window's VM.
+      def window_read(handle, prop, doc: false)
+        b = window_browser(handle) or return nil
+        b.read_property(prop, doc: doc)
+      end
       def window_set_location(handle, url)
         b = window_browser(handle) or return
         navigate_window(b, b.resolve_document_url(url), source: current_browser)

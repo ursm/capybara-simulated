@@ -3149,6 +3149,17 @@ module Capybara
       end
 
       def window_location_of(handle)   = @driver.respond_to?(:window_location)     ? @driver.window_location(handle.to_s).to_s     : ''
+      # Cross-window property reads (a WindowProxy `win.foo` / `win.document.foo`):
+      # route to the Driver, which reads a PRIMITIVE off the target window's VM.
+      def window_get(handle, prop)     = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: false) : nil)
+      def window_doc_get(handle, prop) = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: true)  : nil)
+      # Read a primitive property off THIS window's globalThis / document — called
+      # by the Driver to serve another window's cross-window proxy read.
+      def read_property(prop, doc: false)
+        @runtime.call('__csimReadWindowProp', doc, prop.to_s)
+      rescue StandardError
+        nil
+      end
       def set_window_location(handle, url) = (@driver.window_set_location(handle.to_s, url.to_s) if @driver.respond_to?(:window_set_location))
       def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
       def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))

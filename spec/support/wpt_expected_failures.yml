@@ -10,9 +10,4 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
----
-FileAPI/url/url-charset.window.js:
-- Blob charset should override <meta charset>.
-- Blob charset should override any auto-detected charset.
-FileAPI/url/url-in-tags-revoke.window.js:
-- Opening a blob URL in a new window immediately before revoking it works.
+--- {}

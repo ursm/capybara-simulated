@@ -89,6 +89,8 @@ module Capybara
         '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1]) },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1]); nil },
+        '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
+        '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
