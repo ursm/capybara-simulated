@@ -233,7 +233,7 @@ module WptRunner
   # Top-level trees + the narrow html/ event-loop oracle subtrees (timers +
   # microtask-queuing — the only layout-free slices of html/ we vendor; see
   # script/vendor_wpt.mjs).
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle (all time-probed crasher-free). The dom/ `.any.js` set is

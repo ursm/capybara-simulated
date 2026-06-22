@@ -47,6 +47,8 @@ const REF = process.env.WPT_REF || PINNED;
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
+  'html/dom',                          // IDL attribute REFLECTION (content attr <-> IDL prop) — the IDL
+                                       // coverage gate only checks member EXISTENCE; this checks behaviour
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing'  // queueMicrotask + microtask-checkpoint ordering
 ];
