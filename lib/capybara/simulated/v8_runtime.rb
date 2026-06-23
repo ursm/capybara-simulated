@@ -699,8 +699,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -726,7 +726,7 @@ module Capybara
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -798,6 +798,21 @@ module Capybara
         # javascript:); decoupled from the location string so navigation is intact.
         realm.call('__csimSetLocationOrigin', frame_location_origin.to_s) unless frame_location_origin.nil?
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        # A `javascript:` URL frame: the initial empty document is now loaded and
+        # parent/top are wired, so evaluate the URL's script in the realm (global
+        # scope). Per HTML, only a STRING result navigates the frame to a new
+        # document built from it; any other result (incl. the common undefined)
+        # leaves the about:blank document, so only its side effects (e.g.
+        # `parent.foo()`) take effect. A throwing script is reported and left as a
+        # no-op rather than aborting the frame build.
+        unless js_url_source.nil?
+          begin
+            result = realm.eval(js_url_source.to_s)
+            realm.call('__csimLoadDocument', result, 'text/html') if result.is_a?(String)
+          rescue StandardError => e
+            @browser.log_console('warn', "javascript: URL frame threw: #{e.message}")
+          end
+        end
         frame_realms[realm.id] = realm
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual

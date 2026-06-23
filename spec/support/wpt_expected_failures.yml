@@ -10,6 +10,4 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
----
-html/dom/documents/dom-tree-accessors/Document.currentScript.html:
-- Script iframe-src
+--- {}

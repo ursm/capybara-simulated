@@ -591,11 +591,6 @@ dom/events/webkit-transition-end-event.html:
 - name: webkitTransitionEnd event listener should trigger for an animation
   reason: Requires a running CSS transition to emit transitionend; transition firing
     not modeled.
-dom/nodes/Document-contentType/contentType/contenttype_javascripturi.html:
-- name: Javascript URI document.contentType === 'text/html'
-  reason: 'Navigating an iframe to a javascript: URL and reading the resulting document.contentType
-    (''text/html''); javascript:-URL document creation + content-type tracking on
-    iframe navigation is not modeled.'
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
