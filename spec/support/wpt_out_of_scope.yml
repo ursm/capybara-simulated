@@ -12359,11 +12359,6 @@ html/dom/render-blocking/parser-inserted-module-script.html:
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/parser-inserted-style-element.html:
-- name: Render-blocking stylesheet is applied
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 - name: Rendering is blocked before render-blocking resources are loaded
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
     timing): determining WHEN rendering is blocked during parsing/loading requires
@@ -12382,11 +12377,6 @@ html/dom/render-blocking/remove-attr-script-keeps-blocking.html:
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/remove-attr-style-keeps-blocking.html:
-- name: Render-blocking stylesheet is applied
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 - name: Rendering is blocked before render-blocking resources are loaded
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
     timing): determining WHEN rendering is blocked during parsing/loading requires
