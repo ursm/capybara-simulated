@@ -19,7 +19,5 @@ html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name
 html/dom/self-origin.sub.html:
-- Should have the right origin for sandboxed iframe
 - about:blank subframe origins
-- 'javascript: subframe origins'
 - srcdoc subframe origins

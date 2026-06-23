@@ -699,8 +699,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -726,7 +726,7 @@ module Capybara
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -790,6 +790,10 @@ module Capybara
         # loads, so a frame whose load handler reads window.name to identify itself
         # (declarative-shadow declarative-child-frame) sees it.
         realm.call('__csimSetWindowName', frame_name.to_s) unless frame_name.nil?
+        # Seed the frame's document origin (opaque/inherited) BEFORE the document
+        # loads, so its load-time scripts read the right self.origin. nil → a
+        # real-URL frame whose origin is its own location origin.
+        realm.call('__csimSetDocumentOrigin', frame_doc_origin.to_s) unless frame_doc_origin.nil?
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         frame_realms[realm.id] = realm
         # Fire the nested document's window `load`. The frame's inline scripts ran
