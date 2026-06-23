@@ -210,6 +210,12 @@ module WptRunner
           next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_wrapper("#{m[1].sub(%r{\A/}, '')}.js")]]
         end
         file = File.expand_path(File.join(WptRunner::ROOT, path))
+        # wptserve answers a directory request (e.g. GET `/`) with a 200 listing;
+        # Document.currentScript's xhr-test does a sync GET `/` and gates on
+        # status === 200. Mirror that for in-tree directories.
+        if (file == WptRunner::ROOT || file.start_with?(WptRunner::ROOT + '/')) && File.directory?(file)
+          next [200, {'content-type' => 'text/html'}, ['']]
+        end
         unless file.start_with?(WptRunner::ROOT + '/') && File.file?(file)
           next [404, {'content-type' => 'text/plain'}, ['not found']]
         end

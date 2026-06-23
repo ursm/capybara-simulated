@@ -14,16 +14,9 @@
 html/dom/access-key-label.html:
 - Returns non empty string when accesskey is valid
 html/dom/documents/dom-tree-accessors/Document.currentScript.html:
-- Script dom-ext
 - Script iframe-src
 - Script microtask
-- Script parse-ext
-- Script script-async
-- Script script-async-false
-- Script script-defer
-- Script script-load-error
 - Script script-window-error
-- Script xhr-test
 html/dom/documents/dom-tree-accessors/nameditem-03.html:
 - applet elements are (mostly) gone
 html/dom/elements/global-attributes/custom-attrs.html:
