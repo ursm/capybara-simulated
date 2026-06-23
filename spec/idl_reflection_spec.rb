@@ -72,11 +72,14 @@ RSpec.describe 'WebIDL reflection behaviour' do
       # Per ARIA element reflection (verified vs Chromium): assigning elements
       # via the IDL property keeps them in an internal slot and sets the content
       # attribute to '' — getAttribute returns '' (NOT the joined ids), and the
-      # getter reads the stored elements back.
+      # getter reads the stored elements back. The references must be in a valid
+      # scope (same tree as the host) to be read back; a reference into another
+      # tree is dropped by the getter, so the elements are attached first.
       result = session.evaluate_script(<<~JS)
         const x = document.createElement('div'); x.id = 'x';
         const y = document.createElement('div'); y.id = 'y';
         const host = document.createElement('div');
+        document.body.append(x, y, host);
         host.ariaControlsElements = [x, y];
         ({
           attr:         host.getAttribute('aria-controls'),
