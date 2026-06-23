@@ -217,7 +217,17 @@ module WptRunner
         ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
         body = File.binread(file)
         body = WptRunner.substitute(body, path) if File.basename(path).include?('.sub.')
-        [200, {'content-type' => ct}, [body]]
+        resp_headers = {'content-type' => ct}
+        # wptserve serves a sibling `<file>.headers` as extra response headers
+        # (e.g. Last-Modified for document.lastModified). Merge any it declares.
+        hdr_file = "#{file}.headers"
+        if File.file?(hdr_file)
+          File.read(hdr_file).each_line do |line|
+            name, val = line.split(':', 2)
+            resp_headers[name.strip.downcase] = val.strip if name && val
+          end
+        end
+        [200, resp_headers, [body]]
       }
     }.to_app
   end

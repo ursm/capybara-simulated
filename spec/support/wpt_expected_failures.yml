@@ -24,20 +24,8 @@ html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 - Script script-load-error
 - Script script-window-error
 - Script xhr-test
-html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-namespace-xhtml.xhtml:
-- getElementsByName and foreign namespaces
-html/dom/documents/dom-tree-accessors/document.getElementsByName/document.getElementsByName-namespace.html:
-- getElementsByName and foreign namespaces
 html/dom/documents/dom-tree-accessors/nameditem-03.html:
 - applet elements are (mostly) gone
-html/dom/documents/resource-metadata-management/document-cookie.html:
-- A null char
-- getting cookie for a cookie-averse document returns empty string, setting does nothing
-html/dom/documents/resource-metadata-management/document-lastModified-01.html:
-- Date returned by lastModified is current after timeout.
-- Date returned by lastModified is current at page load
-html/dom/documents/resource-metadata-management/document-lastModified.html:
-- lastModified should return the last modified date and time
 html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name

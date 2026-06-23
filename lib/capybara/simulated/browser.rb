@@ -4508,6 +4508,10 @@ module Capybara
         opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
         # The detected document encoding pins document.characterSet (over meta).
         opts['charset'] = doc_charset if doc_charset
+        # `document.lastModified` reflects the response Last-Modified header (parsed
+        # to local time); absent → the current time (handled JS-side).
+        lm = response_headers['Last-Modified']   # response_headers normalizes keys to Capitalized-Dash form
+        opts['lastModified'] = lm if lm && !lm.to_s.empty?
         if @viewport_width && @viewport_height
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height
