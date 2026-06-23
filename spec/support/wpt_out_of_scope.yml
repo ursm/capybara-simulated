@@ -12700,6 +12700,13 @@ html/dom/render-blocking/script-inserted-stylesheet-link.html:
     timing): determining WHEN rendering is blocked during parsing/loading requires
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
+html/dom/usvstring-reflection.https.html:
+- name: 'RTCDataChannel.send: unpaired surrogate codepoint should be replaced with
+    U+FFFD.'
+  reason: Requires a WebRTC RTCPeerConnection/RTCDataChannel implementation with data-channel
+    pairing (createDataChannelPair) to round-trip the sent string; WebRTC is a deliberately
+    unmodeled subsystem (CLAUDE.md rule 1). The USVString coercion itself is trivial,
+    but there is no transport to observe the received value.
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element

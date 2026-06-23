@@ -116,7 +116,6 @@ Navigator:
   - product
   - productSub
   - queryHandwritingRecognizer
-  - registerProtocolHandler
   - requestMIDIAccess
   - requestMediaKeySystemAccess
   - scheduling
@@ -125,7 +124,6 @@ Navigator:
   - share
   - storage
   - storageBuckets
-  - unregisterProtocolHandler
   - usb
   - userAgentData
   - vendor
