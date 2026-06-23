@@ -124,11 +124,8 @@ html/dom/usvstring-reflection.https.html:
 - 'RegisterProtocolHandler URL: unpaired surrogate codepoint should not make any exceptions.'
 - 'UnregisterProtocolHandler URL: unpaired surrogate codepoint should not make any
   exceptions.'
-- 'anchor : unpaired surrogate codepoint should be replaced with U+FFFD'
-- 'area : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'base : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'location.href : unpaired surrogate codepoint should be replaced with U+FFFD'
-- 'source : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'storage event : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'websocket url : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'window.open : unpaired surrogate codepoint should be replaced with U+FFFD'
