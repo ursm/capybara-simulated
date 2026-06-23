@@ -3844,12 +3844,6 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
-html/dom/access-key-label.html:
-- name: Returns non empty string when accesskey is valid
-  reason: accessKeyLabel is the platform key-combination label (Alt+/Ctrl+Alt+/Cmd+
-    varies by OS/UA) produced by rendering-time access-key assignment; it is platform-specific
-    (headless Chrome itself returns undefined) and no real library depends on it.
-    (CLAUDE.md rule 1.)
 html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaAtomic (<div aria-atomic>): IDL set to " \0\x01\x02\x03\x04\x05\x06\x07
     \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo
@@ -23547,10 +23541,6 @@ shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
     same ID inside an open shadow tree earlier in tree order
   reason: asserts pageYOffset>host.offsetTop after fragment nav; needs offsetTop +
     scroll geometry. No layout engine.
-shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-methods/test-004.html:
-- name: A_10_01_02_04_T01
-  reason: ShadowRoot.getSelection() is a removed legacy-spec method no modern browser
-    implements (use document/window getSelection); no library depends on it.
 shadow-dom/untriaged/events/event-retargeting/test-003.html:
 - name: A_05_01_03_T01
   reason: 'Dispatches a NON-composed event on fallback content created in the PARENT
@@ -23586,13 +23576,6 @@ shadow-dom/untriaged/user-interaction/ranges-and-selections/test-001.html:
   reason: Same obsolete rule for a slotted (distributed) light-DOM node; Chrome 137
     returns "Som" as csim does. The 2013-WD shadow-selection encapsulation was removed
     from the spec and is not implemented by any modern browser.
-shadow-dom/untriaged/user-interaction/ranges-and-selections/test-002.html:
-- name: A_07_01_02_T01
-  reason: Relies on obsolete 2013-WD ShadowRoot.getSelection() returning shadow-internal
-    selection; removed from spec, not in any modern browser or library.
-- name: A_07_07_02_T02
-  reason: Same obsolete ShadowRoot.getSelection() on distributed nodes; API does not
-    exist in current browsers/libs.
 shadow-dom/wheel-event-related-target.html:
 - name: wheel relatedTarget should be retargeted to shadow host when entering shadow
     DOM
