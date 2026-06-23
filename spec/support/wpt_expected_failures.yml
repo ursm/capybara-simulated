@@ -31,13 +31,7 @@ html/dom/historical.html:
 - document.all cannot find applet
 - window cannot find applet
 html/dom/self-origin.sub.html:
-- Should have the right origin for IDN subframe
-- Should have the right origin for IDN subframe after setting document.domain
-- Should have the right origin for cross-origin subframe
-- Should have the right origin for cross-origin subframe after setting document.domain
 - Should have the right origin for sandboxed iframe
-- We should have the right origin for our page
 - about:blank subframe origins
-- 'blob: subframe origins'
 - 'javascript: subframe origins'
 - srcdoc subframe origins
