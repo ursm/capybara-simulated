@@ -12205,37 +12205,6 @@ html/dom/partial-updates/tentative/template-for-title.html:
 - name: HTML partial updates - update title
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
     unshipped feature, not modeled (rule 1).
-html/dom/render-blocking/blocking-idl-attr.html:
-- name: Setting the 'blocking' IDL attribute of the link element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Setting the 'blocking' IDL attribute of the script element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Setting the 'blocking' IDL attribute of the style element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Supported tokens of the 'blocking' IDL attribute of the link element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Supported tokens of the 'blocking' IDL attribute of the script element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Supported tokens of the 'blocking' IDL attribute of the style element
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/element-render-blocking-002.html:
 - name: blocking defers until needed element is parsed
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
