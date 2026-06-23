@@ -3886,6 +3886,12 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
+html/dom/access-key-label.html:
+- name: Returns non empty string when accesskey is valid
+  reason: accessKeyLabel is the platform key-combination label (Alt+/Ctrl+Alt+/Cmd+
+    varies by OS/UA) produced by rendering-time access-key assignment; it is platform-specific
+    (headless Chrome itself returns undefined) and no real library depends on it.
+    (CLAUDE.md rule 1.)
 html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaAtomic (<div aria-atomic>): IDL set to " \0\x01\x02\x03\x04\x05\x06\x07
     \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo
@@ -7466,6 +7472,13 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaSort (<div aria-sort>): typeof IDL attribute'
   reason: Tentative WPT (unratified spec surface); earned out-of-scope until the feature
     ships (rule 1).
+html/dom/documents/dom-tree-accessors/nameditem-03.html:
+- name: applet elements are (mostly) gone
+  reason: Requires applet.name === undefined, but reflected IDL members live on the
+    single shared Element.prototype (a load-bearing perf choice — no per-element-interface
+    prototypes), so a non-applicable element reads the reflected attr as "" rather
+    than undefined. Making it per-interface is a hot-path-cost refactor not worth
+    this edge. (CLAUDE.md rule 1 bounded-design-cost.)
 html/dom/documents/dom-tree-accessors/nameditem-names.html:
 - name: An embed name does not appears in a document's property names if the embed
     is inside another embed.
@@ -7496,6 +7509,13 @@ html/dom/elements/global-attributes/cdata-dir_auto.html:
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
     model (rule 1).
+html/dom/elements/global-attributes/dataset.html:
+- name: Should not have a .dataset on random elements
+  reason: Requires `"dataset" in foreignNamespaceEl` to be false, but the dataset
+    getter is on the single shared Element.prototype (load-bearing perf choice), so
+    the property exists on every element; making it per-namespace needs a per-instance
+    defineProperty (hot path) and the naive return-undefined gate regresses encoding/utf-32
+    (which relies on `"dataset" in foreignEl` being false). (CLAUDE.md rule 1 bounded-design-cost.)
 html/dom/elements/global-attributes/dir-auto-div-append-child.html:
 - name: 'dir auto: updates on appendChild'
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
@@ -7693,6 +7713,12 @@ html/dom/elements/global-attributes/the-lang-attribute-010.html:
     deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
     proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
     Content-Language.
+html/dom/elements/images/bypass-cache-revalidation.html:
+- name: Images can bypass no-cache
+  reason: Needs real image pixel rendering (canvas drawImage of a server-generated
+    PNG + getImageData asserting the pixel is green) plus HTTP no-cache revalidation
+    semantics and the image.py CGI. The layout/rendering engine and HTTP revalidation
+    cache are deliberately unmodeled. (CLAUDE.md rule 1.)
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - name: ' ("<table><tfoot><tr><td>footer</tfoot><thead><tr><td style=''visibility:collapse''>thead</thead><tbody><tr><td>tbody</tbody></table>")'
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
@@ -11003,6 +11029,13 @@ html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html:
   reason: innerText/outerText getter values depend on the RENDERING/layout tree (white-space
     collapsing across laid-out boxes, line-box breaking) — a layout engine we deliberately
     do not model (rule 1). The IDL surface exists; these assert rendered text geometry.
+html/dom/historical.html:
+- name: document.all cannot find applet
+  reason: document.all is the [[IsHTMLDDA]] exotic object (falsy in boolean context,
+    typeof === "undefined"); it is unmodellable in plain JS and we deliberately omit
+    it so `if (document.all)` / `typeof document.all` feature-detection takes the
+    modern path. The subtest reads document.all.war, which requires document.all to
+    exist. (CLAUDE.md rule 2.)
 html/dom/partial-updates/tentative/processing-instruction-attributes.html:
 - name: 'Equivalent attribute name (source: DOM): ABC -> abc'
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);

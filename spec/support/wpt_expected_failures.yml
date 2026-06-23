@@ -11,25 +11,13 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-html/dom/access-key-label.html:
-- Returns non empty string when accesskey is valid
 html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 - Script iframe-src
 - Script microtask
 - Script script-window-error
-html/dom/documents/dom-tree-accessors/nameditem-03.html:
-- applet elements are (mostly) gone
 html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name
-html/dom/elements/global-attributes/dataset.html:
-- Should not have a .dataset on random elements
-html/dom/elements/images/bypass-cache-revalidation.html:
-- Images can bypass no-cache
-html/dom/historical.html:
-- applet is not styled
-- document.all cannot find applet
-- window cannot find applet
 html/dom/self-origin.sub.html:
 - Should have the right origin for sandboxed iframe
 - about:blank subframe origins
