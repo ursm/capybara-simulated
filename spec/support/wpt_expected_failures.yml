@@ -280,9 +280,7 @@ html/semantics/forms/constraints/form-validation-validity-tooShort.html:
 - "[INPUT in URL status] Dirty value - length of value is less than minLength"
 - "[INPUT in URL status] Non-dirty value - length of value is less than minLength"
 html/semantics/forms/constraints/form-validation-validity-typeMismatch.html:
-- "[INPUT in EMAIL status] The value is a valid email address with some white spaces."
 - "[INPUT in EMAIL status] The value is valid email addresses"
-- "[INPUT in URL status] The value is a valid url with some white spaces."
 html/semantics/forms/constraints/form-validation-validity-valid-weekmonth.html:
 - "[INPUT in MONTH status] validity.valid must be false if validity.rangeOverflow
   is true"
@@ -655,25 +653,10 @@ html/semantics/forms/resetting-a-form/reset-form.html:
 - Resetting <output> by clicking the input in reset status
 html/semantics/forms/setCustomValidity-normalize-newlines.html:
 - setCustomValidity should normalize newlines from the given error message
-html/semantics/forms/textfieldselection/selection-after-content-change.html:
-- 'input in document, with focus: selection must not change when setting a value that
-  becomes the same after the value sanitization algorithm'
-- 'input in document: selection must not change when setting a value that becomes
-  the same after the value sanitization algorithm'
-- 'input out of document: selection must not change when setting a value that becomes
-  the same after the value sanitization algorithm'
-- 'textarea in document, with focus: selection must not change when setting the same
-  normalized value'
-- 'textarea in document: selection must not change when setting the same normalized
-  value'
-- 'textarea out of document: selection must not change when setting the same normalized
-  value'
 html/semantics/forms/textfieldselection/selection-start-end-extra.html:
 - Removing child nodes in non-dirty textarea should make selection{Start,End} 0
 - Resetting a value to a shorter string than defaultValue should correct the cursor
   position
-- Shortening value by turning the input type into 'color' and back to 'text' should
-  correct selection{Start,End}
 - Shortening value by turning the input type into 'url' should correct selection{Start,End}
 html/semantics/forms/the-button-element/active-onblur.html:
 - Buttons should clear :active when the user tabs away from them while holding spacebar.
@@ -963,21 +946,9 @@ html/semantics/forms/the-input-element/cloning-steps.html:
   affect the cloned input's checkedness
 - input[type=week] element's indeterminateness should be cloned
 html/semantics/forms/the-input-element/color.html:
-- 'Empty value should return #000000'
-- 'Invalid color: PILE OF POO (U+1F4A9)'
-- 'Invalid color: keyword inherit'
-- 'Invalid color: keyword transparent'
-- 'Invalid color: trailing ;'
-- 'Invalid color: trailing Null (U+0000)'
-- 'Invalid simple color: 8 characters long'
-- 'Invalid simple color: foobar'
-- 'Invalid simple color: no starting # sign'
-- 'Invalid simple color: non ASCII hex digits'
-- 'Missing value should return #000000'
 - System colors are parsed
 - 'Valid color: color(display-p3 .5 0 0)'
 - 'Valid color: color(display-p3 1 0 0)'
-- 'Valid color: currentColor'
 - 'Valid color: hsl(150deg 100 53.5)'
 - 'Valid color: keyword bisque'
 - 'Valid color: keyword crimson'
@@ -986,10 +957,7 @@ html/semantics/forms/the-input-element/color.html:
 - 'Valid color: rgb(1,1,1)'
 - 'Valid color: rgb(1,1,1,1)'
 - 'Valid color: trailing space'
-- 'Valid simple color (containing LATIN CAPITAL LETTERS): should return #ffffff (converted
-  to ASCII lowercase)'
 - 'Valid simple color: 4 characters long'
-- Zero-padding
 html/semantics/forms/the-input-element/date-readonly-keyboard.html:
 - Readonly date input should not change value via keyboard interaction
 html/semantics/forms/the-input-element/date.html:
@@ -1006,17 +974,9 @@ html/semantics/forms/the-input-element/datetime-local.html:
 - Value <= max attribute
 - Value > max attribute
 - Value >= min attribute
-- datetime-local input value set to 2014-01-0 11:11 without min/max
 - datetime-local input value set to 2014-01-01 00:00:00.000 without min/max
-- datetime-local input value set to 2014-01-01 11:1 without min/max
 - datetime-local input value set to 2014-01-01 11:11 without min/max
 - datetime-local input value set to 2014-01-01 11:11:11.111 without min/max
-- invalid datetime-local input value 1
-- invalid datetime-local input value 2
-- invalid datetime-local input value 3
-- invalid datetime-local input value 4
-- invalid datetime-local input value 5
-- invalid datetime-local input value 6
 html/semantics/forms/the-input-element/defaultValue-clobbering.html:
 - Visible value and validity should not be affected when assigning to the defaultValue
   property for type=number.
@@ -1034,7 +994,6 @@ html/semantics/forms/the-input-element/email.html:
   algorithm
 - run the value sanitization algorithm after setting a new value
 - valid value is a set of valid email addresses separated by a single ','
-- 'value should be sanitized: strip line breaks'
 html/semantics/forms/the-input-element/files.html:
 - files for input type=file
 - setting <input type=file>.files
@@ -1121,9 +1080,6 @@ html/semantics/forms/the-input-element/input-type-button.html:
 html/semantics/forms/the-input-element/input-type-change-value.html:
 - With focus
 - Without focus
-html/semantics/forms/the-input-element/input-type-checkbox.html:
-- 'default/on: on getting, if the element has a value attribute, it must return that
-  attribute''s value; otherwise, it must return the string ''on'''
 html/semantics/forms/the-input-element/input-valueasdate-invalidstateerr.html:
 - Forms
 html/semantics/forms/the-input-element/input-valueasdate-stepping.html:
@@ -1173,13 +1129,6 @@ html/semantics/forms/the-input-element/input-valueasnumber.html:
   -1)'
 - 'valueAsNumber getter on type month (actual value: 2019-12, expected valueAsNumber:
   599)'
-- 'valueAsNumber getter on type number (actual value: 1e, expected valueAsNumber:
-  NaN)'
-- 'valueAsNumber getter on type range (actual value: , expected valueAsNumber: 50)'
-- 'valueAsNumber getter on type range (actual value: -10, expected valueAsNumber:
-  0)'
-- 'valueAsNumber getter on type range (actual value: 110, expected valueAsNumber:
-  100)'
 - 'valueAsNumber getter on type time (actual value: 00:00, expected valueAsNumber:
   0)'
 - 'valueAsNumber getter on type time (actual value: 12:00, expected valueAsNumber:
@@ -1201,8 +1150,6 @@ html/semantics/forms/the-input-element/input-valueasnumber.html:
   expected value: 2019-12-10T00:00)'
 - 'valueAsNumber setter on type datetime-local (actual valueAsNumber: 1575979200000,
   expected value: 2019-12-10T12:00)'
-- 'valueAsNumber setter on type datetime-local (actual valueAsNumber: 2.734333707189448e+26,
-  expected value: )'
 - 'valueAsNumber setter on type month (actual valueAsNumber: -1, expected value: 1969-12)'
 - 'valueAsNumber setter on type month (actual valueAsNumber: 599, expected value:
   2019-12)'
@@ -1237,45 +1184,22 @@ html/semantics/forms/the-input-element/month.html:
   use defaul value instead.
 - When value attribute has two digits year value, the value,which is invalid, must
   return empty string.
-- When value is set with invalid value, the value must return empty string.
 - 'Year should be > 0: If the value of the element is not a valid year string, then
   set it to the empty string instead.>'
 html/semantics/forms/the-input-element/number-constraint-validation.html:
-- Setting .value to a parsable but invalid floating point number triggers sanitization
-  but doesn't set badInput.
-- Setting .value to an unparsable number triggers sanitization but doesn't set badInput.
-- Unparsable number user input causes valueMissing to be set on required input.
 - Unparsable number user input triggers sanitization and causes badInput to be set.
 - Users inputting a parsable but invalid floating point number doesn't trigger sanitization
   and doesn't set badInput.
 html/semantics/forms/the-input-element/number-invalid-scientific-key-events.html:
 - Insert - at start
-html/semantics/forms/the-input-element/number.html:
-- " value = Infinity"
-- full-width digits
-- value = '+'
-- value = '-'
-- value = +1
-- value = -Infinity
-- value = 1e
-- value = 1trailing junk
-- value = NaN
-- value >= Number.MAX_VALUE
-- value ending with '.'
-- 'value is not a valid floating-point number: 1d+2'
-- 'value not a valid floating-point number: random string'
-- value with a leading carriage return
-- value with a leading form feed
-- value with a leading newline
-- value with a leading space
-- value with a leading tab
+- Leading '+' with existing 'e'
+- Reject multiple signs after 'e' (+)
+- Reject multiple signs after 'e' (-)
 html/semantics/forms/the-input-element/password-delete-space.html:
 - Backspace with trailing white space in password field
 html/semantics/forms/the-input-element/password.html:
 - Setting value changes the current value for password, but not the value content
   attribute
-- Value sanitization algorithm should strip line breaks for password
-- sanitization algorithm strips line breaks
 html/semantics/forms/the-input-element/pattern_attribute.html:
 - "<input pattern> is Unicode code point-aware"
 - "<input pattern> supports Unicode property escape syntax"
@@ -1328,7 +1252,6 @@ html/semantics/forms/the-input-element/radio.html:
 - only one control of a radio button group can have its checkedness set to true
 - radio inputs with non-ASCII name attributes belong to the same radio button group
 html/semantics/forms/the-input-element/range-2.html:
-- range input value equals 100
 - range input value equals 2
 - range input value equals 50
 - range input value set to ''
@@ -1440,27 +1363,17 @@ html/semantics/forms/the-input-element/telephone.html:
 - The value attribute, if specified, must have a value that contains no "CR" (U+000D)
 - The value attribute, if specified, must have a value that contains no "LF" (U+000A)
 - 'The value sanitization algorithm is as follows: Strip line breaks from the value'
-- User agents must not allow users to insert "CR" (U+000D)
-- User agents must not allow users to insert "LF" (U+000A)
 html/semantics/forms/the-input-element/text.html:
-- Value sanitization algorithm should strip line breaks for search
-- Value sanitization algorithm should strip line breaks for text
 - stepDown does not apply for search
 - stepDown does not apply for text
 - stepUp does not apply for search
 - stepUp does not apply for text
 html/semantics/forms/the-input-element/time-2.html:
-- 'Invalid value: fraction should have one, two or three ASCII digits. Value should
-  be empty'
 - 'Invalid value: hour > 23. Value should be empty'
-- 'Invalid value: hour should have two ASCII digits. Value should be empty'
 - 'Invalid value: minute > 59. Value should be empty'
-- 'Invalid value: minutes should have two ASCII digits. Value should be empty'
 - 'Invalid value: second > 59. Value should be empty'
-- 'Invalid value: seconds should have two ASCII digits. Value should be empty'
 html/semantics/forms/the-input-element/time.html:
 - " empty value of stepUp"
-- set value on not time format value
 - stepDown argument 2 times
 - 'stepDown on step value 24 hour '
 - 'stepDown on step value hour '
@@ -1481,334 +1394,14 @@ html/semantics/forms/the-input-element/time.html:
 - stepUp stop because it exceeds the maximum value
 - stop at border on stepDown
 - stop at border on stepUp
-html/semantics/forms/the-input-element/type-change-state-weekmonth.html:
-- change state from button to month
-- change state from button to week
-- change state from checkbox to month
-- change state from checkbox to week
-- change state from color to month
-- change state from color to week
-- change state from date to month
-- change state from date to week
-- change state from datetime-local to month
-- change state from datetime-local to week
-- change state from email to month
-- change state from email to week
-- change state from hidden to month
-- change state from hidden to week
-- change state from image to month
-- change state from image to week
-- change state from month to color
-- change state from month to date
-- change state from month to datetime-local
-- change state from month to email
-- change state from month to number
-- change state from month to password
-- change state from month to range
-- change state from month to search
-- change state from month to tel
-- change state from month to text
-- change state from month to time
-- change state from month to url
-- change state from month to week
-- change state from number to month
-- change state from number to week
-- change state from password to month
-- change state from password to week
-- change state from radio to month
-- change state from radio to week
-- change state from range to month
-- change state from range to week
-- change state from reset to month
-- change state from reset to week
-- change state from search to month
-- change state from search to week
-- change state from submit to month
-- change state from submit to week
-- change state from tel to month
-- change state from tel to week
-- change state from text to month
-- change state from text to week
-- change state from time to month
-- change state from time to week
-- change state from url to month
-- change state from url to week
-- change state from week to color
-- change state from week to date
-- change state from week to datetime-local
-- change state from week to email
-- change state from week to month
-- change state from week to number
-- change state from week to password
-- change state from week to range
-- change state from week to search
-- change state from week to tel
-- change state from week to text
-- change state from week to time
-- change state from week to url
-html/semantics/forms/the-input-element/type-change-state.html:
-- change state from button to color
-- change state from button to date
-- change state from button to datetime-local
-- change state from button to email
-- change state from button to number
-- change state from button to password
-- change state from button to range
-- change state from button to search
-- change state from button to tel
-- change state from button to text
-- change state from button to time
-- change state from button to url
-- change state from checkbox to color
-- change state from checkbox to date
-- change state from checkbox to datetime-local
-- change state from checkbox to email
-- change state from checkbox to number
-- change state from checkbox to password
-- change state from checkbox to range
-- change state from checkbox to search
-- change state from checkbox to tel
-- change state from checkbox to text
-- change state from checkbox to time
-- change state from checkbox to url
-- change state from color to date
-- change state from color to datetime-local
-- change state from color to email
-- change state from color to number
-- change state from color to password
-- change state from color to range
-- change state from color to search
-- change state from color to tel
-- change state from color to text
-- change state from color to time
-- change state from color to url
-- change state from date to color
-- change state from date to datetime-local
-- change state from date to email
-- change state from date to number
-- change state from date to password
-- change state from date to range
-- change state from date to search
-- change state from date to tel
-- change state from date to text
-- change state from date to time
-- change state from date to url
-- change state from datetime-local to color
-- change state from datetime-local to date
-- change state from datetime-local to email
-- change state from datetime-local to number
-- change state from datetime-local to password
-- change state from datetime-local to range
-- change state from datetime-local to search
-- change state from datetime-local to tel
-- change state from datetime-local to text
-- change state from datetime-local to time
-- change state from datetime-local to url
-- change state from email to color
-- change state from email to date
-- change state from email to datetime-local
-- change state from email to number
-- change state from email to password
-- change state from email to range
-- change state from email to search
-- change state from email to tel
-- change state from email to text
-- change state from email to time
-- change state from email to url
-- change state from hidden to color
-- change state from hidden to date
-- change state from hidden to datetime-local
-- change state from hidden to email
-- change state from hidden to number
-- change state from hidden to password
-- change state from hidden to range
-- change state from hidden to search
-- change state from hidden to tel
-- change state from hidden to text
-- change state from hidden to time
-- change state from hidden to url
-- change state from image to color
-- change state from image to date
-- change state from image to datetime-local
-- change state from image to email
-- change state from image to number
-- change state from image to password
-- change state from image to range
-- change state from image to search
-- change state from image to tel
-- change state from image to text
-- change state from image to time
-- change state from image to url
-- change state from number to color
-- change state from number to date
-- change state from number to datetime-local
-- change state from number to email
-- change state from number to password
-- change state from number to range
-- change state from number to search
-- change state from number to tel
-- change state from number to text
-- change state from number to time
-- change state from number to url
-- change state from password to color
-- change state from password to date
-- change state from password to datetime-local
-- change state from password to email
-- change state from password to number
-- change state from password to range
-- change state from password to search
-- change state from password to tel
-- change state from password to text
-- change state from password to time
-- change state from password to url
-- change state from radio to color
-- change state from radio to date
-- change state from radio to datetime-local
-- change state from radio to email
-- change state from radio to number
-- change state from radio to password
-- change state from radio to range
-- change state from radio to search
-- change state from radio to tel
-- change state from radio to text
-- change state from radio to time
-- change state from radio to url
-- change state from range to color
-- change state from range to date
-- change state from range to datetime-local
-- change state from range to email
-- change state from range to number
-- change state from range to password
-- change state from range to search
-- change state from range to tel
-- change state from range to text
-- change state from range to time
-- change state from range to url
-- change state from reset to color
-- change state from reset to date
-- change state from reset to datetime-local
-- change state from reset to email
-- change state from reset to number
-- change state from reset to password
-- change state from reset to range
-- change state from reset to search
-- change state from reset to tel
-- change state from reset to text
-- change state from reset to time
-- change state from reset to url
-- change state from search to color
-- change state from search to date
-- change state from search to datetime-local
-- change state from search to email
-- change state from search to number
-- change state from search to password
-- change state from search to range
-- change state from search to tel
-- change state from search to text
-- change state from search to time
-- change state from search to url
-- change state from submit to color
-- change state from submit to date
-- change state from submit to datetime-local
-- change state from submit to email
-- change state from submit to number
-- change state from submit to password
-- change state from submit to range
-- change state from submit to search
-- change state from submit to tel
-- change state from submit to text
-- change state from submit to time
-- change state from submit to url
-- change state from tel to color
-- change state from tel to date
-- change state from tel to datetime-local
-- change state from tel to email
-- change state from tel to number
-- change state from tel to password
-- change state from tel to range
-- change state from tel to search
-- change state from tel to text
-- change state from tel to time
-- change state from tel to url
-- change state from text to color
-- change state from text to date
-- change state from text to datetime-local
-- change state from text to email
-- change state from text to number
-- change state from text to password
-- change state from text to range
-- change state from text to search
-- change state from text to tel
-- change state from text to time
-- change state from text to url
-- change state from time to color
-- change state from time to date
-- change state from time to datetime-local
-- change state from time to email
-- change state from time to number
-- change state from time to password
-- change state from time to range
-- change state from time to search
-- change state from time to tel
-- change state from time to text
-- change state from time to url
-- change state from url to color
-- change state from url to date
-- change state from url to datetime-local
-- change state from url to email
-- change state from url to number
-- change state from url to password
-- change state from url to range
-- change state from url to search
-- change state from url to tel
-- change state from url to text
-- change state from url to time
 html/semantics/forms/the-input-element/url.html:
-- The value must not be set with "LF" (U+000A) or "CR" (U+000D)
 - 'The value sanitization algorithm is as follows: Strip leading and trailing whitespace
   from the value.'
 - 'The value sanitization algorithm is as follows: Strip line breaks from the value'
-html/semantics/forms/the-input-element/valueMode-weekmonth.html:
-- value IDL attribute of input type month with value attribute
-- value IDL attribute of input type month without value attribute
-- value IDL attribute of input type week with value attribute
-- value IDL attribute of input type week without value attribute
 html/semantics/forms/the-input-element/valueMode.html:
-- value IDL attribute of input type color with value attribute
-- value IDL attribute of input type color without value attribute
-- value IDL attribute of input type date with value attribute
-- value IDL attribute of input type date without value attribute
-- value IDL attribute of input type datetime-local with value attribute
-- value IDL attribute of input type datetime-local without value attribute
-- value IDL attribute of input type email with value attribute
-- value IDL attribute of input type email without value attribute
 - value IDL attribute of input type file without value attribute
-- value IDL attribute of input type number with value attribute
-- value IDL attribute of input type number without value attribute
-- value IDL attribute of input type password with value attribute
-- value IDL attribute of input type password without value attribute
-- value IDL attribute of input type range with value attribute
-- value IDL attribute of input type range without value attribute
-- value IDL attribute of input type search with value attribute
-- value IDL attribute of input type search without value attribute
-- value IDL attribute of input type tel with value attribute
-- value IDL attribute of input type tel without value attribute
-- value IDL attribute of input type text with value attribute
-- value IDL attribute of input type text without value attribute
-- value IDL attribute of input type time with value attribute
-- value IDL attribute of input type time without value attribute
-- value IDL attribute of input type url with value attribute
-- value IDL attribute of input type url without value attribute
 html/semantics/forms/the-input-element/week.html:
 - '2014 has 52 weeks: Value should be empty'
-- 'Invalid value: incorrect with ''-'' at the end'
-- 'Invalid value: no ''-'' (U+002D)'
-- 'Invalid value: no week number'
-- 'Invalid value: should be capital letter ''W'''
-- 'Invalid value: value should be two parts'
-- 'Invalid value: year only'
-- 'Invalid value: yearless week'
-- 'Invalid value: yearless week and no ''-'' (U+002D)'
 html/semantics/forms/the-label-element/clicking-interactive-content.html:
 - interactive content <audio controls=""></audio> as second child under <label>
 - interactive content <embed> as second child under <label>
@@ -2393,6 +1986,5 @@ html/semantics/forms/the-textarea-element/value-defaultValue-textContent.html:
   a DocumentFragment
 - defaultValue and value reflect child text content, not textContent
 - defaultValue and value treat CRLF differently
-- tests for the value setter
 - value normalizes CRLF even spread over multiple text nodes
 html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
