@@ -14,6 +14,3 @@
 html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 - Script iframe-src
 - Script microtask
-html/dom/elements/global-attributes/custom-attrs.html:
-- Setting an Element's dataset property should not interfere with namespaced attributes
-  with same name
