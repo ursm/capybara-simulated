@@ -7439,27 +7439,6 @@ html/dom/documents/dom-tree-accessors/nameditem-names.html:
     The subtest asserts the opposite, so it matches no real browser; our output (include
     it) matches Chrome. Independent of the named-properties machinery. The other 9
     subtests in this file now PASS."
-html/dom/elements/global-attributes/cdata-dir_auto.html:
-- name: Content of CDATA is ignored for dir=auto in html document
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: Directionality is updated when changing text of CDATASection
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: Directionality is updated when removing CDATASection
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: Text in CDATASection is considered when determining auto directionality
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
 html/dom/elements/global-attributes/dataset.html:
 - name: Should not have a .dataset on random elements
   reason: Requires `"dataset" in foreignNamespaceEl` to be false, but the dataset
@@ -7467,36 +7446,8 @@ html/dom/elements/global-attributes/dataset.html:
     the property exists on every element; making it per-namespace needs a per-instance
     defineProperty (hot path) and the naive return-undefined gate regresses encoding/utf-32
     (which relies on `"dataset" in foreignEl` being false). (CLAUDE.md rule 1 bounded-design-cost.)
-html/dom/elements/global-attributes/dir-auto-div-append-child.html:
-- name: 'dir auto: updates on appendChild'
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-html/dom/elements/global-attributes/dir-bdi-script.html:
-- name: 'BDI test: Directionality'
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-html/dom/elements/global-attributes/dir-not-changed-text-input-typing.html:
-- name: entering LTR text doesn't change directionality of a text input without dir=auto
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
 html/dom/elements/global-attributes/dir-slots-directionality.html:
-- name: 'Slots: Directionality: dir=auto in shadow tree with Arabic light tree content'
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
 - name: 'Slots: Directionality: dir=auto in shadow tree with Arabic shadow tree content'
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: 'Slots: Directionality: dir=auto on host with Arabic shadow tree content'
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
@@ -7516,38 +7467,7 @@ html/dom/elements/global-attributes/dir-slots-directionality.html:
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
     model (rule 1).
-- name: children with dir attribute are skipped by dir=auto
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: dir=auto slot ignores assigned nodes with dir attribute
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: dir=auto slot ignores text in bdi assigned nodes
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
 - name: dir=auto slot ignores text in value of input element children
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: dir=auto slot is not affected by content inside inner slot (version 1)
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: dir=auto slot is not affected by content inside inner slot (version 2)
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: dir=auto slot is not affected by value of auto-directionality form associated
-    elements
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
@@ -7558,11 +7478,6 @@ html/dom/elements/global-attributes/dir-slots-directionality.html:
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
     model (rule 1).
 - name: slot provides its directionality (from host) to a dir=auto container
-  reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
-    algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
-    a text-directionality/bidi engine adjacent to rendering that we deliberately don't
-    model (rule 1).
-- name: slot with dir attribute is skipped by dir=auto
   reason: dir=auto directionality resolution — the UAX#9 first-strong-character bidi
     algorithm over the flat tree (incl. slots / form-associated controls / bdi exclusions),
     a text-directionality/bidi engine adjacent to rendering that we deliberately don't
