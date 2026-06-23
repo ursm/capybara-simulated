@@ -99,14 +99,6 @@ html/dom/historical.html:
 - applet is not styled
 - document.all cannot find applet
 - window cannot find applet
-html/dom/reflection-grouping.html:
-- 'hr.color: IDL set to null'
-html/dom/reflection-metadata.html:
-- 'base.href: typeof IDL attribute'
-html/dom/reflection-obsolete.html:
-- 'marquee.bgColor: IDL set to null'
-html/dom/reflection-tabular.html:
-- 'table.border: IDL set to null'
 html/dom/self-origin.sub.html:
 - Should have the right origin for IDN subframe
 - Should have the right origin for IDN subframe after setting document.domain
@@ -124,7 +116,6 @@ html/dom/usvstring-reflection.https.html:
 - 'RegisterProtocolHandler URL: unpaired surrogate codepoint should not make any exceptions.'
 - 'UnregisterProtocolHandler URL: unpaired surrogate codepoint should not make any
   exceptions.'
-- 'base : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'location.href : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'storage event : unpaired surrogate codepoint should be replaced with U+FFFD'
 - 'websocket url : unpaired surrogate codepoint should be replaced with U+FFFD'
