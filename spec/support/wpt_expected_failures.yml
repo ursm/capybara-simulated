@@ -17,6 +17,3 @@ html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name
-html/dom/self-origin.sub.html:
-- about:blank subframe origins
-- srcdoc subframe origins
