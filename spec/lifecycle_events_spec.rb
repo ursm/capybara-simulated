@@ -39,8 +39,8 @@ RSpec.describe 'document lifecycle events' do
   end
 
   it 'still fires DOMContentLoaded and load alongside readystatechange' do
-    pending 'DOMContentLoaded fires before readyState transitions to "interactive"; ' \
-            "`load` not yet emitted"
+    pending 'window `load` not yet emitted on a top-level visit ' \
+            '(DOMContentLoaded@interactive now works)'
     events = session.evaluate_script('window.__lifecycleEvents')
     expect(events).to eq(['DOMContentLoaded@interactive', 'load@complete'])
   end

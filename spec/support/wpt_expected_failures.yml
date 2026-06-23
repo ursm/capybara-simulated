@@ -86,8 +86,6 @@ html/dom/documents/resource-metadata-management/document-lastModified-01.html:
 - Date returned by lastModified is current at page load
 html/dom/documents/resource-metadata-management/document-lastModified.html:
 - lastModified should return the last modified date and time
-html/dom/documents/resource-metadata-management/document-readyState.html:
-- readyState equals 'interactive' when the document is finished parsing
 html/dom/elements/global-attributes/custom-attrs.html:
 - Setting an Element's dataset property should not interfere with namespaced attributes
   with same name
