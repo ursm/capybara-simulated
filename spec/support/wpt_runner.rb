@@ -246,15 +246,18 @@ module WptRunner
   # testharness.js. Reference / manual / support / resources files are not
   # tests and are skipped. Files on the skip list (driver crashers — see
   # `skip`) are excluded here so they neither run nor need an allowlist entry.
-  # Top-level trees + the narrow html/ event-loop oracle subtrees (timers +
-  # microtask-queuing — the only layout-free slices of html/ we vendor; see
-  # script/vendor_wpt.mjs).
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing}'
+  # Top-level trees + the narrow html/ subtrees we vendor: the event-loop oracle
+  # (timers + microtask-queuing) and the forms semantics surface (form
+  # submission / constraint validation / input / select / textarea / labels —
+  # the form-driven slice every app suite exercises). See script/vendor_wpt.mjs.
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
-  # event-loop oracle (all time-probed crasher-free). The dom/ `.any.js` set is
-  # still excluded — it has synchronous-infinite-loop crashers that hang the V8
-  # call (no virtual-clock timeout catches them) and needs skip-list triage first.
+  # event-loop oracle (all time-probed crasher-free). The dom/ + forms `.any.js`
+  # sets are still excluded — dom/ has synchronous-infinite-loop crashers that
+  # hang the V8 call (no virtual-clock timeout catches them); forms `.any.js`
+  # (~17 files) is deferred until the `.html` set is triaged. Both need skip-list
+  # triage before they can be scanned.
   JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing}'
 
   def test_files

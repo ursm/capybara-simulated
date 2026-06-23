@@ -39,18 +39,23 @@ const REPO = 'web-platform-tests/wpt';
 const PINNED = '34637df05a42cefd99ecc38e6602f7f64e4c1648';
 const REF = process.env.WPT_REF || PINNED;
 
-// Directories to vendor whole and scan for tests. Top-level trees plus a couple
-// of narrow html/ SUBTREES (the full html/ tree is thousands of mostly
-// layout-dependent files; we want only the layout-free event-loop oracle:
-// timers + microtask-queuing). `resources` is fetched selectively (just the
-// harness) below — the rest of resources/ is large and unneeded.
+// Directories to vendor whole and scan for tests. Top-level trees plus a few
+// narrow html/ SUBTREES (the full html/ tree is thousands of mostly
+// layout-dependent files; we cherry-pick the layout-light slices: the
+// event-loop oracle — timers + microtask-queuing — and the forms semantics
+// surface that real app suites hammer). `resources` is fetched selectively
+// (just the harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
   'html/dom',                          // IDL attribute REFLECTION (content attr <-> IDL prop) — the IDL
                                        // coverage gate only checks member EXISTENCE; this checks behaviour
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
-  'html/webappapis/microtask-queuing'  // queueMicrotask + microtask-checkpoint ordering
+  'html/webappapis/microtask-queuing', // queueMicrotask + microtask-checkpoint ordering
+  'html/semantics/forms'               // form submission / constraint validation / FormData / input /
+                                       // select / textarea / labels — the form-driven surface every app
+                                       // suite exercises (layout-dependent widget-rendering subtests are
+                                       // earned out-of-scope in wpt_out_of_scope.yml)
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)

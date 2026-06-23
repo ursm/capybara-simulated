@@ -125,3 +125,16 @@
   rendering engine we don't model (rule 1); unshipped, no library/app uses it.
   Several files have non-deterministic layout-dependent failing sets that can't be
   name-allowlisted, so the whole 18-file subtree is skipped.
+
+# Tentative pattern-attribute test that deliberately feeds a catastrophic-
+# backtracking regex (`(a+)+$` over a long non-matching string) to the JS regex
+# engine. V8's regex matcher runs it synchronously to completion in ~56 s — finite
+# but pathologically slow, and the virtual-clock force-timeout can't interrupt a
+# native regex call (only CSIM_V8_CALL_TIMEOUT_MS catches it, which the gate
+# doesn't set). Skipped so it doesn't add ~a minute to every gate run. Tentative,
+# probes a perf-DoS guard real browsers implement in their regex engine — not a
+# driver-behaviour gap we can close without bounding V8's matcher.
+"html/semantics/forms/constraints/infinite_backtracking.tentative.html": >-
+  Catastrophic-backtracking pattern regex; V8 runs it synchronously for ~56 s
+  (finite but pathological), uninterruptible by the virtual-clock force-timeout.
+  Skipped to keep the gate fast — see header.
