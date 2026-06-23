@@ -3731,43 +3731,6 @@ domparsing/tentative/stream-positional.html:
 - name: streamReplaceWithHTMLUnsafe({}) with A and B
   reason: WritableStream-backed positional streaming (streamAfter/Append/Before/PrependHTML(Unsafe));
     the async-streams runtime is not modeled (rule 1, real async runtime / streams).
-encoding/replacement-encodings.any.js:
-- name: csiso2022kr - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
-- name: hz-gb-2312 - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
-- name: iso-2022-cn - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
-- name: iso-2022-cn-ext - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
-- name: iso-2022-kr - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
-- name: replacement - non-empty input decodes to one replacement character.
-  reason: Decodes via XHR responseText + overrideMimeType(charset) over a data-scheme
-    URL; overrideMimeType is a no-op and responseText isn't re-decoded by charset
-    (xhr.js). The 'replacement' decoder itself is trivial (one U+FFFD) — the blocker
-    is the byte-transport/charset path, deferred to the comprehensive document-charset
-    effort.
 encoding/streams/decode-non-utf8.any.js:
 - name: TextDecoderStream should be able to decode ISO-2022-JP
   reason: TextDecoderStream decode of legacy encodings (Shift_JIS, ISO-2022-JP, ISO-8859-14);
