@@ -77,10 +77,10 @@ under `lib/capybara/simulated/js/` and the vendored JS deps under
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'rusty_racer'         # V8 (JIT, fastest per spec) — default
-gem 'quickjs', '>= 0.18'  # QuickJS (interpreter, smaller per-VM RAM —
-                          # wins when scaling parallel workers under
-                          # a fixed memory budget)
+gem 'rusty_racer', '>= 0.1.9'  # V8 (JIT, fastest per spec) — default
+gem 'quickjs', '>= 0.18'       # QuickJS (interpreter, smaller per-VM RAM —
+                               # wins when scaling parallel workers under
+                               # a fixed memory budget)
 ```
 
 The V8 engine comes from [rusty_racer](https://github.com/ursm/rusty_racer),

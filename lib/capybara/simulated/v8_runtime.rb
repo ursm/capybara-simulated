@@ -106,17 +106,7 @@ module Capybara
           @ctx        = @iso.context
           @attached   = []
           @generation = 0
-          # rusty's heap-accounting API (heap_statistics / low_memory_notification)
-          # landed in 0.1.9. Probe the real Isolate once here — the Ctx wrapper
-          # delegates these unconditionally, so a `respond_to?` on the wrapper
-          # would always be true and never gate the version. Cached so the
-          # per-visit pressure check (rule 3) is an ivar read, not a dispatch.
-          @heap_accounting = @iso.respond_to?(:heap_statistics)
         end
-
-        # True iff the underlying rusty Isolate exposes the 0.1.9 heap-accounting
-        # API. Drives `relieve_heap_pressure`'s version gate.
-        def heap_accounting? = @heap_accounting
 
         # ── Context surface ─────────────────────────────────────────
         # rusty drains microtasks at call-depth zero (V8's default kAuto
@@ -162,8 +152,8 @@ module Capybara
         def terminate                        = @iso.terminate
         def dispose                          = @iso.dispose
         def perform_microtask_checkpoint     = @iso.perform_microtask_checkpoint
-        # rusty >= 0.1.9: V8 heap accounting + a forced full GC. Used by the
-        # per-visit heap-pressure relief in `rebuild_ctx` (see there).
+        # V8 heap accounting + a forced full GC (rusty >= 0.1.9, the gem's
+        # floor). Used by the per-visit heap-pressure relief in `rebuild_ctx`.
         def heap_statistics                  = @iso.heap_statistics
         def low_memory_notification          = @iso.low_memory_notification
 
@@ -577,10 +567,10 @@ module Capybara
       # the GC itself only fires once a multi-visit spec has actually piled up
       # dead realms — measured at ~once per 25-50 iframe-heavy visits, reclaiming
       # native contexts back to 1 and the heap to baseline — so the amortized
-      # cost is negligible while memory stays bounded. No-op on rusty < 0.1.9
-      # (no heap_statistics) or when disabled.
+      # cost is negligible while memory stays bounded. No-op when disabled
+      # (GC_PRESSURE_MB <= 0).
       def relieve_heap_pressure
-        return unless GC_PRESSURE_MB.positive? && @ctx.heap_accounting?
+        return unless GC_PRESSURE_MB.positive?
         s    = @ctx.heap_statistics
         over = (s[:used_heap_size].to_i + s[:external_memory].to_i) > GC_PRESSURE_MB * 1_048_576
         if HEAP_DIAG
@@ -596,8 +586,8 @@ module Capybara
                       a[:used_heap_size].to_i >> 20, a[:number_of_native_contexts].to_i))
         end
       rescue StandardError
-        # Older rusty without the diagnostics API, or a transient read failure —
-        # heap relief is best-effort, never fail a visit over it.
+        # A transient read failure — heap relief is best-effort, never fail a
+        # visit over it.
       end
 
       # Built lazily on first use, on the calling (main) thread. There is no
