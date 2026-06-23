@@ -12270,52 +12270,6 @@ html/dom/render-blocking/element-render-blocking-041.html:
     timing): determining WHEN rendering is blocked during parsing/loading requires
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
-html/dom/render-blocking/non-render-blocking-scripts.optional.html:
-- name: parser-inserted async module script should eventually be loaded and evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: parser-inserted async script is not implicitly render-blocking
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: parser-inserted defer script is not implicitly render-blocking
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: parser-inserted module script should eventually be loaded and evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: script-inserted module script should eventually be loaded and evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: script-inserted script is not implicitly render-blocking
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: script-inserted script should eventually be loaded and evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: script-inserted sync script is not implicitly render-blocking
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: script-inserted sync script should eventually be loaded and evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/parser-blocking-script.html:
 - name: Rendering is blocked before render-blocking resources are loaded
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
@@ -12348,11 +12302,6 @@ html/dom/render-blocking/parser-inserted-inline-module-with-import.html:
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/parser-inserted-module-script.html:
-- name: Parser-inserted render-blocking module script is evaluated
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 - name: Rendering is blocked before render-blocking resources are loaded
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
     timing): determining WHEN rendering is blocked during parsing/loading requires
@@ -12388,58 +12337,6 @@ html/dom/render-blocking/remove-attr-stylesheet-link-keeps-blocking.html:
     timing): determining WHEN rendering is blocked during parsing/loading requires
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
     reflection is part of the same feature, unshipped here.'
-html/dom/render-blocking/remove-attr-unblocks-rendering.optional.html:
-- name: Loading of parser-inserted async module script should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Loading of parser-inserted module script should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Loading of script-inserted inline style should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Loading of script-inserted module script should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Loading of script-inserted script should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Loading of script-inserted stylesheet link should eventually succeed
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Render-blocking on parser-inserted async script is cancellable
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Render-blocking on parser-inserted defer script is cancellable
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Render-blocking on script-inserted script is cancellable
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-html/dom/render-blocking/remove-element-unblocks-rendering.optional.html:
-- name: Render-blocking on script-inserted script is cancellable
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/script-inserted-inline-module-with-import.html:
 - name: Script-inserted module script elements with "blocking=render" are render-blocking
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
@@ -12448,11 +12345,6 @@ html/dom/render-blocking/script-inserted-inline-module-with-import.html:
     reflection is part of the same feature, unshipped here.'
 html/dom/render-blocking/script-inserted-module-script.html:
 - name: Rendering is blocked before render-blocking resources are loaded
-  reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
-    timing): determining WHEN rendering is blocked during parsing/loading requires
-    the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
-    reflection is part of the same feature, unshipped here.'
-- name: Script-inserted render-blocking module script is evaluated
   reason: 'Render-blocking subsystem (the `blocking` attribute + parser/render-blocking
     timing): determining WHEN rendering is blocked during parsing/loading requires
     the rendering+loading pipeline we deliberately don''t model (rule 1). The blocking-IDL-attribute
