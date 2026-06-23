@@ -13,4 +13,3 @@
 ---
 html/dom/documents/dom-tree-accessors/Document.currentScript.html:
 - Script iframe-src
-- Script microtask
