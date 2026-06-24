@@ -115,7 +115,6 @@ html/semantics/forms/form-submission-0/form-double-submit.html:
 html/semantics/forms/form-submission-0/form-submission-algorithm.html:
 - Cannot navigate (after constructing the entry list)
 - If constructing entry list flag of form is true, then return
-- If form's firing submission events is true, then return; 'invalid' event
 - Submission URL should always have a non-null query part
 html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html: HARNESS_ERROR
 html/semantics/forms/form-submission-0/implicit-submission.optional.html:
@@ -180,10 +179,6 @@ html/semantics/forms/the-button-element/button-click-submits-with-commandfor.htm
 - clicking a button (implicit type) should NOT trigger a submit (with command attribute)
 - clicking a button (implicit type) should NOT trigger a submit (with commandfor attribute)
 html/semantics/forms/the-button-element/button-click-submits.html:
-- clicking a button by dispatching an event should trigger a submit (form connected)
-- clicking a disabled button (via ancestor fieldset) should not trigger submit
-- clicking the child of a button by dispatching a bubbling event should trigger a
-  submit
 - clicking the child of a button with .click() should trigger a submit
 html/semantics/forms/the-button-element/button-events.html:
 - The reset event must be fired when click a button in reset status
@@ -201,21 +196,6 @@ html/semantics/forms/the-fieldset-element/HTMLFieldSetElement.html:
 - The controls must root at the fieldset element
 - The elements must return an HTMLCollection object
 - The type attribute must return 'fieldset'
-html/semantics/forms/the-fieldset-element/disabled-001.html:
-- 'A <fieldset> element is in the <legend> element of another disabled <fieldset>:
-  Its descendants should be disabled.'
-- 'The <legend> element is child of the disabled fieldset: Its descendants should
-  be disabled.'
-- 'The <legend> element is not a child of the disabled fieldset: Its descendants should
-  be disabled.'
-- The disabled attribute, when specified, causes all the form control descendants
-  of the fieldset element, excluding those that are descendants of the fieldset element's
-  first legend element child, if any, to be disabled.
-- 'The first ''legend'' element is not a child of the disabled fieldset: Its descendants
-  should be disabled.'
-html/semantics/forms/the-fieldset-element/disabled-002.xhtml:
-- A file input without a disabled attribute that is a descendant of a disabled fieldset
-  should be disabled (modulo legend-related complications that don't apply here)
 html/semantics/forms/the-fieldset-element/disabled-003.html:
 - Disable deep-nested fieldsets should not hang
 - Disable light-nested fieldsets should not crash
@@ -271,9 +251,6 @@ html/semantics/forms/the-form-element/form-nameditem.html:
 - The form attribute should be taken into account for named getters (multiple elements)
 - The form attribute should be taken into account for named getters (single element)
 - Trying to set an expando that would shadow an already-existing named property
-html/semantics/forms/the-form-element/form-requestsubmit.html:
-- The value of the submitter should be appended, and form* attributes of the submitter
-  should be handled.
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
