@@ -363,20 +363,6 @@ html/semantics/forms/the-input-element/color.html:
 - 'Valid color: rgb(1,1,1,1)'
 - 'Valid color: trailing space'
 - 'Valid simple color: 4 characters long'
-html/semantics/forms/the-input-element/date.html:
-- User agents must not allow the user to set the value to a non-empty string that
-  is not a valid date string.
-html/semantics/forms/the-input-element/datetime-local-trailing-zeros.html:
-- Verifies that trailing zeros in the milliseconds portion of the date strings are
-  removed.
-html/semantics/forms/the-input-element/datetime-local.html:
-- Value < min attribute
-- Value <= max attribute
-- Value > max attribute
-- Value >= min attribute
-- datetime-local input value set to 2014-01-01 00:00:00.000 without min/max
-- datetime-local input value set to 2014-01-01 11:11 without min/max
-- datetime-local input value set to 2014-01-01 11:11:11.111 without min/max
 html/semantics/forms/the-input-element/defaultValue-clobbering.html:
 - Visible value and validity should not be affected when assigning to the defaultValue
   property for type=number.
@@ -443,9 +429,6 @@ html/semantics/forms/the-input-element/input-stepdown.html:
 - Calling stepDown() on input - time - where value < min should not modify value.
 html/semantics/forms/the-input-element/input-type-button.html:
 - label value
-html/semantics/forms/the-input-element/input-type-change-value.html:
-- With focus
-- Without focus
 html/semantics/forms/the-input-element/input-valueasdate-typeerror.html:
 - valueAsDate setter with non-Date object (input type date)
 - valueAsDate setter with non-Date object (input type month)
@@ -458,25 +441,7 @@ html/semantics/forms/the-input-element/input-valueasnumber-typeerror.html:
 - valueAsNumber = Infinity (input type does not apply)
 html/semantics/forms/the-input-element/maxlength-number.html:
 - maxlength doesn't apply to input type=number
-html/semantics/forms/the-input-element/month.html:
-- 'Month should be <= 13: If the value of the element is not a valid month string,
-  then set it to the empty string instead.'
-- 'Month should be > 0: If the value of the element is not a valid month string, then
-  set it to the empty string instead.>'
-- 'Month should be two digits not characters: If the value of the element is not a
-  valid month string, then set it to the empty string instead.>'
-- 'Month should be two digits: If the value of the element is not a valid month string,
-  then set it to the empty string instead.>'
-- User agents must not allow the user to set the value to a non-empty string that
-  is not a valid month string.
-- 'Value should be two parts: If the value of the element is not a valid month string,
-  then set it to the empty string instead.>'
-- When value attribute has two digits year value, the value,which is invalid, must
-  return empty string.
-- 'Year should be > 0: If the value of the element is not a valid year string, then
-  set it to the empty string instead.>'
 html/semantics/forms/the-input-element/number-constraint-validation.html:
-- Unparsable number user input causes valueMissing to be set on required input.
 - Unparsable number user input triggers sanitization and causes badInput to be set.
 - Users inputting a parsable but invalid floating point number doesn't trigger sanitization
   and doesn't set badInput.
@@ -511,26 +476,9 @@ html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
 html/semantics/forms/the-input-element/radio-morphed.html:
 - Setting type attribute must unset checkedness of other elements
-html/semantics/forms/the-input-element/range-2.html:
-- range input value equals 2
-- range input value equals 50
-- range input value set to ''
 html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.
-html/semantics/forms/the-input-element/range.html:
-- Converting an illegal string to the default value
-- Input should be reset to the default value when value attribute has whitespace
-- Solving the step mismatch
-- 'Step scale factor behavior when min attribute has integer value but max attribute
-  is non-integer '
-- The default step scale factor is 1, unless min attribute has non-integer value
-- default value when both min and max attributes are given, while min > max
-- default value when min and max attributes are given (= min plus half the difference
-  between min and max)
-- default value with step control when both min and max attributes are given
-- the value is set to max when a larger value than max attribute is given
-- the value is set to min when a smaller value than min attribute is given
 html/semantics/forms/the-input-element/reset.html:
 - reset button resets controls associated with a form using the form attribute
 - reset button resets controls associated with their form using the form element pointer
@@ -560,18 +508,8 @@ html/semantics/forms/the-input-element/show-picker-cross-origin-iframe.html:
 - Test showPicker() called from cross-origin iframe 1
 - Test showPicker() called from cross-origin iframe 2
 - Test showPicker() called from cross-origin iframe 3
-html/semantics/forms/the-input-element/telephone.html:
-- The value attribute, if specified, must have a value that contains no "CR" (U+000D)
-- The value attribute, if specified, must have a value that contains no "LF" (U+000A)
-- 'The value sanitization algorithm is as follows: Strip line breaks from the value'
-html/semantics/forms/the-input-element/url.html:
-- 'The value sanitization algorithm is as follows: Strip leading and trailing whitespace
-  from the value.'
-- 'The value sanitization algorithm is as follows: Strip line breaks from the value'
 html/semantics/forms/the-input-element/valueMode.html:
 - value IDL attribute of input type file without value attribute
-html/semantics/forms/the-input-element/week.html:
-- '2014 has 52 weeks: Value should be empty'
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
 - Click forwarded from label.click() is not trusted
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
