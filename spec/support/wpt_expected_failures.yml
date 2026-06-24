@@ -158,8 +158,6 @@ html/semantics/forms/input-change-event-properties.html:
 - "<select> pressing down arrow"
 html/semantics/forms/resetting-a-form/reset-event.html:
 - Test aspects of the reset event
-html/semantics/forms/resetting-a-form/reset-form-2.html:
-- integration test on reset for a created-from-script form
 html/semantics/forms/resetting-a-form/reset-form.html:
 - Resetting <output> by calling the reset() method
 - Resetting <output> by clicking the button in reset status
@@ -278,9 +276,6 @@ html/semantics/forms/the-input-element/checkbox.html:
 - canceled activation steps on unchecked checkbox (indeterminate=true in onclick)
 - pre-activation steps on checked checkbox
 - pre-activation steps on unchecked checkbox
-html/semantics/forms/the-input-element/cloning-steps.html:
-- input element's dirty value flag should be cloned, so setAttribute doesn't affect
-  the cloned input's value
 html/semantics/forms/the-input-element/defaultValue-clobbering.html:
 - Visible value and validity should not be affected when assigning to the defaultValue
   property for type=number.
@@ -347,9 +342,6 @@ html/semantics/forms/the-input-element/number-invalid-scientific-key-events.html
 - Leading '+' with existing 'e'
 - Reject multiple signs after 'e' (+)
 - Reject multiple signs after 'e' (-)
-html/semantics/forms/the-input-element/password.html:
-- Setting value changes the current value for password, but not the value content
-  attribute
 html/semantics/forms/the-input-element/radio-disconnected-group-owner.html:
 - Appending input radio input into a disconnect form should update the other radio
   inputs in the same radio group.
@@ -768,9 +760,6 @@ html/semantics/forms/the-select-element/show-picker-user-gesture.html:
 - select showPicker() requires a user gesture
 html/semantics/forms/the-textarea-element/change-to-empty-value.html:
 - Change event when clearing a textarea
-html/semantics/forms/the-textarea-element/cloning-steps.html:
-- textarea element's dirty value flag should be cloned, so setAttribute doesn't affect
-  the cloned textarea's value
 html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
 html/semantics/forms/the-textarea-element/textarea-textLength.html:
