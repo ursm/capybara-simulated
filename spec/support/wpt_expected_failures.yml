@@ -534,12 +534,6 @@ html/semantics/forms/the-option-element/option-index.html:
 - option index should always be 0 for options not even in the document
 - option index should always be 0 for options with no container
 - option index should work inside the document
-html/semantics/forms/the-option-element/option-label.html:
-- No children, namespaced label
-- Single child, namespaced label
-- Single child, no label
-- Two children, namespaced label
-- Two children, no label
 html/semantics/forms/the-option-element/option-value.html:
 - No children, namespaced value
 - Single child, namespaced value
@@ -822,13 +816,6 @@ html/semantics/forms/the-select-element/filterable-select/select-beforefilter.te
 - beforefilter event for customizable combobox.
 html/semantics/forms/the-select-element/inserted-or-removed.html:
 - The last selected OPTION should win; Inserted by jQuery append()
-html/semantics/forms/the-select-element/option-selectedness-script-mutation.html:
-- multi-select keeps multiple selected options when selected attribute changes from
-  script
-- multi-select responds to option.selected without selected attribute reflection
-- single-select responds to removing selected attribute from script
-- single-select responds to setting option.selected from script
-- single-select responds to setting selected attribute from script
 html/semantics/forms/the-select-element/select-add-optgroup.html:
 - select.add() with an index should work when the target is inside an optgroup.
 html/semantics/forms/the-select-element/select-ask-for-reset.html:
@@ -863,12 +850,6 @@ html/semantics/forms/the-select-element/select-required-attribute.tentative.html
 - Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
 - Test required attribute
-html/semantics/forms/the-select-element/select-selectedOptions.html:
-- ".selectedOptions should always return the same value - [SameObject]"
-- ".selectedOptions should return `HTMLCollection` instance"
-- ".selectedOptions should return the same object after selection changes - [SameObject]"
-- ".selectedOptions using the 'multiple' attribute with no selected options"
-- ".selectedOptions using the 'multiple' attribute with two selected options"
 html/semantics/forms/the-select-element/select-validity.html:
 - Placeholder label options within a select
 - Placeholder label-like options within optgroup
