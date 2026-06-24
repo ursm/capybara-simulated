@@ -2085,10 +2085,11 @@ module Capybara
       # state. A general primitive — it models a browser animation frame and knows
       # nothing about any particular test harness; the WPT runner is its first
       # caller (driving a page to completion one frame at a time). It advances the
-      # same virtual clock the Capybara poll path drives through `tick_real_time`,
-      # which still uses its own poll-cadence policy (a ~100 ms `horizon_fast_forward`
-      # step per poll, tuned for app debounce observation) rather than this per-frame
-      # model — folding that path onto this primitive is a worthwhile follow-up.
+      # same virtual clock as the Capybara poll path: `tick_real_time` keeps its own
+      # per-poll BUDGET (a ~100 ms `horizon_fast_forward` step, tuned for app
+      # debounce observation) but, when the page has work runnable now, spends that
+      # budget in `FRAME_STEP_MS` chunks — the same frame cadence this primitive
+      # uses — so a page renders frame-by-frame regardless of which path drives it.
       #
       # A real browser processes EVERYTHING ready at the current instant within a
       # single animation frame — microtasks, timers due now (incl. newly scheduled
