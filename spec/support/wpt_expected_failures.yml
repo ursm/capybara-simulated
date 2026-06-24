@@ -1014,9 +1014,6 @@ html/semantics/forms/the-select-element/customizable-select/select-type-to-searc
 html/semantics/forms/the-select-element/customizable-select/select-value-selectedOption.html:
 - Test that option parts in a slotted-in listbox are reflected in the value property
 - Test that slotted-in selected-value part is updated to value of select
-- Test value and selectedOption when value is null
-- Test value and selectedOption when value is undefined
-- Test value and selectedOption with HTMLOptionElement element option parts
 html/semantics/forms/the-select-element/customizable-select/select-vertical-writing-mode-navigation.optional.html:
 - 'sideways-lr: Down/Up keys navigate as secondary axis'
 - 'sideways-lr: Right/Left keys navigate as primary axis'
@@ -1132,26 +1129,11 @@ html/semantics/forms/the-select-element/select-validity.html:
 - Placeholder label options within a select
 - Placeholder label-like options within optgroup
 - Validation on selects with display size set as more than one
-- Validation on selects with non-empty disabled option
 html/semantics/forms/the-select-element/select-validity.tentative.html:
 - Check form not submitted for invalid select
 - Validation for placeholder option
 html/semantics/forms/the-select-element/select-willvalidate-readonly-attribute.html:
 - Select element with "readonly" attribute shouldn't be barred from constraint validation
-html/semantics/forms/the-select-element/selected-index.html:
-- get default
-- get disabled
-- get display:none
-- get empty
-- get unselected
-- reset to display:none
-- set (HTMLOptionsCollection)
-- set (HTMLSelectElement)
-- set and reset (HTMLOptionsCollection)
-- set and reset (HTMLSelectElement)
-- set empty (HTMLOptionsCollection)
-- set empty (HTMLSelectElement)
-- set selectedIndex=-1
 html/semantics/forms/the-select-element/show-picker-being-cv-hidden.html:
 - select showPicker() throws when content-visibility hidden
 html/semantics/forms/the-select-element/show-picker-being-rendered.html:
