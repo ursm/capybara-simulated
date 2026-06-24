@@ -197,8 +197,6 @@ html/semantics/forms/the-button-element/button-validation.html:
 - invalid type attribute
 html/semantics/forms/the-button-element/button-willvalidate-readonly-attribute.html:
 - Button element with "readonly" attribute shouldn't be barred from constraint validation
-html/semantics/forms/the-datalist-element/datalistoptions.html:
-- options label/value
 html/semantics/forms/the-fieldset-element/HTMLFieldSetElement.html:
 - The controls must root at the fieldset element
 - The elements must return an HTMLCollection object
@@ -545,9 +543,7 @@ html/semantics/forms/the-option-element/option-label.html:
 html/semantics/forms/the-option-element/option-value.html:
 - No children, namespaced value
 - Single child, namespaced value
-- Single child, no value
 - Two children, namespaced value
-- Two children, no value
 html/semantics/forms/the-output-element/output-validity.html:
 - ":valid and :invalid pseudo-class on output element"
 html/semantics/forms/the-output-element/output.html:
@@ -555,24 +551,8 @@ html/semantics/forms/the-output-element/output.html:
 html/semantics/forms/the-select-element/common-HTMLOptionsCollection-add.html:
 - add method should add option elements correctly
 - add method should add option groups correctly
-html/semantics/forms/the-select-element/common-HTMLOptionsCollection-namedItem.html:
-- if multiple items have a *name* or *id* value matching the parameter, return the
-  first object and stop
-- if multiple items have a *name* or id value matching the parameter, return the first
-  object and stop
-- if multiple items have a name or *id* value matching the parameter, return the first
-  object and stop
-- if no item has a name or id value matching the parameter, return null and stop
-- if only one item has a *name* or id value matching the parameter, return that object
-  and stop
-- if only one item has a name or *id* value matching the parameter, return that object
-  and stop
 html/semantics/forms/the-select-element/common-HTMLOptionsCollection.html:
-- Changing the length adds new nodes; The new nodes will not copy select's prefix
-- Changing the length adds new nodes; The number of new nodes = new length minus old
-  length
 - New nodes have no value
-- Setting a length equal to existing length changes nothing
 - Setting element by index should correctly append and replace elements
 - Setting element to null by index removed the element
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
@@ -866,9 +846,6 @@ html/semantics/forms/the-select-element/select-multiple.html:
 - Removing multiple attribute reduces the number of selected OPTIONs to 1
 html/semantics/forms/the-select-element/select-named-getter.html:
 - Empty string name
-- Option with id
-- Option with name
-- Option with name and id
 html/semantics/forms/the-select-element/select-option-display-inherit.tentative.html:
 - display:inherit on option in multiple select computes to contents
 - display:inherit on option in single select computes to contents
