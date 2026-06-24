@@ -400,9 +400,22 @@ module Capybara
       # nothing else would ever free them.
       def frame_realms = (@frame_realms ||= {})
 
+      # Parent realm id per frame realm, captured at `create_frame_realm` time
+      # (parallel to `@frame_realm_depths`). Lets a form/navigation that reaches a
+      # frame via `contentWindow` (so it never entered `within_frame` and has no
+      # `@frame_stack` entry) recover the realm that OWNS the iframe element, to
+      # rebuild + rebind it. 0/nil = the main realm.
+      def frame_realm_parents = (@frame_realm_parents ||= {})
+
+      def frame_realm_parent(realm_id)
+        return 0 if realm_id.nil? || realm_id.zero?
+        frame_realm_parents[realm_id] || 0
+      end
+
       def dispose_frame_realms
         @realm_module_handles&.clear
         @frame_realm_depths&.clear
+        @frame_realm_parents&.clear
         return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
@@ -429,6 +442,7 @@ module Capybara
         @browser.revoke_realm_blobs(id) rescue nil
         @realm_module_handles&.delete(id)
         @frame_realm_depths&.delete(id)
+        @frame_realm_parents&.delete(id)
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         nil
@@ -728,7 +742,8 @@ module Capybara
         # (their create_frame_realm looks up this realm's depth as their parent's),
         # so it must already be set or the nested depth undercounts and the cap
         # never trips.
-        frame_realm_depths[realm.id] = depth
+        frame_realm_depths[realm.id]  = depth
+        frame_realm_parents[realm.id] = parent_id.to_i   # owning realm, for contentWindow-reached rebuilds
         # Re-evaling the snapshot source would redefine snapshot globals (e.g.
         # the `scrollX` accessor) and throw — re-entrantly. Only eval the
         # source on a bare no-snapshot dev ctx, where the realm boots empty.

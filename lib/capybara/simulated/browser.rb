@@ -2119,34 +2119,46 @@ module Capybara
         method  = 'GET' if method.empty?
         fields  = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
         file_inputs = spec['fileInputs'] || []
-        enctype = spec['enctype'].to_s
-        multipart = enctype.start_with?('multipart/form-data')
-        content_type = nil
-        body =
-          if multipart
-            built = build_multipart_body(fields, file_inputs)
-            content_type = built[:content_type]
-            built[:body]
-          else
-            # Non-multipart: file inputs contribute the filename only.
-            file_inputs.each do |fi|
-              picks = @file_picks && @file_picks[fi['handle'].to_i] || []
-              fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
-            end
-            URI.encode_www_form(fields)
-          end
+        enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
         if method == 'GET'
+          # GET ignores enctype: the entry list is always the urlencoded query.
+          query, = encode_form_submission(fields, file_inputs, 'application/x-www-form-urlencoded')
           uri = URI.parse(action_url)
-          uri.query = body unless body.empty?
+          uri.query = query unless query.empty?
           frame_entry ? navigate_frame(uri.to_s, entry: frame_entry) : navigate(uri.to_s)
-        elsif frame_entry
-          navigate_frame_post(action_url, body, content_type || enctype, entry: frame_entry)
         else
-          navigate_post(action_url, body, content_type || enctype)
+          body, content_type = encode_form_submission(fields, file_inputs, enctype)
+          if frame_entry
+            navigate_frame_post(action_url, body, content_type, entry: frame_entry)
+          else
+            navigate_post(action_url, body, content_type)
+          end
+        end
+      end
+
+      # HTML "encode the entry list" by enctype → [body, exact Content-Type]. The
+      # Content-Type is sent verbatim (no charset suffix), which the spec's
+      # form-submission resources compare exactly. text/plain is `name=value\r\n`
+      # per entry (NOT urlencoded); urlencoded merges each non-multipart file input
+      # as its bare filename.
+      def encode_form_submission(fields, file_inputs, enctype)
+        if enctype.start_with?('multipart/form-data')
+          built = build_multipart_body(fields, file_inputs)
+          return [built[:body], built[:content_type]]
+        end
+        fields = fields.dup
+        (file_inputs || []).each do |fi|
+          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
+          fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
+        end
+        if enctype == 'text/plain'
+          [fields.map {|name, value| "#{name}=#{value}\r\n" }.join, 'text/plain']
+        else
+          [URI.encode_www_form(fields), 'application/x-www-form-urlencoded']
         end
       end
 
@@ -4052,15 +4064,18 @@ module Capybara
         target = spec['target'].to_s
         action = spec['action'].to_s
         fields = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
-        # Non-multipart file inputs contribute the filename only (mirror submit_form_handle's GET path).
-        (spec['fileInputs'] || []).each do |fi|
-          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
-          fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
-        end
-        body    = URI.encode_www_form(fields)
-        get_url = form_get_url(action, body)
+        file_inputs = spec['fileInputs'] || []
+        enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
+        # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
+        get_query, = encode_form_submission(fields, file_inputs, 'application/x-www-form-urlencoded')
+        get_url = form_get_url(action, get_query)
         if frame_self_target?(target)
-          navigate_realm_self(realm_id, get_url, action, method, body, spec['enctype'].to_s)
+          if method == 'GET'
+            navigate_realm_self_get(realm_id, get_url)
+          else
+            body, content_type = encode_form_submission(fields, file_inputs, enctype)
+            navigate_realm_self_post(realm_id, resolve_against_current(action), body, content_type)
+          end
         elsif %w[_parent _top _blank].include?(target.downcase)
           log_console('warn', "nested-context form submit (target=#{target.inspect}) is not modeled")
         elsif method == 'GET'
@@ -4086,22 +4101,88 @@ module Capybara
         url  = "#{path}?#{body}"
         frag.empty? ? url : "#{url}##{frag}"
       end
-      # Navigate the initiating frame realm itself (a self-targeted form submit).
-      def navigate_realm_self(realm_id, get_url, action, method, body, enctype)
+      # A self-targeted GET form submit in the initiating frame realm: navigate
+      # that frame to the action URL (query already mutated in).
+      def navigate_realm_self_get(realm_id, get_url)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        if method == 'GET'
-          if entry
-            navigate_frame(resolve_against_current(get_url), entry: entry)
-          else
-            # A frame reached via contentWindow (not on the entered stack): its
-            # owning iframe lives in the parent document — re-navigate by realm id
-            # (relative get_url resolves against the frame's base on rebuild).
-            @runtime.call('__csimNavigateFrameByRealm', realm_id, get_url)
-          end
-        elsif entry
-          navigate_frame_post(resolve_against_current(action), body, enctype, entry: entry)
+        if entry
+          navigate_frame(resolve_against_current(get_url), entry: entry)
         else
-          log_console('warn', "nested-context self-form POST (realm #{realm_id}) is not modeled")
+          # A frame reached via contentWindow (not on the entered stack): its
+          # owning iframe lives in its PARENT realm's document (the main realm for
+          # a top-level frame, an intermediate realm for a nested one), so route
+          # the by-realm src-reassignment there — not unconditionally to main.
+          # (relative get_url resolves against the frame's base on rebuild).
+          parent = @runtime.frame_realm_parent(realm_id)
+          frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
+        end
+      end
+      # A self-targeted POST form submit in the initiating frame realm. POST the
+      # entity body to the action URL, then rebuild that frame's realm from the
+      # response. An ENTERED frame (on @frame_stack) reuses navigate_frame_post;
+      # a frame reached via contentWindow has no stack entry, so rebuild it by
+      # realm id (recovering its container element + parent realm) and fire the
+      # iframe element's load event the GET/src path would.
+      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0)
+        raise 'too many redirects' if depth > 10
+        entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
+        return navigate_frame_post(url, body, content_type, entry: entry) if entry
+        invalidate_find_cache
+        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
+        env['CONTENT_LENGTH'] = body.bytesize.to_s
+        apply_default_request_env(env, referer: current_browsing_context_url)
+        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
+        merge_set_cookie(headers)
+        if (loc = redirect_location(status, headers))
+          next_url = resolve_against_current(loc)
+          resp_body.close if resp_body.respond_to?(:close)
+          # 307/308 preserve method + body; 301/302/303 → GET the frame (routed
+          # through the realm that OWNS the iframe, as in navigate_realm_self_get).
+          if [307, 308].include?(status)
+            return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1)
+          end
+          parent = @runtime.frame_realm_parent(realm_id)
+          return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, next_url)
+        end
+        if download_response?(headers)
+          save_downloaded_response(url, headers, resp_body)
+          return
+        end
+        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers))
+      end
+      # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
+      # recover its container element handle + parent realm, swap in a fresh realm
+      # built from `html`, re-point the iframe at it, and fire the element load.
+      def reload_frame_realm_by_id(realm_id, url, html, content_type)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        return if handle.zero?
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type).to_i
+        return if new_id.zero?
+        begin
+          rebind_frame_realm(parent, handle, realm_id, new_id)
+          frame_realm_host_call(parent, '__csimFireFrameElementLoad', handle)
+        rescue StandardError
+          # The element rebind/load failed — don't strand the freshly built realm
+          # (it's no longer referenced by any iframe), then surface the error.
+          @runtime.dispose_frame_realm(new_id)
+          raise
+        end
+        invalidate_find_cache
+        settle
+      end
+      # The iframe/frame element handle that owns `realm_id`, found in the document
+      # of its parent realm (main realm for a top-level frame).
+      def frame_container_handle(realm_id, parent)
+        frame_realm_host_call(parent, '__csimGetFrameHandle', realm_id).to_i
+      end
+      # Call a host fn in the realm that OWNS an iframe (main realm for 0/nil).
+      def frame_realm_host_call(parent_realm_id, fn, *args)
+        if parent_realm_id.nil? || parent_realm_id.zero?
+          @runtime.call(fn, *args)
+        else
+          @runtime.realm_call(parent_realm_id, fn, *args)
         end
       end
       def drain_pending_navigation

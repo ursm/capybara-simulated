@@ -180,6 +180,43 @@ module WptRunner
           body << '</head>'
           next [200, headers, [body]]
         end
+        # `form-submission.py` — WPT's form-submission entity-body validator: it
+        # checks the POSTed body matches the expected encoding for the enctype and
+        # echoes "OK"/"FAIL". We don't run Python; emulate its logic (the
+        # submit-entity-body tests POST here from a form inside an iframe and read
+        # back "OK"). Content-Type is compared EXACTLY (no charset), matching what
+        # the driver sends per enctype.
+        if path.end_with?('/form-submission.py')
+          qparams = Rack::Utils.parse_query(req.query_string)
+          input   = env['rack.input']
+          raw     = input ? input.read.to_s : ''
+          input.rewind if input.respond_to?(:rewind)
+          ctype   = (env['CONTENT_TYPE'] || '').to_s
+          ok =
+            if qparams['query'] == '1'
+              case ctype
+              when 'application/x-www-form-urlencoded' then raw == 'foo=bara'
+              when 'text/plain'                        then raw == "qux=baz\r\n"
+              else
+                # multipart/form-data: the first `foo` field must be `bar`.
+                boundary = ctype[/boundary=("?)([^";]+)\1/, 2]
+                val = nil
+                if boundary
+                  raw.split("--#{boundary}").each do |part|
+                    next unless part =~ /name="foo"/
+                    _hdrs, _, body = part.partition("\r\n\r\n")
+                    (val = body.sub(/\r\n\z/, '')) && break unless body.empty?
+                  end
+                end
+                val == 'bar'
+              end
+            elsif qparams.key?('expected_body')
+              raw == qparams['expected_body'].to_s
+            else
+              false
+            end
+          next [200, {'content-type' => 'text/plain'}, [ok ? 'OK' : 'FAIL']]
+        end
         # `echo-content.py` — WPT's request-body echo CGI (the FileAPI
         # send-file-formdata tests POST a multipart body here and assert on the
         # echoed bytes). Emulate it: return the raw request body verbatim as
