@@ -337,20 +337,8 @@ html/semantics/forms/the-input-element/radio-disconnected-group-owner.html:
 - Appending input radio input into a disconnect form should update the other radio
   inputs in the same radio group.
 - Removed elements are moved into separate radio groups.
-html/semantics/forms/the-input-element/radio-focus-navigation-checked.html:
-- Focus the checked radio in the focused radio group.
-- Focus the checked radio in the group.
-- Focus the new checked radio in the focused radio group.
-- When `checked` is false on a radio element, focus navigation target the radio group
-  first element.
-html/semantics/forms/the-input-element/radio-focus-navigation-disabled.html:
-- Should be able to tab focus in radio group even when the checked radio button is
-  disabled.
-html/semantics/forms/the-input-element/radio-focus-navigation-group-first-focus.html:
-- Both forward and backward focus navigation target the radio group first element.
 html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-focus.html:
 - During arrow key navigation, focus and checked is set on the radio element.
-- Focusable elements between radio elements in a group can be focused.
 html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
 - Focusing offscreen radio via keyboard should scroll it into view
 html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
