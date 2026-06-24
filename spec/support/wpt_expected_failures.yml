@@ -608,23 +608,11 @@ html/semantics/forms/the-input-element/focus-dynamic-type-change-on-blur.html:
 - week -> text false
 - week -> text true
 html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html: HARNESS_ERROR
-html/semantics/forms/the-input-element/hidden.html:
-- stepDown does not apply for hidden
-- stepUp does not apply for hidden
 html/semantics/forms/the-input-element/image-click-form-data.html:
 - Image submit button should not add extra form data if 'value' attribute is present
   with non-empty value
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
-html/semantics/forms/the-input-element/input-seconds-leading-zeroes.html:
-- Expected valueAsNumber=45000003 from 12:30:00.003
-- Expected valueAsNumber=45000040 from 12:30:00.04
-- Expected valueAsNumber=45000500 from 12:30:00.5
-- Expected valueAsNumber=45001000 from 12:30:01
-- Expected valueAsNumber=946729800003 from 2000-01-01T12:30:00.003
-- Expected valueAsNumber=946729800040 from 2000-01-01T12:30:00.04
-- Expected valueAsNumber=946729800500 from 2000-01-01T12:30:00.5
-- Expected valueAsNumber=946729801000 from 2000-01-01T12:30:01
 html/semantics/forms/the-input-element/input-stepdown-02.html:
 - stepDown() on input with initial value less than min value
 - stepDown() on input with no initial value and negative min value
@@ -637,28 +625,6 @@ html/semantics/forms/the-input-element/input-stepdown.html:
   value.
 - Calling stepDown() on input - number - where value < min should not modify value.
 - Calling stepDown() on input - time - where value < min should not modify value.
-html/semantics/forms/the-input-element/input-stepup.html:
-- Calling stepUp on input type=button should throw a DOMException
-- Calling stepUp on input type=checkbox should throw a DOMException
-- Calling stepUp on input type=color should throw a DOMException
-- Calling stepUp on input type=email should throw a DOMException
-- Calling stepUp on input type=hidden should throw a DOMException
-- Calling stepUp on input type=image should throw a DOMException
-- Calling stepUp on input type=password should throw a DOMException
-- Calling stepUp on input type=radio should throw a DOMException
-- Calling stepUp on input type=reset should throw a DOMException
-- Calling stepUp on input type=search should throw a DOMException
-- Calling stepUp on input type=submit should throw a DOMException
-- Calling stepUp on input type=tel should throw a DOMException
-- Calling stepUp on input type=text should throw a DOMException
-- Calling stepUp on input type=url should throw a DOMException
-- Calling stepUp when the step attribute is "any" should throw a DOMException
-- Step delta from stepUp on input type=number with step=-2
-- Step delta from stepUp on input type=number with step=0
-- Step delta from stepUp on input type=range with step=-2
-- Step delta from stepUp on input type=range with step=0
-- stepUp should clamp to the input maximum
-- stepUp should do nothing if the input minimum is larger than the input maximum
 html/semantics/forms/the-input-element/input-type-button.html:
 - label value
 html/semantics/forms/the-input-element/input-type-change-value.html:
@@ -667,7 +633,6 @@ html/semantics/forms/the-input-element/input-type-change-value.html:
 html/semantics/forms/the-input-element/input-valueasdate-invalidstateerr.html:
 - Forms
 html/semantics/forms/the-input-element/input-valueasdate-stepping.html:
-- date should step correctly
 - month should step correctly
 - time should step correctly
 - week should step correctly
@@ -687,68 +652,11 @@ html/semantics/forms/the-input-element/input-valueasdate.html:
 - valueAsDate setter on type time (new Date("1970-01-01T12:00:00.000Z"))
 - valueAsDate setter on type time (new Date("1970-01-01T23:59:00.000Z"))
 - valueAsDate setter on type week (new Date("2019-12-09T00:00:00.000Z"))
-html/semantics/forms/the-input-element/input-valueasnumber-stepping.html:
-- date should step correctly
-- datetime-local should step correctly
-- month should step correctly
-- time should step correctly
-- week should step correctly
 html/semantics/forms/the-input-element/input-valueasnumber-typeerror.html:
 - valueAsNumber = -Infinity (input type does apply)
 - valueAsNumber = -Infinity (input type does not apply)
 - valueAsNumber = Infinity (input type does apply)
 - valueAsNumber = Infinity (input type does not apply)
-html/semantics/forms/the-input-element/input-valueasnumber.html:
-- 'valueAsNumber getter on type date (actual value: 2016-02-29, expected valueAsNumber:
-  1456704000000)'
-- 'valueAsNumber getter on type date (actual value: 2019-12-10, expected valueAsNumber:
-  1575936000000)'
-- 'valueAsNumber getter on type datetime-local (actual value: 2019-12-10T00:00, expected
-  valueAsNumber: 1575936000000)'
-- 'valueAsNumber getter on type datetime-local (actual value: 2019-12-10T12:00, expected
-  valueAsNumber: 1575979200000)'
-- 'valueAsNumber getter on type month (actual value: 1969-12, expected valueAsNumber:
-  -1)'
-- 'valueAsNumber getter on type month (actual value: 2019-12, expected valueAsNumber:
-  599)'
-- 'valueAsNumber getter on type time (actual value: 00:00, expected valueAsNumber:
-  0)'
-- 'valueAsNumber getter on type time (actual value: 12:00, expected valueAsNumber:
-  43200000)'
-- 'valueAsNumber getter on type time (actual value: 23:59, expected valueAsNumber:
-  86340000)'
-- 'valueAsNumber getter on type week (actual value: 1969-W20, expected valueAsNumber:
-  -20217600000)'
-- 'valueAsNumber getter on type week (actual value: 2019-W50, expected valueAsNumber:
-  1575849600000)'
-- 'valueAsNumber setter on type date (actual valueAsNumber: 0, expected value: 1970-01-01)'
-- 'valueAsNumber setter on type date (actual valueAsNumber: 1456704000000, expected
-  value: 2016-02-29)'
-- 'valueAsNumber setter on type date (actual valueAsNumber: 1575936000000, expected
-  value: 2019-12-10)'
-- 'valueAsNumber setter on type datetime-local (actual valueAsNumber: -86400000, expected
-  value: 1969-12-31T00:00)'
-- 'valueAsNumber setter on type datetime-local (actual valueAsNumber: 1575936000000,
-  expected value: 2019-12-10T00:00)'
-- 'valueAsNumber setter on type datetime-local (actual valueAsNumber: 1575979200000,
-  expected value: 2019-12-10T12:00)'
-- 'valueAsNumber setter on type month (actual valueAsNumber: -1, expected value: 1969-12)'
-- 'valueAsNumber setter on type month (actual valueAsNumber: 599, expected value:
-  2019-12)'
-- 'valueAsNumber setter on type time (actual valueAsNumber: -3600000, expected value:
-  23:00)'
-- 'valueAsNumber setter on type time (actual valueAsNumber: 0, expected value: 00:00)'
-- 'valueAsNumber setter on type time (actual valueAsNumber: 2.734333707189448e+26,
-  expected value: 10:54:10.944)'
-- 'valueAsNumber setter on type time (actual valueAsNumber: 43200000, expected value:
-  12:00)'
-- 'valueAsNumber setter on type time (actual valueAsNumber: 86340000, expected value:
-  23:59)'
-- 'valueAsNumber setter on type week (actual valueAsNumber: -20217600000, expected
-  value: 1969-W20)'
-- 'valueAsNumber setter on type week (actual valueAsNumber: 0, expected value: 1970-W01)'
-- 'valueAsNumber setter on type week (actual valueAsNumber: 1575849600000, expected
-  value: 2019-W50)'
 html/semantics/forms/the-input-element/month.html:
 - 'Month should be <= 13: If the value of the element is not a valid month string,
   then set it to the empty string instead.'
@@ -762,8 +670,6 @@ html/semantics/forms/the-input-element/month.html:
   is not a valid month string.
 - 'Value should be two parts: If the value of the element is not a valid month string,
   then set it to the empty string instead.>'
-- When step attribute is given invalid value, it must ignore the invalid value and
-  use defaul value instead.
 - When value attribute has two digits year value, the value,which is invalid, must
   return empty string.
 - 'Year should be > 0: If the value of the element is not a valid year string, then
@@ -835,7 +741,6 @@ html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.http
 html/semantics/forms/the-input-element/range.html:
 - Converting an illegal string to the default value
 - Input should be reset to the default value when value attribute has whitespace
-- Performing stepUp() beyond the value of the max attribute
 - Solving the step mismatch
 - 'Step scale factor behavior when min attribute has integer value but max attribute
   is non-integer '
@@ -937,33 +842,6 @@ html/semantics/forms/the-input-element/telephone.html:
 - The value attribute, if specified, must have a value that contains no "CR" (U+000D)
 - The value attribute, if specified, must have a value that contains no "LF" (U+000A)
 - 'The value sanitization algorithm is as follows: Strip line breaks from the value'
-html/semantics/forms/the-input-element/text.html:
-- stepDown does not apply for search
-- stepDown does not apply for text
-- stepUp does not apply for search
-- stepUp does not apply for text
-html/semantics/forms/the-input-element/time.html:
-- " empty value of stepUp"
-- stepDown argument 2 times
-- 'stepDown on step value 24 hour '
-- 'stepDown on step value hour '
-- stepDown on step value minus
-- 'stepDown on step value second '
-- stepDown on step value with fractional seconds
-- 'stepDown on step value zero '
-- stepDown step value empty default step value
-- stepDown stop so lower than the minimum value
-- stepUp argument 2 times
-- stepUp on step value 24 hour
-- 'stepUp on step value hour  '
-- stepUp on step value minus
-- 'stepUp on step value second '
-- stepUp on step value with fractional seconds
-- 'stepUp on step value zero '
-- 'stepUp step value empty on default step value '
-- stepUp stop because it exceeds the maximum value
-- stop at border on stepDown
-- stop at border on stepUp
 html/semantics/forms/the-input-element/url.html:
 - 'The value sanitization algorithm is as follows: Strip leading and trailing whitespace
   from the value.'
