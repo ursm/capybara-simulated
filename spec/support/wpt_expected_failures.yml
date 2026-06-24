@@ -325,19 +325,6 @@ html/semantics/forms/the-input-element/cloning-steps.html:
   affect the cloned input's checkedness
 - input[type=week] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-html/semantics/forms/the-input-element/color.html:
-- System colors are parsed
-- 'Valid color: color(display-p3 .5 0 0)'
-- 'Valid color: color(display-p3 1 0 0)'
-- 'Valid color: hsl(150deg 100 53.5)'
-- 'Valid color: keyword bisque'
-- 'Valid color: keyword crimson'
-- 'Valid color: leading space'
-- 'Valid color: leading+trailing spaces'
-- 'Valid color: rgb(1,1,1)'
-- 'Valid color: rgb(1,1,1,1)'
-- 'Valid color: trailing space'
-- 'Valid simple color: 4 characters long'
 html/semantics/forms/the-input-element/defaultValue-clobbering.html:
 - Visible value and validity should not be affected when assigning to the defaultValue
   property for type=number.

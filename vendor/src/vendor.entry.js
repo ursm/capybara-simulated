@@ -72,4 +72,25 @@ import * as streams from 'web-streams-polyfill';
 import { Parser as Parse5Parser } from 'parse5';
 const parse5 = { Parser: Parse5Parser };
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, streams, parse5 };
+// culori: CSS Color 4 parser + converters (npm, MIT). Backs `<input type=color>`
+// value sanitization. Imported via the TREE-SHAKEABLE `culori/fn` entry (the
+// barrel registers every colour mode + formatter); here we register only the
+// modes the HTML colour syntaxes need — rgb (which also carries the named-colour
+// and hex parsers), hsl, and p3 (`color(display-p3 …)`) — so esbuild drops the
+// lab/lch/oklab/… machinery. `toHex` is the HTML color-input serialization:
+// parse, convert to sRGB, channel-clamp to an opaque #rrggbb (NOT OKLCH gamut-
+// mapping — HTML clamps; verified against the WPT color tests).
+import { useMode, modeRgb, modeHsl, modeP3, parse as culoriParse, formatHex as culoriFormatHex } from 'culori/fn';
+const culoriRgb = useMode(modeRgb);   // registers 'rgb' (+ named + hex parsers); returns the rgb converter
+useMode(modeHsl);                     // registers 'hsl' / 'hsla'
+useMode(modeP3);                      // registers 'p3' (color(display-p3 …))
+function cssColorToHex(str) {
+  if (typeof str !== 'string') return null;
+  let parsed;
+  try { parsed = culoriParse(str.trim()); } catch (_) { return null; }
+  if (!parsed) return null;
+  try { return culoriFormatHex(culoriRgb(parsed)) || null; } catch (_) { return null; }
+}
+const color = { toHex: cssColorToHex };
+
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, streams, parse5, color };

@@ -10,6 +10,7 @@
     "vendor:wpt": "node script/vendor_wpt.mjs"
   },
   "dependencies": {
+    "culori": "^4.0.2",
     "css-select": "^7.0.0",
     "css-tree": "^3.2.1",
     "css-what": "^8.0.0",
