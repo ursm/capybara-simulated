@@ -640,13 +640,6 @@ html/semantics/forms/the-select-element/filterable-select/filterable-select-keyb
 - 'appearance base-select: active option should get scrolled into view.'
 html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
 - beforefilter event for customizable combobox.
-html/semantics/forms/the-select-element/inserted-or-removed.html:
-- The last selected OPTION should win; Inserted by jQuery append()
-html/semantics/forms/the-select-element/select-add-optgroup.html:
-- select.add() with an index should work when the target is inside an optgroup.
-html/semantics/forms/the-select-element/select-ask-for-reset.html:
-- ask for reset on node remove, non multiple.
-- change selectedness of option, non multiple.
 html/semantics/forms/the-select-element/select-click-does-not-open-picker.html:
 - Synthetic click events do not open select picker
 html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
@@ -655,10 +648,6 @@ html/semantics/forms/the-select-element/select-many-options.tentative.html:
 - The popover should be bottom left positioned
 html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:
 - Resizing <select multiple> should not autoscroll the listbox.
-html/semantics/forms/the-select-element/select-multiple.html:
-- Removing multiple attribute reduces the number of selected OPTIONs to 1
-html/semantics/forms/the-select-element/select-named-getter.html:
-- Empty string name
 html/semantics/forms/the-select-element/select-option-display-inherit.tentative.html:
 - display:inherit on option in multiple select computes to contents
 - display:inherit on option in single select computes to contents
@@ -670,8 +659,6 @@ html/semantics/forms/the-select-element/select-popover-position-with-zoom.tentat
 - The popover should be bottom right positioned
 - The popover should be top left positioned
 - The popover should be top right positioned
-html/semantics/forms/the-select-element/select-remove.html:
-- select.remove(n) should work
 html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
 - Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:

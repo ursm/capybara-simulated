@@ -384,13 +384,15 @@ module WptRunner
   def run(rel)
     variants = variant_queries(rel)
     return run_one(rel) if variants.empty?
-    merged = []
+    merged       = []
+    merged_tests = []
     variants.each do |q|
       r = run_one(rel, q)
       return {completed: false, error: r[:error]} unless r[:completed]
       merged.concat(r[:failing])
+      merged_tests.concat(r[:tests])
     end
-    {completed: true, failing: merged}
+    {completed: true, failing: merged, tests: merged_tests}
   end
 
   # A file's declared variant query strings: `<meta name=variant content="?…">`
@@ -492,8 +494,12 @@ module WptRunner
 
     return {completed: false, error: nil} if res.nil?
 
-    failing = res['tests'].reject {|t| t['status'].to_i.zero? }.map {|t| t['name'] }
-    {completed: true, failing: failing}
+    # Full per-subtest detail (name / status / message) is kept on `tests`; the
+    # gate only consumes `failing` (the non-PASS names), but `wpt_diag` and any
+    # other diagnostic surfaces the messages the gate discards.
+    tests   = res['tests']
+    failing = tests.reject {|t| t['status'].to_i.zero? }.map {|t| t['name'] }
+    {completed: true, failing: failing, tests: tests}
   rescue StandardError => e
     # A file that errored may have left the shared session in a bad state;
     # rebuild it so the next file (and the result) doesn't depend on run order.
