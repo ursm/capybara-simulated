@@ -274,13 +274,8 @@ html/semantics/forms/the-form-element/form-nameditem.html:
 - The form attribute should be taken into account for named getters (single element)
 - Trying to set an expando that would shadow an already-existing named property
 html/semantics/forms/the-form-element/form-requestsubmit.html:
-- Passing a submit button not owned by the context object should throw
-- Passing an element which is not a submit button should throw
 - The value of the submitter should be appended, and form* attributes of the submitter
   should be handled.
-- requestSubmit() doesn't run interactive validation reentrantly
-- requestSubmit() for a disconnected form should not submit the form
-- requestSubmit() should trigger interactive form validation
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
@@ -619,20 +614,6 @@ html/semantics/forms/the-output-element/output-validity.html:
 - ":valid and :invalid pseudo-class on output element"
 html/semantics/forms/the-output-element/output.html:
 - output value and defaultValue
-html/semantics/forms/the-progress-element/progress-2.html:
-- progress position equals -1
-- progress position equals 0
-- progress value equals .5
-- progress value equals 0
-html/semantics/forms/the-progress-element/progress.html:
-- Determinate progress bar should have fractional position
-- Indeterminate progress bar should have position -1
-- Indeterminate progress bar should have value 0
-- Revoming the value attribute makes an intermediate progress bar, which should have
-  position -1
-- Value must be 0 if the parsed value is less than or equal to zero
-- Value must be 0 if value is invalid
-- Value must equal max if the parsed value is larger than max
 html/semantics/forms/the-select-element/common-HTMLOptionsCollection-add.html:
 - add method should add option elements correctly
 - add method should add option groups correctly
@@ -978,7 +959,6 @@ html/semantics/forms/the-select-element/select-validity.html:
 - Placeholder label-like options within optgroup
 - Validation on selects with display size set as more than one
 html/semantics/forms/the-select-element/select-validity.tentative.html:
-- Check form not submitted for invalid select
 - Validation for placeholder option
 html/semantics/forms/the-select-element/select-willvalidate-readonly-attribute.html:
 - Select element with "readonly" attribute shouldn't be barred from constraint validation
