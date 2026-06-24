@@ -97,6 +97,16 @@ module Capybara
       # green at 100 across gem 1579, WPT 660, Forem, Avo, :464 passing). Clamped
       # >=1 so a `CSIM_POLL_TICK_STEP_MS=0` misconfig can't freeze the fixed-step path.
       POLL_TICK_STEP_MS = [(ENV['CSIM_POLL_TICK_STEP_MS'] || '100').to_i, 1].max
+      # One animation frame (~60 Hz, whole ms — `run_loop_step` truncates). When a
+      # poll advances the clock while the page has work runnable NOW (a rAF chain or
+      # a timer burst), `tick_real_time` runs the advance in chunks this size so the
+      # page's rendering runs at real-browser cadence (one render phase per frame),
+      # not one `POLL_TICK_STEP_MS` super-frame — the same model the WPT drain uses.
+      FRAME_STEP_MS = 16
+      # Per-poll task-iteration cap, mirroring `RuntimeShared#run_loop_step`'s own
+      # default — shared across the frame chunks of one poll so sub-stepping keeps
+      # the same per-poll ceiling the single-step path had.
+      RUN_LOOP_MAX_ITER = 10_000
       # Horizon-gated fast-forward: when the page is observably idle (no timer due
       # now, no background IO) but a timer is parked within this horizon, jump the
       # virtual clock straight to it instead of waiting ~delay/step polls. A timer
@@ -1993,11 +2003,47 @@ module Capybara
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
           if @timers_active && effective_step > 0
-            r = @runtime.run_loop_step(effective_step)
-            # `dirtied` (settleGen changed) catches a render-phase rAF / microtask-
-            # delivered MutationObserver that mutated the DOM without firing a timer
-            # (fired == 0) — a fired-count-only test would leave a stale find cache.
-            @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+            # When the page has work runnable NOW (a rAF chain / timer burst — set
+            # by `horizon_fast_forward_step`), run the poll's worth of virtual time
+            # in frame-sized chunks so the page renders at real-browser cadence
+            # rather than one `POLL_TICK_STEP_MS` super-frame. The `step_ms` path
+            # (explicit `sleep` / `wait_for_timeout`) and idle/parked/fast-forward
+            # polls keep the single step — nothing is rendering frame-by-frame, so
+            # sub-stepping would only spin empty render phases. The tail-jump bails
+            # the moment a frame goes quiet, so a chain that settles early (or the
+            # rare quiet sub-step) doesn't pay for the unused remainder.
+            if step_ms.nil? && @page_runnable_now && effective_step > FRAME_STEP_MS
+              remaining = effective_step
+              # Share ONE task-iteration budget across the chunks so the per-poll
+              # cap matches the single-step path (each `run_loop_step` otherwise
+              # gets a fresh `RUN_LOOP_MAX_ITER`, so an always-due `setInterval(0)`
+              # busy loop could run N× the work). Exhausting it ends the poll —
+              # the clock is stuck on that loop either way.
+              iter_budget = RUN_LOOP_MAX_ITER
+              while remaining > 0 && iter_budget > 0
+                chunk = remaining < FRAME_STEP_MS ? remaining : FRAME_STEP_MS
+                r = @runtime.run_loop_step(chunk, iter_budget)
+                @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+                remaining    -= chunk
+                iter_budget  -= r['fired'].to_i
+                # Idle frame → nothing left to render frame-by-frame this poll: jump
+                # the remaining advance in one step (fires any timer parked within
+                # it). A still-queued rAF (`r['raf']`) is NOT idle — a non-mutating
+                # animation chain fires no timer and dirties nothing yet keeps
+                # rendering, so keep sub-stepping it at frame cadence.
+                if remaining > 0 && r['fired'].to_i.zero? && !r['dirtied'] && !r['raf']
+                  r = @runtime.run_loop_step(remaining, iter_budget)
+                  @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+                  break
+                end
+              end
+            else
+              r = @runtime.run_loop_step(effective_step)
+              # `dirtied` (settleGen changed) catches a render-phase rAF / microtask-
+              # delivered MutationObserver that mutated the DOM without firing a timer
+              # (fired == 0) — a fired-count-only test would leave a stale find cache.
+              @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+            end
           end
           # Pull any pending Worker / EventSource messages into JS
           # state. Without this, `evaluate_script` after kicking off
@@ -2171,6 +2217,11 @@ module Capybara
       # it — but only after the transient-guard window so pre-debounce states are
       # still observed across several polls. `FF_HORIZON_MS=0` ⇒ pure fixed-step.
       def horizon_fast_forward_step
+        # Whether the page has work runnable at the CURRENT instant (a rAF or a
+        # due-now timer). Only then does `tick_real_time` sub-step the advance into
+        # frames — an idle/parked poll has nothing to render frame-by-frame, so it
+        # stays a single step (no extra render phases on the common idle-wait poll).
+        @page_runnable_now = false
         # Escape hatch to the legacy wall-sync clock (virtual advance = real
         # wall-elapsed per poll). The deterministic model decouples perf from
         # timing but can't match a real browser's wall-proportional cadence for
@@ -2195,6 +2246,7 @@ module Capybara
         # (2) Runnable now → fixed step, reset guard (not a quiet pre-debounce window).
         if delay.zero?
           @ff_transient_polls = 0
+          @page_runnable_now  = true
           return POLL_TICK_STEP_MS
         end
         # (3) Nothing parked → nothing to fast-forward to.
