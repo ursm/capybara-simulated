@@ -12377,18 +12377,18 @@ html/dom/usvstring-reflection.https.html:
 html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
 - name: Control should be :active on mousedown when clicking the label twice in succession.
   reason: Needs the test_driver.Actions pointer-automation backend to synthesize a
-    real pointerdown/up sequence AND the `:active` ("being actively pointed at")
-    interaction pseudo-state, with label→labeled-control forwarding of that state.
-    Both the automation pointer backend and the transient :active UI state are
-    deliberately unmodeled (CLAUDE.md rule 1); there is no rendering/interaction
-    engine to observe `:active` during a held mousedown.
+    real pointerdown/up sequence AND the `:active` ("being actively pointed at") interaction
+    pseudo-state, with label→labeled-control forwarding of that state. Both the automation
+    pointer backend and the transient :active UI state are deliberately unmodeled
+    (CLAUDE.md rule 1); there is no rendering/interaction engine to observe `:active`
+    during a held mousedown.
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
 - name: Click forwarded from label to control preserves pointer metadata
-  reason: Needs test_driver.click to produce a TRUSTED pointer click carrying
-    pointerType/pointerId/isPrimary/detail, and the label-forwarded click to copy
-    that pointer metadata onto the control's click. The automation trusted-click
-    backend and PointerEvent metadata propagation are unmodeled (CLAUDE.md rule 1).
-    The sibling "not trusted" subtest (pure label.click()) is in scope and passes.
+  reason: Needs test_driver.click to produce a TRUSTED pointer click carrying pointerType/pointerId/isPrimary/detail,
+    and the label-forwarded click to copy that pointer metadata onto the control's
+    click. The automation trusted-click backend and PointerEvent metadata propagation
+    are unmodeled (CLAUDE.md rule 1). The sibling "not trusted" subtest (pure label.click())
+    is in scope and passes.
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element

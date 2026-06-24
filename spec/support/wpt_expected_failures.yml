@@ -51,16 +51,6 @@ html/semantics/forms/constraints/input-maxlength-emoji.html:
 html/semantics/forms/constraints/input-number-validity-dynamic-value-no-change.html:
 - number input number validation is updated correctly after value attribute change
   which doesn't change input value
-html/semantics/forms/constraints/radio-group-valueMissing.html:
-- valueMissing is false for all group members when any group member is checked
-- valueMissing is true for all group members when checked group member is removed
-html/semantics/forms/constraints/radio-valueMissing.html:
-- One of the radios is required and another one is checked
-- One of the radios is required and checked
-- One of the radios is required and disabled, but none checked
-- One of the radios is required, but none checked
-- One of the radios is required, checked and disabled
-- The required attribute is not set
 html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
 - beforefilter event for customizable combobox.
 html/semantics/forms/customizable-combobox/customizable-combobox-filtered-pseudo.tentative.html:
@@ -181,11 +171,9 @@ html/semantics/forms/historical-search-event.html:
 - search event should not be supported
 html/semantics/forms/historical.html: HARNESS_ERROR
 html/semantics/forms/input-change-event-properties.html:
-- <input type="checkbox"> click()
 - <input type="email"> typing
 - <input type="number"> typing
 - <input type="password"> typing
-- <input type="radio"> click()
 - <input type="search"> typing
 - <input type="tel"> typing
 - <input type="text"> typing
@@ -343,12 +331,8 @@ html/semantics/forms/the-input-element/checkable-active-onblur.html:
 - Radios should clear :active when the user tabs away from them while holding spacebar.
 html/semantics/forms/the-input-element/checkbox.html:
 - canceled activation steps on unchecked checkbox (indeterminate=true in onclick)
-- click on mutable checkbox fires a click event, then an input event, then a change
-  event
 - pre-activation steps on checked checkbox
 - pre-activation steps on unchecked checkbox
-html/semantics/forms/the-input-element/clone.html:
-- Radiobutton must retain unchecked state.
 html/semantics/forms/the-input-element/cloning-steps.html:
 - input element's dirty value flag should be cloned, so setAttribute doesn't affect
   the cloned input's value
@@ -538,12 +522,7 @@ html/semantics/forms/the-input-element/password.html:
 html/semantics/forms/the-input-element/radio-disconnected-group-owner.html:
 - Appending input radio input into a disconnect form should update the other radio
   inputs in the same radio group.
-- Disconnected document fragments can serve as radio group containers.
-- Disconnected radio buttons can serve as radio group containers.
-- Disconnected radio buttons should be contained by their tree root.
-- Non-HTML elements in disconnected trees can serve as radio group containers.
 - Removed elements are moved into separate radio groups.
-- Shadow roots in disconnected trees can serve as radio group containers.
 html/semantics/forms/the-input-element/radio-focus-navigation-checked.html:
 - Focus the checked radio in the focused radio group.
 - Focus the checked radio in the group.
@@ -564,20 +543,6 @@ html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
 html/semantics/forms/the-input-element/radio-morphed.html:
 - Setting type attribute must unset checkedness of other elements
-html/semantics/forms/the-input-element/radio-multiple-selected.html:
-- Form should be valid since one of the radio elements is checked
-html/semantics/forms/the-input-element/radio.html:
-- Radio buttons in an orphan tree should make a group
-- Radio buttons in different groups (because they have different form owners or no
-  form owner) do not affect each other's checkedness
-- Radio buttons in different groups (because they have different name attribute values,
-  or no name attribute) do not affect each other's checkedness
-- changing the name of a radio input element and setting its checkedness to true makes
-  all the other elements' checkedness in the same radio button group be set to false
-- click on mutable radio fires click event, then input event, then change event
-- moving radio input element out of or into a form should still work as expected
-- only one control of a radio button group can have its checkedness set to true
-- radio inputs with non-ASCII name attributes belong to the same radio button group
 html/semantics/forms/the-input-element/range-2.html:
 - range input value equals 2
 - range input value equals 50
