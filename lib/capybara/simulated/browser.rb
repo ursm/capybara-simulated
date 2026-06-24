@@ -1617,6 +1617,24 @@ module Capybara
       def go_back        ; history_go(-1, force: true) ; end
       def go_forward     ; history_go(+1, force: true) ; end
 
+      # Reset the session history to empty WITHOUT the full `reset!` (cookies /
+      # storage / viewport / frame scope stay put). A single session that visits
+      # many documents in sequence — the WPT conformance runner reuses one for
+      # the whole 1645-file suite — otherwise accumulates every prior visit's
+      # history entry, so a document that calls `history.back()` (e.g. a bfcache
+      # round-trip test) traverses the SHARED history back into the PREVIOUS
+      # document and re-runs it. Clearing history per visit confines each
+      # document's back / forward to its own navigations, matching a real
+      # browser's fresh-browsing-context isolation, so results don't depend on
+      # visit order. Not wired into `visit` itself — a normal session keeps
+      # cross-`visit` back-navigation (Selenium parity); only callers that want
+      # per-document isolation invoke it.
+      def reset_history!
+        @history.clear
+        @history_idx              = -1
+        @pending_history_traverse = nil
+      end
+
       # Move through the history stack by `delta`. Per HTML spec, a
       # same-document traversal (within a chain of pushState entries
       # rooted at a single navigation) updates `location` and fires

@@ -422,6 +422,14 @@ module WptRunner
     sub = File.basename(rel).include?('.sub.')
     @session = nil if sub
     s = session
+    # One session runs the whole suite, so its history accumulates every prior
+    # file's visit. Clear it before each file — otherwise a test that calls
+    # `history.back()` (select-restore-invalid-option's bfcache round-trip, the
+    # selectedcontent-restore files, …) traverses the SHARED history back into
+    # the PREVIOUS file's document, re-runs its testharness, and reports THAT
+    # file's results here — making the gate depend on visit order. Per-file
+    # reset matches real WPT's fresh-browsing-context-per-file isolation.
+    s.driver.reset_history!
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
     # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel

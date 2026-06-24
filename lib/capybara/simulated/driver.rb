@@ -224,6 +224,7 @@ module Capybara
       end
       def go_back              = current_browser.go_back
       def go_forward           = current_browser.go_forward
+      def reset_history!       = current_browser.reset_history!
       def current_url          = current_browser.current_url || ''
       def html                 = current_browser.html
       def title                = current_browser.title
