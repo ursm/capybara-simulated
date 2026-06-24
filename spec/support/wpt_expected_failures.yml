@@ -378,29 +378,9 @@ html/semantics/forms/the-input-element/image-click-form-data.html:
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
 html/semantics/forms/the-input-element/input-stepdown-02.html:
-- stepDown() on input with initial value less than min value
 - stepDown() on input with no initial value and negative min value
-html/semantics/forms/the-input-element/input-stepdown-weekmonth.html:
-- Calling stepDown() on input - month - where value < min should not modify value.
-- Calling stepDown() on input - week - where value < min should not modify value.
-html/semantics/forms/the-input-element/input-stepdown.html:
-- Calling stepDown() on input - date - where value < min should not modify value.
-- Calling stepDown() on input - datetime-local - where value < min should not modify
-  value.
-- Calling stepDown() on input - number - where value < min should not modify value.
-- Calling stepDown() on input - time - where value < min should not modify value.
 html/semantics/forms/the-input-element/input-type-button.html:
 - label value
-html/semantics/forms/the-input-element/input-valueasdate-typeerror.html:
-- valueAsDate setter with non-Date object (input type date)
-- valueAsDate setter with non-Date object (input type month)
-- valueAsDate setter with non-Date object (input type time)
-- valueAsDate setter with non-Date object (input type week)
-html/semantics/forms/the-input-element/input-valueasnumber-typeerror.html:
-- valueAsNumber = -Infinity (input type does apply)
-- valueAsNumber = -Infinity (input type does not apply)
-- valueAsNumber = Infinity (input type does apply)
-- valueAsNumber = Infinity (input type does not apply)
 html/semantics/forms/the-input-element/maxlength-number.html:
 - maxlength doesn't apply to input type=number
 html/semantics/forms/the-input-element/number-constraint-validation.html:
@@ -493,11 +473,6 @@ html/semantics/forms/the-option-element/option-element-constructor.html:
 - Option constructor handles selectedness correctly, even when incongruous with defaultSelected
 html/semantics/forms/the-option-element/option-form.html:
 - form
-html/semantics/forms/the-option-element/option-index.html:
-- option index should always be 0 for options in datalists
-- option index should always be 0 for options not even in the document
-- option index should always be 0 for options with no container
-- option index should work inside the document
 html/semantics/forms/the-option-element/option-value.html:
 - No children, namespaced value
 - Single child, namespaced value
