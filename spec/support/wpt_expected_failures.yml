@@ -766,12 +766,6 @@ html/semantics/forms/the-textarea-element/textarea-textLength.html:
 - Textarea's 'testLength' should work for utf-16.
 html/semantics/forms/the-textarea-element/textarea-type.html:
 - Textarea's type attribute should return 'textarea'
-html/semantics/forms/the-textarea-element/value-defaultValue-textContent.html:
-- defaultValue and value are affected by textContent in combination with appending
-  a DocumentFragment
-- defaultValue and value reflect child text content, not textContent
-- defaultValue and value treat CRLF differently
-- value normalizes CRLF even spread over multiple text nodes
 html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
