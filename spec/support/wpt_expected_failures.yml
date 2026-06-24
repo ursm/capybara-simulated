@@ -32,9 +32,6 @@ html/semantics/forms/beforeinput.tentative.html:
 - <input type="url">
 - <textarea onbeforeinput="onBeforeInput(event)" oninput="onInput(event)"></textarea>
 - "<textarea></textarea>"
-html/semantics/forms/constraints/form-validation-validity-customError.html:
-- "[button]  The validity.customError must be true if the custom validity error message
-  is not empty"
 html/semantics/forms/constraints/form-validation-validity-rangeOverflow.html:
 - "[INPUT in TIME status] The time is inside the accepted range for reversed range"
 - "[INPUT in TIME status] The time is min for reversed range"
@@ -49,59 +46,6 @@ html/semantics/forms/constraints/form-validation-validity-textarea-defaultValue.
 - User keystrokes should trigger validation
 html/semantics/forms/constraints/form-validation-validity-typeMismatch.html:
 - "[INPUT in EMAIL status] The value is valid email addresses"
-html/semantics/forms/constraints/form-validation-willValidate-datalist.html:
-- Test button element with submit type
-- Test input element with color type
-- Test input element with date type
-- Test input element with datetime-local type
-- Test input element with email type
-- Test input element with file type
-- Test input element with month type
-- Test input element with password type
-- Test input element with search type
-- Test input element with submit type
-- Test input element with tel type
-- Test input element with text type
-- Test input element with time type
-- Test input element with url type
-- Test input element with week type
-- Test select element
-- Test textarea element
-html/semantics/forms/constraints/form-validation-willValidate.html:
-- "[BUTTON in SUBMIT status] The willValidate attribute must be true if an element
-  is mutable"
-- "[INPUT in BUTTON status] Must be barred from the constraint validation"
-- "[INPUT in COLOR status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in DATE status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in DATETIME-LOCAL status] The willValidate attribute must be false if it
-  has a datalist ancestor"
-- "[INPUT in EMAIL status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in FILE status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in MONTH status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in PASSWORD status] The willValidate attribute must be false if it has a
-  datalist ancestor"
-- "[INPUT in RESET status] Must be barred from the constraint validation"
-- "[INPUT in SEARCH status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in SUBMIT status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in TEL status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in TEXT status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in TIME status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in URL status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[INPUT in WEEK status] The willValidate attribute must be false if it has a datalist
-  ancestor"
-- "[select]  The willValidate attribute must be false if it has a datalist ancestor"
-- "[textarea]  The willValidate attribute must be false if it has a datalist ancestor"
 html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
 html/semantics/forms/constraints/input-number-validity-dynamic-value-no-change.html:
@@ -337,14 +281,9 @@ html/semantics/forms/the-button-element/button-submit-remove-children.html:
 html/semantics/forms/the-button-element/button-validation.html:
 - historical menu type attribute
 - invalid type attribute
-- missing type attribute
-- submit type attribute
 html/semantics/forms/the-button-element/button-willvalidate-readonly-attribute.html:
 - Button element with "readonly" attribute shouldn't be barred from constraint validation
-html/semantics/forms/the-button-element/button-willvalidate.html:
-- Forms
 html/semantics/forms/the-datalist-element/datalistoptions.html:
-- If an element has a datalist element ancestor, it is barred from constraint validation
 - options label/value
 html/semantics/forms/the-fieldset-element/HTMLFieldSetElement.html:
 - The controls must root at the fieldset element
@@ -430,8 +369,6 @@ html/semantics/forms/the-form-element/form-requestsubmit.html:
 - requestSubmit() should trigger interactive form validation
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
-html/semantics/forms/the-input-element/button.html:
-- the element is barred from constraint validation
 html/semantics/forms/the-input-element/change-set-value.html:
 - Change event when restoring pre-focused value then setting it again
 html/semantics/forms/the-input-element/change-to-empty-value.html:
@@ -732,7 +669,6 @@ html/semantics/forms/the-input-element/range.html:
 html/semantics/forms/the-input-element/reset.html:
 - reset button resets controls associated with a form using the form attribute
 - reset button resets controls associated with their form using the form element pointer
-- the element is barred from constraint validation
 html/semantics/forms/the-input-element/selection-pointer.html:
 - Selecting texts across <input type=button> should not cancel selection
 - Selecting texts across <input type=checkbox> should not cancel selection
