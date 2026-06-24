@@ -27,4 +27,18 @@
   window.test_driver.get_computed_label = function (element) {
     return Promise.resolve(accessibleLabel(element));
   };
+
+  // `test_driver.bless(intent, fn)` grants transient user activation (a real
+  // automation backend does this via a trusted click). The in-process driver
+  // models the transient-activation flag as `globalThis.__csimTransientActivation`
+  // (read by navigator.userActivation.isActive, consumed by activation-gated
+  // APIs like HTMLInputElement.showPicker()).
+  window.test_driver.bless = function (intent, fn) {
+    globalThis.__csimTransientActivation = true;
+    try {
+      return Promise.resolve(typeof fn === 'function' ? fn() : undefined);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  };
 })();
