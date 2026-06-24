@@ -11,27 +11,12 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
+dom/events/Event-dispatch-redispatch.html:
+- Redispatching mouseup event whose default action dispatches a click event
 html/semantics/forms/attributes-common-to-form-controls/dirname-ltr.html: HARNESS_ERROR
 html/semantics/forms/attributes-common-to-form-controls/dirname-only-if-applies.html: HARNESS_ERROR
 html/semantics/forms/attributes-common-to-form-controls/dirname-rtl-auto.html: HARNESS_ERROR
 html/semantics/forms/attributes-common-to-form-controls/dirname-rtl-inherited.html: HARNESS_ERROR
-html/semantics/forms/beforeinput.tentative.html:
-- <input type="email" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="email">
-- <input type="number" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="number">
-- <input type="password" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="password">
-- <input type="search" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="search">
-- <input type="tel" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="tel">
-- <input type="text" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="text">
-- <input type="url" onbeforeinput="onBeforeInput(event)" oninput="onInput(event)">
-- <input type="url">
-- <textarea onbeforeinput="onBeforeInput(event)" oninput="onInput(event)"></textarea>
-- "<textarea></textarea>"
 html/semantics/forms/constraints/form-validation-validity-rangeOverflow.html:
 - "[INPUT in TIME status] The time is inside the accepted range for reversed range"
 - "[INPUT in TIME status] The time is min for reversed range"
@@ -171,15 +156,7 @@ html/semantics/forms/historical-search-event.html:
 - search event should not be supported
 html/semantics/forms/historical.html: HARNESS_ERROR
 html/semantics/forms/input-change-event-properties.html:
-- <input type="email"> typing
-- <input type="number"> typing
-- <input type="password"> typing
-- <input type="search"> typing
-- <input type="tel"> typing
-- <input type="text"> typing
-- <input type="url"> typing
 - "<select> pressing down arrow"
-- "<textarea></textarea> typing"
 html/semantics/forms/resetting-a-form/reset-event.html:
 - Test aspects of the reset event
 html/semantics/forms/resetting-a-form/reset-form-2.html:
@@ -197,8 +174,6 @@ html/semantics/forms/textfieldselection/selection-start-end-extra.html:
 - Shortening value by turning the input type into 'url' should correct selection{Start,End}
 html/semantics/forms/the-button-element/active-onblur.html:
 - Buttons should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-button-element/button-activate-keyup-prevented.html:
-- Button activation submits on keyup, but not if keydown is defaultPrevented
 html/semantics/forms/the-button-element/button-click-submits-with-commandfor.html:
 - clicking a button (implicit type) should NOT trigger a submit (with command and
   commandfor attribute)
@@ -393,8 +368,6 @@ html/semantics/forms/the-input-element/color.html:
 - 'Valid color: rgb(1,1,1,1)'
 - 'Valid color: trailing space'
 - 'Valid simple color: 4 characters long'
-html/semantics/forms/the-input-element/date-readonly-keyboard.html:
-- Readonly date input should not change value via keyboard interaction
 html/semantics/forms/the-input-element/date.html:
 - User agents must not allow the user to set the value to a non-empty string that
   is not a valid date string.
@@ -488,6 +461,8 @@ html/semantics/forms/the-input-element/input-valueasnumber-typeerror.html:
 - valueAsNumber = -Infinity (input type does not apply)
 - valueAsNumber = Infinity (input type does apply)
 - valueAsNumber = Infinity (input type does not apply)
+html/semantics/forms/the-input-element/maxlength-number.html:
+- maxlength doesn't apply to input type=number
 html/semantics/forms/the-input-element/month.html:
 - 'Month should be <= 13: If the value of the element is not a valid month string,
   then set it to the empty string instead.'
@@ -506,16 +481,14 @@ html/semantics/forms/the-input-element/month.html:
 - 'Year should be > 0: If the value of the element is not a valid year string, then
   set it to the empty string instead.>'
 html/semantics/forms/the-input-element/number-constraint-validation.html:
+- Unparsable number user input causes valueMissing to be set on required input.
 - Unparsable number user input triggers sanitization and causes badInput to be set.
 - Users inputting a parsable but invalid floating point number doesn't trigger sanitization
   and doesn't set badInput.
 html/semantics/forms/the-input-element/number-invalid-scientific-key-events.html:
-- Insert - at start
 - Leading '+' with existing 'e'
 - Reject multiple signs after 'e' (+)
 - Reject multiple signs after 'e' (-)
-html/semantics/forms/the-input-element/password-delete-space.html:
-- Backspace with trailing white space in password field
 html/semantics/forms/the-input-element/password.html:
 - Setting value changes the current value for password, but not the value content
   attribute
@@ -604,6 +577,11 @@ html/semantics/forms/the-input-element/valueMode.html:
 - value IDL attribute of input type file without value attribute
 html/semantics/forms/the-input-element/week.html:
 - '2014 has 52 weeks: Value should be empty'
+html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
+- Click forwarded from label.click() is not trusted
+html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
+- label with for attribute should proxy click events to the associated element on
+  click
 html/semantics/forms/the-legend-element/HTMLLegendElement.html:
 - The legend.form must be same value as fieldset.form
 - The legend.form return null when it has no fieldset parent
@@ -1035,3 +1013,12 @@ html/semantics/forms/the-textarea-element/value-defaultValue-textContent.html:
 - defaultValue and value treat CRLF differently
 - value normalizes CRLF even spread over multiple text nodes
 html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
+shadow-dom/focus/click-focus-delegatesFocus-click.html:
+- click on the host with delegatesFocus with another host with delegatesFocus and
+  a focusable child
+- click on the host with delegatesFocus with another host with no delegatesFocus and
+  a focusable child
+- click on the host with no delegatesFocus with another host with delegatesFocus and
+  a focusable child
+- click on the host with no delegatesFocus with another host with no delegatesFocus
+  and a focusable child
