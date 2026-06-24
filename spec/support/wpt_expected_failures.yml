@@ -466,70 +466,48 @@ html/semantics/forms/the-input-element/cloning-steps.html:
   the cloned input's value
 - input[type=button] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=button] element's indeterminateness should be cloned
 - input[type=checkbox] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=checkbox] element's indeterminateness should be cloned
 - input[type=color] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=color] element's indeterminateness should be cloned
 - input[type=date] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=date] element's indeterminateness should be cloned
 - input[type=datetime-local] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=datetime-local] element's indeterminateness should be cloned
 - input[type=email] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=email] element's indeterminateness should be cloned
 - input[type=file] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=file] element's indeterminateness should be cloned
 - input[type=hidden] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=hidden] element's indeterminateness should be cloned
 - input[type=image] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=image] element's indeterminateness should be cloned
 - input[type=month] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=month] element's indeterminateness should be cloned
 - input[type=number] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=number] element's indeterminateness should be cloned
 - input[type=password] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=password] element's indeterminateness should be cloned
 - input[type=radio] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=radio] element's indeterminateness should be cloned
 - input[type=range] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=range] element's indeterminateness should be cloned
 - input[type=reset] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=reset] element's indeterminateness should be cloned
 - input[type=search] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=search] element's indeterminateness should be cloned
 - input[type=submit] element's dirty checkedness should be cloned, so setAttribute
   doesn't affect the cloned input's checkedness
-- input[type=submit] element's indeterminateness should be cloned
 - input[type=tel] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=tel] element's indeterminateness should be cloned
 - input[type=text] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=text] element's indeterminateness should be cloned
 - input[type=time] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=time] element's indeterminateness should be cloned
 - input[type=url] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=url] element's indeterminateness should be cloned
 - input[type=week] element's dirty checkedness should be cloned, so setAttribute doesn't
   affect the cloned input's checkedness
-- input[type=week] element's indeterminateness should be cloned
 html/semantics/forms/the-input-element/color.html:
 - System colors are parsed
 - 'Valid color: color(display-p3 .5 0 0)'
