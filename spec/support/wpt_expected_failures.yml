@@ -29,8 +29,6 @@ html/semantics/forms/constraints/form-validation-validity-textarea-defaultValue.
 - Calling textarea.replaceChildren() from the input event handler should trigger validation
 - Setting textarea.defaultValue from the input event handler should trigger validation
 - User keystrokes should trigger validation
-html/semantics/forms/constraints/form-validation-validity-typeMismatch.html:
-- "[INPUT in EMAIL status] The value is valid email addresses"
 html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
 html/semantics/forms/constraints/input-number-validity-dynamic-value-no-change.html:
@@ -286,13 +284,6 @@ html/semantics/forms/the-input-element/email-value-idn.html:
 - IDN domain in parser-created email value attribute is converted to ASCII
 - IDN domain is converted when type changes to email
 - IDN domains in multiple email value attribute are converted to ASCII
-html/semantics/forms/the-input-element/email.html:
-- When the multiple attribute is removed, the user agent must run the value sanitization
-  algorithm
-- When the multiple attribute is set, the user agent must run the value sanitization
-  algorithm
-- run the value sanitization algorithm after setting a new value
-- valid value is a set of valid email addresses separated by a single ','
 html/semantics/forms/the-input-element/files.html:
 - files for input type=file
 - setting <input type=file>.files
