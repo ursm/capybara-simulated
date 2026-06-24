@@ -66,7 +66,11 @@ const SUPPORT_TREES = ['common'];
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument
 // / HTML5_ELEMENTS / HTML5_SHADOW_DISALLOWED_ELEMENTS used pervasively by the
 // shadow-dom/untriaged suite and gethtml/attachShadow tests.
-const SUPPORT_FILES = ['html/resources/common.js'];
+// `pointerevents/pointerevent_support.js` provides getEvent() and pointer
+// helpers that html/semantics/forms/the-label-element click-forwarding tests
+// pull in via an absolute `<script src>`; it is self-contained (no further
+// includes) and not scanned as a test (pointerevents is not in TREES).
+const SUPPORT_FILES = ['html/resources/common.js', 'pointerevents/pointerevent_support.js'];
 
 const CONCURRENCY = 24;
 

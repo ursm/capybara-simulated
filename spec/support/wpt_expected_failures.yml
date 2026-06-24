@@ -82,16 +82,8 @@ html/semantics/forms/customizable-combobox/customizable-combobox-popover-excepti
 html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
 - Focusing input should show datalist as a popover.
 html/semantics/forms/form-control-infrastructure/form.html:
-- label-for-control-form-in-form.form
-- label-for-control-form.form
-- label-for.form
-- label-form-form2.form
-- label-form.form
 - label-in-table-for.form
 - label-in-table-with-control.form
-- label-in-table.form
-- label-with-control.form
-- label.form
 html/semantics/forms/form-control-infrastructure/form_owner_and_table.html:
 - Form element and form controls nested inside a table are correctly handled
 html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
@@ -233,8 +225,6 @@ html/semantics/forms/the-button-element/button-click-submits.html:
 html/semantics/forms/the-button-element/button-events.html:
 - The reset event must be fired when click a button in reset status
 - The submit event must be fired when click a button in submit status
-html/semantics/forms/the-button-element/button-labels.html:
-- Forms
 html/semantics/forms/the-button-element/button-submit-remove-children.html:
 - This test will pass if a form navigation successfully occurs when clicking a child
   element of a <button type=submit> element with a onclick event handler which removes
@@ -649,91 +639,6 @@ html/semantics/forms/the-input-element/valueMode.html:
 - value IDL attribute of input type file without value attribute
 html/semantics/forms/the-input-element/week.html:
 - '2014 has 52 weeks: Value should be empty'
-html/semantics/forms/the-label-element/clicking-interactive-content.html:
-- interactive content <audio controls=""></audio> as second child under <label>
-- interactive content <embed> as second child under <label>
-- interactive content <iframe></iframe> as second child under <label>
-- interactive content <img usemap=""> as second child under <label>
-- interactive content <video controls=""></video> as second child under <label>
-html/semantics/forms/the-label-element/clicking-noninteractive-labelable-content.html:
-- labelable element <meter></meter> as second child under <label>
-- labelable element <output></output> as second child under <label>
-- labelable element <progress></progress> as second child under <label>
-html/semantics/forms/the-label-element/clicking-noninteractive-unlabelable-content.html:
-- noninteractive unlabelable content <a tabindex=""></a> as second child under <label>
-- noninteractive unlabelable content <a></a> as second child under <label>
-- noninteractive unlabelable content <audio tabindex=""></audio> as second child under
-  <label>
-- noninteractive unlabelable content <audio></audio> as second child under <label>
-- noninteractive unlabelable content <details></details> as second child under <label>
-- noninteractive unlabelable content <div tabindex=""></div> as second child under
-  <label>
-- noninteractive unlabelable content <div></div> as second child under <label>
-- noninteractive unlabelable content <img tabindex=""> as second child under <label>
-- noninteractive unlabelable content <img> as second child under <label>
-- noninteractive unlabelable content <input type="hidden" tabindex=""> as second child
-  under <label>
-- noninteractive unlabelable content <input type="hidden"> as second child under <label>
-- noninteractive unlabelable content <object tabindex=""></object> as second child
-  under <label>
-- noninteractive unlabelable content <object usemap=""></object> as second child under
-  <label>
-- noninteractive unlabelable content <object></object> as second child under <label>
-- noninteractive unlabelable content <svg></svg> as second child under <label>
-- noninteractive unlabelable content <video tabindex=""></video> as second child under
-  <label>
-- noninteractive unlabelable content <video></video> as second child under <label>
-html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
-- Control should be :active on mousedown when clicking the label twice in succession.
-html/semantics/forms/the-label-element/forward-focus-to-associated-element.html:
-- focusing a hidden label with tabindex should forward focus to the labelable element
-- focusing a label with empty tabindex should forward focus to the labelable element
-- focusing a label with for attribute should forward focus to the associated element
-- focusing a label without for attribute should fowrad focus to the first labelable
-  child
-html/semantics/forms/the-label-element/label-attributes.sub.html:
-- A div element which contains labelable element is removed.
-- A form control has an implicit label.
-- A form control has multiple labels.
-- A form control has no label 1.
-- A form control has no label 2.
-- A label in a form without a control
-- A label outside a form with a control inside the form
-- A labelable element inside the shadow DOM.
-- A labelable element is moved to iframe.
-- A labelable element is moved to inside of nested associated labels.
-- A labelable element is moved to outside of nested associated labels.
-- A labelable element not in a document can label element in the same tree.
-- A labelable element which is a descendant of non-labelable element is moved to outside
-  of associated label.
-- A non-control follows by a control with same ID.
-- The 'for' attribute is an empty string.
-- The 'for' attribute points to an inexistent id.
-- The labeled control for a label element that has no 'for' attribute is the first
-  labelable element which is a descendant of that label element.
-html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
-- Click forwarded from label to control preserves pointer metadata
-- Click forwarded from label.click() is not trusted
-html/semantics/forms/the-label-element/labelable-elements.html:
-- Check if the button element can access 'labels'
-- Check if the hidden input element has null 'labels'
-- Check if the meter element can access 'labels'
-- Check if the output element can access 'labels'
-- Check if the progress element can access 'labels'
-- Check if the select element can access 'labels'
-- Check if the textarea element can access 'labels'
-html/semantics/forms/the-label-element/proxy-click-to-associated-element.html:
-- label with for attribute should proxy click events to the associated element
-- label without for attribute should proxy click events to the first labelable child
-html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
-- label with for attribute should proxy click events to the associated element on
-  alt click
-- label with for attribute should proxy click events to the associated element on
-  click
-- label with for attribute should proxy click events to the associated element on
-  meta click
-- label with for attribute should proxy click events to the associated element on
-  shift click
 html/semantics/forms/the-legend-element/HTMLLegendElement.html:
 - The legend.form must be same value as fieldset.form
 - The legend.form return null when it has no fieldset parent

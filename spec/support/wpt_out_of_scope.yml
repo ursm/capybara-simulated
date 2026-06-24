@@ -12374,6 +12374,21 @@ html/dom/usvstring-reflection.https.html:
     pairing (createDataChannelPair) to round-trip the sent string; WebRTC is a deliberately
     unmodeled subsystem (CLAUDE.md rule 1). The USVString coercion itself is trivial,
     but there is no transport to observe the received value.
+html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
+- name: Control should be :active on mousedown when clicking the label twice in succession.
+  reason: Needs the test_driver.Actions pointer-automation backend to synthesize a
+    real pointerdown/up sequence AND the `:active` ("being actively pointed at")
+    interaction pseudo-state, with label→labeled-control forwarding of that state.
+    Both the automation pointer backend and the transient :active UI state are
+    deliberately unmodeled (CLAUDE.md rule 1); there is no rendering/interaction
+    engine to observe `:active` during a held mousedown.
+html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
+- name: Click forwarded from label to control preserves pointer metadata
+  reason: Needs test_driver.click to produce a TRUSTED pointer click carrying
+    pointerType/pointerId/isPrimary/detail, and the label-forwarded click to copy
+    that pointer metadata onto the control's click. The automation trusted-click
+    backend and PointerEvent metadata propagation are unmodeled (CLAUDE.md rule 1).
+    The sibling "not trusted" subtest (pure label.click()) is in scope and passes.
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
@@ -14898,96 +14913,6 @@ shadow-dom/reference-target/tentative/property-reflection-idl-setters.html:
     file is one feature.
 - name: input.htmlFor has IDL setter behavior ReflectsHostID when pointing to textarea
     with reference target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to button with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to datalist with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to div with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to fieldset with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to form with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to input with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to label with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to legend with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to meter with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to object with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to option with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to output with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to progress with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to select with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has IDL setter behavior IsNull when pointing to textarea with reference
-    target
   reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
     id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
     path + property-reflection IDL surface enumerate hundreds of subtests; the whole
@@ -18145,96 +18070,6 @@ shadow-dom/reference-target/tentative/property-reflection-imperative-setup.html:
     file is one feature.
 - name: label.control has reflection behavior ReflectsHostReadOnly when pointing to
     textarea with reference target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to button with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to datalist with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to div with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to fieldset with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to form with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to input with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to label with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to legend with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to meter with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to object with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to option with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to output with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to progress with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to select with reference
-    target with imperative setup
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to textarea with reference
-    target with imperative setup
   reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
     id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
     path + property-reflection IDL surface enumerate hundreds of subtests; the whole
@@ -21476,96 +21311,6 @@ shadow-dom/reference-target/tentative/property-reflection.html:
     file is one feature.
 - name: label.control has reflection behavior ReflectsHostReadOnly when pointing to
     textarea with reference target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to button with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to datalist with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to div with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to fieldset with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to form with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to input with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to label with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to legend with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to meter with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to object with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to option with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to output with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to progress with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to select with reference
-    target
-  reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
-    id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
-    path + property-reflection IDL surface enumerate hundreds of subtests; the whole
-    file is one feature.
-- name: label.form has reflection behavior IsNull when pointing to textarea with reference
-    target
   reason: Tentative WICG shadowrootreferencetarget proposal (cross-shadow-boundary
     id/reference resolution); unshipped feature not modeled (rule 1). The /tentative/
     path + property-reflection IDL surface enumerate hundreds of subtests; the whole
