@@ -427,8 +427,6 @@ html/semantics/forms/the-input-element/date.html:
 html/semantics/forms/the-input-element/datetime-local-trailing-zeros.html:
 - Verifies that trailing zeros in the milliseconds portion of the date strings are
   removed.
-html/semantics/forms/the-input-element/datetime-local-valueasdate.html:
-- valueAsDate does not apply to datetime-local inputs
 html/semantics/forms/the-input-element/datetime-local.html:
 - Value < min attribute
 - Value <= max attribute
@@ -506,28 +504,11 @@ html/semantics/forms/the-input-element/input-type-button.html:
 html/semantics/forms/the-input-element/input-type-change-value.html:
 - With focus
 - Without focus
-html/semantics/forms/the-input-element/input-valueasdate-invalidstateerr.html:
-- Forms
-html/semantics/forms/the-input-element/input-valueasdate-stepping.html:
-- month should step correctly
-- time should step correctly
-- week should step correctly
 html/semantics/forms/the-input-element/input-valueasdate-typeerror.html:
 - valueAsDate setter with non-Date object (input type date)
 - valueAsDate setter with non-Date object (input type month)
 - valueAsDate setter with non-Date object (input type time)
 - valueAsDate setter with non-Date object (input type week)
-html/semantics/forms/the-input-element/input-valueasdate.html:
-- 'valueAsDate getter on type month (with value: "2019-12")'
-- 'valueAsDate getter on type time (with value: "00:00")'
-- 'valueAsDate getter on type time (with value: "12:00")'
-- 'valueAsDate getter on type time (with value: "23:59")'
-- 'valueAsDate getter on type week (with value: "2019-W50")'
-- valueAsDate setter on type month (new Date("2019-12-01T00:00:00.000Z"))
-- valueAsDate setter on type time (new Date("1970-01-01T00:00:00.000Z"))
-- valueAsDate setter on type time (new Date("1970-01-01T12:00:00.000Z"))
-- valueAsDate setter on type time (new Date("1970-01-01T23:59:00.000Z"))
-- valueAsDate setter on type week (new Date("2019-12-09T00:00:00.000Z"))
 html/semantics/forms/the-input-element/input-valueasnumber-typeerror.html:
 - valueAsNumber = -Infinity (input type does apply)
 - valueAsNumber = -Infinity (input type does not apply)
