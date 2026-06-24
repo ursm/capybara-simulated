@@ -34,30 +34,41 @@ module WptRunner
   # no-op unless the file opted into `explicit_timeout`, so it can't be used to
   # force this.) Big virtual jumps are ~free in wall-clock — they only run the
   # few timers actually due — so the suite still runs in seconds.
-  # Progress-aware normal drain: pump one render phase (≈ one animation frame) at
-  # a time and keep going while the page makes progress (a task fired, a DOM/URL
-  # change bumped settleGen, or an rAF callback is still queued), up to a generous
-  # frame cap. This lets a test that legitimately needs MANY sequential
-  # animation frames — e.g. focus-navigation's `await waitForRender()` (double
-  # rAF) per Tab hop, ~40 frames for a bidirectional sweep — run to completion
-  # within its virtual-time budget, instead of giving up after a fixed few frames
-  # and force-jumping the clock past testharness's own 10 s timeout (which would
-  # mark a still-progressing test TIMEOUT). A genuinely idle test (only far-future
-  # timers like the harness timeout remain) shows no progress and bails to the
-  # force-timeout below within DRAIN_IDLE_BAIL frames; a self-rescheduling
-  # animation loop is bounded by DRAIN_MAX_STEPS. The step is small (50 ms) so a
-  # frame-hungry test gets many render phases; in practice the loop terminates
-  # well before the cap because every evaluate_script also advances the virtual
-  # clock (tick_real_time), so testharness's own 10 s timeout fires and completes
-  # the file. DRAIN_MAX_STEPS is a generous backstop for a page that never idles
-  # AND never lets the clock reach that timeout (e.g. a perpetual rAF loop).
-  DRAIN_STEP_MS      = 50
-  DRAIN_MAX_STEPS    = 160  # frame cap — animation-loop backstop (harness timeout normally ends it first)
+  # Progress-aware normal drain: pump ONE real-cadence animation frame at a time
+  # (`Browser#run_event_loop_frame`) and keep going while the page makes progress, up
+  # to a generous frame cap. Each frame runs ALL work ready at the current instant
+  # to quiescence (microtasks, due-now timers, render-phase rAF, and the nav /
+  # form-submit / worker chains they trigger) and THEN advances ONE frame interval
+  # — modelling a real browser. The clock therefore tracks real cadence (~16.67
+  # ms/frame) instead of the ~100 ms-per-evaluate_script poll tick the old loop
+  # incurred three times per frame (~20× too fast). That matters for files running
+  # many sequential rAF `promise_test`s (focus-dynamic-type-change-on-blur: ~80
+  # tests × 2 rAF; focus-navigation's double-rAF per Tab hop): their queues drain
+  # inside testharness's own 10 s harness timeout, where the old fast clock tripped
+  # it after ~30 frames and marked the still-pending tests TIMEOUT. A genuinely
+  # idle test (only far-future timers like the harness timeout remain) makes no
+  # progress and bails to the force-timeout below within DRAIN_IDLE_BAIL frames; a
+  # self-rescheduling animation loop is bounded by DRAIN_MAX_STEPS (then the force
+  # jump fires testharness's timeout).
+  FRAME_MS           = 16   # ~one 60 Hz animation frame (run_loop_step takes whole ms)
+  # Frame cap: FRAME_MS × DRAIN_MAX_STEPS (≈ 10.2 s) lands just past testharness's
+  # 10 s harness timeout, which self-completes a still-running normal file first.
+  DRAIN_MAX_STEPS    = 640
   DRAIN_IDLE_BAIL    = 2    # consecutive no-progress frames → idle → force-timeout
+  # A frame with no rAF / async / due-now work still counts as PROGRESS (resets the
+  # idle-bail) while a timer is parked within this horizon — a `step_timeout`-style
+  # wait the test is deliberately sitting on (e.g. confirming a `scrollend` does NOT
+  # fire within 500 ms). Without this the runner declares such a wait idle after
+  # DRAIN_IDLE_BAIL frames (~33 ms) and force-timeouts the still-pending test before
+  # its wait resolves. The horizon sits above the longest legitimate per-test wait
+  # in the corpus (3 s) and below testharness's 10 s normal harness timeout, so a
+  # genuinely idle page (only that far-future timeout parked) still bails promptly.
+  DRAIN_PENDING_TIMER_HORIZON_MS = 5_000
   FORCE_TIMEOUT_MS   = 12_000  # > the 10 s normal harness timeout (+ margin)
   LONG_TIMEOUT_MS    = 55_000  # cumulative ≈ 67 s > the 60 s `meta timeout=long`
-  POST_TIMEOUT_STEPS = 3   # let a completion that chains through a final
-                           # microtask / timer hop land after the jump
+  POST_TIMEOUT_STEPS   = 3   # let a completion that chains through a final
+                             # microtask / timer hop land after the jump
+  POST_TIMEOUT_STEP_MS = 50  # small virtual step per post-jump settle hop
   DRAIN_ITER         = 5_000
   # `__runLoopStep`'s per-call task cap pins the virtual clock to `limit` only
   # when it runs out of *due* timers — if it hits the iter cap first it returns
@@ -426,35 +437,34 @@ module WptRunner
     res = nil
     idle = 0
     DRAIN_MAX_STEPS.times do
-      step = s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(#{DRAIN_STEP_MS}, #{DRAIN_ITER}, false) : null")
-      res  = s.evaluate_script('globalThis.__wptResults')
+      # Advance the page one real-cadence event-loop frame (quiescence at the
+      # current instant, then one frame interval). Advancing the clock by one frame
+      # — not the ~100 ms-per-evaluate_script poll tick the old loop incurred three
+      # times per frame — keeps virtual time at a real browser's cadence (see
+      # FRAME_MS / Browser#run_event_loop_frame). Then check OUR completion sentinel
+      # (the reporter's `__wptResults`) with a clock-free `peek_script`, so polling
+      # it each frame doesn't perturb the cadence the loop maintains.
+      frame = s.driver.run_event_loop_frame(FRAME_MS)
+      # Read OUR completion sentinel (the reporter's `__wptResults`) with the same
+      # clock-free `peek_script` — returns the results object once set, nil before —
+      # so polling it each frame doesn't perturb the cadence the loop maintains.
+      res = s.driver.peek_script('globalThis.__wptResults')
       break unless res.nil?
-      # Progress = a task fired, a DOM/URL change bumped settleGen, or an rAF
-      # callback is still queued (an animation-frame chain is mid-flight). No
-      # progress for DRAIN_IDLE_BAIL consecutive frames → the page is idling on
-      # something we can't advance (only far-future timers like the harness
-      # timeout remain) → stop and let the force-timeout below fire it.
-      # (`step` already folds in child-realm fired/dirtied via drainChildRealms;
-      # __csimHasPendingRAF only sees the main realm — a child-realm-only rAF that
-      # produces no observable fired/dirtied would not register, but the
-      # force-timeout backstops it. No vendored test relies on that.)
-      # `raf` (a queued animation frame) and `async` (a non-timer async channel —
-      # a freshly-spawned worker that hasn't posted yet, SSE, a hijacked fetch, …)
-      # both mean there's progress `step` can't see, so keep draining rather than
-      # bailing to the force-timeout. Read BOTH in one evaluate_script: each
-      # evaluate_script ticks the virtual clock, so a separate probe would advance
-      # time an extra step per frame and shift timing-sensitive tests (scrollend).
-      flags = s.evaluate_script(
-        "({ raf: typeof __csimHasPendingRAF === 'function' ? !!__csimHasPendingRAF() : false," \
-        "   async: typeof __csim_asyncIoPending === 'function' ? !!__csim_asyncIoPending() : false })"
-      )
-      if (step && (step['fired'].to_i.positive? || step['dirtied'])) || flags['raf'] || flags['async']
+      # Progress = this frame did work, or an rAF / async channel is still in
+      # flight (a freshly-spawned worker that hasn't posted yet, SSE, a hijacked
+      # fetch), or a near-future timer is parked (a `step_timeout`-style wait the
+      # test is sitting on — see DRAIN_PENDING_TIMER_HORIZON_MS). No progress for
+      # DRAIN_IDLE_BAIL consecutive frames → idle → stop and let the force-timeout
+      # below fire it. (`next_timer` is always a Float; -1 means no timer queued.)
+      nt = frame['next_timer']
+      pending_timer = nt >= 0 && nt <= DRAIN_PENDING_TIMER_HORIZON_MS
+      if frame['progressed'] || frame['raf'] || frame['async'] || pending_timer
         idle = 0
         # An async channel in flight is usually a WORKER thread. The drain loop
         # otherwise spins holding the GVL, starving that thread; yield briefly so
         # it makes progress deterministically (otherwise its first postMessage
         # lands non-deterministically — a flaky SharedWorker connect, etc.).
-        sleep(0.001) if flags['async']
+        sleep(0.001) if frame['async']
       else
         idle += 1
         break if idle >= DRAIN_IDLE_BAIL
@@ -475,7 +485,7 @@ module WptRunner
       # Let a completion that chains through a final microtask / timer hop land.
       POST_TIMEOUT_STEPS.times do
         break unless res.nil?
-        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{DRAIN_STEP_MS}, #{DRAIN_ITER}) : null")
+        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{POST_TIMEOUT_STEP_MS}, #{DRAIN_ITER}) : null")
         res = s.evaluate_script('globalThis.__wptResults')
       end
     end

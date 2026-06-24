@@ -203,6 +203,17 @@ module Capybara
       # `wait? = false` synchronize path.
       def wait?               = current_browser.polling?
 
+      # Run one real-cadence event-loop frame in the active browsing context and
+      # return the loop's observable state. Drives "advance the page one frame"
+      # without the full poll tick `evaluate_script` would incur per read; the
+      # wpt_runner uses it to drain a page to completion at browser cadence.
+      def run_event_loop_frame(frame_ms) = current_browser.run_event_loop_frame(frame_ms)
+
+      # Clock-free read of a JS expression in the active browsing context (no
+      # virtual-time advance, unlike evaluate_script) — for polling page state
+      # between event-loop frames without perturbing the clock.
+      def peek_script(expr) = current_browser.peek_script(expr)
+
       def visit(path)          = current_browser.visit(path)
       def refresh              = current_browser.refresh
       def reset!

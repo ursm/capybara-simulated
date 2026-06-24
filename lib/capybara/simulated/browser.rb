@@ -2004,11 +2004,7 @@ module Capybara
           # a worker round-trip would see stale state — the inbox
           # outbox only drains during `settle`, which doesn't run
           # for direct `execute_script` / `evaluate_script` calls.
-          @find_cache_dirty = true if deliver_worker_messages > 0
-          @find_cache_dirty = true if deliver_event_source_events > 0
-          @find_cache_dirty = true if deliver_hijacked_fetches > 0
-          @find_cache_dirty = true if deliver_window_messages > 0
-          @find_cache_dirty = true if deliver_websocket_events > 0
+          drain_async_channels
         ensure
           @ticking = false
         end
@@ -2030,6 +2026,141 @@ module Capybara
         # goes via file-saver's `saveAs` → synthetic dispatchEvent
         # on a freshly-created anchor with `download` + blob URL).
         consume_pending_download
+      end
+
+      # Backstop on the per-frame quiescence loop — caps the event-loop turns
+      # processed at a single instant so a `setInterval(0)` (always-due) busy loop
+      # advances a frame and continues, rather than spinning forever. Generous:
+      # real frames here run hundreds of microtask/rAF turns (e.g. ~80 sequential
+      # rAF promise_tests, each ~2 render turns).
+      EVENT_LOOP_QUIESCENCE_CAP = 512
+
+      # Run ONE real-cadence event-loop frame and report the loop's observable
+      # state. A general primitive — it models a browser animation frame and knows
+      # nothing about any particular test harness; the WPT runner is its first
+      # caller (driving a page to completion one frame at a time). It advances the
+      # same virtual clock the Capybara poll path drives through `tick_real_time`,
+      # which still uses its own poll-cadence policy (a ~100 ms `horizon_fast_forward`
+      # step per poll, tuned for app debounce observation) rather than this per-frame
+      # model — folding that path onto this primitive is a worthwhile follow-up.
+      #
+      # A real browser processes EVERYTHING ready at the current instant within a
+      # single animation frame — microtasks, timers due now (incl. newly scheduled
+      # `setTimeout(0)`), the render-phase rAF callbacks, and the navigation /
+      # form-submit / worker chains they trigger — and only THEN advances ~16.67 ms
+      # to the next frame. Modelling that is essential: a multi-hop chain (a form →
+      # iframe-rebuild → onload → next-submit sequence, or N sequential rAF
+      # `promise_test`s) must complete inside a frame. Advancing the clock per host
+      # round-trip instead (the old WPT runner did ~3 `evaluate_script`s/frame, each
+      # a full ~100 ms `tick_real_time` poll tick) runs it ~20× real cadence, so a
+      # page that needs many frames trips a wall-clock-budget harness timeout long
+      # before its queue drains. Driving the loop here keeps real cadence (one frame
+      # interval per frame) while still completing the chains.
+      #
+      # Phase 1 — quiescence at the CURRENT virtual time: repeatedly run the loop
+      # with a ZERO advance (`run_loop_step(0)` fires only timers due now + the
+      # microtask checkpoints + the render phase) and drain the Ruby-side async /
+      # nav / form-submit / download chains they queue, until a turn makes no
+      # observable progress (or the backstop caps a busy loop). Phase 2 — advance
+      # exactly one frame so the next batch of timers comes due.
+      #
+      # Returns the loop state: `progressed` (this frame did real work — drives a
+      # caller's idle detection), `raf` (an animation frame is queued), `async` (a
+      # non-timer background channel — worker / SSE / hijacked fetch — is in
+      # flight), and `next_timer` (ms to the nearest scheduled timer, -1 = none, so
+      # a caller can tell a page PARKED on a near-future `setTimeout` from an idle
+      # one). Whether the page reached some application-level "done" state is the
+      # caller's concern — read it separately with `peek_script` (clock-free).
+      def run_event_loop_frame(frame_ms)
+        turns = 0
+        loop do
+          r = @runtime.run_loop_step(0)          # run only what's due NOW + microtasks + render; no clock advance
+          progressed = step_and_drain_progressed(r)
+          turns += 1
+          break unless progressed
+          break if turns >= EVENT_LOOP_QUIESCENCE_CAP
+        end
+        # Phase 2 — advance one real frame so the next batch of timers becomes due.
+        # Its work counts toward `progressed` too: a timer that first comes due in
+        # this advance (e.g. a `setTimeout(…, 8)` firing mid-frame) and the nav hop
+        # it queues are real progress, so a caller mustn't read the frame as idle.
+        frame_progressed = step_and_drain_progressed(@runtime.run_loop_step(frame_ms))
+        probe = dom_call('__csimEventLoopProbe')
+        {
+          'raf'        => !!probe['raf'],
+          'async'      => !!probe['async'],
+          # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
+          # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
+          # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
+          'next_timer' => probe['nextTimer'].to_f,
+          # `turns > 1` ⇒ phase 1's quiescence did work (the trailing no-progress
+          # turn that ends the loop is the +1); OR phase 2's advance did.
+          'progressed' => turns > 1 || frame_progressed
+        }
+      end
+
+      # Drain the Ruby-side async / navigation / form-submit / download chains a
+      # `run_loop_step` (passed as `r`) may have queued, and report whether this
+      # step+drain made observable progress. Shared by both phases of
+      # `run_event_loop_frame`.
+      #
+      # A pending Ruby-side navigation/submit/reload intent counts as progress:
+      # draining it rebuilds a child frame realm and fires that iframe's `onload`
+      # synchronously, whose handler can queue the NEXT hop (submit-entity-body's
+      # `run_simple_test` chain: form.submit() → realm rebuild → onload → next
+      # form.submit()). That work happens entirely in the CHILD realm, so it bumps
+      # the child's `settleGen`, never the main realm's `settle_gen` we sample, and
+      # fires no main-realm timer. Snapshot the intent BEFORE draining: this call
+      # consumes one hop and the onload re-queues the next, which the following
+      # call sees — so the quiescence loop self-terminates when the chain ends.
+      private def step_and_drain_progressed(r)
+        pulled = drain_async_channels
+        invalidate_find_cache
+        drained_nav = pending_nav_intent?
+        drain_pending_navigation
+        consume_pending_form_submit
+        consume_pending_download
+        # `r['dirtied']` already covers settleGen changes DURING the step; compare
+        # the post-drain gen against the step's post-step gen (`r['gen']`, free —
+        # no extra crossing) to also catch a main-realm change the drains caused.
+        r['fired'].to_i.positive? || r['dirtied'] || pulled || drained_nav ||
+          @runtime.settle_gen != r['gen'].to_i
+      end
+
+      # Clock-FREE read of a JS expression in the active browsing context. Unlike
+      # `evaluate_script` (which ticks `tick_real_time` first), this is a bare
+      # `dom_call` and advances no virtual time — so a caller polling page state
+      # once per `run_event_loop_frame` (e.g. the WPT runner checking its harness's
+      # completion sentinel) doesn't perturb the frame cadence the loop maintains.
+      def peek_script(expr)
+        dom_call('__csimEvalScript', expr.to_s, marshal_args([]))
+      end
+
+      # Any Ruby-side navigation intent queued and waiting for `drain_pending_navigation`
+      # to act on it — the same set that method drains (location / frame nav / frame
+      # submit / frame reload / reload / history traverse). The quiescence loop treats
+      # a queued intent as progress because draining it does cross-realm work (rebuild
+      # a child frame realm + fire its `onload`) that the main-realm `settleGen` /
+      # fired-timer signals can't see. Aux-window opens are intentionally excluded:
+      # they build a separate Browser, not a hop in a same-page chain.
+      private def pending_nav_intent?
+        !@pending_location.nil? ||
+          @pending_reload ||
+          !@pending_history_traverse.nil? ||
+          !(@pending_frame_nav || {}).empty? ||
+          !(@pending_frame_submit || []).empty? ||
+          !(@pending_frame_reload || []).empty?
+      end
+
+      # Pull every background async channel (Worker / EventSource / hijacked fetch
+      # / postMessage / WebSocket) into JS state, marking the find cache dirty if
+      # any delivered. Shared by `tick_real_time` and `run_event_loop_frame`.
+      # Returns true if any channel delivered.
+      private def drain_async_channels
+        n = deliver_worker_messages + deliver_event_source_events + deliver_hijacked_fetches +
+            deliver_window_messages + deliver_websocket_events
+        @find_cache_dirty = true if n.positive?
+        n.positive?
       end
 
       # This tick's deterministic virtual-clock advance (ms). Default is the fixed
