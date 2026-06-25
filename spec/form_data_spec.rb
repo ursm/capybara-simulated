@@ -155,3 +155,40 @@ RSpec.describe 'named-frame submit threads the constructed entry list' do
     end
   end
 end
+
+# The top-page submission path runs Ruby-side (the JS stashes the intent, the
+# user-action drain navigates). A `formdata` handler's mutations must reach THAT
+# submission too — the entry list JS constructed is threaded to Ruby rather than
+# the form being re-serialised from the DOM.
+RSpec.describe 'top-page submit threads the constructed entry list to Ruby' do
+  let(:app) {
+    lambda do |env|
+      if env['PATH_INFO'] == '/echo'
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><html><body>QS:#{env['QUERY_STRING']}</body></html>"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <form id="f" action="/echo" method="get">
+              <input name="n1" value="v1">
+              <button type="submit">Go</button>
+            </form>
+            <script>
+              document.getElementById('f').addEventListener('formdata', (e) => {
+                e.formData.append('extra', 'injected');
+                e.formData.delete('n1');
+              });
+            </script>
+          </body></html>
+        HTML
+      end
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  it 'submits the handler-mutated entry list (append + delete)' do
+    session.click_button('Go')
+    expect(session).to have_text('QS:extra=injected')
+    expect(session).to have_current_path('/echo?extra=injected')
+  end
+end

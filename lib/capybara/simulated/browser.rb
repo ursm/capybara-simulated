@@ -976,7 +976,7 @@ module Capybara
           elsif @current_url != submit_baseline_url
             # Already navigated; nothing more to do.
           else
-            submit_form_handle(action['formHandle'], action['submitter'])
+            submit_form_handle(action['formHandle'], action['submitter'], action['entryList'])
           end
         when 'download'
           download_link(resolve_against_current(action['url'].to_s), action['filename'].to_s)
@@ -1385,7 +1385,7 @@ module Capybara
       def consume_pending_form_submit
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
-        submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'])
+        submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'], pending['entryList'])
       end
 
       # Pin the URL the page is at as a user action BEGINS — the FIRST line of
@@ -2311,24 +2311,26 @@ module Capybara
       attr_reader :context_gen
 
       # Pulls the serialised form-state out of JS, encodes it, and
-      # drives the Rack app via `navigate` (for GET) or a POST.
-      def submit_form_handle(form_handle, submitter_handle)
+      # drives the Rack app via `navigate` (for GET) or a POST. `entry_list` is the
+      # list JS already constructed (post-`formdata`, so a handler's append/delete
+      # is honoured); when absent (the Enter implicit-submit path) we build it from
+      # the form's own controls.
+      def submit_form_handle(form_handle, submitter_handle, entry_list = nil)
         invalidate_find_cache
         spec = dom_call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
         action  = spec['action'].to_s
         method  = spec['method'].to_s.upcase
         method  = 'GET' if method.empty?
-        fields  = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
-        file_inputs = spec['fileInputs'] || []
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
+        entries = entry_list.is_a?(Array) ? entry_list : entries_from_spec(spec)
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
         if method == 'GET'
           # GET ignores enctype: the entry list is always the urlencoded query.
-          query, = encode_form_submission(fields, file_inputs, 'application/x-www-form-urlencoded')
+          query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
           uri = URI.parse(action_url)
           # HTML "mutate action URL" for GET: SET the query to the entry list
           # unconditionally — an empty list clears any query the action already
@@ -2336,7 +2338,7 @@ module Capybara
           uri.query = query
           frame_entry ? navigate_frame(uri.to_s, entry: frame_entry) : navigate(uri.to_s)
         else
-          body, content_type = encode_form_submission(fields, file_inputs, enctype)
+          body, content_type = encode_entry_list(entries, enctype)
           if frame_entry
             navigate_frame_post(action_url, body, content_type, entry: frame_entry)
           else
@@ -2348,73 +2350,80 @@ module Capybara
       # HTML "encode the entry list" by enctype → [body, exact Content-Type]. The
       # Content-Type is sent verbatim (no charset suffix), which the spec's
       # form-submission resources compare exactly. text/plain is `name=value\r\n`
-      # per entry (NOT urlencoded); urlencoded merges each non-multipart file input
-      # as its bare filename.
-      def encode_form_submission(fields, file_inputs, enctype)
+      # per entry (NOT urlencoded); urlencoded (and GET) merge each file entry as
+      # its bare filename. `entries` is the ordered entry list — string
+      # {'name','value'} or file {'name','file'=>true,'filename','handle','index'}
+      # entries; a file's bytes resolve through the `@file_picks` slot.
+      def encode_entry_list(entries, enctype)
         if enctype.start_with?('multipart/form-data')
-          built = build_multipart_body(fields, file_inputs)
-          return [built[:body], built[:content_type]]
-        end
-        fields = fields.dup
-        (file_inputs || []).each do |fi|
-          picks = @file_picks && @file_picks[fi['handle'].to_i] || []
-          fields << [fi['name'].to_s, picks.first ? File.basename(picks.first) : '']
-        end
-        if enctype == 'text/plain'
-          [fields.map {|name, value| "#{name}=#{value}\r\n" }.join, 'text/plain']
+          boundary = "csim-#{SecureRandom.hex(8)}"
+          body     = String.new.force_encoding(Encoding::ASCII_8BIT)
+          entries.each do |e|
+            if e['file']
+              path = entry_file_path(e)
+              if path
+                append_multipart_part(body, boundary, e['name'].to_s, File.binread(path),
+                                      filename:     File.basename(path),
+                                      content_type: Rack::Mime.mime_type(File.extname(path)))
+              else
+                append_multipart_part(body, boundary, e['name'].to_s, '', filename: e['filename'].to_s)
+              end
+            else
+              append_multipart_part(body, boundary, e['name'].to_s, e['value'].to_s)
+            end
+          end
+          body << "--#{boundary}--\r\n"
+          [body, "multipart/form-data; boundary=#{boundary}"]
         else
-          [URI.encode_www_form(fields), 'application/x-www-form-urlencoded']
+          pairs = entries.map {|e| [e['name'].to_s, e['file'] ? e['filename'].to_s : e['value'].to_s] }
+          if enctype == 'text/plain'
+            [pairs.map {|name, value| "#{name}=#{value}\r\n" }.join, 'text/plain']
+          else
+            [URI.encode_www_form(pairs), 'application/x-www-form-urlencoded']
+          end
         end
       end
 
-      def build_multipart_body(fields, file_inputs)
-        boundary = "csim-#{SecureRandom.hex(8)}"
-        body     = String.new.force_encoding(Encoding::ASCII_8BIT)
-        fields.each do |name, value|
-          append_multipart_part(body, boundary, name, value.to_s)
-        end
-        file_inputs.each do |fi|
-          picks = file_pick_paths(fi)
-          if picks.empty?
-            append_multipart_part(body, boundary, fi['name'].to_s, '', filename: '')
+      # Resolve a threaded file entry's on-disk path via the `@file_picks` slot
+      # recorded at `attach_file` time (handle/index). nil for a purely in-memory
+      # `new File(['bytes'], …)` (no slot) — a CLASSIC (non-Turbo) submit then
+      # drops its bytes, while the fetch/XHR path serializes them in JS
+      # (`serializeMultipart` → `blobBytes`). This covers every realistic upload
+      # (a host-backed file submitted through Turbo or a plain form).
+      def entry_file_path(entry)
+        handle = entry['handle']
+        return nil if handle.nil?
+        picks = @file_picks && @file_picks[handle.to_i]
+        picks && picks[entry['index'].to_i]
+      end
+
+      # Build the entry list from the form's own controls, for triggers that didn't
+      # construct one in JS (the Enter implicit-submit path). Mirrors the JS FormData
+      # construction: non-file fields in tree order, then each file input's selection
+      # (one empty entry when nothing is picked). A selected File reports its
+      # host-backed source (`handle`/`index`); the older payload shape with no per-File
+      # refs falls back to the input's own handle slot.
+      def entries_from_spec(spec)
+        entries = (spec['fields'] || []).map {|pair| {'name' => pair[0].to_s, 'value' => pair[1].to_s} }
+        (spec['fileInputs'] || []).each do |fi|
+          name = fi['name'].to_s
+          refs = fi['files']
+          if refs.is_a?(Array) && !refs.empty?
+            refs.each {|ref|
+              entries << {'name' => name, 'file' => true, 'filename' => ref['name'].to_s, 'handle' => ref['handle'], 'index' => ref['index']}
+            }
           else
-            picks.each do |path|
-              append_multipart_part(body, boundary, fi['name'].to_s, File.binread(path),
-                                    filename:     File.basename(path),
-                                    content_type: Rack::Mime.mime_type(File.extname(path)))
+            picks = (@file_picks && @file_picks[fi['handle'].to_i]) || []
+            if picks.empty?
+              entries << {'name' => name, 'file' => true, 'filename' => '', 'handle' => nil, 'index' => nil}
+            else
+              picks.each_index {|i|
+                entries << {'name' => name, 'file' => true, 'filename' => File.basename(picks[i]), 'handle' => fi['handle'], 'index' => i}
+              }
             end
           end
         end
-        body << "--#{boundary}--\r\n"
-        {content_type: "multipart/form-data; boundary=#{boundary}", body: body}
-      end
-
-      # The on-disk paths backing a file input's current selection. Each
-      # selected File reports its host-backed source (`handle`/`index` → the
-      # `@file_picks` slot recorded at `attach_file` time); this resolves bytes
-      # even when JS moved a File onto a different input (`input.files =
-      # dataTransfer.files`), whose own handle was never attached to. Falls back
-      # to the input's own handle for older serializer payloads.
-      #
-      # Only host-backed Files (from `attach_file`) resolve here; a purely
-      # in-memory `new File(['bytes'], …)` assigned via JS has no `@file_picks`
-      # slot, so a CLASSIC (non-Turbo) submit drops its bytes — the fetch/XHR
-      # path serializes those in JS (`serializeMultipart` → `blobBytes`) and is
-      # unaffected. This matches the pre-existing behaviour and covers every
-      # realistic upload (host-backed file submitted through Turbo or a plain
-      # form).
-      def file_pick_paths(fi)
-        refs = fi['files']
-        if refs.is_a?(Array) && !refs.empty?
-          refs.filter_map {|ref|
-            handle = ref['handle']
-            next if handle.nil?
-            picks = @file_picks && @file_picks[handle.to_i]
-            picks && picks[ref['index'].to_i]
-          }
-        else
-          (@file_picks && @file_picks[fi['handle'].to_i]) || []
-        end
+        entries
       end
 
       def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
@@ -4246,7 +4255,7 @@ module Capybara
           sub = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
           next unless sub.is_a?(Hash) && sub['formHandle']
           invalidate_find_cache
-          submit_form_in_realm(realm_id, sub['formHandle'], sub['submitterHandle'])
+          submit_form_in_realm(realm_id, sub['formHandle'], sub['submitterHandle'], sub['entryList'])
         rescue StandardError => e
           log_console('warn', "nested-context form submission failed: #{e.message}")
         end
@@ -4261,24 +4270,23 @@ module Capybara
       # GET fully supported. POST to a self frame needs the entered stack
       # (navigate_frame_post); POST-to-named and other targets from a nested
       # context aren't modeled (no in-scope need) — logged rather than dropped.
-      def submit_form_in_realm(realm_id, form_handle, submitter_handle)
+      def submit_form_in_realm(realm_id, form_handle, submitter_handle, entry_list = nil)
         spec = @runtime.realm_call(realm_id, '__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
         method = spec['method'].to_s.upcase
         method = 'GET' if method.empty?
         target = spec['target'].to_s
         action = spec['action'].to_s
-        fields = (spec['fields'] || []).map {|pair| [pair[0].to_s, pair[1].to_s] }
-        file_inputs = spec['fileInputs'] || []
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
+        entries = entry_list.is_a?(Array) ? entry_list : entries_from_spec(spec)
         # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
-        get_query, = encode_form_submission(fields, file_inputs, 'application/x-www-form-urlencoded')
+        get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
         get_url = form_get_url(action, get_query)
         if frame_self_target?(target)
           if method == 'GET'
             navigate_realm_self_get(realm_id, get_url)
           else
-            body, content_type = encode_form_submission(fields, file_inputs, enctype)
+            body, content_type = encode_entry_list(entries, enctype)
             navigate_realm_self_post(realm_id, resolve_against_current(action), body, content_type)
           end
         elsif %w[_parent _top _blank].include?(target.downcase)
