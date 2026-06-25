@@ -161,8 +161,6 @@ html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
 - Change event when restoring pre-focused value then setting it again
-html/semantics/forms/the-input-element/change-to-empty-value.html:
-- Change event when clearing an input
 html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
 - Checkboxes should clear :active when the user tabs away from them while pressing
   it with a pointing device
@@ -575,12 +573,8 @@ html/semantics/forms/the-select-element/show-picker-disabled.html:
 html/semantics/forms/the-select-element/show-picker-user-gesture.html:
 - select showPicker() does not throw when user activation is active.
 - select showPicker() requires a user gesture
-html/semantics/forms/the-textarea-element/change-to-empty-value.html:
-- Change event when clearing a textarea
 html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
-html/semantics/forms/the-textarea-element/textarea-textLength.html:
-- Textarea's 'testLength' should work for utf-16.
 html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
