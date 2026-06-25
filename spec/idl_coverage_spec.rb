@@ -57,6 +57,7 @@ module IdlCoverage
     'HTMLInputElement'  => {instance: "document.createElement('input')"},
     'HTMLFormElement'   => {instance: "document.createElement('form')"},
     'HTMLAnchorElement' => {instance: "document.createElement('a')"},
+    'HTMLOptionsCollection' => {instance: "document.createElement('select').options", ctor: 'HTMLOptionsCollection'},
     'Event'       => {instance: "new Event('x')", ctor: 'Event'},
     'CustomEvent' => {instance: "new CustomEvent('x')"},
     'EventTarget' => {instance: 'new EventTarget()'},

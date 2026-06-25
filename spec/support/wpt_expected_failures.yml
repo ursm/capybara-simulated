@@ -368,13 +368,6 @@ html/semantics/forms/the-output-element/output-validity.html:
 - ":valid and :invalid pseudo-class on output element"
 html/semantics/forms/the-output-element/output.html:
 - output value and defaultValue
-html/semantics/forms/the-select-element/common-HTMLOptionsCollection-add.html:
-- add method should add option elements correctly
-- add method should add option groups correctly
-html/semantics/forms/the-select-element/common-HTMLOptionsCollection.html:
-- New nodes have no value
-- Setting element by index should correctly append and replace elements
-- Setting element to null by index removed the element
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
 - Base appearance listbox selects should not be focusable.
 - Keyboard behavior for base appearance <select multiple>
