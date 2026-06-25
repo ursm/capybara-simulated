@@ -163,23 +163,6 @@ html/semantics/forms/the-fieldset-element/fieldset-intrinsic-size.html:
 - max-content content-box
 - min-content border-box
 - min-content content-box
-html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html:
-- An action URL should be resolved relative to the document's base URL (not the document's
-  URL)
-html/semantics/forms/the-form-element/form-action-submission-with-base-url.html:
-- A missing action should submit the form to its containing document's URL (not its
-  base URL)
-- An action URL should be resolved relative to the document's base URL (not document
-  URL)
-- An empty-string action should submit the form to its containing document's URL (not
-  its base URL)
-html/semantics/forms/the-form-element/form-action-submission.html:
-- A missing action should submit the form to the document's URL (= document's base
-  URL in this case)
-- An action URL should be resolved relative to the document's base URL (= document's
-  URL in this case)
-- An empty-string action should submit the form to the document's URL (= document's
-  base URL in this case)
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
@@ -222,9 +205,6 @@ html/semantics/forms/the-input-element/files.html:
 - setting <input type=file>.files
 - setting <input type=file>.files from DataTransfer
 html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html: HARNESS_ERROR
-html/semantics/forms/the-input-element/image-click-form-data.html:
-- Image submit button should not add extra form data if 'value' attribute is present
-  with non-empty value
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
 html/semantics/forms/the-input-element/input-stepdown-02.html:

@@ -113,7 +113,7 @@ module WptRunner
   # tokens. Unknown tokens are left verbatim so a new, unhandled pattern shows
   # up loudly as a literal `{{…}}` in a failing assertion rather than silently
   # mis-substituting to something plausible.
-  def substitute(body, req_path)
+  def substitute(body, req_path, query = {})
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
@@ -128,6 +128,12 @@ module WptRunner
       when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
       when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? SUB_ALT_HOST : "#{m}.#{SUB_ALT_HOST}"
       when /\Ahosts\[\]\[(\w*)\]\z/    then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
+      # `{{GET[name]}}` → the value of the `name` query parameter (wptserve's
+      # request-substitution). Absent params substitute to the empty string, which
+      # the form-action tests rely on (`?action=` → an empty action attribute).
+      # (A repeated param resolves to Rack's last value; wptserve takes the first.
+      # No vendored `.sub.` template references a repeated GET parameter.)
+      when /\AGET\[(\w+)\]\z/          then query[Regexp.last_match(1)].to_s
       else whole
       end
     end
@@ -270,7 +276,7 @@ module WptRunner
 
         ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
         body = File.binread(file)
-        body = WptRunner.substitute(body, path) if File.basename(path).include?('.sub.')
+        body = WptRunner.substitute(body, path, req.GET) if File.basename(path).include?('.sub.')
         resp_headers = {'content-type' => ct}
         # wptserve serves a sibling `<file>.headers` as extra response headers
         # (e.g. Last-Modified for document.lastModified). Merge any it declares.

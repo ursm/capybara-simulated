@@ -2330,7 +2330,10 @@ module Capybara
           # GET ignores enctype: the entry list is always the urlencoded query.
           query, = encode_form_submission(fields, file_inputs, 'application/x-www-form-urlencoded')
           uri = URI.parse(action_url)
-          uri.query = query unless query.empty?
+          # HTML "mutate action URL" for GET: SET the query to the entry list
+          # unconditionally — an empty list clears any query the action already
+          # carried (browsers navigate to `action?`), it isn't preserved.
+          uri.query = query
           frame_entry ? navigate_frame(uri.to_s, entry: frame_entry) : navigate(uri.to_s)
         else
           body, content_type = encode_form_submission(fields, file_inputs, enctype)
@@ -4295,9 +4298,9 @@ module Capybara
       # URL's query with the serialized entry list (dropping any pre-existing
       # query), preserving a trailing #fragment. String-based so it works on the
       # raw (possibly relative) action attribute without URI.parse fragility;
-      # the absolute equivalent of submit_form_handle's `uri.query = body`.
+      # the absolute equivalent of submit_form_handle's `uri.query = body`. An
+      # EMPTY entry list still clears the query (→ `action?`), matching browsers.
       def form_get_url(action, body)
-        return action if body.empty?
         base, _hash, frag = action.partition('#')
         path = base.split('?', 2).first
         url  = "#{path}?#{body}"
