@@ -209,6 +209,10 @@ html/semantics/forms/the-input-element/selection-pointer.html:
 - Selecting texts across <input type=time> should not cancel selection
 - Selecting texts across <input type=url> should not cancel selection
 - Selecting texts across <input type=week> should not cancel selection
+html/semantics/forms/the-input-element/show-picker-cross-origin-iframe.html:
+- Test showPicker() called from cross-origin iframe 1
+- Test showPicker() called from cross-origin iframe 2
+- Test showPicker() called from cross-origin iframe 3
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
 - Click forwarded from label.click() is not trusted
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
@@ -515,6 +519,10 @@ html/semantics/forms/the-select-element/show-picker-being-cv-hidden.html:
 - select showPicker() throws when content-visibility hidden
 html/semantics/forms/the-select-element/show-picker-being-rendered.html:
 - select showPicker() throws when not being rendered
+html/semantics/forms/the-select-element/show-picker-cross-origin-iframe.html:
+- Test showPicker() called from cross-origin iframe 1
+- Test showPicker() called from cross-origin iframe 2
+- Test showPicker() called from cross-origin iframe 3
 html/semantics/forms/the-select-element/show-picker-disabled.html:
 - select showPicker() throws when disabled
 html/semantics/forms/the-select-element/show-picker-user-gesture.html:
