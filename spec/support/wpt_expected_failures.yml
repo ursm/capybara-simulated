@@ -157,8 +157,6 @@ html/semantics/forms/the-fieldset-element/fieldset-intrinsic-size.html:
 - max-content content-box
 - min-content border-box
 - min-content content-box
-html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
-- Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
 - Change event when restoring pre-focused value then setting it again
 html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
@@ -178,10 +176,6 @@ html/semantics/forms/the-input-element/checkable-active-onblur.html:
 - Checkboxes should clear :active when the user tabs away from them while holding
   spacebar.
 - Radios should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-input-element/checkbox.html:
-- canceled activation steps on unchecked checkbox (indeterminate=true in onclick)
-- pre-activation steps on checked checkbox
-- pre-activation steps on unchecked checkbox
 html/semantics/forms/the-input-element/defaultValue-clobbering.html:
 - Visible value and validity should not be affected when assigning to the defaultValue
   property for type=number.
@@ -216,8 +210,6 @@ html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html
 - Focusing offscreen radio via keyboard should scroll it into view
 html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
-html/semantics/forms/the-input-element/radio-morphed.html:
-- Setting type attribute must unset checkedness of other elements
 html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.
