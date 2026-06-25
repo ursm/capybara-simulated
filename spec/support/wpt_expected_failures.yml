@@ -63,47 +63,10 @@ html/semantics/forms/form-submission-0/constructing-form-data-set.html: HARNESS_
 html/semantics/forms/form-submission-0/form-double-submit-3.html:
 - "<button> should have the same double-submit protection as <input type=submit>"
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-double-submit-preventdefault.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  false, passSubmitter: false'
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  false, passSubmitter: true'
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  true, passSubmitter: false'
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  true, passSubmitter: true'
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: true, preventDefaultSubmitButton:
-  false, passSubmitter: false'
-- 'test runTest with submitterType: button, preventDefaultRequestSubmit: true, preventDefaultSubmitButton:
-  false, passSubmitter: true'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  false, passSubmitter: false'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  false, passSubmitter: true'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  true, passSubmitter: false'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: false, preventDefaultSubmitButton:
-  true, passSubmitter: true'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: true, preventDefaultSubmitButton:
-  false, passSubmitter: false'
-- 'test runTest with submitterType: input, preventDefaultRequestSubmit: true, preventDefaultSubmitButton:
-  false, passSubmitter: true'
-- 'test runTest2 with submitterType: button, callRequestSubmit: false, callSubmit:
-  true, preventDefault: false, passSubmitter: true'
-- 'test runTest2 with submitterType: button, callRequestSubmit: true, callSubmit:
-  true, preventDefault: false, passSubmitter: true'
-- 'test runTest2 with submitterType: input, callRequestSubmit: false, callSubmit:
-  true, preventDefault: false, passSubmitter: true'
-- 'test runTest2 with submitterType: input, callRequestSubmit: true, callSubmit: true,
-  preventDefault: false, passSubmitter: true'
 html/semantics/forms/form-submission-0/form-double-submit-to-different-origin-frame.html:
 - default submit action should supersede onclick submit() for cross-origin iframes
 html/semantics/forms/form-submission-0/form-double-submit.html:
 - default submit action should supersede onclick submit()
-html/semantics/forms/form-submission-0/form-submission-algorithm.html:
-- Cannot navigate (after constructing the entry list)
-- If constructing entry list flag of form is true, then return
 html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html: HARNESS_ERROR
 html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
 - 'Verifies that form submissions scheduled inside javascript: urls take precedence
