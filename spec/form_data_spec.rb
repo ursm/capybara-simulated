@@ -99,6 +99,24 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(charset).to eq('UTF-8')
   end
 
+  it 'emits coordinate entries for an image-button submitter, named or not' do
+    entries = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('form');
+        f.innerHTML = '<input type=image name=pic><input type=image>';
+        document.body.appendChild(f);
+        const named    = f.querySelector('input[name=pic]');
+        const nameless = f.querySelectorAll('input[type=image]')[1];
+        const collect  = (submitter) => Array.from(new FormData(f, submitter).entries());
+        return { named: collect(named), nameless: collect(nameless) };
+      })()
+    JS
+    # An image button contributes only when it IS the submitter: `<name>.x`/`.y`,
+    # or bare `x`/`y` when it has no name. The other image button stays out.
+    expect(entries['named']).to eq([['pic.x', '0'], ['pic.y', '0']])
+    expect(entries['nameless']).to eq([['x', '0'], ['y', '0']])
+  end
+
   it 'converts an unpaired surrogate in a control name to U+FFFD' do
     key_codes = session.evaluate_script(<<~JS)
       (function () {

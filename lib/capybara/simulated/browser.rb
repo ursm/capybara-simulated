@@ -1045,7 +1045,7 @@ module Capybara
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # the marshaller rejects non-primitive types. Coerce to a path-list
         # form V8 can hold — the actual multipart upload happens later
-        # in `build_multipart_body` during form submission.
+        # in `encode_entry_list` during form submission.
         coerced = coerce_set_value(value)
         # For date/time-shaped inputs we need the type-specific
         # string. Probe the handle's `type` and re-format Date / Time
