@@ -151,8 +151,6 @@ html/semantics/forms/textfieldselection/selection-start-end-extra.html:
 - Shortening value by turning the input type into 'url' should correct selection{Start,End}
 html/semantics/forms/the-button-element/active-onblur.html:
 - Buttons should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-button-element/button-willvalidate-readonly-attribute.html:
-- Button element with "readonly" attribute shouldn't be barred from constraint validation
 html/semantics/forms/the-fieldset-element/disabled-003.html:
 - Disable deep-nested fieldsets should not hang
 - Disable light-nested fieldsets should not crash
@@ -572,8 +570,6 @@ html/semantics/forms/the-select-element/select-validity.html:
 - Validation on selects with display size set as more than one
 html/semantics/forms/the-select-element/select-validity.tentative.html:
 - Validation for placeholder option
-html/semantics/forms/the-select-element/select-willvalidate-readonly-attribute.html:
-- Select element with "readonly" attribute shouldn't be barred from constraint validation
 html/semantics/forms/the-select-element/show-picker-being-cv-hidden.html:
 - select showPicker() throws when content-visibility hidden
 html/semantics/forms/the-select-element/show-picker-being-rendered.html:
