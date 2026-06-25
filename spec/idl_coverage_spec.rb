@@ -58,6 +58,8 @@ module IdlCoverage
     'HTMLFormElement'   => {instance: "document.createElement('form')"},
     'HTMLAnchorElement' => {instance: "document.createElement('a')"},
     'HTMLOptionsCollection' => {instance: "document.createElement('select').options", ctor: 'HTMLOptionsCollection'},
+    'HTMLFormControlsCollection' => {instance: "document.createElement('form').elements", ctor: 'HTMLFormControlsCollection'},
+    'RadioNodeList' => {instance: "(function(){var f=document.createElement('form'),a=document.createElement('input'),b=document.createElement('input');a.name='r';b.name='r';f.append(a,b);return f.elements.r;})()", ctor: 'RadioNodeList'},
     'Event'       => {instance: "new Event('x')", ctor: 'Event'},
     'CustomEvent' => {instance: "new CustomEvent('x')"},
     'EventTarget' => {instance: 'new EventTarget()'},

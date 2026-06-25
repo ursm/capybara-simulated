@@ -172,10 +172,6 @@ html/semantics/forms/the-button-element/button-validation.html:
 - invalid type attribute
 html/semantics/forms/the-button-element/button-willvalidate-readonly-attribute.html:
 - Button element with "readonly" attribute shouldn't be barred from constraint validation
-html/semantics/forms/the-fieldset-element/HTMLFieldSetElement.html:
-- The controls must root at the fieldset element
-- The elements must return an HTMLCollection object
-- The type attribute must return 'fieldset'
 html/semantics/forms/the-fieldset-element/disabled-003.html:
 - Disable deep-nested fieldsets should not hang
 - Disable light-nested fieldsets should not crash
@@ -203,20 +199,6 @@ html/semantics/forms/the-form-element/form-action-submission.html:
   URL in this case)
 - An empty-string action should submit the form to the document's URL (= document's
   base URL in this case)
-html/semantics/forms/the-form-element/form-elements-filter.html:
-- form.elements must contain all listed elements with the form owner
-html/semantics/forms/the-form-element/form-elements-interfaces-01.html:
-- Testing interface HTMLCollection
-- Testing interface HTMLFormControlsCollection
-html/semantics/forms/the-form-element/form-elements-matches.html:
-- form.elements should include elements whose name starts with a number
-- input type=image should not be present in the form.elements collection
-html/semantics/forms/the-form-element/form-elements-nameditem-01.html:
-- RadioNodeList should exist
-- elements collection should include fieldsets
-- elements collection should return elements or RadioNodeLists
-html/semantics/forms/the-form-element/form-elements-sameobject.html:
-- "[SameObject] should apply to 'elements' attr on <form>"
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
@@ -294,7 +276,6 @@ html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.http
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.
 html/semantics/forms/the-input-element/reset.html:
-- reset button resets controls associated with a form using the form attribute
 - reset button resets controls associated with their form using the form element pointer
 html/semantics/forms/the-input-element/selection-pointer.html:
 - Selecting texts across <input type=button> should not cancel selection
