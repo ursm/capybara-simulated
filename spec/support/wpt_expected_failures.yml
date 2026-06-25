@@ -312,18 +312,6 @@ html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-elemen
   click
 html/semantics/forms/the-meter-element/meter.html:
 - Invalid floating-point number values
-html/semantics/forms/the-option-element/option-element-constructor.html:
-- Option constructor does not set dirtiness (so, manipulating the selected content
-  attribute still updates the selected IDL attribute)
-- Option constructor handles selectedness correctly when specified with defaultSelected
-  only
-- Option constructor handles selectedness correctly, even when incongruous with defaultSelected
-html/semantics/forms/the-option-element/option-form.html:
-- form
-html/semantics/forms/the-option-element/option-value.html:
-- No children, namespaced value
-- Single child, namespaced value
-- Two children, namespaced value
 html/semantics/forms/the-output-element/output-validity.html:
 - ":valid and :invalid pseudo-class on output element"
 html/semantics/forms/the-output-element/output.html:
@@ -374,7 +362,6 @@ html/semantics/forms/the-select-element/customizable-select/option-disabled-optg
 - nesting options and optgroups in disabled select
 - options should check ancestor optgroup for disabled state.
 html/semantics/forms/the-select-element/customizable-select/option-form-ancestor-select.html:
-- option.form should be null when options are nested in invalid elements.
 - option.form should look up the ancestor chain for a select element to get its form
   from.
 html/semantics/forms/the-select-element/customizable-select/option-list.html:
