@@ -54,11 +54,6 @@ html/semantics/forms/customizable-combobox/customizable-combobox-popover-excepti
   popover.
 html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
 - Focusing input should show datalist as a popover.
-html/semantics/forms/form-control-infrastructure/form.html:
-- label-in-table-for.form
-- label-in-table-with-control.form
-html/semantics/forms/form-control-infrastructure/form_owner_and_table.html:
-- Form element and form controls nested inside a table are correctly handled
 html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
 - parser inserted flag is not reset by insertions with the owner form, but reset by
   by removal from the owner form
@@ -196,8 +191,6 @@ html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.
-html/semantics/forms/the-input-element/reset.html:
-- reset button resets controls associated with their form using the form element pointer
 html/semantics/forms/the-input-element/selection-pointer.html:
 - Selecting texts across <input type=button> should not cancel selection
 - Selecting texts across <input type=checkbox> should not cancel selection
