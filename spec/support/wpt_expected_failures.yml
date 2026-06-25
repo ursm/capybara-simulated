@@ -176,9 +176,6 @@ html/semantics/forms/the-input-element/checkable-active-onblur.html:
 - Checkboxes should clear :active when the user tabs away from them while holding
   spacebar.
 - Radios should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-input-element/defaultValue-clobbering.html:
-- Visible value and validity should not be affected when assigning to the defaultValue
-  property for type=number.
 html/semantics/forms/the-input-element/email-set-value.html:
 - setValue(sanitizedValue) is reflected in visible text field content
 html/semantics/forms/the-input-element/files.html:
@@ -188,18 +185,8 @@ html/semantics/forms/the-input-element/files.html:
 html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html: HARNESS_ERROR
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
-html/semantics/forms/the-input-element/input-stepdown-02.html:
-- stepDown() on input with no initial value and negative min value
 html/semantics/forms/the-input-element/input-type-button.html:
 - label value
-html/semantics/forms/the-input-element/number-constraint-validation.html:
-- Unparsable number user input triggers sanitization and causes badInput to be set.
-- Users inputting a parsable but invalid floating point number doesn't trigger sanitization
-  and doesn't set badInput.
-html/semantics/forms/the-input-element/number-invalid-scientific-key-events.html:
-- Leading '+' with existing 'e'
-- Reject multiple signs after 'e' (+)
-- Reject multiple signs after 'e' (-)
 html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-focus.html:
 - During arrow key navigation, focus and checked is set on the radio element.
 html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
