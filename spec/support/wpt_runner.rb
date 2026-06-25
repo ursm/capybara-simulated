@@ -4,6 +4,8 @@ require 'capybara/simulated'
 require 'rack'
 require 'yaml'
 require 'set'
+require 'json'
+require 'open3'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the
@@ -17,6 +19,8 @@ require 'set'
 # stashed on `globalThis.__wptResults`.
 module WptRunner
   ROOT              = File.expand_path('../wpt', __dir__)
+  # The generic WPT `.py` request-handler executor (a minimal wptserve shim).
+  PY_HANDLER        = File.expand_path('../../script/wpt_py_handler.py', __dir__)
   EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
   OUT_OF_SCOPE_PATH = File.expand_path('wpt_out_of_scope.yml', __dir__)
   SKIP_PATH         = File.expand_path('wpt_skip.yml', __dir__)
@@ -107,6 +111,42 @@ module WptRunner
   SUB_ORIGIN     = "http://#{SUB_HOST}:#{SUB_HTTP_PORT}"
 
   module_function
+
+  # Run a vendored WPT `.py` request handler through script/wpt_py_handler.py (a
+  # minimal wptserve shim) via python3, returning a Rack `[status, headers, [body]]`
+  # — or nil to fall through (handler missing / python3 unavailable / malformed
+  # output) so the caller serves the source as text as before. The request body is
+  # piped on stdin; method / URL / headers go via env. Binary-safe: the child emits
+  # one JSON metadata line then the raw body bytes.
+  def run_py_handler(pyfile, req, env)
+    input = env['rack.input']
+    body  = input ? input.read.to_s : ''
+    input.rewind if input.respond_to?(:rewind)
+    headers = []
+    env.each do |k, v|
+      next unless k.is_a?(String) && k.start_with?('HTTP_')
+      headers << [k.sub('HTTP_', '').split('_').map(&:capitalize).join('-'), v.to_s]
+    end
+    headers << ['Content-Type', env['CONTENT_TYPE'].to_s] if env['CONTENT_TYPE']
+    py_env = {
+      'WPT_METHOD'   => req.request_method.to_s,
+      'WPT_URL'      => req.url.to_s,
+      'WPT_HEADERS'  => JSON.generate(headers),
+      'WPT_DOC_ROOT' => ROOT
+    }
+    out, status = Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true)
+    return nil unless status.success?
+    nl = out.index("\n".b)
+    return nil unless nl
+    meta  = JSON.parse(out.byteslice(0, nl))
+    rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
+    hdrs  = {}
+    Array(meta['headers']).each {|k, v| hdrs[k.to_s.downcase] = v.to_s }
+    hdrs['content-type'] ||= 'text/plain'
+    [meta['status'].to_i, hdrs, [rbody]]
+  rescue StandardError, JSON::ParserError
+    nil
+  end
 
   # Emulate wptserve's server-side `{{…}}` substitution for `.sub.` files (the
   # subset our vendored corpus references). `req_path` feeds the `location[...]`
@@ -262,6 +302,17 @@ module WptRunner
         # + report + each `// META: script=` dep + the test source.
         if (m = path.match(%r{\A(/.+\.(?:any|window))\.html\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
           next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_wrapper("#{m[1].sub(%r{\A/}, '')}.js")]]
+        end
+        # Any other vendored `.py` handler: run it under the minimal wptserve shim
+        # (script/wpt_py_handler.py) via python3 instead of serving its source as
+        # text. The hardcoded fast-paths above stay (proven + no subprocess); this
+        # covers the long tail (echo / set-headers / return-(headers, body)).
+        if path.end_with?('.py')
+          pyfile = File.expand_path(File.join(WptRunner::ROOT, path))
+          if pyfile.start_with?(WptRunner::ROOT + '/') && File.file?(pyfile)
+            resp = WptRunner.run_py_handler(pyfile, req, env)
+            next resp if resp
+          end
         end
         file = File.expand_path(File.join(WptRunner::ROOT, path))
         # wptserve answers a directory request (e.g. GET `/`) with a 200 listing;

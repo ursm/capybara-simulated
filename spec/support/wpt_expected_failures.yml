@@ -62,8 +62,6 @@ html/semantics/forms/form-submission-0/action-encoding.html:
 html/semantics/forms/form-submission-0/constructing-form-data-set.html: HARNESS_ERROR
 html/semantics/forms/form-submission-0/form-data-set-usv.html:
 - Strings from form controls should be converted to Unicode scalar values in FormData
-- Strings from form controls should be converted to Unicode scalar values in form
-  submission
 html/semantics/forms/form-submission-0/form-double-submit-3.html:
 - "<button> should have the same double-submit protection as <input type=submit>"
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html: HARNESS_ERROR
@@ -118,8 +116,6 @@ html/semantics/forms/form-submission-target/form-target-blank-useractivation-mul
 - "<form target=_blank>.requestSubmit()"
 - "<form target=_blank>.submit()"
 html/semantics/forms/form-submission-target/form-target-blank-useractivation.html: HARNESS_ERROR
-html/semantics/forms/form-submission-target/form-target-iframe.html:
-- Form targetted at iframe
 html/semantics/forms/form-submission-target/form-target-request-header.html: HARNESS_ERROR
 html/semantics/forms/form-submission-target/rel-base-target.html: HARNESS_ERROR
 html/semantics/forms/form-submission-target/rel-button-target.html: HARNESS_ERROR
