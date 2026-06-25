@@ -138,10 +138,6 @@ html/semantics/forms/historical-search-event.html:
 html/semantics/forms/historical.html: HARNESS_ERROR
 html/semantics/forms/input-change-event-properties.html:
 - "<select> pressing down arrow"
-html/semantics/forms/resetting-a-form/reset-form.html:
-- Resetting <output> by calling the reset() method
-- Resetting <output> by clicking the button in reset status
-- Resetting <output> by clicking the input in reset status
 html/semantics/forms/setCustomValidity-normalize-newlines.html:
 - setCustomValidity should normalize newlines from the given error message
 html/semantics/forms/textfieldselection/selection-start-end-extra.html:
@@ -271,10 +267,6 @@ html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-elemen
   click
 html/semantics/forms/the-meter-element/meter.html:
 - Invalid floating-point number values
-html/semantics/forms/the-output-element/output-validity.html:
-- ":valid and :invalid pseudo-class on output element"
-html/semantics/forms/the-output-element/output.html:
-- output value and defaultValue
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
 - Base appearance listbox selects should not be focusable.
 - Keyboard behavior for base appearance <select multiple>
@@ -589,8 +581,6 @@ html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
 html/semantics/forms/the-textarea-element/textarea-textLength.html:
 - Textarea's 'testLength' should work for utf-16.
-html/semantics/forms/the-textarea-element/textarea-type.html:
-- Textarea's type attribute should return 'textarea'
 html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
