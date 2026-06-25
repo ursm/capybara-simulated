@@ -12384,6 +12384,23 @@ html/semantics/forms/the-form-element/form-nameditem.html:
     type and break all internal type checks. A bounded, earned cost of representing
     nodeType as an own field (not a C++-style type tag) — every other named override
     works.
+html/semantics/forms/the-input-element/show-picker-cross-origin-iframe.html:
+- name: Test showPicker() called from cross-origin iframe 1
+  reason: Needs cross-origin iframe loading — the child document is fetched from a
+    DIFFERENT origin (get_host_info().HTTP_NOTSAMESITE_ORIGIN / HTTP_REMOTE_ORIGIN)
+    and showPicker() must throw SecurityError based on the frame's origin relative to
+    the top. The in-process driver serves a SINGLE origin with no origin isolation
+    (rule 1, multi-origin server / cross-origin frame loading is unmodeled). The
+    same-origin subtest is in scope and passes (the child runs its module, calls
+    showPicker without a SecurityError, and postMessages "" back via the WindowProxy).
+- name: Test showPicker() called from cross-origin iframe 2
+  reason: Cross-origin iframe loading + origin-based showPicker SecurityError; the
+    single-origin in-process driver can't serve a second origin (rule 1). Same-origin
+    subtest passes.
+- name: Test showPicker() called from cross-origin iframe 3
+  reason: Cross-origin iframe loading + origin-based showPicker SecurityError; the
+    single-origin in-process driver can't serve a second origin (rule 1). Same-origin
+    subtest passes.
 html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
 - name: Control should be :active on mousedown when clicking the label twice in succession.
   reason: Needs the test_driver.Actions pointer-automation backend to synthesize a
@@ -12399,6 +12416,21 @@ html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.
     click. The automation trusted-click backend and PointerEvent metadata propagation
     are unmodeled (CLAUDE.md rule 1). The sibling "not trusted" subtest (pure label.click())
     is in scope and passes.
+html/semantics/forms/the-select-element/show-picker-cross-origin-iframe.html:
+- name: Test showPicker() called from cross-origin iframe 1
+  reason: Needs cross-origin iframe loading — the child is fetched from a different
+    origin (get_host_info().HTTP_NOTSAMESITE_ORIGIN / HTTP_REMOTE_ORIGIN) and
+    showPicker() must throw SecurityError per the frame's origin. The single-origin
+    in-process driver can't serve a second origin / isolate origins (rule 1). The
+    same-origin subtest is in scope and passes.
+- name: Test showPicker() called from cross-origin iframe 2
+  reason: Cross-origin iframe loading + origin-based showPicker SecurityError; the
+    single-origin in-process driver can't serve a second origin (rule 1). Same-origin
+    subtest passes.
+- name: Test showPicker() called from cross-origin iframe 3
+  reason: Cross-origin iframe loading + origin-based showPicker SecurityError; the
+    single-origin in-process driver can't serve a second origin (rule 1). Same-origin
+    subtest passes.
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
