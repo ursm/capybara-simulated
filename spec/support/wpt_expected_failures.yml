@@ -152,8 +152,6 @@ html/semantics/forms/the-fieldset-element/fieldset-intrinsic-size.html:
 - max-content content-box
 - min-content border-box
 - min-content content-box
-html/semantics/forms/the-input-element/change-set-value.html:
-- Change event when restoring pre-focused value then setting it again
 html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
 - Checkboxes should clear :active when the user tabs away from them while pressing
   it with a pointing device
@@ -171,8 +169,6 @@ html/semantics/forms/the-input-element/checkable-active-onblur.html:
 - Checkboxes should clear :active when the user tabs away from them while holding
   spacebar.
 - Radios should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-input-element/email-set-value.html:
-- setValue(sanitizedValue) is reflected in visible text field content
 html/semantics/forms/the-input-element/files.html:
 - files for input type=file
 - setting <input type=file>.files
