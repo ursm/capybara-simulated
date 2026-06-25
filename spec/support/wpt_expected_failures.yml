@@ -200,10 +200,6 @@ html/semantics/forms/the-input-element/number-invalid-scientific-key-events.html
 - Leading '+' with existing 'e'
 - Reject multiple signs after 'e' (+)
 - Reject multiple signs after 'e' (-)
-html/semantics/forms/the-input-element/radio-disconnected-group-owner.html:
-- Appending input radio input into a disconnect form should update the other radio
-  inputs in the same radio group.
-- Removed elements are moved into separate radio groups.
 html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-focus.html:
 - During arrow key navigation, focus and checked is set on the radio element.
 html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
