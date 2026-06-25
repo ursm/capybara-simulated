@@ -187,11 +187,6 @@ html/semantics/forms/the-input-element/defaultValue-clobbering.html:
   property for type=number.
 html/semantics/forms/the-input-element/email-set-value.html:
 - setValue(sanitizedValue) is reflected in visible text field content
-html/semantics/forms/the-input-element/email-value-idn.html:
-- IDN domain in dynamically-set email value attribute is converted to ASCII
-- IDN domain in parser-created email value attribute is converted to ASCII
-- IDN domain is converted when type changes to email
-- IDN domains in multiple email value attribute are converted to ASCII
 html/semantics/forms/the-input-element/files.html:
 - files for input type=file
 - setting <input type=file>.files
@@ -203,8 +198,6 @@ html/semantics/forms/the-input-element/input-stepdown-02.html:
 - stepDown() on input with no initial value and negative min value
 html/semantics/forms/the-input-element/input-type-button.html:
 - label value
-html/semantics/forms/the-input-element/maxlength-number.html:
-- maxlength doesn't apply to input type=number
 html/semantics/forms/the-input-element/number-constraint-validation.html:
 - Unparsable number user input triggers sanitization and causes badInput to be set.
 - Users inputting a parsable but invalid floating point number doesn't trigger sanitization
@@ -256,8 +249,6 @@ html/semantics/forms/the-input-element/show-picker-cross-origin-iframe.html:
 - Test showPicker() called from cross-origin iframe 1
 - Test showPicker() called from cross-origin iframe 2
 - Test showPicker() called from cross-origin iframe 3
-html/semantics/forms/the-input-element/valueMode.html:
-- value IDL attribute of input type file without value attribute
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
 - Click forwarded from label.click() is not trusted
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
