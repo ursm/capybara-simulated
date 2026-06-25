@@ -138,8 +138,6 @@ html/semantics/forms/historical-search-event.html:
 html/semantics/forms/historical.html: HARNESS_ERROR
 html/semantics/forms/input-change-event-properties.html:
 - "<select> pressing down arrow"
-html/semantics/forms/resetting-a-form/reset-event.html:
-- Test aspects of the reset event
 html/semantics/forms/resetting-a-form/reset-form.html:
 - Resetting <output> by calling the reset() method
 - Resetting <output> by clicking the button in reset status
@@ -153,23 +151,6 @@ html/semantics/forms/textfieldselection/selection-start-end-extra.html:
 - Shortening value by turning the input type into 'url' should correct selection{Start,End}
 html/semantics/forms/the-button-element/active-onblur.html:
 - Buttons should clear :active when the user tabs away from them while holding spacebar.
-html/semantics/forms/the-button-element/button-click-submits-with-commandfor.html:
-- clicking a button (implicit type) should NOT trigger a submit (with command and
-  commandfor attribute)
-- clicking a button (implicit type) should NOT trigger a submit (with command attribute)
-- clicking a button (implicit type) should NOT trigger a submit (with commandfor attribute)
-html/semantics/forms/the-button-element/button-click-submits.html:
-- clicking the child of a button with .click() should trigger a submit
-html/semantics/forms/the-button-element/button-events.html:
-- The reset event must be fired when click a button in reset status
-- The submit event must be fired when click a button in submit status
-html/semantics/forms/the-button-element/button-submit-remove-children.html:
-- This test will pass if a form navigation successfully occurs when clicking a child
-  element of a <button type=submit> element with a onclick event handler which removes
-  the button's child.
-html/semantics/forms/the-button-element/button-validation.html:
-- historical menu type attribute
-- invalid type attribute
 html/semantics/forms/the-button-element/button-willvalidate-readonly-attribute.html:
 - Button element with "readonly" attribute shouldn't be barred from constraint validation
 html/semantics/forms/the-fieldset-element/disabled-003.html:
