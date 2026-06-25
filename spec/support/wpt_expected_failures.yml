@@ -310,12 +310,6 @@ html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
 - label with for attribute should proxy click events to the associated element on
   click
-html/semantics/forms/the-legend-element/HTMLLegendElement.html:
-- The legend.form must be same value as fieldset.form
-- The legend.form return null when it has no fieldset parent
-html/semantics/forms/the-legend-element/legend-form.html:
-- Check if legend.form return null when legend has no fieldset element as its parent
-- Check if legend.form returns its parent when it's inside a fieldset
 html/semantics/forms/the-meter-element/meter.html:
 - Invalid floating-point number values
 html/semantics/forms/the-option-element/option-element-constructor.html:
@@ -567,8 +561,8 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontent-muta
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-nested.html:
 - Modification behavior when nesting selectedcontent elements.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-restore.optional.html:
-- "<selectedcontent> should be up to date after form restoration."
 - "<input> inside <selectedcontent> should be restored after form submission."
+- "<selectedcontent> should be up to date after form restoration."
 html/semantics/forms/the-select-element/customizable-select/selectedcontent.html:
 - "<seletedcontent> behavior in disconnected <select>."
 - The <selectedcontent> element should reflect the HTML contents of the selected <option>.
