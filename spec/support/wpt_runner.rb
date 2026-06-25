@@ -132,7 +132,8 @@ module WptRunner
       'WPT_METHOD'   => req.request_method.to_s,
       'WPT_URL'      => req.url.to_s,
       'WPT_HEADERS'  => JSON.generate(headers),
-      'WPT_DOC_ROOT' => ROOT
+      'WPT_DOC_ROOT' => ROOT,
+      'PYTHONDONTWRITEBYTECODE' => '1'   # no __pycache__ in the vendored WPT tree
     }
     out, status = Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true)
     return nil unless status.success?

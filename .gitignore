@@ -9,3 +9,7 @@
 /spec/fixtures/hotwire/
 /tmp/
 *.gem
+
+# Python bytecode from the WPT .py handler executor
+__pycache__/
+*.pyc

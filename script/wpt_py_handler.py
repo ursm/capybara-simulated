@@ -16,7 +16,9 @@ handler exception → status 500 with the traceback as the body (the harness log
 Out of scope (best-effort stubs, won't pass but won't crash): request.server.stash
 (cross-request state — each call is a fresh subprocess) and deep server config.
 """
-import sys, os, json, io, importlib.util
+import sys
+sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
+import os, json, io, importlib.util
 from urllib.parse import urlsplit, parse_qsl
 
 
