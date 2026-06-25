@@ -12374,6 +12374,15 @@ html/dom/usvstring-reflection.https.html:
     pairing (createDataChannelPair) to round-trip the sent string; WebRTC is a deliberately
     unmodeled subsystem (CLAUDE.md rule 1). The USVString coercion itself is trivial,
     but there is no transport to observe the received value.
+html/semantics/forms/the-form-element/form-nameditem.html:
+- name: Named elements should override builtins
+  reason: 'The form named getter (LegacyOverrideBuiltins) does shadow every prototype
+    builtin tested EXCEPT `nodeType`. `nodeType` is the driver''s node-type discriminator,
+    stored as an own field and read as `node.nodeType` on every node in every DOM
+    operation (insertion validity, tree walks, find); letting an `<input name=nodeType>`
+    shadow it would make `form.nodeType` return an element instead of the numeric type
+    and break all internal type checks. A bounded, earned cost of representing nodeType
+    as an own field (not a C++-style type tag) — every other named override works.'
 html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
 - name: Control should be :active on mousedown when clicking the label twice in succession.
   reason: Needs the test_driver.Actions pointer-automation backend to synthesize a

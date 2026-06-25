@@ -118,7 +118,6 @@ html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate
 html/semantics/forms/form-submission-0/implicit-submission.optional.html:
 - Submit event with a submit button
 - Submit event with disabled submit button
-- Submit event with no submit button
 html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
 - 'Verifies that form submissions scheduled inside javascript: urls take precedence
   over the javascript: url''s return value.'
@@ -218,20 +217,6 @@ html/semantics/forms/the-form-element/form-elements-nameditem-01.html:
 - elements collection should return elements or RadioNodeLists
 html/semantics/forms/the-form-element/form-elements-sameobject.html:
 - "[SameObject] should apply to 'elements' attr on <form>"
-html/semantics/forms/the-form-element/form-indexed-element.html:
-- Trying to delete an indexed property name should never work
-- form.elements should be accessed correctly by index
-html/semantics/forms/the-form-element/form-nameditem.html:
-- All listed elements except input type=image should be present in the form
-- Calling item() on the NodeList returned from the named getter should work
-- Indexed getter on the NodeList returned from the named getter should work
-- Input should only be a named property on the innermost form that contains it
-- Name for a single element should work
-- Named elements should override builtins
-- Past names map should work correctly
-- The form attribute should be taken into account for named getters (multiple elements)
-- The form attribute should be taken into account for named getters (single element)
-- Trying to set an expando that would shadow an already-existing named property
 html/semantics/forms/the-input-element/anchor-contenteditable-navigate.html:
 - Anchor elements should not be able to navigate if they have contentEditable.
 html/semantics/forms/the-input-element/change-set-value.html:
