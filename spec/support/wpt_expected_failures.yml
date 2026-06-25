@@ -60,8 +60,6 @@ html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
 html/semantics/forms/form-submission-0/constructing-form-data-set.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-data-set-usv.html:
-- Strings from form controls should be converted to Unicode scalar values in FormData
 html/semantics/forms/form-submission-0/form-double-submit-3.html:
 - "<button> should have the same double-submit protection as <input type=submit>"
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html: HARNESS_ERROR
