@@ -2,6 +2,7 @@
 
 require 'json'
 require 'yaml'
+require 'set'
 require 'capybara/simulated'
 
 # WebIDL existence-coverage gate.
@@ -39,6 +40,58 @@ module IdlCoverage
 
   gaps_path = File.expand_path('support/idl_known_gaps.yml', __dir__)
   KNOWN_GAPS = (File.exist?(gaps_path) ? (YAML.safe_load_file(gaps_path) || {}) : {}).freeze
+
+  # ── Per-interface ownership (the inverse of the existence check) ───────────
+  # A member declared on a specific HTML element interface must NOT appear on
+  # elements of OTHER interfaces (`'disabled' in div` is false in a real browser
+  # — disabled is an HTMLButtonElement/Input/… member, not an HTMLDivElement one).
+  # Historically every reflected member lived on one shared Element.prototype, so
+  # they all leaked onto every element; the per-interface-prototype work moves
+  # each onto its owning interface. This gate measures that migration: it asserts
+  # interface-specific members are ABSENT on a bare control element, with a
+  # ratcheting allowlist of members still leaked (drained as they're relocated).
+
+  # An interface's FULL member surface (own + inherited). Mixin members are
+  # already merged into each interface's `members`, so only `inheritance` walks.
+  def self.full_members(interface, seen = {})
+    return [] if interface.nil? || seen[interface]
+    seen[interface] = true
+    iface = SURFACE[interface]
+    return [] unless iface
+    (iface['members'] || []) + full_members(iface['inheritance'], seen)
+  end
+
+  # Every HTML element interface (transitively inherits HTMLElement).
+  def self.html_element_interfaces
+    SURFACE.keys.select do |k|
+      next false if k == 'HTMLElement'
+      cur = k; chain = []
+      while cur && SURFACE[cur] && !chain.include?(cur)
+        chain << cur
+        cur = SURFACE[cur]['inheritance']
+      end
+      chain.include?('HTMLElement')
+    end
+  end
+
+  # The control element to probe: <span> (HTMLSpanElement has zero own members),
+  # so its full surface is exactly the bare HTMLElement/Element/Node one.
+  CONTROL_TAG = 'span'
+
+  # Members owned by SOME element interface but not part of the control's surface
+  # — these must be absent on the control element.
+  def self.interface_specific_members
+    control = full_members('HTMLSpanElement').to_set
+    out = Set.new
+    html_element_interfaces.each do |iface|
+      next if iface == 'HTMLSpanElement'
+      Array(SURFACE[iface]['members']).each { |m| out << m unless control.include?(m) }
+    end
+    out.to_a.sort
+  end
+
+  leaked_path = File.expand_path('support/idl_leaked_members.yml', __dir__)
+  LEAKED_ALLOW = (File.exist?(leaked_path) ? Array(YAML.safe_load_file(leaked_path)) : []).freeze
 
   # interface => { instance: <JS expr for an instance>, ctor: <JS expr for the
   # constructor, for static members> }. Either key may be omitted.
@@ -145,5 +198,37 @@ RSpec.describe 'WebIDL existence coverage' do
           "spec/support/idl_known_gaps.yml: #{stale_gaps.sort.join(', ')}"
       end
     end
+  end
+end
+
+RSpec.describe 'WebIDL per-interface ownership (members not leaked across interfaces)' do
+  let(:app) {
+    ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+
+  before { session.visit '/' }
+
+  it "interface-specific members are absent on a bare <#{IdlCoverage::CONTROL_TAG}> (or listed as a known leak)" do
+    want_absent = IdlCoverage.interface_specific_members
+    js = <<~JS
+      (() => {
+        const el = document.createElement('#{IdlCoverage::CONTROL_TAG}');
+        return #{want_absent.to_json}.filter((n) => n in el);
+      })()
+    JS
+    leaked = Array(session.evaluate_script(js)).sort
+    allow  = IdlCoverage::LEAKED_ALLOW.sort
+
+    new_leaks = leaked - allow
+    stale     = allow  - leaked
+
+    expect(new_leaks).to be_empty,
+      "interface-specific members leaked onto <#{IdlCoverage::CONTROL_TAG}> — relocate each to its owning " \
+      "interface prototype, or add to spec/support/idl_leaked_members.yml: #{new_leaks.join(', ')}"
+
+    expect(stale).to be_empty,
+      "members allowlisted as leaked but now correctly absent — remove from " \
+      "spec/support/idl_leaked_members.yml: #{stale.join(', ')}"
   end
 end
