@@ -115,3 +115,43 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(key_codes).to eq([0x6E, 0xFFFD])   # "n" + U+FFFD
   end
 end
+
+# A submission whose target names a same-document frame runs JS-side. Its entry
+# list is constructed once (firing `formdata`) and that SAME list is submitted, so
+# a handler's append/delete reaches the request — and `formdata` fires exactly once
+# (it used to fire a second time when the multipart path re-built the FormData).
+RSpec.describe 'named-frame submit threads the constructed entry list' do
+  let(:app) {
+    lambda do |env|
+      if env['PATH_INFO'] == '/echo'
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><html><body>QS:#{env['QUERY_STRING']}</body></html>"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <iframe name="resultframe"></iframe>
+            <form id="f" action="/echo" method="get" target="resultframe">
+              <input name="n1" value="v1">
+            </form>
+            <script>
+              window.formdataFires = 0;
+              document.getElementById('f').addEventListener('formdata', (e) => {
+                window.formdataFires++;
+                e.formData.append('extra', 'injected');
+              });
+            </script>
+          </body></html>
+        HTML
+      end
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  it 'fires formdata once and submits the handler-appended entry' do
+    session.evaluate_script("document.getElementById('f').requestSubmit()")
+    expect(session.evaluate_script('window.formdataFires')).to eq(1)
+    session.within_frame('resultframe') do
+      expect(session).to have_text('QS:n1=v1&extra=injected')
+    end
+  end
+end
