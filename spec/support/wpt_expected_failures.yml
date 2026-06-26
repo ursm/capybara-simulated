@@ -13,10 +13,6 @@
 ---
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching mouseup event whose default action dispatches a click event
-html/semantics/forms/attributes-common-to-form-controls/dirname-ltr.html: HARNESS_ERROR
-html/semantics/forms/attributes-common-to-form-controls/dirname-only-if-applies.html: HARNESS_ERROR
-html/semantics/forms/attributes-common-to-form-controls/dirname-rtl-auto.html: HARNESS_ERROR
-html/semantics/forms/attributes-common-to-form-controls/dirname-rtl-inherited.html: HARNESS_ERROR
 html/semantics/forms/constraints/form-validation-validity-rangeOverflow.html:
 - "[INPUT in TIME status] The time is inside the accepted range for reversed range"
 - "[INPUT in TIME status] The time is min for reversed range"
@@ -59,13 +55,18 @@ html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
   by removal from the owner form
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
-html/semantics/forms/form-submission-0/constructing-form-data-set.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html: HARNESS_ERROR
+html/semantics/forms/form-submission-0/constructing-form-data-set.html:
+- _charset_ control sets the expected encoding name.
+html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html:
+- Verifies that one form used to target multiple frames in succession navigates all
+  of them.
+html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html:
+- Verifies that location navigations take precedence when following form submissions.
 html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
 - 'Verifies that form submissions scheduled inside javascript: urls take precedence
   over the javascript: url''s return value.'
-html/semantics/forms/form-submission-0/submit-file.sub.html: HARNESS_ERROR
+html/semantics/forms/form-submission-0/submit-file.sub.html:
+- Posting a File
 html/semantics/forms/form-submission-target/form-target-blank-useractivation-multi-globals.html:
 - "<form target=_blank>.requestSubmit()"
 - "<form target=_blank>.submit()"
@@ -77,7 +78,6 @@ html/semantics/forms/form-submission-target/rel-form-target.html: HARNESS_ERROR
 html/semantics/forms/form-submission-target/rel-input-target.html: HARNESS_ERROR
 html/semantics/forms/historical-search-event.html:
 - search event should not be supported
-html/semantics/forms/historical.html: HARNESS_ERROR
 html/semantics/forms/input-change-event-properties.html:
 - "<select> pressing down arrow"
 html/semantics/forms/setCustomValidity-normalize-newlines.html:
@@ -120,7 +120,8 @@ html/semantics/forms/the-input-element/files.html:
 - files for input type=file
 - setting <input type=file>.files
 - setting <input type=file>.files from DataTransfer
-html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html: HARNESS_ERROR
+html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html:
+- keyword _charset_
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
 html/semantics/forms/the-input-element/input-type-button.html:
@@ -477,7 +478,8 @@ html/semantics/forms/the-select-element/show-picker-user-gesture.html:
 - select showPicker() requires a user gesture
 html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
-html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html: HARNESS_ERROR
+html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html:
+- keywords
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
   a focusable child

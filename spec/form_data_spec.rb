@@ -210,3 +210,42 @@ RSpec.describe 'top-page submit threads the constructed entry list to Ruby' do
     expect(session).to have_current_path('/echo?extra=injected')
   end
 end
+
+# A form whose target names an iframe, submitted DURING PARSE by an inline
+# script's `button.click()`, must navigate that iframe — not the top page. The
+# element's handle isn't registered in the lookup table yet at parse time, so the
+# named-frame path must serialise from the form OBJECT (not its handle); a handle
+# miss there used to bail to a top-page navigation that destroyed the document
+# (the WPT dirname / form-submission-target iframe tests hit exactly this).
+RSpec.describe 'named-frame form submit during parse' do
+  let(:app) {
+    lambda do |env|
+      if env['PATH_INFO'] == '/landing'
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><html><body>landing QS:#{env['QUERY_STRING']}</body></html>"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><body>
+            <form action="/landing" method="get" target="frame">
+              <input name="q" value="self">
+              <button type="submit">Go</button>
+            </form>
+            <iframe name="frame"></iframe>
+            <script>document.querySelector('button').click();</script>
+          </body></html>
+        HTML
+      end
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  it 'navigates the named iframe, leaving the top page intact' do
+    # Top page must NOT have navigated to the action URL.
+    expect(session).to have_current_path('/')
+    expect(session).to have_css('form')
+    # The iframe received the GET submission.
+    session.within_frame('frame') do
+      expect(session).to have_text('landing QS:q=self')
+    end
+  end
+end
