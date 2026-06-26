@@ -80,4 +80,61 @@ RSpec.describe 'canvas.toBlob binary integrity' do
     end
     expect(out).to eq({'width' => 8, 'height' => 6})
   end
+
+  it 'toDataURL emits a base64 PNG whose decoded bytes are a valid PNG' do
+    require 'base64'
+    url = session.evaluate_script(<<~JS)
+      (function(){
+        var w = 4, h = 4;
+        var data = new Uint8ClampedArray(w * h * 4);
+        for (var i = 0; i < data.length; i++) { data[i] = 0x80 + (i % 0x40); }
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
+        return c.toDataURL();
+      })()
+    JS
+    expect(url).to start_with('data:image/png;base64,')
+    png = Base64.decode64(url.delete_prefix('data:image/png;base64,'))
+    expect(png[0, 8].bytes).to eq([137, 80, 78, 71, 13, 10, 26, 10])
+  end
+
+  it 'toDataURL of a zero-area canvas is the empty "data:," URL' do
+    url = session.evaluate_script(<<~JS)
+      (function(){
+        var c = document.createElement('canvas');
+        c.width = 0; c.height = 0;
+        return c.toDataURL();
+      })()
+    JS
+    expect(url).to eq('data:,')
+  end
+
+  it 'toDataURL of a sized but undrawn canvas is a valid (transparent) PNG' do
+    require 'base64'
+    url = session.evaluate_script(<<~JS)
+      (function(){
+        var c = document.createElement('canvas');
+        c.width = 3; c.height = 2;   // sized, never drawn into
+        return c.toDataURL();
+      })()
+    JS
+    expect(url).to start_with('data:image/png;base64,')
+    png = Base64.decode64(url.delete_prefix('data:image/png;base64,'))
+    expect(png[0, 8].bytes).to eq([137, 80, 78, 71, 13, 10, 26, 10])
+  end
+
+  it 'toDataURL falls back to image/png for an unsupported type' do
+    url = session.evaluate_script(<<~JS)
+      (function(){
+        var c = document.createElement('canvas');
+        c.width = 2; c.height = 2;
+        var d = new Uint8ClampedArray(16);
+        for (var i = 0; i < 16; i++) { d[i] = 200; }
+        c.getContext('2d').putImageData(new ImageData(d, 2, 2), 0, 0);
+        return c.toDataURL('image/bogus');
+      })()
+    JS
+    expect(url).to start_with('data:image/png;base64,')
+  end
 end

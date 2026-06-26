@@ -3704,6 +3704,17 @@ module Capybara
       }.freeze
       private_constant :MIME_TO_VIPS_EXT
 
+      # The canonical MIME for each format we actually encode. An unsupported
+      # request type maps to '.png' below, so the encoded format (and the type
+      # we report back to the canvas) is image/png — matching the toBlob /
+      # toDataURL "unsupported type falls back to image/png" rule.
+      EXT_TO_MIME = {
+        '.jpg'  => 'image/jpeg',
+        '.webp' => 'image/webp',
+        '.png'  => 'image/png'
+      }.freeze
+      private_constant :EXT_TO_MIME
+
       def encode_image(pixels_ref, width, height, mime_type = 'image/png', quality = 90)
         host_image_op('encode_image') {
           require 'vips' unless defined?(Vips)
@@ -3714,7 +3725,7 @@ module Capybara
           img = Vips::Image.new_from_memory_copy(raw, w, h, 4, :uchar)
           ext = MIME_TO_VIPS_EXT[mime_type.to_s.downcase] || '.png'
           opts = (ext == '.jpg' || ext == '.webp') ? {Q: quality.to_i} : {}
-          {'refId' => transfer_buffer_stash(img.write_to_buffer(ext, **opts))}
+          {'refId' => transfer_buffer_stash(img.write_to_buffer(ext, **opts)), 'mime' => EXT_TO_MIME[ext]}
         }
       end
 
