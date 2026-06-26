@@ -119,3 +119,144 @@ RSpec.describe 'iframe contentDocument same-origin policy' do
     expect(content_doc_reachable("f.setAttribute('sandbox', ''); f.src = '/child';")).to be(false)
   end
 end
+
+# Same-origin policy on the cross-origin WindowProxy itself: a cross-origin
+# Window exposes only the "CrossOriginProperties" (postMessage / location /
+# closed / frames / top / parent / …); reading anything else (notably
+# `document`) throws SecurityError. The same get-trap governs BOTH directions —
+# a parent reading a cross-origin child AND a cross-origin child reading its
+# parent / top.
+RSpec.describe 'cross-origin WindowProxy same-origin policy' do
+  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
+
+  let(:app) {
+    lambda do |env|
+      if env['PATH_INFO'].include?('child')
+        # A cross-origin child reports the cross-origin-readable origins (so it can
+        # tell it is cross-origin to its top), via the always-allowed postMessage.
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><meta charset=utf-8><script>
+            parent.postMessage(
+              'self=' + self.origin + ' top=' + top.origin + ' cross=' + (self.origin !== top.origin),
+              '*');
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>ROOT</body>']]
+      end
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  # Read `prop` off a freshly-appended cross-origin frame's contentWindow.
+  def cross_window_get(prop)
+    session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe');
+        f.src = 'http://cross.example.org/child';
+        document.body.appendChild(f);
+        try { const v = f.contentWindow.#{prop}; return 'ok:' + (typeof v); }
+        catch (e) { return e.name; }
+      })()
+    JS
+  end
+
+  it 'throws SecurityError reading document on a cross-origin frame' do
+    expect(cross_window_get('document')).to eq('SecurityError')
+  end
+
+  it 'exposes the cross-origin-safe properties without throwing (postMessage, closed)' do
+    # The point is that an allowlisted property is READABLE cross-origin (no
+    # SecurityError), unlike `document`. (`closed` is accessible though not yet a
+    # real boolean — a separate, non-SOP gap.)
+    expect(cross_window_get('postMessage')).to eq('ok:function')
+    expect(cross_window_get('closed')).to start_with('ok:')
+  end
+
+  it 'allows full access to a same-origin frame window' do
+    same = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe');
+        f.src = '/child';
+        document.body.appendChild(f);
+        try { return f.contentWindow.document ? 'doc' : 'null'; }
+        catch (e) { return e.name; }
+      })()
+    JS
+    expect(same).to eq('doc')
+  end
+
+  # NOTE: the REVERSE direction (a cross-origin child reading parent.document /
+  # top.document → SecurityError) is a follow-up. A top-level child's `parent`/
+  # `top` resolve to the MAIN realm, and frameWindowProxyFor self-shortcuts a
+  # request for the main realm to the raw global (no SOP get-trap), so the child
+  # can still reach the parent document. Closing it needs an observer-aware proxy.
+  # It is NOT needed for the cross-origin showPicker check (that compares
+  # self.origin to top.origin, and `origin` is a cross-origin-readable property).
+  it 'lets a cross-origin child read the cross-origin-safe top.origin (for self-vs-top checks)' do
+    session.evaluate_script(<<~JS)
+      window.__r = 'none';
+      window.addEventListener('message', (e) => { window.__r = e.data; });
+      const f = document.createElement('iframe');
+      f.src = 'http://cross.example.org/child';
+      document.body.appendChild(f);
+      void f.contentWindow;   // cross-origin frames build lazily — force the load
+    JS
+    r = nil
+    20.times do
+      r = session.evaluate_script('window.__r')
+      break if r != 'none'
+      sleep 0.02
+    end
+    # The child sees its own origin differs from top's (so a cross-origin-aware
+    # API like showPicker can detect the cross-origin embedding).
+    expect(r).to eq('self=http://cross.example.org top=http://www.example.com cross=true')
+  end
+end
+
+# postMessage targetOrigin gating + event.origin (HTML "window post message").
+RSpec.describe 'postMessage cross-document origin' do
+  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
+
+  let(:app) {
+    lambda do |env|
+      if env['PATH_INFO'].include?('child')
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><meta charset=utf-8><script>
+            parent.postMessage('star', '*');
+            parent.postMessage('match', location.origin);
+            parent.postMessage('mismatch', 'http://wrong.example.org');
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>ROOT</body>']]
+      end
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  it 'delivers only matching-targetOrigin messages and sets event.origin to the sender' do
+    session.evaluate_script(<<~JS)
+      window.__msgs = [];
+      window.addEventListener('message', (e) => { window.__msgs.push(e.data + '@' + e.origin); });
+      const f = document.createElement('iframe');
+      f.src = '/child';
+      document.body.appendChild(f);
+      void f.contentWindow;
+    JS
+    msgs = []
+    20.times do
+      msgs = session.evaluate_script('window.__msgs')
+      break if msgs.length >= 2
+      sleep 0.02
+    end
+    # "star" (*) and "match" (origin equals target) delivered; "mismatch" dropped.
+    # event.origin is the sender's origin, not ''.
+    expect(msgs).to contain_exactly(
+      'star@http://www.example.com',
+      'match@http://www.example.com'
+    )
+  end
+end
