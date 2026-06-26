@@ -126,6 +126,11 @@ module Capybara
       # timer/microtask storm so one settle iter returns to Ruby; large enough
       # for the heaviest legit chain (Mastodon hydrate, Turbo stream batch).
       SETTLE_MAX_ITER_TASKS = 256
+      # Backstop for the post-boot deferred-external-script drain: a dynamically
+      # inserted external <script> runs async (setTimeout 0), so an app's chunk
+      # loader chains many of them at boot. We pump only ALREADY-due tasks until the
+      # pending count hits 0; this caps a pathological self-injecting loader.
+      BOOT_SCRIPT_DRAIN_MAX_ITER = 300
       # Post-user-action virtual-clock advance. Default 0 — the
       # wall-sync model (each tick_real_time advances by the wall
       # ms elapsed since the last tick) lets Capybara's outer poll
@@ -4812,6 +4817,22 @@ module Capybara
         end
         opts['userAgent'] = @default_user_agent if @default_user_agent
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
+        # Drain the app's deferred external-script (chunk) boot chain to quiescence.
+        # A dynamically-inserted external <script> runs async (setTimeout 0; HTML
+        # "prepare the script" force-async), so a module/chunk loader's scripts
+        # haven't executed when boot returns — leaving the page half-booted, where a
+        # negative assertion (have_no_*) passes early or a reactive control (a toggle
+        # whose handler a chunk wires up) does nothing. `run_loop_step(0)` fires only
+        # ALREADY-due timers (the setTimeout(0) chunks + their .then chains, which
+        # may insert further due-now chunks), NOT delayed app timers — so the lazy
+        # wall-sync clock is preserved (smoke_spec "queries DOM before advancing
+        # pending timers"). Bounded by the finite pending-script count.
+        if @runtime.respond_to?(:run_loop_step)
+          BOOT_SCRIPT_DRAIN_MAX_ITER.times do
+            break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
+            @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+          end
+        end
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
 
