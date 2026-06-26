@@ -79,3 +79,43 @@ RSpec.describe 'iframe inline-script realm routing' do
     expect(titles_after_visit('/main-module')).to eq(parent: 'MAIN', frame: 'IFRAME-MODULE')
   end
 end
+
+# Same-origin policy on iframe `contentDocument`: a frame is reachable only when
+# it is same-origin with the accessing document. A cross-origin frame (different
+# host) and a sandboxed frame (opaque origin) expose a WindowProxy via
+# `contentWindow` but a null `contentDocument`.
+RSpec.describe 'iframe contentDocument same-origin policy' do
+  before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
+
+  let(:app) {
+    lambda do |env|
+      body = env['PATH_INFO'] == '/child' ? '<!doctype html><html><body>CHILD</body></html>' : '<!doctype html><html><body>ROOT</body></html>'
+      [200, {'content-type' => 'text/html'}, [body]]
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  def content_doc_reachable(frame_html)
+    session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe');
+        #{frame_html}
+        document.body.appendChild(f);
+        return !!f.contentDocument;
+      })()
+    JS
+  end
+
+  it 'exposes a same-origin frame document' do
+    expect(content_doc_reachable("f.src = '/child';")).to be(true)
+  end
+
+  it 'hides a cross-origin (different-host) frame document' do
+    expect(content_doc_reachable("f.src = 'http://cross.example.org/child';")).to be(false)
+  end
+
+  it 'hides a sandboxed frame document (opaque origin)' do
+    expect(content_doc_reachable("f.setAttribute('sandbox', ''); f.src = '/child';")).to be(false)
+  end
+end
