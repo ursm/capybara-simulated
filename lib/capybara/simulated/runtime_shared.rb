@@ -116,6 +116,11 @@ module Capybara
         '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch_for_js(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         '__csim_transferIssued'      => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
+        # Universal-server context (WPT runner)? Gates cross-origin eager frame
+        # building: only there is a cross-origin iframe's content served locally,
+        # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
+        # eager-@app.calls a foreign URL (side effects: extra visit / log row).
+        '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
         '__csim_decodeVideoFrame'    => ->(b, *a) { b.decode_video_frame(a[0]) },
         '__csim_encodeImage'         => ->(b, *a) { b.encode_image(a[0], a[1], a[2], a[3], a[4]) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying

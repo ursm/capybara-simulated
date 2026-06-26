@@ -345,7 +345,23 @@ module WptRunner
   end
 
   def session
-    @session ||= Capybara::Session.new(:simulated, app)
+    # The wptserve shim app serves EVERY host (www.example.com, the cross-origin
+    # test hosts not-web-platform.test / www1.web-platform.test, the SUB_ORIGIN),
+    # so every host is genuinely local here. Mark it so a cross-origin iframe
+    # fixture eager-builds + is served by @app.call (real apps leave this off, so
+    # external embeds stay lazy). The Browser caches this at construction, so set
+    # the env ONLY while constructing the session and restore it immediately — a
+    # process-global flag would otherwise leak into a later non-WPT Browser built
+    # in the same rspec process (e.g. under `--order random`).
+    @session ||= begin
+      prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+      begin
+        Capybara::Session.new(:simulated, app)
+      ensure
+        if prev.nil? then ENV.delete('CSIM_LOCAL_ALL_HOSTS') else ENV['CSIM_LOCAL_ALL_HOSTS'] = prev end
+      end
+    end
   end
 
   # Every real testharness test file under dom/ — i.e. one that pulls in

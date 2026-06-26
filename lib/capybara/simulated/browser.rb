@@ -233,6 +233,13 @@ module Capybara
         # `Capybara.app_host` / `server_host` / `server_port` on every
         # rack call (CLAUDE.md: cache env decisions at construction).
         @default_host                 = self.class.default_host
+        # The WPT runner serves EVERY host through one in-process Rack app (the
+        # wptserve catch-all), so cross-origin test fixtures are genuinely local
+        # there. Setting this makes `url_is_local?` true for all hosts, so a
+        # cross-origin iframe eager-builds + is served by @app.call directly
+        # (no failing net_http_fetch). Apps leave it off: an external embed stays
+        # non-local → lazy → no @app.call side effect (extra visit / log row).
+        @all_hosts_local              = ENV['CSIM_LOCAL_ALL_HOSTS'] == '1'
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -4964,10 +4971,20 @@ module Capybara
         net_http_fetch(url, env, method: method, body: body) || @app.call(env)
       end
 
+      # Whether this is a universal-server context (the WPT runner's wptserve shim
+      # serves every host in-process). Gates cross-origin eager frame building: in
+      # such a context a cross-origin iframe's content IS served locally, so it
+      # eager-builds; an ordinary app leaves cross-origin frames lazy (= baseline),
+      # so an external embed isn't eager-fetched. A simple flag, NOT per-URL —
+      # url_is_local? compares only host:port (ignoring scheme) and treats a missing
+      # ref origin as local, which would eager-build frames the baseline left lazy.
+      def all_hosts_local? = @all_hosts_local
+
       # Path-only or fragment-only URLs are always against the current
       # origin. For absolute URLs, compare host:port to the cached
       # parsed @current_url (or default_host on first navigate).
       def url_is_local?(url)
+        return true if @all_hosts_local
         s = url.to_s
         return true if s.empty? || s.start_with?('/', '#', '?')
         uri = safe_uri(s)
