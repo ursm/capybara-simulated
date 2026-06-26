@@ -60,13 +60,9 @@ html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
 html/semantics/forms/form-submission-0/constructing-form-data-set.html: HARNESS_ERROR
-html/semantics/forms/form-submission-0/form-double-submit-3.html:
-- "<button> should have the same double-submit protection as <input type=submit>"
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html: HARNESS_ERROR
 html/semantics/forms/form-submission-0/form-double-submit-to-different-origin-frame.html:
 - default submit action should supersede onclick submit() for cross-origin iframes
-html/semantics/forms/form-submission-0/form-double-submit.html:
-- default submit action should supersede onclick submit()
 html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html: HARNESS_ERROR
 html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
 - 'Verifies that form submissions scheduled inside javascript: urls take precedence

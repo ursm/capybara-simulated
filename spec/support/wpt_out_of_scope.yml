@@ -12380,29 +12380,29 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
   reason: 'Chrome-divergent: the driver produces n2="v3" (last-wins — the requestSubmit
     submitter replaces the inner form.submit()), which is exactly what real Chrome
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
-    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct =
-    what browsers actually do"; see memory form-submission-planned-nav.'
+    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
+    = what browsers actually do"; see memory form-submission-planned-nav.'
 - name: 'test runTest2 with submitterType: button, callRequestSubmit: true, callSubmit:
     true, preventDefault: false, passSubmitter: true'
   reason: 'Chrome-divergent: the driver produces n2="v3" (last-wins — the requestSubmit
     submitter replaces the inner form.submit()), which is exactly what real Chrome
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
-    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct =
-    what browsers actually do"; see memory form-submission-planned-nav.'
+    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
+    = what browsers actually do"; see memory form-submission-planned-nav.'
 - name: 'test runTest2 with submitterType: input, callRequestSubmit: false, callSubmit:
     true, preventDefault: false, passSubmitter: true'
   reason: 'Chrome-divergent: the driver produces n2="v3" (last-wins — the requestSubmit
     submitter replaces the inner form.submit()), which is exactly what real Chrome
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
-    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct =
-    what browsers actually do"; see memory form-submission-planned-nav.'
+    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
+    = what browsers actually do"; see memory form-submission-planned-nav.'
 - name: 'test runTest2 with submitterType: input, callRequestSubmit: true, callSubmit:
     true, preventDefault: false, passSubmitter: true'
   reason: 'Chrome-divergent: the driver produces n2="v3" (last-wins — the requestSubmit
     submitter replaces the inner form.submit()), which is exactly what real Chrome
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
-    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct =
-    what browsers actually do"; see memory form-submission-planned-nav.'
+    4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
+    = what browsers actually do"; see memory form-submission-planned-nav.'
 html/semantics/forms/the-form-element/form-nameditem.html:
 - name: Named elements should override builtins
   reason: The form named getter (LegacyOverrideBuiltins) does shadow every prototype
