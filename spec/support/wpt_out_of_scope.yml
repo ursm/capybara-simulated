@@ -12792,10 +12792,6 @@ html/semantics/forms/the-select-element/customizable-select/select-disabled.html
     appearance:base-select.'
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
-- name: 'defaultbutton: <select disabled> should prevent focus and activation with
-    appearance:base-select.'
-  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
-    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
 html/semantics/forms/the-select-element/customizable-select/select-events-2.optional.html:
 - name: "<select> should fire input and change events when new option is selected."
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -12963,11 +12959,6 @@ html/semantics/forms/the-select-element/customizable-select/select-mouse-behavio
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
     the :open state, and focus/keyboard navigation within the rendered listbox are
     rendering we deliberately do not model.'
-- name: 'custombutton: Clicking the label should focus the select button without opening
-    the picker.'
-  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
-    the :open state, and focus/keyboard navigation within the rendered listbox are
-    rendering we deliberately do not model.'
 - name: 'custombutton: Select with appearance:base-select should open and close when
     clicking the button.'
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -12979,11 +12970,6 @@ html/semantics/forms/the-select-element/customizable-select/select-mouse-behavio
     rendering we deliberately do not model.'
 - name: 'fallbackbutton: Clicking an option in an appearance:base-select select should
     choose the option and close the popover.'
-  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
-    the :open state, and focus/keyboard navigation within the rendered listbox are
-    rendering we deliberately do not model.'
-- name: 'fallbackbutton: Clicking the label should focus the select button without
-    opening the picker.'
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
     the :open state, and focus/keyboard navigation within the rendered listbox are
     rendering we deliberately do not model.'

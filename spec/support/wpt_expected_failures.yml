@@ -80,19 +80,11 @@ html/semantics/forms/the-select-element/customizable-select/option-disabled-optg
 - disabled select
 - nesting options and optgroups in disabled select
 - options should check ancestor optgroup for disabled state.
-html/semantics/forms/the-select-element/customizable-select/option-form-ancestor-select.html:
-- option.form should look up the ancestor chain for a select element to get its form
-  from.
 html/semantics/forms/the-select-element/customizable-select/option-list.html:
 - select's option list should not include descendants of options, hrs, or nested optgroups.
-html/semantics/forms/the-select-element/customizable-select/select-button-behaviors.html:
-- Select button should not be the default form submit button.
 html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
 - Input tags should parse inside select if nested in another tag
 - Input tags should parse inside select if there are no options first.
-html/semantics/forms/the-select-element/customizable-select/select-options-id.html:
-- Options in wrapper div in multiple should work after re-parsing and re-attaching.
-- Options in wrapper div should still work when the multiple attribute is added.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
 - Option element insertion steps.
 - Option element removal steps.
@@ -118,8 +110,6 @@ html/semantics/forms/the-select-element/filterable-select/filterable-select-filt
 - Filterable select option:filtered behavior
 html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
 - beforefilter event for customizable combobox.
-html/semantics/forms/the-select-element/select-click-does-not-open-picker.html:
-- Synthetic click events do not open select picker
 html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
 - Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
