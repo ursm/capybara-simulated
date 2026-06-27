@@ -12378,6 +12378,30 @@ html/dom/usvstring-reflection.https.html:
     pairing (createDataChannelPair) to round-trip the sent string; WebRTC is a deliberately
     unmodeled subsystem (CLAUDE.md rule 1). The USVString coercion itself is trivial,
     but there is no transport to observe the received value.
+html/semantics/forms/constraints/form-validation-validity-stepMismatch.html:
+- name: "[INPUT in NUMBER status] Step mismatch when step is a very small floating
+    number and value is not its integral multiple"
+  reason: 'stepMismatch for a sub-float-epsilon step (step=3e-15, value=17): value/step
+    exceeds float fractional precision, so the float remainder cannot detect the off-grid
+    value — exact decimal arithmetic (a decimal library) is a measured cost for a
+    step no app uses (rule 1 case 2).'
+html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
+- name: beforefilter event for customizable combobox.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). cancelable beforefilter event + datalist
+    popover-on-focus.
+html/semantics/forms/customizable-combobox/customizable-combobox-filtered-pseudo.tentative.html:
+- name: Case folding
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). :filtered pseudo + case-folded option/input
+    matching.
+- name: Customizable combobox option:filtered behavior
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). :filtered pseudo + case-folded option/input
+    matching.
 html/semantics/forms/customizable-combobox/customizable-combobox-keyboard-behavior.tentative.html:
 - name: Disabled options should not match :active-option.
   reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
@@ -12404,6 +12428,18 @@ html/semantics/forms/customizable-combobox/customizable-combobox-pointer-behavio
     element.'
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/customizable-combobox/customizable-combobox-popover-exception.tentative.html:
+- name: Datalist popover should not show when an exception is encountered when showing
+    the popover.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). beforetoggle on an auto-shown datalist popover.
+html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
+- name: Focusing input should show datalist as a popover.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). auto-show datalist as a popover on input
+    focus.
 html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
 - name: 'test runTest2 with submitterType: button, callRequestSubmit: false, callSubmit:
     true, preventDefault: false, passSubmitter: true'
@@ -12433,6 +12469,12 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
+html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
+- name: 'Verifies that form submissions scheduled inside javascript: urls take precedence
+    over the javascript: url''s return value.'
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). javascript:-URL form-submit navigation precedence.
 html/semantics/forms/form-submission-target/form-target-blank-useractivation-multi-globals.html:
 - name: "<form target=_blank>.requestSubmit()"
   reason: Full multi-window browsing context (target=_blank new window with its own
@@ -12548,6 +12590,15 @@ html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html
 - name: Focusing offscreen radio via keyboard should scroll it into view
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
+- name: Verifies that form restoration does not fire input or change events for <input
+    type=range>.
+  reason: Needs a real window.open child window with its own VM (multi-window — deliberately
+    scoped to URL-only aux windows) plus session-history form-control restoration.
+- name: Verifies that form restoration does not fire input or change events for <input
+    type=text>.
+  reason: Needs a real window.open child window with its own VM (multi-window — deliberately
+    scoped to URL-only aux windows) plus session-history form-control restoration.
 html/semantics/forms/the-input-element/selection-pointer.html:
 - name: Selecting texts across <input type=button> should not cancel selection
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
@@ -12621,9 +12672,18 @@ html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
     (CLAUDE.md rule 1); there is no rendering/interaction engine to observe `:active`
     during a held mousedown.
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
+- name: Click forwarded from label to control preserves pointer metadata
+  reason: A label-forwarded click must carry pointer-event metadata (coordinates/buttons)
+    — pointer automation / pointer-event metadata not modeled.
 - name: Click forwarded from label.click() is not trusted
-  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
-    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+  reason: The file drives a test_driver pointer sequence (preserves-pointer-metadata)
+    that hangs without a pointer backend; the runner force-timeout then makes the
+    sibling subtest non-deterministic — out-of-scope on pointer automation.
+html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
+- name: label with for attribute should proxy click events to the associated element
+    on click
+  reason: Modifier click forwarded from a <label> to its control via test_driver.Actions
+    pointer automation (+ .tentative) — pointer automation not modeled.
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
 - name: Base appearance listbox selects should not be focusable.
   reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
@@ -12680,12 +12740,21 @@ html/semantics/forms/the-select-element/customizable-select-multiple-popup/selec
 - name: Mouse behavior for base appearance <select multiple size=1>
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-validity-invalidation.tentative.html:
+- name: select-multiple-validity-invalidation
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). :user-valid/:user-invalid + pointer interaction
+    for <select multiple>.
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple.tentative.html:
+- name: "<selectedcontent> should support <select multiple>."
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). <select multiple> selectedcontent div-wrapping.
 - name: "<selectedcontent> should update in response to user interaction."
-  reason: The in-scope <selectedcontent> mirroring is covered; this subtest changes
-    the selection via showPicker() + test_driver.click/Actions on a rendered option
-    (customizable-select picker/listbox option-click) — picker rendering + pointer
-    automation not modeled.
+  reason: Tentative/unstable spec (.tentative) for <select multiple> selectedcontent
+    (div-wrapping + pointer interaction); no app depends on it — per the project tentative
+    out-of-scope bucket.
 html/semantics/forms/the-select-element/customizable-select/base-appearance-inheritance.html:
 - name: base appearance should not propagate to nested elements which support appearance.
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
@@ -12873,6 +12942,15 @@ html/semantics/forms/the-select-element/customizable-select/select-initial-focus
 - name: Option initial focus should still work when a display animation is present.
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
     picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
+- name: Input tags should parse inside select if nested in another tag
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). content model keeping <input> inside <select>.
+- name: Input tags should parse inside select if there are no options first.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). content model keeping <input> inside <select>.
 html/semantics/forms/the-select-element/customizable-select/select-inside-top-layer.html:
 - name: a modal dialog can be nested inside select
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -13113,6 +13191,12 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontent.html
     the selection via showPicker() + test_driver.click/Actions on a rendered option
     (customizable-select picker/listbox option-click) — picker rendering + pointer
     automation not modeled.
+html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
+- name: The selectedcontentelement attribute should set up an association between
+    a select and a selectedcontent.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). selectedcontentelement attribute association.
 html/semantics/forms/the-select-element/customizable-select/switch-picker-appearance.html:
 - name: Basic functionality of select picker and appearance
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
@@ -13144,6 +13228,15 @@ html/semantics/forms/the-select-element/customizable-select/switch-picker-appear
     while the picker is open
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
     pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
+- name: Case folding
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). :filtered pseudo for <input filter=select>.
+- name: Filterable select option:filtered behavior
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). :filtered pseudo for <input filter=select>.
 html/semantics/forms/the-select-element/filterable-select/filterable-select-keyboard-behavior.tentative.html:
 - name: 'appearance auto: Keyboard behavior for filterable select.'
   reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
@@ -13157,6 +13250,11 @@ html/semantics/forms/the-select-element/filterable-select/filterable-select-keyb
 - name: 'appearance base-select: active option should get scrolled into view.'
   reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
     popup + in-popup keyboard/pointer interaction not modeled.'
+html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
+- name: beforefilter event for customizable combobox.
+  reason: Tentative/unstable spec (.tentative) for a brand-new customizable-<select>/combobox
+    sub-feature; no shipping library or app depends on it — per the project tentative
+    out-of-scope bucket (see wpt_subset). beforefilter event + :filtered filtering.
 html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
 - name: Using touch inputs should not deselect other options in a listbox <select
     multiple>.
@@ -13198,6 +13296,11 @@ html/semantics/forms/the-select-element/select-popover-position-with-zoom.tentat
 - name: The popover should be top right positioned
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
+- name: Test required attribute
+  reason: getComputedStyle of border-width — an uncaptured layout property; the cascade
+    models a deliberate subset (CAPTURED_PROPS), not full computed box style. Also
+    .tentative customizable-select.
 html/semantics/forms/the-select-element/show-picker-being-cv-hidden.html:
 - name: select showPicker() throws when content-visibility hidden
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
