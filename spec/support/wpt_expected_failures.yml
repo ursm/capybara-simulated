@@ -13,19 +13,11 @@
 ---
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching mouseup event whose default action dispatches a click event
-html/semantics/forms/constraints/form-validation-validity-rangeOverflow.html:
-- "[INPUT in TIME status] The time is inside the accepted range for reversed range"
-- "[INPUT in TIME status] The time is min for reversed range"
-html/semantics/forms/constraints/form-validation-validity-rangeUnderflow.html:
-- "[INPUT in TIME status] The time is max for reversed range"
 html/semantics/forms/constraints/form-validation-validity-stepMismatch.html:
 - "[INPUT in NUMBER status] Step mismatch when step is a very small floating number
   and value is not its integral multiple"
 html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
-html/semantics/forms/constraints/input-number-validity-dynamic-value-no-change.html:
-- number input number validation is updated correctly after value attribute change
-  which doesn't change input value
 html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
 - beforefilter event for customizable combobox.
 html/semantics/forms/customizable-combobox/customizable-combobox-filtered-pseudo.tentative.html:
@@ -57,13 +49,9 @@ html/semantics/forms/historical-search-event.html:
 - search event should not be supported
 html/semantics/forms/input-change-event-properties.html:
 - "<select> pressing down arrow"
-html/semantics/forms/setCustomValidity-normalize-newlines.html:
-- setCustomValidity should normalize newlines from the given error message
 html/semantics/forms/the-fieldset-element/disabled-003.html:
 - Disable deep-nested fieldsets should not hang
 - Disable light-nested fieldsets should not crash
-html/semantics/forms/the-input-element/hidden-charset-case-sensitive.html:
-- keyword _charset_
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
 html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-focus.html:
@@ -78,8 +66,6 @@ html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
 - label with for attribute should proxy click events to the associated element on
   click
-html/semantics/forms/the-meter-element/meter.html:
-- Invalid floating-point number values
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-validity-invalidation.tentative.html:
 - select-multiple-validity-invalidation
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple-restore.optional.html:
