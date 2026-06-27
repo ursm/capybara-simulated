@@ -91,6 +91,11 @@ module Capybara
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1]); nil },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
+        # Cross-window remote-ref RPC: route an opener's node/object proxy op to
+        # the target window's VM (a[0]=window handle, a[1]=ref id, a[2]=prop/method).
+        '__csimWindowRefGet'         => ->(b, *a) { b.window_ref_get(a[0], a[1], a[2]) },
+        '__csimWindowRefSet'         => ->(b, *a) { b.window_ref_set(a[0], a[1], a[2], a[3]); nil },
+        '__csimWindowRefCall'        => ->(b, *a) { b.window_ref_call(a[0], a[1], a[2], a[3]) },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },

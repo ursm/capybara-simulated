@@ -3426,6 +3426,23 @@ module Capybara
       # route to the Driver, which reads a PRIMITIVE off the target window's VM.
       def window_get(handle, prop)     = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: false) : nil)
       def window_doc_get(handle, prop) = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: true)  : nil)
+      # Cross-window remote-ref RPC — SOURCE side: forward a node/object proxy op to
+      # the target window's Browser via the Driver.
+      def window_ref_get(handle, id, prop)         = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
+      def window_ref_set(handle, id, prop, value)  = (@driver.window_ref_set(handle.to_s, id, prop.to_s, value) if @driver.respond_to?(:window_ref_set))
+      def window_ref_call(handle, id, method, args) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args) : nil)
+      # TARGET side: execute the op against THIS window's VM (the Driver calls these
+      # on the resolved target Browser).
+      def remote_ref_get(id, prop)          = @runtime.call('__csimRemoteRefGet', id, prop.to_s)
+      def remote_ref_set(id, prop, value)   = (@runtime.call('__csimRemoteRefSet', id, prop.to_s, value); nil)
+      def remote_ref_call(id, method, args)
+        result = @runtime.call('__csimRemoteRefCall', id, method.to_s, args || [])
+        # A cross-isolate `form.submit()` / `requestSubmit()` queued a pending
+        # submit in THIS (target) window; drain it so the submission is actioned
+        # (it would otherwise wait for a Capybara action on this non-active window).
+        consume_pending_form_submit
+        result
+      end
       # Read a primitive property off THIS window's globalThis / document — called
       # by the Driver to serve another window's cross-window proxy read.
       def read_property(prop, doc: false)

@@ -373,6 +373,11 @@ module Capybara
         b = window_browser(handle) or return nil
         b.read_property(prop, doc: doc)
       end
+      # Cross-window remote-ref RPC: route a node/object proxy op to the window
+      # that owns the ref (handle), executing in that window's VM.
+      def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
+      def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
+      def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
       def window_set_location(handle, url)
         b = window_browser(handle) or return
         navigate_window(b, b.resolve_document_url(url), source: current_browser)
