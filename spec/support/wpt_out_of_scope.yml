@@ -706,11 +706,6 @@ dom/nodes/moveBefore/selection-preserve.html:
 - name: moveBefore should not reset selection with preceding text
   reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
     — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
-dom/nodes/remove-and-adopt-thcrash.html:
-- name: Check that removing a node and then adopting its parent into a different window/document
-    doesn't crash.
-  reason: window.open() aux windows are URL-only by design (no per-window VM/document);
-    popup.document.body.appendChild(document.body) has no real second-window document.
 domparsing/XMLSerializer-serializeToString.html:
 - name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
   reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
@@ -12433,45 +12428,6 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
-html/semantics/forms/form-submission-target/form-target-blank-useractivation-multi-globals.html:
-- name: "<form target=_blank>.requestSubmit()"
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-- name: "<form target=_blank>.submit()"
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/form-target-blank-useractivation.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/form-target-request-header.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/rel-base-target.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/rel-button-target.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/rel-form-target.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
-html/semantics/forms/form-submission-target/rel-input-target.html:
-- name: HARNESS_ERROR
-  reason: Full multi-window browsing context (target=_blank new window with its own
-    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
-    windows.
 html/semantics/forms/the-button-element/active-onblur.html:
 - name: Buttons should clear :active when the user tabs away from them while holding
     spacebar.
@@ -12548,15 +12504,6 @@ html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html
 - name: Focusing offscreen radio via keyboard should scroll it into view
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
-html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
-- name: Verifies that form restoration does not fire input or change events for <input
-    type=range>.
-  reason: Needs a real window.open child window with its own VM (multi-window — deliberately
-    scoped to URL-only aux windows) plus session-history form-control restoration.
-- name: Verifies that form restoration does not fire input or change events for <input
-    type=text>.
-  reason: Needs a real window.open child window with its own VM (multi-window — deliberately
-    scoped to URL-only aux windows) plus session-history form-control restoration.
 html/semantics/forms/the-input-element/selection-pointer.html:
 - name: Selecting texts across <input type=button> should not cancel selection
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover

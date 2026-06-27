@@ -13,6 +13,9 @@
 ---
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching mouseup event whose default action dispatches a click event
+dom/nodes/remove-and-adopt-thcrash.html:
+- Check that removing a node and then adopting its parent into a different window/document
+  doesn't crash.
 html/semantics/forms/constraints/form-validation-validity-stepMismatch.html:
 - "[INPUT in NUMBER status] Step mismatch when step is a very small floating number
   and value is not its integral multiple"
@@ -39,6 +42,15 @@ html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
   over the javascript: url''s return value.'
 html/semantics/forms/form-submission-0/submit-file.sub.html:
 - Posting a File
+html/semantics/forms/form-submission-target/form-target-blank-useractivation-multi-globals.html:
+- "<form target=_blank>.requestSubmit()"
+- "<form target=_blank>.submit()"
+html/semantics/forms/form-submission-target/form-target-blank-useractivation.html: HARNESS_ERROR
+html/semantics/forms/form-submission-target/form-target-request-header.html: HARNESS_ERROR
+html/semantics/forms/form-submission-target/rel-base-target.html: HARNESS_ERROR
+html/semantics/forms/form-submission-target/rel-button-target.html: HARNESS_ERROR
+html/semantics/forms/form-submission-target/rel-form-target.html: HARNESS_ERROR
+html/semantics/forms/form-submission-target/rel-input-target.html: HARNESS_ERROR
 html/semantics/forms/historical-search-event.html:
 - search event should not be supported
 html/semantics/forms/input-change-event-properties.html:
@@ -52,6 +64,9 @@ html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-fo
 - During arrow key navigation, focus and checked is set on the radio element.
 html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
+html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
+- Verifies that form restoration does not fire input or change events for <input type=range>.
+- Verifies that form restoration does not fire input or change events for <input type=text>.
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
 - label with for attribute should proxy click events to the associated element on
   click
