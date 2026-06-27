@@ -276,10 +276,17 @@ module Capybara
       # matches an existing window navigates that window instead of opening a
       # new one (HTML window-name targeting); `opener_handle` records the
       # opener so the new window's `window.opener` resolves back to it.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil)
         name = name.to_s
+        # A `<form target>` keeps its opener by default (unlike a `target=_blank`
+        # LINK, which is noopener) — resolve the opener handle from the source.
+        opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
-          navigate_window(existing[:browser], url, source: source)
+          if post
+            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer)
+          else
+            navigate_window(existing[:browser], url, source: source)
+          end
           return existing[:handle]
         end
         @next_window_seq += 1
@@ -291,12 +298,18 @@ module Capybara
         # (with its opener) must exist before `visit` runs those scripts.
         @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
         if url && !url.empty?
+          if post
+            # A `<form target=_blank method=post>` loads the new window via POST,
+            # carrying the opener's URL as referrer (unless rel=noreferrer → '').
+            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer)
           # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
           # isolate — load the document directly from a click-time snapshot (a
           # deferred target=_blank nav may revoke the URL first) or, failing that,
           # the opener's blob store.
-          unless url.to_s.start_with?('blob:') && load_blob_into_window(aux, url, source, snapshot: blob_snapshot)
-            aux.visit(url)
+          elsif !(url.to_s.start_with?('blob:') && load_blob_into_window(aux, url, source, snapshot: blob_snapshot))
+            # A form submission carries a referrer (the opener's URL) unless the
+            # form opted out via rel=noreferrer (referrer: '').
+            aux.visit(url, referer: referrer)
           end
         end
         handle

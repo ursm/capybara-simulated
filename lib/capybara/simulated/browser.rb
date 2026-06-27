@@ -425,8 +425,8 @@ module Capybara
 
       # Address-bar navigation: no Referer, and relative paths resolve
       # against the host root (not the current page's directory).
-      def visit(url)
-        navigate(resolve_visit_url(url), referer: nil)
+      def visit(url, referer: nil)
+        navigate(resolve_visit_url(url), referer: referer)
       end
 
       URL_UNSAFE_CHARS = %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n.freeze
@@ -2340,6 +2340,29 @@ module Capybara
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
+        # A non-frame named target (`_blank`, or a window name that isn't a frame)
+        # submits into a NEW/named browsing context — open (or reuse) an aux window,
+        # mirroring the link `target=_blank` branch. `_blank` is always a fresh window;
+        # a named target that matches THIS window's own `window.name` navigates in
+        # place (HTML named-context targeting), so it isn't a new window.
+        target = spec['target'].to_s
+        named_target = frame_entry.nil? && !target.empty? &&
+                       !%w[_self _top _parent].include?(target.downcase) &&
+                       @driver.respond_to?(:open_aux_window)
+        own_name   = named_target ? (@runtime.call('__csimReadWindowProp', false, 'name').to_s rescue '') : ''
+        new_window = named_target && (target.casecmp?('_blank') || target != own_name)
+        window_name = target.casecmp?('_blank') ? '' : target
+        # Opener exposure for a `<form target>` new context, per the link-relation
+        # model: `noopener`/`noreferrer` always drop the opener; `target=_blank`
+        # ALSO defaults to noopener unless `rel=opener` opts back in (a named target
+        # keeps its opener by default). `noreferrer` additionally empties the referrer.
+        rel_tokens  = spec['rel'].to_s.downcase.split(/\s+/)
+        no_referrer = rel_tokens.include?('noreferrer')
+        keep_opener = !no_referrer && !rel_tokens.include?('noopener') &&
+                      (target.downcase != '_blank' || rel_tokens.include?('opener'))
+        referrer    = no_referrer ? '' : (@current_url || '')
+        # Opening a new top-level browsing context consumes transient user activation.
+        @runtime.call('__csimConsumeTransientActivation') if new_window rescue nil
         if method == 'GET'
           # GET ignores enctype: the entry list is always the urlencoded query.
           query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
@@ -2348,10 +2371,21 @@ module Capybara
           # unconditionally — an empty list clears any query the action already
           # carried (browsers navigate to `action?`), it isn't preserved.
           uri.query = query
-          frame_entry ? navigate_frame(uri.to_s, entry: frame_entry) : navigate(uri.to_s)
+          if new_window
+            @driver.open_aux_window(uri.to_s, name: window_name, source: self,
+                                    opener: keep_opener, referrer: referrer)
+          elsif frame_entry
+            navigate_frame(uri.to_s, entry: frame_entry)
+          else
+            navigate(uri.to_s)
+          end
         else
           body, content_type = encode_entry_list(entries, enctype)
-          if frame_entry
+          if new_window
+            @driver.open_aux_window(action_url, name: window_name, source: self,
+                                    opener: keep_opener, referrer: referrer,
+                                    post: {body: body, content_type: content_type})
+          elsif frame_entry
             navigate_frame_post(action_url, body, content_type, entry: frame_entry)
           else
             navigate_post(action_url, body, content_type)
@@ -2449,14 +2483,14 @@ module Capybara
         body << "\r\n"
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, referer: @current_url)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         record_history({method: :post, url: url, body: body, content_type: content_type}) unless from_history || depth > 0
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: @current_url)
+        apply_default_request_env(env, referer: referer)
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers)
         if (loc = redirect_location(status, headers))
@@ -5137,7 +5171,7 @@ module Capybara
       # within the `record_action` block, which handles begin/finish
       # step bookkeeping + on-failure DOM snapshot.
       module RecordedActions
-        def visit(url)
+        def visit(url, referer: nil)
           record_action(:visit, "visit #{url}") { super }
         end
         def refresh
