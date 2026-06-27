@@ -80,15 +80,12 @@ html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-elemen
   click
 html/semantics/forms/the-meter-element/meter.html:
 - Invalid floating-point number values
-html/semantics/forms/the-select-element/customizable-select-listbox/selectedcontent-listbox.html:
-- "<select size=4> should support <selectedcontent>."
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-validity-invalidation.tentative.html:
 - select-multiple-validity-invalidation
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple-restore.optional.html:
 - "<selectedcontent> should be up to date after form restoration."
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple.tentative.html:
 - "<selectedcontent> should support <select multiple>."
-- "<selectedcontent> should update in response to user interaction."
 html/semantics/forms/the-select-element/customizable-select/nested-options.html:
 - Nested <options> not should be listed in <select> IDLs.
 html/semantics/forms/the-select-element/customizable-select/option-color-inheritance.html:
@@ -110,13 +107,9 @@ html/semantics/forms/the-select-element/customizable-select/select-input-parsing
 html/semantics/forms/the-select-element/customizable-select/select-options-id.html:
 - Options in wrapper div in multiple should work after re-parsing and re-attaching.
 - Options in wrapper div should still work when the multiple attribute is added.
-html/semantics/forms/the-select-element/customizable-select/select-value-selectedOption.html:
-- Test that option parts in a slotted-in listbox are reflected in the value property
-- Test that slotted-in selected-value part is updated to value of select
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
 - Option element insertion steps.
 - Option element removal steps.
-- Selectedcontent element insertion steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-movebefore.html:
 - Selectedcontent behavior with moving steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
@@ -128,16 +121,9 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontent-muta
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test6'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test7'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test8'
-html/semantics/forms/the-select-element/customizable-select/selectedcontent-nested.html:
-- Modification behavior when nesting selectedcontent elements.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-restore.optional.html:
 - "<input> inside <selectedcontent> should be restored after form submission."
 - "<selectedcontent> should be up to date after form restoration."
-html/semantics/forms/the-select-element/customizable-select/selectedcontent.html:
-- "<seletedcontent> behavior in disconnected <select>."
-- The <selectedcontent> element should reflect the HTML contents of the selected <option>.
-- When there are multiple <selectedcontent> elements, both of them should be kept
-  up to date.
 html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
 - The selectedcontentelement attribute should set up an association between a select
   and a selectedcontent.
