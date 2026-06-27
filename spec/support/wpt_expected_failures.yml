@@ -30,8 +30,6 @@ html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
 - Focusing input should show datalist as a popover.
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
-html/semantics/forms/form-submission-0/constructing-form-data-set.html:
-- _charset_ control sets the expected encoding name.
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html:
 - Verifies that one form used to target multiple frames in succession navigates all
   of them.
