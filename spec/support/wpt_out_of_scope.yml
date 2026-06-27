@@ -12773,6 +12773,12 @@ html/semantics/forms/the-select-element/customizable-select/checkmark-animation.
 - name: "::checkmark pseudo-element animates"
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
     picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/option-color-inheritance.html:
+- name: option elements should inherit color from their parent select element.
+  reason: 'getComputedStyle of a <select>s non-rendered internal contents (an <option>,
+    or any element nested in a select): the cascade deliberately does not descend
+    into a select dropdown internals (a rendering-model boundary); computed style
+    there is not modeled.'
 html/semantics/forms/the-select-element/customizable-select/picker-icon-animation.html:
 - name: "::picker-icon pseudo-element animates"
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
@@ -13184,6 +13190,79 @@ html/semantics/forms/the-select-element/customizable-select/select-vertical-writ
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
     the :open state, and focus/keyboard navigation within the rendered listbox are
     rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test1'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test2'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test3'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test4'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test5'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test6'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test7'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
+- name: 'MutationObserver records during parsing of <select> with <selectedcontent>:
+    test8'
+  reason: 'Exact MutationObserver record ORDERING during the streaming parse of a
+    <selectedcontent>: the driver re-clones selectedcontent once per connect-batch
+    (after the select parses), not once per option-insertion as a char-by-char parser
+    does. The final selectedcontent content is correct; only the parse-time record
+    sequence differs — matching it needs a streaming-parser per-option reconcile rearchitecture
+    (measured cost) for a parse-time MutationObserver order no app observes (rule
+    1 case 2).'
 html/semantics/forms/the-select-element/customizable-select/selectedcontent.html:
 - name: The <selectedcontent> element should reflect the HTML contents of the selected
     <option>.

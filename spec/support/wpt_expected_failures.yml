@@ -41,30 +41,15 @@ html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple-restore.optional.html:
 - "<selectedcontent> should be up to date after form restoration."
-html/semantics/forms/the-select-element/customizable-select/nested-options.html:
-- Nested <options> not should be listed in <select> IDLs.
-html/semantics/forms/the-select-element/customizable-select/option-color-inheritance.html:
-- option elements should inherit color from their parent select element.
 html/semantics/forms/the-select-element/customizable-select/option-disabled-optgroup.html:
 - disabled select
 - nesting options and optgroups in disabled select
 - options should check ancestor optgroup for disabled state.
-html/semantics/forms/the-select-element/customizable-select/option-list.html:
-- select's option list should not include descendants of options, hrs, or nested optgroups.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
 - Option element insertion steps.
 - Option element removal steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-movebefore.html:
 - Selectedcontent behavior with moving steps.
-html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test1'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test2'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test3'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test4'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test5'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test6'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test7'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test8'
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-restore.optional.html:
 - "<input> inside <selectedcontent> should be restored after form submission."
 - "<selectedcontent> should be up to date after form restoration."
