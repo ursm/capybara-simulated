@@ -28,9 +28,6 @@ html/semantics/forms/customizable-combobox/customizable-combobox-popover-excepti
   popover.
 html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
 - Focusing input should show datalist as a popover.
-html/semantics/forms/form-control-infrastructure/form_owner_and_table_3.html:
-- parser inserted flag is not reset by insertions with the owner form, but reset by
-  by removal from the owner form
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
 html/semantics/forms/form-submission-0/constructing-form-data-set.html:
