@@ -53,17 +53,11 @@ html/semantics/forms/form-submission-target/rel-form-target.html: HARNESS_ERROR
 html/semantics/forms/form-submission-target/rel-input-target.html: HARNESS_ERROR
 html/semantics/forms/historical-search-event.html:
 - search event should not be supported
-html/semantics/forms/input-change-event-properties.html:
-- "<select> pressing down arrow"
 html/semantics/forms/the-fieldset-element/disabled-003.html:
 - Disable deep-nested fieldsets should not hang
 - Disable light-nested fieldsets should not crash
 html/semantics/forms/the-input-element/input-disabled-fieldset-dynamic.html:
 - input-disabled-fieldset-dynamic
-html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-focus.html:
-- During arrow key navigation, focus and checked is set on the radio element.
-html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
-- Radio button keyboard navigation should proceed in tree-order.
 html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.

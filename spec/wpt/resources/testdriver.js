@@ -63,9 +63,14 @@
   // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
   // Only runs when the keydown wasn't preventDefault'd — matching real browsers.
   function keyDefaultAction(name, keydownEv) {
-    if (name === 'Tab' && keydownEv && !keydownEv.defaultPrevented &&
-        typeof W.__csimAdvanceFocus === 'function') {
+    if (keydownEv && keydownEv.defaultPrevented) return;
+    if (name === 'Tab' && typeof W.__csimAdvanceFocus === 'function') {
       W.__csimAdvanceFocus(__shiftHeld);
+    } else if ((name === 'ArrowDown' || name === 'ArrowUp' || name === 'ArrowLeft' || name === 'ArrowRight') &&
+               typeof W.__csimArrowKeyDefault === 'function') {
+      // Arrow-key default on a focused radio (group navigation) / single-line select.
+      var t = D() && D().activeElement;
+      if (t) W.__csimArrowKeyDefault(t, name);
     }
   }
 
