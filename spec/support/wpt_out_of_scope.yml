@@ -6,7 +6,11 @@
 #
 # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
 # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
-# it to the in-scope file / delete it). Format per file: a list of {name, reason}.
+# it to the in-scope file / delete it). Format per file: a list of {name, reason} —
+# or a single {name: HARNESS_ERROR, reason} entry for a whole file whose harness
+# never completes as an earned non-goal (e.g. a target=_blank test that hangs
+# without a real multi-window model); if such a file later completes, the gate goes
+# RED so it gets reclassified.
 #
 # regen_wpt_expected_failures.rb PRESERVES these classifications + reasons across
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
@@ -12374,6 +12378,32 @@ html/dom/usvstring-reflection.https.html:
     pairing (createDataChannelPair) to round-trip the sent string; WebRTC is a deliberately
     unmodeled subsystem (CLAUDE.md rule 1). The USVString coercion itself is trivial,
     but there is no transport to observe the received value.
+html/semantics/forms/customizable-combobox/customizable-combobox-keyboard-behavior.tentative.html:
+- name: Disabled options should not match :active-option.
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: Keyboard behavior for customizable combobox.
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: No active option and removal of active option.
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: Options should be scrolled into view when arrowed to.
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+html/semantics/forms/customizable-combobox/customizable-combobox-option-attributes.html:
+- name: Choosing options with value and label attributes.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/customizable-combobox/customizable-combobox-pointer-behavior.tentative.html:
+- name: 'click: activating an option in a combobox should set the text of the input
+    element.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'touch: activating an option in a combobox should set the text of the input
+    element.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
 html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
 - name: 'test runTest2 with submitterType: button, callRequestSubmit: false, callSubmit:
     true, preventDefault: false, passSubmitter: true'
@@ -12403,6 +12433,69 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
+html/semantics/forms/form-submission-target/form-target-blank-useractivation-multi-globals.html:
+- name: "<form target=_blank>.requestSubmit()"
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+- name: "<form target=_blank>.submit()"
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/form-target-blank-useractivation.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/form-target-request-header.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/rel-base-target.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/rel-button-target.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/rel-form-target.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/form-submission-target/rel-input-target.html:
+- name: HARNESS_ERROR
+  reason: Full multi-window browsing context (target=_blank new window with its own
+    VM + cross-window BroadcastChannel/opener) — deliberately scoped to URL-only aux
+    windows.
+html/semantics/forms/the-button-element/active-onblur.html:
+- name: Buttons should clear :active when the user tabs away from them while holding
+    spacebar.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-fieldset-element/fieldset-intrinsic-size.html:
+- name: auto border-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: auto content-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: max-content border-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: max-content content-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: min-content border-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: min-content content-box
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
 html/semantics/forms/the-form-element/form-nameditem.html:
 - name: Named elements should override builtins
   reason: The form named getter (LegacyOverrideBuiltins) does shadow every prototype
@@ -12413,6 +12506,112 @@ html/semantics/forms/the-form-element/form-nameditem.html:
     type and break all internal type checks. A bounded, earned cost of representing
     nodeType as an own field (not a C++-style type tag) — every other named override
     works.
+html/semantics/forms/the-input-element/checkable-active-onblur-with-click.html:
+- name: Checkboxes should clear :active when the user tabs away from them while pressing
+    it with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Checkboxes should clear :active when the user tabs away from them while pressing
+    the following label with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Checkboxes should clear :active when the user tabs away from them while pressing
+    the parent label with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Radios should clear :active when the user tabs away from them while pressing
+    it with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Radios should clear :active when the user tabs away from them while pressing
+    the following label with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Radios should clear :active when the user tabs away from them while pressing
+    the parent label with a pointing device
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-input-element/checkable-active-onblur.html:
+- name: Checkboxes should clear :active when the user tabs away from them while holding
+    spacebar.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Radios should clear :active when the user tabs away from them while holding
+    spacebar.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-input-element/input-type-button.html:
+- name: label value
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
+- name: Focusing offscreen radio via keyboard should scroll it into view
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-input-element/selection-pointer.html:
+- name: Selecting texts across <input type=button> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=checkbox> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=color> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=date> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=datetime-local> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=email> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=file> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=image> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=month> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=number> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=password> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=radio> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=range> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=reset> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=search> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=submit> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=tel> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=text> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=time> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=url> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: Selecting texts across <input type=week> should not cancel selection
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
 html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
 - name: Control should be :active on mousedown when clicking the label twice in succession.
   reason: Needs the test_driver.Actions pointer-automation backend to synthesize a
@@ -12422,12 +12621,590 @@ html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
     (CLAUDE.md rule 1); there is no rendering/interaction engine to observe `:active`
     during a held mousedown.
 html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
-- name: Click forwarded from label to control preserves pointer metadata
-  reason: Needs test_driver.click to produce a TRUSTED pointer click carrying pointerType/pointerId/isPrimary/detail,
-    and the label-forwarded click to copy that pointer metadata onto the control's
-    click. The automation trusted-click backend and PointerEvent metadata propagation
-    are unmodeled (CLAUDE.md rule 1). The sibling "not trusted" subtest (pure label.click())
-    is in scope and passes.
+- name: Click forwarded from label.click() is not trusted
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
+- name: Base appearance listbox selects should not be focusable.
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+- name: Keyboard behavior for base appearance <select multiple>
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+- name: Keyboard behavior for base appearance <select size=4>
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+- name: Tabbing and shift+tabbing into base appearance listbox.
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-mouse-behavior.html:
+- name: 'mouse: input behavior for base appearance <select multiple>'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'mouse: input behavior for base appearance <select size=4>'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'touch: input behavior for base appearance <select multiple>'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'touch: input behavior for base appearance <select size=4>'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select-listbox/select-listbox-home-end-pagedown-pageup.optional.html:
+- name: 'multiple: Home/End/PageUp/PageDown should move focus between options and
+    scroll.'
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+- name: 'single: Home/End/PageUp/PageDown should move focus between options and scroll.'
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+html/semantics/forms/the-select-element/customizable-select-listbox/select-listbox-typeahead.optional.html:
+- name: "<select multiple>: Typeahead should focus options without checking them."
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+- name: "<select>: Typeahead should focus options without checking them."
+  reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
+    keyboard navigation/scroll are rendering we do not model.'
+? html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-keyboard-behavior.tentative.html
+: - name: Keyboard behavior for base appearance <select multiple size=1>
+    reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+      the :open state, and focus/keyboard navigation within the rendered listbox are
+      rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-mouse-behavior.tentative.html:
+- name: Mouse behavior for base appearance <select multiple size=1>
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/base-appearance-inheritance.html:
+- name: base appearance should not propagate to nested elements which support appearance.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/customizable-select/button-in-popover.html:
+- name: Buttons in the popover should be rendered and should not close the popover
+    when clicked.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Non-interactive content in the popover should not close the popover when clicked.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/checkmark-animation.html:
+- name: "::checkmark pseudo-element animates"
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/picker-icon-animation.html:
+- name: "::picker-icon pseudo-element animates"
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-accessibility-minimum-target-size.html:
+- name: 'horizontal-tb "": Select with appearance:base-select should have targets
+    for pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: 'horizontal-tb "i": Select with appearance:base-select should have targets
+    for pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: 'vertical-lr "": Select with appearance:base-select should have targets for
+    pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: 'vertical-lr "i": Select with appearance:base-select should have targets for
+    pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: 'vertical-rl "": Select with appearance:base-select should have targets for
+    pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: 'vertical-rl "i": Select with appearance:base-select should have targets for
+    pointer inputs be at least 24x24 CSS pixels.'
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/customizable-select/select-base-appearance-computed-style.html:
+- name: UA styles of base appearance ::picker(select)
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance <legend>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance <optgroup>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance <option> in <optgroup>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance <option>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance <select>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance option::checkmark.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance select <button>.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: UA styles of base appearance select::picker-icon.
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-click-drag-option.optional.html:
+- name: Clicking the invoker button and dragging to an option should choose that option
+    and close the picker.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'mouse: Releasing the pointer on an option positioned on top of the invoker
+    button should not close the picker.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'touch: Releasing the pointer on an option positioned on top of the invoker
+    button should not close the picker.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-click-picker-light-dismiss.tentative.html:
+- name: Clicking directly on ::picker(select) should not trigger light dismiss.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-dialog-mode-focus.optional.html:
+- name: In dialog mode tab should not close the picker.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: In dialog mode the first focusable element should get focus.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-disabled.html:
+- name: 'custombutton: <select disabled> should prevent focus and activation with
+    appearance:base-select.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'defaultbutton: <select disabled> should prevent focus and activation with
+    appearance:base-select.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-events-2.optional.html:
+- name: "<select> should fire input and change events when new option is selected."
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: "<select> should fire input and change events when option in listbox is clicked"
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: "<select> should not fire input and change events when new selected option
+    has the same value as the old."
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Button controller code should not run if the mousedown event is preventDefaulted.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Check that <Space> opens <select> when <select> specifies tabindex
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Check that <Space> opens <select>.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Listbox controller code should not run if the mousedown event is preventDefaulted.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-events.optional.html:
+- name: Events, explicit button
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Events, implicit button
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-focus-visible-with-mouse.html:
+- name: Select should not match :focus-visible when using mouse.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-home-end-pagedown-pageup-detailed.optional.html:
+- name: Behavior of Home and End for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of Home and End for customizable-<select>, starting at the bottom
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of Home and End for customizable-<select>, starting at the top
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of PageUp and PageDown for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-home-end-pagedown-pageup.optional.html:
+- name: Behavior of End for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of Home for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of PageDown for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Behavior of PageUp for customizable-<select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-initial-focus-display-animation.html:
+- name: Option initial focus should still work when a display animation is present.
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-inside-top-layer.html:
+- name: a modal dialog can be nested inside select
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: a popover can be nested inside select
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: select can be nested inside a modal dialog
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: select can be nested inside a popover
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-iterate-before-beginning.optional.html:
+- name: Attempting to focus the previous option while focused on the first option
+    should not crash.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Keyboard navigating backwards over an <hr> and <optgroup> should not crash.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-keyboard-behavior.optional.html:
+- name: 'custombutton: When the listbox is closed, all arrow keys should open the
+    listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: When the listbox is closed, spacebar should open the listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: When the listbox is closed, the enter key should not trigger
+    form submission.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: When the listbox is open, the enter key should commit the selected
+    option.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: When the listbox is open, the tab key should close the listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: When the listbox is closed, all arrow keys should open the
+    listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: When the listbox is closed, spacebar should open the listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: When the listbox is closed, the enter key should not trigger
+    form submission.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: When the listbox is open, the enter key should commit the
+    selected option.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: When the listbox is open, the tab key should close the listbox.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-keyboard-focus-change-for-hidden-options.optional.html:
+- name: Hidden options should be skipped when changing focus using the up and down
+    keys.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-mouse-behavior.html:
+- name: 'custombutton: Clicking an option in an appearance:base-select select should
+    choose the option and close the popover.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: Clicking the label should focus the select button without opening
+    the picker.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: Select with appearance:base-select should open and close when
+    clicking the button.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'custombutton: Touch input should work the same as mouse input.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'fallbackbutton: Clicking an option in an appearance:base-select select should
+    choose the option and close the popover.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'fallbackbutton: Clicking the label should focus the select button without
+    opening the picker.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'fallbackbutton: Select with appearance:base-select should open and close
+    when clicking the button.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'fallbackbutton: Touch input should work the same as mouse input.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-mousedown-slot-mutation.optional.html:
+- name: Select opens when options are mutated during mousedown
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: Select options work correctly after mousedown mutation
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-optgroup-arrow-keys.optional.html:
+- name: Keyboard navigation forwards and backwards should visit each option with optgroups.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-option-arrow-scroll.optional.html:
+- name: 'bottomofdocument: Arrow keys on options should not scroll the document.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'topofdocument: Arrow keys on options should not scroll the document.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-option-hover-styles.html:
+- name: Hover styles should be present for appearance:base-select options.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-picker-animations.html:
+- name: select::picker(select) should support author provided top layer animations.
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-picker-exit-animation.html:
+- name: Top layer exit animations should work on ::picker(select) just like a popover.
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-picker-hover-active-pseudo.html:
+- name: 'custombutton: select should match :hover and :active when interacting with
+    button.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'custombutton: select should not match :hover or :active when interacting
+    with elements in the picker.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'defaultbutton: select should match :hover and :active when interacting with
+    button.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+- name: 'defaultbutton: select should not match :hover or :active when interacting
+    with elements in the picker.'
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-picker-interactive-element-focus.optional.html:
+- name: Clicking interactive elements inside the select picker should focus them.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-picker-option-animation-reopens.html:
+- name: CSS animations on option elements restart when the base-select picker reopens.
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-picker-starting-style.html:
+- name: "@starting-style should work on ::picker(select) just like a popover."
+  reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
+    picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-pseudo-light-dismiss-invalidation.html:
+- name: select should not match :open when light dismissed.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/customizable-select/select-pseudo-open.html:
+- name: select :open and :not(:open) should invalidate correctly.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: select should support :open pseudo selector.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-synthetic-events.html:
+- name: 'custombutton: Synthetic events should not trigger behaviors of select element.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'defaultbutton: Synthetic events should not trigger behaviors of select element.'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-type-to-search.tentative.html:
+- name: Type to search should focus but not select an option until selection is confirmed.
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/select-vertical-writing-mode-navigation.optional.html:
+- name: 'sideways-lr: Down/Up keys navigate as secondary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'sideways-lr: Right/Left keys navigate as primary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'sideways-rl: Down/Up keys navigate as secondary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'sideways-rl: Left/Right keys navigate as primary axis (block-flipped)'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'vertical-lr: Down/Up keys navigate as secondary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'vertical-lr: Right/Left keys navigate as primary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'vertical-rl: Down/Up keys navigate as secondary axis'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+- name: 'vertical-rl: Left/Right keys navigate as primary axis (block-flipped)'
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/switch-picker-appearance.html:
+- name: Basic functionality of select picker and appearance
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: Basic functionality of select picker with appearance:auto
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: Basic functionality of select picker with appearance:none
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: Switching appearance in :open should close the picker
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: Switching appearance in JS after picker is open should close the picker
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: Test of the test harness
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: The select picker is closed if the ::picker() appearance value is changed
+    via CSS while the picker is open
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: The select picker is closed if the <select> appearance value is changed via
+    CSS while the picker is open
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+- name: The select picker is closed if the <select> inline appearance value is changed
+    while the picker is open
+  reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
+    pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/filterable-select/filterable-select-keyboard-behavior.tentative.html:
+- name: 'appearance auto: Keyboard behavior for filterable select.'
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: 'appearance auto: active option should get scrolled into view.'
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: 'appearance base-select: Keyboard behavior for filterable select.'
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: 'appearance base-select: active option should get scrolled into view.'
+  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
+    popup + in-popup keyboard/pointer interaction not modeled.'
+html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
+- name: Using touch inputs should not deselect other options in a listbox <select
+    multiple>.
+  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
+    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
+html/semantics/forms/the-select-element/select-many-options.tentative.html:
+- name: The popover should be bottom left positioned
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:
+- name: Resizing <select multiple> should not autoscroll the listbox.
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/select-option-display-inherit.tentative.html:
+- name: display:inherit on option in multiple select computes to contents
+  reason: display:inherit→contents computed display + closed-select option geometry
+    — layout/rendering not modeled.
+- name: display:inherit on option in single select computes to contents
+  reason: display:inherit→contents computed display + closed-select option geometry
+    — layout/rendering not modeled.
+- name: option in closed single select has zero bounding client rect
+  reason: display:inherit→contents computed display + closed-select option geometry
+    — layout/rendering not modeled.
+html/semantics/forms/the-select-element/select-option-focusable.tentative.html:
+- name: Validate <option> is focusable when is a descendant of <select>
+  reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
+    the :open state, and focus/keyboard navigation within the rendered listbox are
+    rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/select-popover-position-with-zoom.tentative.html:
+- name: The popover should be bottom left positioned
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: The popover should be bottom right positioned
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: The popover should be top left positioned
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+- name: The popover should be top right positioned
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-select-element/show-picker-being-cv-hidden.html:
+- name: select showPicker() throws when content-visibility hidden
+  reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
+    — needs visibility/render state we do not model.
+html/semantics/forms/the-select-element/show-picker-being-rendered.html:
+- name: select showPicker() throws when not being rendered
+  reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
+    — needs visibility/render state we do not model.
+html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
+- name: Bounding rect height for textarea must be the same as line-height
+  reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
+    scroll position / popover positioning) — no layout engine.
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element

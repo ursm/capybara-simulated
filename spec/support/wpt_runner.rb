@@ -606,7 +606,12 @@ module WptRunner
       out_map = out_of_scope
       (in_map.keys | out_map.keys).each_with_object({}) do |rel, merged|
         iv = in_map[rel]
-        merged[rel] = iv == HARNESS_ERROR ? HARNESS_ERROR : Array(iv) + out_subtest_names(rel)
+        out_names = out_subtest_names(rel)
+        # HARNESS_ERROR is a whole-file sentinel (the harness never completed). It
+        # may be listed in EITHER file — in-scope (a gap to fix) or out-of-scope
+        # (an earned non-goal, e.g. a target=_blank test that hangs without a real
+        # multi-window model), the latter as a single {name: HARNESS_ERROR} entry.
+        merged[rel] = (iv == HARNESS_ERROR || out_names.include?(HARNESS_ERROR)) ? HARNESS_ERROR : Array(iv) + out_names
       end
     end
   end

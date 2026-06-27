@@ -78,7 +78,17 @@ files.each_with_index do |rel, i|
     end
   else
     error_count += 1
-    in_map[rel] = WptRunner::HARNESS_ERROR
+    # A non-completing file is HARNESS_ERROR. Keep it OUT-OF-SCOPE (with its reason)
+    # when it's already classified there as a HARNESS_ERROR non-goal — e.g. a
+    # target=_blank test that hangs without a real multi-window model — otherwise it
+    # defaults in-scope.
+    pool = out_existing[rel]
+    if pool && pool[WptRunner::HARNESS_ERROR] && !pool[WptRunner::HARNESS_ERROR].empty?
+      reason = pool[WptRunner::HARNESS_ERROR].shift
+      out_map[rel] = [{ 'name' => WptRunner::HARNESS_ERROR, 'reason' => reason.to_s }]
+    else
+      in_map[rel] = WptRunner::HARNESS_ERROR
+    end
   end
   warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 25).zero? || i + 1 == files.size
 end
@@ -108,7 +118,11 @@ out_hdr = <<~H
   #
   # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
   # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
-  # it to the in-scope file / delete it). Format per file: a list of {name, reason}.
+  # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
+  # or a single {name: HARNESS_ERROR, reason} entry for a whole file whose harness
+  # never completes as an earned non-goal (e.g. a target=_blank test that hangs
+  # without a real multi-window model); if such a file later completes, the gate goes
+  # RED so it gets reclassified.
   #
   # regen_wpt_expected_failures.rb PRESERVES these classifications + reasons across
   # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
