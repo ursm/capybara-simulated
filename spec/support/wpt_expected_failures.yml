@@ -42,8 +42,6 @@ html/semantics/forms/form-submission-0/submit-file.sub.html:
 - Posting a File
 html/semantics/forms/form-submission-target/form-target-blank-useractivation.html:
 - "<form target=_blank> click submit"
-html/semantics/forms/historical-search-event.html:
-- search event should not be supported
 html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
 - Verifies that form restoration does not fire input or change events for <input type=range>.
 - Verifies that form restoration does not fire input or change events for <input type=text>.
@@ -87,8 +85,6 @@ html/semantics/forms/the-select-element/select-required-attribute.tentative.html
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
 - The select element should reset to its initial state when restoring a mismatched
   value.
-html/semantics/forms/the-textarea-element/wrap-enumerated-ascii-case-insensitive.html:
-- keywords
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
   a focusable child

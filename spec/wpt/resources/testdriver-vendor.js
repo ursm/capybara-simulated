@@ -116,15 +116,24 @@
   }
 
   window.test_driver.send_keys = function (element, keys) {
-    try {
-      const h = globalThis.__csimRegisterNode && globalThis.__csimRegisterNode(element);
-      if (h && typeof globalThis.__csimSendKeys === 'function') {
-        globalThis.__csimSendKeys(h, parseKeys(keys));
-      }
-      return settleThen();
-    } catch (e) {
-      return Promise.reject(e);
-    }
+    const h = globalThis.__csimRegisterNode && globalThis.__csimRegisterNode(element);
+    // Dispatch the keys on the NEXT task, not synchronously — real
+    // test_driver.send_keys is async, so a test that wires up an EventWatcher
+    // AFTER calling send_keys (e.g. `Promise.all([send_keys(...), watcher.wait_for(...)])`,
+    // where send_keys is evaluated first) registers its listeners before the keys
+    // fire (historical-search-event). A second task then resolves, after any
+    // deferred default action (Tab focus / Enter submit, parked on a 0ms timer).
+    return new Promise((resolve, reject) => {
+      const run = () => {
+        try {
+          if (h && typeof globalThis.__csimSendKeys === 'function') globalThis.__csimSendKeys(h, parseKeys(keys));
+        } catch (e) { reject(e); return; }
+        if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(resolve, 0);
+        else resolve();
+      };
+      if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(run, 0);
+      else run();
+    });
   };
 
   window.test_driver.click = function (element) {
