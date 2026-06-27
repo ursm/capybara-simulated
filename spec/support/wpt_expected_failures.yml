@@ -20,9 +20,6 @@ html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
 html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
 - beforefilter event for customizable combobox.
-html/semantics/forms/customizable-combobox/customizable-combobox-filtered-pseudo.tentative.html:
-- Case folding
-- Customizable combobox option:filtered behavior
 html/semantics/forms/customizable-combobox/customizable-combobox-popover-exception.tentative.html:
 - Datalist popover should not show when an exception is encountered when showing the
   popover.
@@ -90,9 +87,6 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontent-rest
 html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
 - The selectedcontentelement attribute should set up an association between a select
   and a selectedcontent.
-html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
-- Case folding
-- Filterable select option:filtered behavior
 html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
 - Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:

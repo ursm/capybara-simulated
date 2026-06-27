@@ -236,9 +236,35 @@
         var dkn = keyName(a.key);
         var dmod = trackModifier(dkn, true);   // sets __shiftHeld before the event/default
         t = (D() && D().activeElement) || (D() && D().body);
+        // WebDriver special keys (arrows, Backspace, Enter, …) are PUA U+E000..F8FF.
+        var dcp = String(a.key).codePointAt(0);
+        var dspecial = dcp >= 0xE000 && dcp <= 0xF8FF;
         var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld });
         dispatch(t, dEv);
-        if (!dmod) keyDefaultAction(dkn, dEv);
+        if (!dspecial) {
+          // Printable key: keypress + insert the char (through the `value` setter,
+          // so e.g. a filter combobox re-filters) + `input` — mirrors send_keys.
+          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld }));
+          if (!dEv.defaultPrevented) {
+            try {
+              if (t && 'value' in t) {
+                t.value = (t.value || '') + a.key;
+                dispatch(t, new (W.InputEvent || W.Event)('input', { bubbles: true, composed: true, data: a.key }));
+              }
+            } catch (e) {}
+          }
+        } else if (dkn === 'Backspace') {
+          if (!dEv.defaultPrevented) {
+            try {
+              if (t && 'value' in t && typeof t.value === 'string' && t.value.length) {
+                t.value = t.value.slice(0, -1);
+                dispatch(t, new (W.InputEvent || W.Event)('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
+              }
+            } catch (e) {}
+          }
+        } else if (!dmod) {
+          keyDefaultAction(dkn, dEv);          // Tab → sequential focus navigation, etc.
+        }
         break;
       }
       case 'keyUp': {
