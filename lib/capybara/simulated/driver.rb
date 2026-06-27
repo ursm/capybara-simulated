@@ -375,6 +375,7 @@ module Capybara
       end
       # Cross-window remote-ref RPC: route a node/object proxy op to the window
       # that owns the ref (handle), executing in that window's VM.
+      def fire_aux_window_load(handle)             = ((b = window_browser(handle)) && b.fire_own_window_load)
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil

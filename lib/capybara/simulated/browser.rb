@@ -3454,6 +3454,9 @@ module Capybara
       def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
       def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
+      # Fire an aux window's own window `load` (called by its opener, deferred).
+      def fire_aux_window_load(handle)  = (@driver.fire_aux_window_load(handle.to_s) if @driver.respond_to?(:fire_aux_window_load))
+      def fire_own_window_load          = (@runtime.call('__csimFireWindowLoad') rescue nil)
 
       # Queue a cross-window message for delivery into THIS window's VM (called
       # by the Driver on the target Browser). Delivered as a `message` event the
