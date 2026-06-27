@@ -13,8 +13,21 @@
 ---
 dom/events/Event-dispatch-redispatch.html:
 - Redispatching mouseup event whose default action dispatches a click event
+html/semantics/forms/constraints/form-validation-validity-stepMismatch.html:
+- "[INPUT in NUMBER status] Step mismatch when step is a very small floating number
+  and value is not its integral multiple"
 html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
+html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
+- beforefilter event for customizable combobox.
+html/semantics/forms/customizable-combobox/customizable-combobox-filtered-pseudo.tentative.html:
+- Case folding
+- Customizable combobox option:filtered behavior
+html/semantics/forms/customizable-combobox/customizable-combobox-popover-exception.tentative.html:
+- Datalist popover should not show when an exception is encountered when showing the
+  popover.
+html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
+- Focusing input should show datalist as a popover.
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
 html/semantics/forms/form-submission-0/constructing-form-data-set.html:
@@ -24,6 +37,9 @@ html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html:
   of them.
 html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html:
 - Verifies that location navigations take precedence when following form submissions.
+html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
+- 'Verifies that form submissions scheduled inside javascript: urls take precedence
+  over the javascript: url''s return value.'
 html/semantics/forms/form-submission-0/submit-file.sub.html:
 - Posting a File
 html/semantics/forms/historical-search-event.html:
@@ -39,20 +55,52 @@ html/semantics/forms/the-input-element/radio-focus-navigation-group-focusable-fo
 - During arrow key navigation, focus and checked is set on the radio element.
 html/semantics/forms/the-input-element/radio-keyboard-navigation-order.html:
 - Radio button keyboard navigation should proceed in tree-order.
+html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
+- label with for attribute should proxy click events to the associated element on
+  click
+html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-validity-invalidation.tentative.html:
+- select-multiple-validity-invalidation
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple-restore.optional.html:
 - "<selectedcontent> should be up to date after form restoration."
+html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple.tentative.html:
+- "<selectedcontent> should support <select multiple>."
+- "<selectedcontent> should update in response to user interaction."
+html/semantics/forms/the-select-element/customizable-select/option-color-inheritance.html:
+- option elements should inherit color from their parent select element.
 html/semantics/forms/the-select-element/customizable-select/option-disabled-optgroup.html:
 - disabled select
 - nesting options and optgroups in disabled select
 - options should check ancestor optgroup for disabled state.
+html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
+- Input tags should parse inside select if nested in another tag
+- Input tags should parse inside select if there are no options first.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
 - Option element insertion steps.
 - Option element removal steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-movebefore.html:
 - Selectedcontent behavior with moving steps.
+html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test1'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test2'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test3'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test4'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test5'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test6'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test7'
+- 'MutationObserver records during parsing of <select> with <selectedcontent>: test8'
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-restore.optional.html:
 - "<input> inside <selectedcontent> should be restored after form submission."
 - "<selectedcontent> should be up to date after form restoration."
+html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
+- The selectedcontentelement attribute should set up an association between a select
+  and a selectedcontent.
+html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
+- Case folding
+- Filterable select option:filtered behavior
+html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
+- beforefilter event for customizable combobox.
+html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
+- Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
 - The select element should reset to its initial state when restoring a mismatched
   value.
