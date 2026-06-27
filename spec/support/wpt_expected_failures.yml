@@ -93,8 +93,6 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontenteleme
 html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
 - Case folding
 - Filterable select option:filtered behavior
-html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
-- beforefilter event for customizable combobox.
 html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
 - Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
