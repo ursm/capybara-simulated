@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/js_engine'
 
 # `new FormData(form)` must mirror real-browser submission semantics:
 # the option's `value` attribute, NOT its visible text. Most apps put
@@ -166,6 +167,7 @@ RSpec.describe 'named-frame submit threads the constructed entry list' do
   before { session.visit '/' }
 
   it 'fires formdata once and submits the handler-appended entry' do
+    skip 'within_frame needs the V8 engine' unless CsimEngine.v8?
     session.evaluate_script("document.getElementById('f').requestSubmit()")
     expect(session.evaluate_script('window.formdataFires')).to eq(1)
     session.within_frame('resultframe') do
@@ -240,6 +242,7 @@ RSpec.describe 'named-frame form submit during parse' do
   before { session.visit '/' }
 
   it 'navigates the named iframe, leaving the top page intact' do
+    skip 'within_frame needs the V8 engine' unless CsimEngine.v8?
     # Top page must NOT have navigated to the action URL.
     expect(session).to have_current_path('/')
     expect(session).to have_css('form')

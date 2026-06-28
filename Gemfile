@@ -7,7 +7,8 @@ gemspec
 # they want — neither is a hard dependency of the gem itself.
 gem 'rusty_racer', '~> 0.1.10'
 gem 'nokogiri'
-gem 'quickjs', '>= 0.18'
+gem 'quickjs', '>= 0.19'
+gem 'quickjs-polyfill-intl' # Intl.* polyfills (split out of quickjs >= 0.19)
 
 group :development, :test do
   gem 'launchy'            # required by Capybara's shared save_and_open_page spec

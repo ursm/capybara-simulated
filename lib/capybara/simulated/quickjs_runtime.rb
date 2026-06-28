@@ -225,11 +225,37 @@ module Capybara
       # introduce a NoMethodError window for any stray post-close call (eval/call
       # don't all nil-guard `@vm`) with no leak benefit.
 
-      # bridge.js patches `Intl.DateTimeFormat`; rusty_racer ships ICU
-      # built-in but QuickJS gates it behind a polyfill flag. Other JS
-      # surfaces bridge.js touches (URL / TextEncoder / atob/btoa /
-      # crypto) are already routed through Ruby-side host fns, so
-      # POLYFILL_INTL is the only one we strictly need.
+      # bridge.js patches `Intl.DateTimeFormat` and apps use the wider Intl
+      # surface (NumberFormat / RelativeTimeFormat / Collator / …); rusty_racer
+      # ships ICU built-in but QuickJS gates Intl behind polyfills. Other JS
+      # surfaces bridge.js touches (URL / TextEncoder / atob/btoa / crypto) are
+      # already routed through Ruby-side host fns, so Intl is the only one we
+      # strictly need. Since quickjs 0.19 these moved out of the core gem (the old
+      # `Quickjs::POLYFILL_INTL` flag) into quickjs-polyfill-intl; requiring `/all`
+      # registers every `:polyfill_intl_*` feature and we enable the full set in
+      # dependency order to match the old behavior. The gem is optional — a
+      # downstream QuickJS user without it still runs, just without Intl.
+      INTL_FEATURES =
+        begin
+          require 'quickjs-polyfill-intl/all'
+
+          %i[
+            polyfill_intl_getcanonicallocales
+            polyfill_intl_locale
+            polyfill_intl_listformat
+            polyfill_intl_pluralrules
+            polyfill_intl_numberformat
+            polyfill_intl_datetimeformat
+            polyfill_intl_durationformat
+            polyfill_intl_collator
+            polyfill_intl_segmenter
+            polyfill_intl_displaynames
+            polyfill_intl_relativetimeformat
+            polyfill_intl_supportedvaluesof
+          ].freeze
+        rescue LoadError
+          [].freeze
+        end
       #
       # `max_stack_size: 0` — `JS_SetMaxStackSize` measures C stack
       # delta from runtime construction; Ruby callers reach QuickJS
@@ -245,7 +271,7 @@ module Capybara
       # handler returns `elapsed >= limit_ms`, so 0 fires on the first
       # check), so practical no-limit.
       VM_OPTIONS = {
-        features:       [Quickjs::POLYFILL_INTL].freeze,
+        features:       INTL_FEATURES,
         max_stack_size: 0,
         # quickjs.rb's 128 MB default trips "out of memory in regexp
         # execution" on class-attribute-heavy polls and the heaviest
