@@ -55,8 +55,6 @@ html/semantics/forms/the-select-element/customizable-select/selectedcontent-rest
 html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
 - The selectedcontentelement attribute should set up an association between a select
   and a selectedcontent.
-html/semantics/forms/the-select-element/select-required-attribute.tentative.html:
-- Test required attribute
 html/semantics/forms/the-select-element/select-restore-invalid-option.html:
 - The select element should reset to its initial state when restoring a mismatched
   value.
