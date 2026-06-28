@@ -226,36 +226,18 @@ module Capybara
       # don't all nil-guard `@vm`) with no leak benefit.
 
       # bridge.js patches `Intl.DateTimeFormat`; rusty_racer ships ICU built-in but
-      # QuickJS gates Intl behind polyfills (other surfaces bridge.js touches — URL /
-      # TextEncoder / atob/btoa / crypto — already route through Ruby host fns, so
-      # Intl is the only one we strictly need). Since quickjs 0.19 the polyfills moved
-      # out of the core gem (the old `Quickjs::POLYFILL_INTL` flag) into
-      # quickjs-polyfill-intl; `/all` registers every `:polyfill_intl_*` feature.
+      # QuickJS gates it behind a polyfill flag (other surfaces bridge.js touches —
+      # URL / TextEncoder / atob/btoa / crypto — already route through Ruby host fns,
+      # so POLYFILL_INTL is the only one we strictly need).
       #
-      # PERF (rule 3): unlike the old single bundled flag (~140 ms/VM), the new gem's
-      # polyfills are eval'd per VM and the VM-pool pre-warm is GVL-serial, so each
-      # feature sits on the critical path. Enabling all 12 was ~226 ms/VM and added
-      # ~5 min to the QuickJS suite (20.7 → 15.5 min) vs this DateTimeFormat chain —
-      # so we enable only what's needed: DateTimeFormat (bridge.js) + its dependency
-      # chain (getcanonicallocales → locale → pluralrules → numberformat). The local
-      # suite passes with 0 failures on this set; INTL_FEATURES is QuickJS-only (V8
-      # uses built-in ICU), so apps on V8 are unaffected. Add another `:polyfill_intl_*`
-      # here only if a QuickJS test actually needs that API. The gem is optional — a
-      # downstream QuickJS user without it still runs, just without Intl.
-      INTL_FEATURES =
-        begin
-          require 'quickjs-polyfill-intl/all'
-
-          %i[
-            polyfill_intl_getcanonicallocales
-            polyfill_intl_locale
-            polyfill_intl_pluralrules
-            polyfill_intl_numberformat
-            polyfill_intl_datetimeformat
-          ].freeze
-        rescue LoadError
-          [].freeze
-        end
+      # PERF (rule 3): quickjs is pinned to `~> 0.18.0` in the Gemfile. quickjs 0.19
+      # both split the Intl polyfills into a separate quickjs-polyfill-intl gem (which
+      # eval's them per VM at ~226 ms — vs this single bundled flag's ~140 ms) AND
+      # regressed interpreter execution ~2.8× (measured: the QuickJS spec suite ran
+      # 5.6 min on 0.18 vs 15.5 min on 0.19 with an equivalent Intl set). The 0.19
+      # migration is recorded in the cross-window / quickjs-CI memory; re-migrate to
+      # 0.19 + quickjs-polyfill-intl once that upstream perf regression is fixed.
+      INTL_FEATURES = [Quickjs::POLYFILL_INTL].freeze
       #
       # `max_stack_size: 0` — `JS_SetMaxStackSize` measures C stack
       # delta from runtime construction; Ruby callers reach QuickJS

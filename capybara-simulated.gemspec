@@ -44,8 +44,8 @@ Gem::Specification.new do |spec|
   # `CSIM_JS_ENGINE=v8|quickjs` or `Driver.new(app, js_engine: :…)`.
   #
   #   gem 'rusty_racer' # V8 via rusty_v8 (JIT, fastest per spec)
-  #   gem 'quickjs', '>= 0.19' # QuickJS (interpreter, smaller per-VM
-  #                            # footprint; wins on parallelism).
-  #   gem 'quickjs-polyfill-intl' # optional, with QuickJS — Intl.* support
-  #                               # (split out of quickjs >= 0.19).
+  #   gem 'quickjs', '~> 0.18.0' # QuickJS (interpreter, smaller per-VM
+  #                              # footprint; wins on parallelism). Pinned to
+  #                              # 0.18: 0.19 regressed execution ~2.8x and split
+  #                              # Intl into a separate gem; unpin when fixed.
 end
