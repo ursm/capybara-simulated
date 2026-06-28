@@ -3434,14 +3434,32 @@ module Capybara
       # TARGET side: execute the op against THIS window's VM (the Driver calls these
       # on the resolved target Browser).
       def remote_ref_get(id, prop)          = @runtime.call('__csimRemoteRefGet', id, prop.to_s)
-      def remote_ref_set(id, prop, value)   = (@runtime.call('__csimRemoteRefSet', id, prop.to_s, value); nil)
+      def remote_ref_set(id, prop, value)
+        @runtime.call('__csimRemoteRefSet', id, prop.to_s, value)
+        # A cross-isolate property set can queue a navigation in THIS (target)
+        # window — `w.location.href = …` / `w.location = …`. Drain it (and any other
+        # pending action it triggered) so the non-active window actions it now.
+        drain_pending_after_remote_ref
+        nil
+      end
       def remote_ref_call(id, method, args)
         result = @runtime.call('__csimRemoteRefCall', id, method.to_s, args || [])
-        # A cross-isolate `form.submit()` / `requestSubmit()` queued a pending
-        # submit in THIS (target) window; drain it so the submission is actioned
-        # (it would otherwise wait for a Capybara action on this non-active window).
-        consume_pending_form_submit
+        # A cross-isolate call can queue a pending action in THIS (target) window —
+        # `w.form.submit()` (form submit), `w.history.back()` (history traverse),
+        # `w.location.assign()` (navigation). Drain them so the non-active window
+        # actions them (they would otherwise wait for a Capybara action on it).
+        drain_pending_after_remote_ref
         result
+      end
+      # Drain every deferred action a cross-isolate operation may have queued in this
+      # window: form submission, plain navigation, same-document history traversal
+      # (history.back/forward/go — restores the previous entry + fires load), and
+      # child-frame navigation. Each consume is a no-op when nothing is pending.
+      def drain_pending_after_remote_ref
+        consume_pending_form_submit
+        consume_pending_navigation
+        consume_pending_history_traverse
+        consume_pending_frame_nav
       end
       # Read a primitive property off THIS window's globalThis / document — called
       # by the Driver to serve another window's cross-window proxy read.
