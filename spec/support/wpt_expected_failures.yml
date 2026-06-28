@@ -62,9 +62,6 @@ html/semantics/forms/the-select-element/customizable-select/select-input-parsing
 - Input tags should parse inside select if there are no options first.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
 - Option element insertion steps.
-- Option element removal steps.
-html/semantics/forms/the-select-element/customizable-select/selectedcontent-movebefore.html:
-- Selectedcontent behavior with moving steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test1'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test2'
