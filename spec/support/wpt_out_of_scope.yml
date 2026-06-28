@@ -10380,6 +10380,21 @@ shadow-dom/focus-navigation/tentative/focus-scroller-layout-update.html:
     to date.
   reason: Asserts focus() refuses a no-longer-scrollable scroller after a height change;
     scrollability is layout/scroll-geometry derived, not modeled.
+shadow-dom/focus/click-focus-delegatesFocus-click.html:
+- name: click on the host with no delegatesFocus with another host with delegatesFocus
+    and a focusable child
+  reason: 'Clicking a non-delegatesFocus shadow host: which flat-tree element receives
+    focus depends on which the click COORDINATE lands on (the test places a 1000px
+    spacer so the click lands on non-focusable content -> focus clears to body; without
+    it it would land on a focusable shadow descendant). Visual hit-testing / layout
+    not modeled (rule 1, like elementFromPoint).'
+- name: click on the host with no delegatesFocus with another host with no delegatesFocus
+    and a focusable child
+  reason: 'Clicking a non-delegatesFocus shadow host: which flat-tree element receives
+    focus depends on which the click COORDINATE lands on (the test places a 1000px
+    spacer so the click lands on non-focusable content -> focus clears to body; without
+    it it would land on a focusable shadow descendant). Visual hit-testing / layout
+    not modeled (rule 1, like elementFromPoint).'
 shadow-dom/focus/click-focus-slot-ancestor.html:
 - name: Clicking on non-focusable slot inside focusable div will make the flat-tree
     focusable ancestor get focused
