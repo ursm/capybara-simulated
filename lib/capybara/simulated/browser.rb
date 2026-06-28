@@ -4389,6 +4389,98 @@ module Capybara
           log_console('warn', "nested-context form submission failed: #{e.message}")
         end
       end
+      # ── Frame session history ──────────────────────────────────────────────
+      # A nested browsing context (iframe) keeps its OWN back/forward history of
+      # the documents it navigates through, with each entry's form-control state
+      # captured for restoration (HTML "persisted user state" / bfcache). Keyed by
+      # [parent realm, iframe element handle] — stable across the frame-realm
+      # rebuilds a navigation triggers (the element outlives its realm).
+      #
+      # `iframe.contentWindow.history.back()` runs while the frame realm is on the
+      # V8 stack, so (like frame_navigate_self) DEFER the traversal and drain it
+      # after the call returns — rebuilding the realm inline would terminate it.
+      def frame_history_go(realm_id, delta)
+        return if realm_id.nil? || realm_id.zero?
+        @pending_frame_traverse = {realm_id: realm_id, delta: delta.to_i}
+      end
+      def consume_pending_frame_traverse
+        return if @pending_frame_traverse.nil?
+        pt = @pending_frame_traverse
+        @pending_frame_traverse = nil
+        invalidate_find_cache
+        perform_frame_traverse(pt[:realm_id], pt[:delta])
+      rescue StandardError => e
+        log_console('warn', "frame history traversal failed: #{e.message}")
+      end
+      def perform_frame_traverse(realm_id, delta)
+        # The traversal was deferred; the frame may have been disposed (a competing
+        # nav) between flag and drain — drop it gracefully.
+        return unless @runtime.frame_realm_alive?(realm_id)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        return if handle.zero?
+        h = (@frame_histories ||= {})[[parent, handle]]
+        return if h.nil?
+        target = h[:idx] + delta
+        return if target.negative? || target >= h[:entries].size
+        # Snapshot the entry we're leaving so a later forward traversal restores it.
+        h[:entries][h[:idx]] = frame_history_entry(realm_id) if h[:idx] >= 0
+        reload_frame_to_entry(realm_id, h[:entries][target])
+        h[:idx] = target   # advance only after the rebuild succeeds
+      end
+      # Record a frame navigation away from `realm_id` to `new_url`: snapshot the
+      # OUTGOING document (URL + form state) into the current entry — seeding entry
+      # 0 the first time — then drop any forward tail and push the new entry. Hooked
+      # into the frame form-submission paths; frame navigations driven by
+      # `location.href` / link clicks aren't recorded yet (history.back there falls
+      # through to the top document, as before).
+      def record_frame_nav(realm_id, new_url)
+        return if realm_id.nil? || realm_id.zero?
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        return if handle.zero?
+        h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
+        outgoing = frame_history_entry(realm_id)
+        if h[:idx] >= 0
+          h[:entries][h[:idx]] = outgoing
+        else
+          h[:entries] << outgoing
+          h[:idx] = 0
+        end
+        h[:entries] = h[:entries][0..h[:idx]]
+        h[:entries] << {url: new_url.to_s, form_state: nil}
+        h[:idx] = h[:entries].size - 1
+      end
+      # The history entry for the document currently loaded in `realm_id`: its URL
+      # plus a snapshot of its form-control state.
+      def frame_history_entry(realm_id)
+        {url: frame_realm_url(realm_id), form_state: capture_frame_form_state(realm_id)}
+      end
+      def frame_realm_url(realm_id)
+        return nil unless @runtime.frame_realm_alive?(realm_id)
+        @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+      rescue StandardError
+        nil
+      end
+      def capture_frame_form_state(realm_id)
+        return nil unless @runtime.frame_realm_alive?(realm_id)
+        @runtime.realm_call(realm_id, '__csimCaptureFormState')
+      rescue StandardError
+        nil
+      end
+      # Re-fetch a history entry's URL and rebuild the frame realm from it, then
+      # restore the entry's captured form state (before the element load fires).
+      def reload_frame_to_entry(realm_id, entry)
+        url = entry[:url].to_s
+        return if url.empty?
+        env = Rack::MockRequest.env_for(url, method: 'GET')
+        apply_default_request_env(env, referer: current_browsing_context_url)
+        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+        merge_set_cookie(headers)
+        return if download_response?(headers)
+        html = read_rack_body(body)
+        reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: entry[:form_state])
+      end
       # Serialize + route a form submitted inside frame realm `realm_id`. We
       # serialize in the INITIATING realm (so shadow-tree controls are excluded
       # and relative URLs resolve against that document), then route by target:
@@ -4446,6 +4538,7 @@ module Capybara
       # A self-targeted GET form submit in the initiating frame realm: navigate
       # that frame to the action URL (query already mutated in).
       def navigate_realm_self_get(realm_id, get_url)
+        record_frame_nav(realm_id, get_url)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
           navigate_frame(resolve_against_current(get_url), entry: entry)
@@ -4467,6 +4560,7 @@ module Capybara
       # iframe element's load event the GET/src path would.
       def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0)
         raise 'too many redirects' if depth > 10
+        record_frame_nav(realm_id, url) if depth.zero?
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame_post(url, body, content_type, entry: entry) if entry
         invalidate_find_cache
@@ -4496,7 +4590,7 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, html, content_type)
+      def reload_frame_realm_by_id(realm_id, url, html, content_type, restore_state: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
@@ -4504,6 +4598,10 @@ module Capybara
         return if new_id.zero?
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
+          # Restore captured form state (history traversal) BEFORE the element load
+          # fires, so the restored values are in place by the time the parent's
+          # `iframe.onload` handler — and any assertion after it — runs.
+          @runtime.realm_call(new_id, '__csimRestoreFormState', restore_state) if restore_state
           frame_realm_host_call(parent, '__csimFireFrameElementLoad', handle)
         rescue StandardError
           # The element rebind/load failed — don't strand the freshly built realm
@@ -4513,6 +4611,7 @@ module Capybara
         end
         invalidate_find_cache
         settle
+        new_id
       end
       # The iframe/frame element handle that owns `realm_id`, found in the document
       # of its parent realm (main realm for a top-level frame).
@@ -4532,6 +4631,7 @@ module Capybara
         consume_pending_frame_nav
         consume_pending_frame_submit
         consume_pending_frame_reload
+        consume_pending_frame_traverse
         consume_pending_reload
         consume_pending_history_traverse
         consume_pending_aux_window
@@ -4897,7 +4997,9 @@ module Capybara
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
+        # Per-frame session histories are scoped to this document tree; drop them.
         reset_frame_scope
+        @frame_histories = nil
         reset_timer_state
         # The response content type drives both the parser choice (XML vs HTML —
         # XHTML/XML/SVG parse case-sensitively, no html/head/body skeleton,

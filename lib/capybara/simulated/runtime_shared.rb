@@ -57,6 +57,7 @@ module Capybara
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.
         '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i); nil },
+        '__csimFrameHistoryGo'       => ->(b, *a) { b.frame_history_go(a[0].to_i, a[1].to_i); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1]); nil },
