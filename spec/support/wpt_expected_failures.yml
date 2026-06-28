@@ -43,8 +43,6 @@ html/semantics/forms/the-select-element/customizable-select-multiple-popup/selec
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/selectedcontent-multiple.tentative.html:
 - "<selectedcontent> should support <select multiple>."
 - "<selectedcontent> should update in response to user interaction."
-html/semantics/forms/the-select-element/customizable-select/option-color-inheritance.html:
-- option elements should inherit color from their parent select element.
 html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
 - Input tags should parse inside select if nested in another tag
 - Input tags should parse inside select if there are no options first.
