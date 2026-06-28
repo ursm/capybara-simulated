@@ -18,8 +18,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-dom/events/Event-dispatch-redispatch.html:
-- Redispatching mouseup event whose default action dispatches a click event
 dom/nodes/remove-and-adopt-thcrash.html:
 - Check that removing a node and then adopting its parent into a different window/document
   doesn't crash.
