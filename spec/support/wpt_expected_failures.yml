@@ -23,9 +23,6 @@ html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
-html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html:
-- Verifies that one form used to target multiple frames in succession navigates all
-  of them.
 html/semantics/forms/form-submission-0/form-submit-iframe-then-location-navigate.html:
 - Verifies that location navigations take precedence when following form submissions.
 html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
