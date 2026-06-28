@@ -21,13 +21,6 @@ html/semantics/forms/constraints/form-validation-validity-stepMismatch.html:
   and value is not its integral multiple"
 html/semantics/forms/constraints/input-maxlength-emoji.html:
 - Emoji gets truncated due to maxlength attribute
-html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
-- beforefilter event for customizable combobox.
-html/semantics/forms/customizable-combobox/customizable-combobox-popover-exception.tentative.html:
-- Datalist popover should not show when an exception is encountered when showing the
-  popover.
-html/semantics/forms/customizable-combobox/datalist-popover.tentative.html:
-- Focusing input should show datalist as a popover.
 html/semantics/forms/form-submission-0/action-encoding.html:
 - Encoding of form action URL
 html/semantics/forms/form-submission-0/form-double-submit-multiple-targets.html:
