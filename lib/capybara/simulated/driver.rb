@@ -381,7 +381,30 @@ module Capybara
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
       def window_set_location(handle, url)
         b = window_browser(handle) or return
-        navigate_window(b, b.resolve_document_url(url), source: current_browser)
+        # Per HTML, `w.location = url` parses `url` relative to the ENTRY settings
+        # object — the document of the script doing the assignment (the active
+        # window) — NOT the target window's current document. So a cross-window
+        # `w.location.href = 'resources/x.html'` resolves against the opener's
+        # base, not the aux's (which would double a shared path segment).
+        navigate_window(b, current_browser.resolve_document_url(url), source: current_browser)
+      end
+      # A cross-window `w.history.back()/forward()/go(n)`: traverse the target
+      # window's history. The opener's VM is the one executing, so a non-active
+      # target can rebuild eagerly (like `navigate_window`); an active target
+      # (e.g. `opener.history.back()` from an aux) defers to avoid tearing down
+      # the running VM mid-call. Returns true when the traversal crossed a
+      # document boundary — the JS proxy then fires the target's deferred `load`
+      # (the same deferral as `navAux`) so the restored page's `window.onload`
+      # runs after the opener's current task. False for a same-document
+      # (pushState) traversal — popstate already fired — or a no-op.
+      def window_history_go(handle, delta)
+        b = window_browser(handle) or return false
+        if b.equal?(current_browser)
+          b.history_go(delta)
+          false
+        else
+          b.history_go(delta, force: true) == :cross_document
+        end
       end
       def window_closed?(handle)         = window_browser(handle).nil?
       def opener_handle_of(browser)

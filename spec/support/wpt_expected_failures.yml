@@ -25,9 +25,6 @@ html/semantics/forms/form-submission-0/submit-file.sub.html:
 - Posting a File
 html/semantics/forms/form-submission-target/form-target-blank-useractivation.html:
 - "<form target=_blank> click submit"
-html/semantics/forms/the-input-element/range-restore-oninput-onchange-event.https.html:
-- Verifies that form restoration does not fire input or change events for <input type=range>.
-- Verifies that form restoration does not fire input or change events for <input type=text>.
 html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
 - label with for attribute should proxy click events to the associated element on
   click

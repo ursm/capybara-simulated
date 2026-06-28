@@ -1652,6 +1652,11 @@ module Capybara
       # rooted at a single navigation) updates `location` and fires
       # `popstate` with the entry's state — no full reload. A cross-
       # document traversal replays the entry (full navigate / re-POST).
+      # Returns the traversal kind so a cross-window caller
+      # (`window_history_go`) knows whether to fire the target window's
+      # deferred `load`: `:same_document` (pushState traversal — popstate
+      # already fired, no load), `:cross_document` (full document replay —
+      # load follows), or `nil` (no-op: zero delta / out of range).
       def history_go(delta, force: false)
         delta = delta.to_i
         return if delta == 0
@@ -1666,10 +1671,13 @@ module Capybara
           @current_url = entry[:url]
           @runtime.call('__csimUpdateLocation', @current_url)
           @runtime.call('__csimDispatchPopState', entry[:state])
+          :same_document
         elsif force
-          # Ruby-driven (`page.go_back`) — no live JS call to interrupt,
-          # safe to rebuild the Context synchronously.
+          # Ruby-driven (`page.go_back`), or a non-active window driven by its
+          # opener (`w.history.back()`) — no live JS call on THIS window's
+          # isolate to interrupt, safe to rebuild the Context synchronously.
           perform_history_traverse(target)
+          :cross_document
         else
           # JS-driven (`history.back()` from a page handler): replaying
           # the history entry synchronously would call `rebuild_ctx`
@@ -1679,6 +1687,7 @@ module Capybara
           # and drain after the call returns — mirrors
           # `location_assign` / `location_reload`.
           @pending_history_traverse = target
+          :cross_document
         end
       end
 
@@ -1689,8 +1698,29 @@ module Capybara
       end
 
       private def perform_history_traverse(target)
+        capture_outgoing_form_state
         @history_idx = target
         replay_history_entry(@history[target])
+        restore_form_state(@history[target])
+      end
+
+      # Snapshot the OUTGOING document's form-control state into the history entry
+      # we are leaving, so a later back/forward traversal to it restores the
+      # values the user/script had set (HTML "persisted user state"), not the
+      # markup defaults. Captured while the outgoing VM is still live — before
+      # record_history advances the index or boot rebuilds the context.
+      def capture_outgoing_form_state
+        return if @history_idx < 0 || (entry = @history[@history_idx]).nil?
+        state = (@runtime.call('__csimCaptureFormState') rescue nil)
+        entry[:form_state] = state if state
+      end
+
+      # Re-apply a history entry's captured form state after its document has been
+      # rebuilt. The JS setters set the dirty value flag WITHOUT firing
+      # input/change, so a restored value doesn't look like a fresh user edit.
+      def restore_form_state(entry)
+        return unless entry && (state = entry[:form_state])
+        @runtime.call('__csimRestoreFormState', state) rescue nil
       end
 
       # Same-document = every entry between `from` and `to` (inclusive)
@@ -2486,7 +2516,10 @@ module Capybara
       def navigate_post(url, body, content_type, depth: 0, from_history: false, referer: @current_url)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
-        record_history({method: :post, url: url, body: body, content_type: content_type}) unless from_history || depth > 0
+        unless from_history || depth > 0
+          capture_outgoing_form_state
+          record_history({method: :post, url: url, body: body, content_type: content_type})
+        end
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -3469,6 +3502,7 @@ module Capybara
         nil
       end
       def set_window_location(handle, url) = (@driver.window_set_location(handle.to_s, url.to_s) if @driver.respond_to?(:window_set_location))
+      def window_history_go(handle, delta) = (@driver.respond_to?(:window_history_go) ? @driver.window_history_go(handle.to_s, delta.to_i) : false)
       def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
       def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
@@ -4793,7 +4827,10 @@ module Capybara
             boot_response_into_ctx('')
             return
           end
-          record_history({method: :get, url: url}) unless from_history || depth > 0
+          unless from_history || depth > 0
+            capture_outgoing_form_state
+            record_history({method: :get, url: url})
+          end
           env = Rack::MockRequest.env_for(url, method: 'GET')
           apply_default_request_env(env, referer: referer)
           status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')

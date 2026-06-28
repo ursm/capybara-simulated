@@ -98,6 +98,7 @@ module Capybara
         '__csimWindowRefCall'        => ->(b, *a) { b.window_ref_call(a[0], a[1], a[2], a[3]) },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
+        '__csimWindowHistoryGo'      => ->(b, *a) { b.window_history_go(a[0], a[1]) },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
         '__csimWindowClose'          => ->(b, *a) { b.close_child_window(a[0]); nil },
         '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
