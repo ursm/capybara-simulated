@@ -165,6 +165,7 @@ module WptRunner
       when /\Aports\[https\]\[\d+\]\z/ then SUB_HTTPS_PORT
       when 'location[scheme]'          then 'http'
       when 'location[host]'            then "#{SUB_HOST}:#{SUB_HTTP_PORT}"
+      when 'location[port]'            then SUB_HTTP_PORT
       when 'location[path]'            then req_path
       when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
       when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? SUB_ALT_HOST : "#{m}.#{SUB_ALT_HOST}"

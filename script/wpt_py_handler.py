@@ -18,8 +18,57 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 """
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
-import os, json, io, importlib.util
+import os, json, io, re, importlib.util
 from urllib.parse import urlsplit, parse_qsl
+
+
+class FormField(bytes):
+    """A wptserve multipart POST field. Subclasses bytes so it IS its value: a
+    handler can read `field.value` (file fields, like file-submission.py) OR use
+    the field directly as bytes (`field == b'…'`, `.decode()`), matching how
+    different vendored handlers consume `request.POST.first(name)`."""
+    def __new__(cls, name, value, filename=None):
+        return super().__new__(cls, value)
+
+    def __init__(self, name, value, filename=None):
+        self.name = name
+        self.value = value
+        self.filename = filename
+        self.file = filename is not None
+
+
+def parse_multipart(ctype, body):
+    """Parse a multipart/form-data body into [(name_bytes, FormField)] pairs,
+    preserving raw bytes (a leading CRLF after each boundary and the trailing
+    CRLF before the next are stripped without touching the part body). `ctype`
+    MUST keep its original case — the boundary token is case-sensitive."""
+    m = re.search(rb'boundary=([^;]+)', ctype)
+    if not m:
+        return []
+    boundary = m.group(1).strip().strip(b'"')
+    segments = body.split(b'--' + boundary)
+    pairs = []
+    for seg in segments[1:-1]:   # drop the preamble and the closing "--\r\n"
+        if seg.startswith(b'\r\n'):
+            seg = seg[2:]
+        if seg.endswith(b'\r\n'):
+            seg = seg[:-2]
+        raw_headers, sep, content = seg.partition(b'\r\n\r\n')
+        if not sep:
+            continue
+        name = filename = None
+        for line in raw_headers.split(b'\r\n'):
+            if line.lower().startswith(b'content-disposition:'):
+                nm = re.search(rb'name="([^"]*)"', line)
+                fn = re.search(rb'filename="([^"]*)"', line)
+                if nm:
+                    name = nm.group(1)
+                if fn:
+                    filename = fn.group(1)
+        if name is None:
+            continue
+        pairs.append((name, FormField(name, content, filename)))
+    return pairs
 
 
 class MultiDict:
@@ -155,12 +204,18 @@ class Request:
         self.raw_input = io.BytesIO(body)
         self.headers = RequestHeaders(headers)
         self.GET = MultiDict([(_b(k), _b(v)) for k, v in parse_qsl(self.url_parts.query, keep_blank_values=True)])
-        ctype = (self.headers.get(b'content-type') or b'').lower()
+        ctype_raw = self.headers.get(b'content-type') or b''   # keep case for the boundary
+        ctype = ctype_raw.lower()
         post_pairs = []
         if b'application/x-www-form-urlencoded' in ctype:
             try:
                 text = body.decode('utf-8', 'replace')
                 post_pairs = [(_b(k), _b(v)) for k, v in parse_qsl(text, keep_blank_values=True)]
+            except Exception:
+                pass
+        elif b'multipart/form-data' in ctype:
+            try:
+                post_pairs = parse_multipart(ctype_raw, body)
             except Exception:
                 pass
         self.POST = MultiDict(post_pairs)
@@ -209,6 +264,22 @@ def _status_code(status):
     return 200
 
 
+def register_wptserve_stub():
+    """Vendored handlers commonly do `from wptserve.utils import isomorphic_decode
+    / isomorphic_encode`. We aren't wptserve; register a minimal `wptserve.utils`
+    so those imports resolve (latin-1 byte<->codepoint round-trips, as wptserve)."""
+    import types
+    if 'wptserve.utils' in sys.modules:
+        return
+    utils = types.ModuleType('wptserve.utils')
+    utils.isomorphic_decode = lambda s: s.decode('latin-1') if isinstance(s, (bytes, bytearray)) else s
+    utils.isomorphic_encode = lambda s: s.encode('latin-1') if isinstance(s, str) else s
+    pkg = types.ModuleType('wptserve')
+    pkg.utils = utils
+    sys.modules['wptserve'] = pkg
+    sys.modules['wptserve.utils'] = utils
+
+
 def main():
     handler_path = sys.argv[1]
     method = os.environ.get('WPT_METHOD', 'GET')
@@ -220,6 +291,7 @@ def main():
     request = Request(method, url, headers, body, doc_root)
     response = Response()
 
+    register_wptserve_stub()
     spec = importlib.util.spec_from_file_location('wpt_handler', handler_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

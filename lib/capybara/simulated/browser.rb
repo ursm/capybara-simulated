@@ -2441,6 +2441,14 @@ module Capybara
                 append_multipart_part(body, boundary, e['name'].to_s, File.binread(path),
                                       filename:     File.basename(path),
                                       content_type: Rack::Mime.mime_type(File.extname(path)))
+              elsif e['b64']
+                # An in-memory `new File([…])` has no on-disk slot; its bytes are
+                # carried base64-encoded from the VM. Decode them for the part body.
+                content = e['b64'].to_s.unpack1('m')
+                ct      = e['type'].to_s
+                ct      = 'application/octet-stream' if ct.empty?
+                append_multipart_part(body, boundary, e['name'].to_s, content,
+                                      filename: e['filename'].to_s, content_type: ct)
               else
                 append_multipart_part(body, boundary, e['name'].to_s, '', filename: e['filename'].to_s)
               end
