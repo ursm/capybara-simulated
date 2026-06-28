@@ -5,6 +5,13 @@
 # that now PASSes -> RED. New failures default here (in-scope) until shown to be
 # an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
 #
+# WPT `.tentative` tests (unratified specs) are the exception: they default to
+# wpt_out_of_scope.yml, since a spec still in flux only bakes in churn if chased.
+# Nothing is lost — when it ratifies, WPT drops the `.tentative` suffix and the
+# test re-enters HERE as a fresh failure automatically, so we handle it then.
+# (Exception: a `.tentative` behavior real browsers already ship AND an app
+# depends on is in-scope per the real-browser bar — keep it here.)
+#
 # Each entry is one file: a list of not-yet-passing subtest names, or the string
 # HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
 #
@@ -16,18 +23,6 @@ dom/events/Event-dispatch-redispatch.html:
 dom/nodes/remove-and-adopt-thcrash.html:
 - Check that removing a node and then adopting its parent into a different window/document
   doesn't crash.
-html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
-- 'Verifies that form submissions scheduled inside javascript: urls take precedence
-  over the javascript: url''s return value.'
-html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
-- label with for attribute should proxy click events to the associated element on
-  click
-html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
-- Input tags should parse inside select if nested in another tag
-- Input tags should parse inside select if there are no options first.
-html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
-- The selectedcontentelement attribute should set up an association between a select
-  and a selectedcontent.
 shadow-dom/focus/click-focus-delegatesFocus-click.html:
 - click on the host with delegatesFocus with another host with delegatesFocus and
   a focusable child

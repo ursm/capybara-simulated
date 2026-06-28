@@ -4,6 +4,11 @@
 # edge no real library/app depends on. These are NOT a backlog; each carries the
 # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
 #
+# Unratified `.tentative` specs also belong here (in flux — chasing them only bakes
+# in churn). They re-enter the in-scope roadmap automatically when they ratify and
+# WPT drops the `.tentative` suffix. Exception: a `.tentative` behavior real
+# browsers already ship AND an app depends on is in-scope (the real-browser bar).
+#
 # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
 # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
 # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
@@ -8920,6 +8925,12 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
+html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
+- name: 'Verifies that form submissions scheduled inside javascript: urls take precedence
+    over the javascript: url''s return value.'
+  reason: 'Unratified WPT .tentative spec (javascript: URL form-submission precedence);
+    no shipped-browser/app dependency. Deferred until it ratifies — re-enters in-scope
+    automatically when the test loses its .tentative marker.'
 html/semantics/forms/the-button-element/active-onblur.html:
 - name: Buttons should clear :active when the user tabs away from them while holding
     spacebar.
@@ -9076,6 +9087,12 @@ html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.
   reason: The file drives a test_driver pointer sequence (preserves-pointer-metadata)
     that hangs without a pointer backend; the runner force-timeout then makes the
     sibling subtest non-deterministic — out-of-scope on pointer automation.
+html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
+- name: label with for attribute should proxy click events to the associated element
+    on click
+  reason: Unratified WPT .tentative spec; the label->control click proxy already works
+    for real clicks (apps unaffected) — the failing subtest is a test_driver modifier-click
+    harness edge. Deferred until it ratifies (then re-enters in-scope).
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-keyboard-behavior.optional.html:
 - name: Base appearance listbox selects should not be focusable.
   reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
@@ -9310,6 +9327,15 @@ html/semantics/forms/the-select-element/customizable-select/select-initial-focus
 - name: Option initial focus should still work when a display animation is present.
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
     picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
+- name: Input tags should parse inside select if nested in another tag
+  reason: Unratified WPT .tentative spec in active redesign (whatwg/html#12050); implementing
+    bakes in churn (tried + reverted). No app dependency. Deferred until it ratifies
+    (then re-enters in-scope).
+- name: Input tags should parse inside select if there are no options first.
+  reason: Unratified WPT .tentative spec in active redesign (whatwg/html#12050); implementing
+    bakes in churn (tried + reverted). No app dependency. Deferred until it ratifies
+    (then re-enters in-scope).
 html/semantics/forms/the-select-element/customizable-select/select-inside-top-layer.html:
 - name: a modal dialog can be nested inside select
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -9543,6 +9569,11 @@ html/semantics/forms/the-select-element/customizable-select/select-vertical-writ
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
     the :open state, and focus/keyboard navigation within the rendered listbox are
     rendering we deliberately do not model.'
+html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
+- name: The selectedcontentelement attribute should set up an association between
+    a select and a selectedcontent.
+  reason: Unratified WPT .tentative spec (customizable-select selectedcontentelement
+    association); no app dependency. Deferred until it ratifies (then re-enters in-scope).
 html/semantics/forms/the-select-element/customizable-select/switch-picker-appearance.html:
 - name: Basic functionality of select picker and appearance
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
