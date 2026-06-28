@@ -12598,9 +12598,6 @@ html/semantics/forms/the-select-element/customizable-select-listbox/customizable
   reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
     keyboard navigation/scroll are rendering we do not model.'
 html/semantics/forms/the-select-element/customizable-select-listbox/customizable-select-listbox-mouse-behavior.html:
-- name: 'mouse: input behavior for base appearance <select multiple>'
-  reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
-    interaction state, touch, click-drag, pointer-event metadata) — not modeled.
 - name: 'mouse: input behavior for base appearance <select size=4>'
   reason: Pointer automation (test_driver.Actions pointer sequences, :active/:hover
     interaction state, touch, click-drag, pointer-event metadata) — not modeled.
@@ -12625,12 +12622,6 @@ html/semantics/forms/the-select-element/customizable-select-listbox/select-listb
 - name: "<select>: Typeahead should focus options without checking them."
   reason: 'Customizable <select> base-appearance listbox: option focus model + in-listbox
     keyboard navigation/scroll are rendering we do not model.'
-html/semantics/forms/the-select-element/customizable-select-listbox/selectedcontent-listbox.html:
-- name: "<select size=4> should support <selectedcontent>."
-  reason: The in-scope <selectedcontent> mirroring is covered; this subtest changes
-    the selection via showPicker() + test_driver.click/Actions on a rendered option
-    (customizable-select picker/listbox option-click) — picker rendering + pointer
-    automation not modeled.
 ? html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-keyboard-behavior.tentative.html
 : - name: Keyboard behavior for base appearance <select multiple size=1>
     reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
@@ -13060,13 +13051,6 @@ html/semantics/forms/the-select-element/customizable-select/select-vertical-writ
   reason: 'Customizable <select> picker (appearance:base-select): popover open/close,
     the :open state, and focus/keyboard navigation within the rendered listbox are
     rendering we deliberately do not model.'
-html/semantics/forms/the-select-element/customizable-select/selectedcontent.html:
-- name: The <selectedcontent> element should reflect the HTML contents of the selected
-    <option>.
-  reason: The in-scope <selectedcontent> mirroring is covered; this subtest changes
-    the selection via showPicker() + test_driver.click/Actions on a rendered option
-    (customizable-select picker/listbox option-click) — picker rendering + pointer
-    automation not modeled.
 html/semantics/forms/the-select-element/customizable-select/switch-picker-appearance.html:
 - name: Basic functionality of select picker and appearance
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
