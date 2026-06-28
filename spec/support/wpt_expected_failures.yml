@@ -27,7 +27,6 @@ html/semantics/forms/the-select-element/customizable-select/select-input-parsing
 - Input tags should parse inside select if there are no options first.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test6'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test8'
 html/semantics/forms/the-select-element/customizable-select/selectedcontentelement-attr.tentative.html:
 - The selectedcontentelement attribute should set up an association between a select
   and a selectedcontent.
