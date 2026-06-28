@@ -400,6 +400,10 @@ module Capybara
       def window_history_go(handle, delta)
         b = window_browser(handle) or return false
         if b.equal?(current_browser)
+          # `opener.history.back()` targeting the active window: defer (can't
+          # rebuild the running VM mid-call) and return false — the active
+          # window's load fires through its own navigation path when the pending
+          # traversal drains, NOT via the aux-load deferral the caller would run.
           b.history_go(delta)
           false
         else
