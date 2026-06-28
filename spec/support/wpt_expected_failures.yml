@@ -60,8 +60,6 @@ html/semantics/forms/the-select-element/customizable-select/option-color-inherit
 html/semantics/forms/the-select-element/customizable-select/select-input-parsing.tentative.html:
 - Input tags should parse inside select if nested in another tag
 - Input tags should parse inside select if there are no options first.
-html/semantics/forms/the-select-element/customizable-select/selectedcontent-insertion-removal.html:
-- Option element insertion steps.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test1'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test2'
