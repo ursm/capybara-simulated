@@ -140,10 +140,12 @@
     try {
       const h = globalThis.__csimRegisterNode && globalThis.__csimRegisterNode(element);
       // __csimClickResolve runs the trusted mousedown→mouseup→click sequence
-      // (+ checkbox/radio activation + focus). It returns a navigate/submit
-      // intent the Ruby side would action; an in-page test click ignores it.
+      // (+ checkbox/radio activation + focus). leavePending keeps any resulting
+      // submit/navigate intent in its pending slot so the driver's drain actions
+      // it — this JS-side click discards the return value the Ruby click path
+      // would otherwise consume (so without it a target=_blank submit is lost).
       if (h && typeof globalThis.__csimClickResolve === 'function') {
-        globalThis.__csimClickResolve(h, null);
+        globalThis.__csimClickResolve(h, null, { leavePending: true });
       }
       return settleThen();
     } catch (e) {
