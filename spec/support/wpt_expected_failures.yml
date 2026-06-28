@@ -61,13 +61,7 @@ html/semantics/forms/the-select-element/customizable-select/select-input-parsing
 - Input tags should parse inside select if nested in another tag
 - Input tags should parse inside select if there are no options first.
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-mutations.html:
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test1'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test2'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test3'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test4'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test5'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test6'
-- 'MutationObserver records during parsing of <select> with <selectedcontent>: test7'
 - 'MutationObserver records during parsing of <select> with <selectedcontent>: test8'
 html/semantics/forms/the-select-element/customizable-select/selectedcontent-restore.optional.html:
 - "<input> inside <selectedcontent> should be restored after form submission."
