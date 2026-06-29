@@ -4378,6 +4378,10 @@ module Capybara
       def response_hash(status, headers, body, url, redirected)
         raw     = body.to_s
         hdrs    = stringify(headers)
+        # A NUL in a header value is not a valid HTTP message; a real server can't
+        # put it on the wire, so the fetch is a network error (nil → status 0 / a
+        # thrown NetworkError for a sync XHR). See headers-normalize-response.
+        return nil if hdrs.any? {|_, v| v.include?("\u0000") }
         is_text = text_response?(hdrs)
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
         # as UTF-8 with invalid sequences replaced (a leading BOM selects the
@@ -5560,11 +5564,22 @@ module Capybara
       end
 
       # Header names/values are TEXT (RFC 9110: field values are ASCII); Rack
-      # hands them over BINARY-tagged (see `RuntimeShared.utf8_text`).
+      # hands them over BINARY-tagged (see `RuntimeShared.utf8_text`). Values are
+      # normalized — leading/trailing HTTP whitespace (tab/LF/CR/space) stripped —
+      # which is how a browser stores them, so getResponseHeader / a `fetch()`
+      # Headers entry expose the trimmed value (headers-normalize-response).
+      # HTTP whitespace at a value's edge (tab/LF/CR/space) — the only bytes header
+      # normalization strips. NOT \v / \f, which headers-some-are-empty preserves,
+      # so String#strip (which also strips those + NUL) is wrong here.
+      HEADER_WS_EDGE = /\A[\t\n\r ]|[\t\n\r ]\z/
       def stringify(headers)
         out = {}
         headers.each do |k, v|
-          out[k.to_s] = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(',') : v.to_s)
+          str = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(',') : v.to_s)
+          # Only allocate a trimmed copy when an edge actually carries whitespace —
+          # the vast majority of response headers don't, and this is a hot path.
+          str = str.gsub(/\A[\t\n\r ]+|[\t\n\r ]+\z/, '') if str.match?(HEADER_WS_EDGE)
+          out[k.to_s] = str
         end
         out
       end

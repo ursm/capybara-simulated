@@ -19,6 +19,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
 import os, json, io, re, base64, importlib.util
+from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
 
@@ -99,7 +100,13 @@ class MultiDict:
 
 
 def _b(s):
-    return s.encode('utf-8') if isinstance(s, str) else s
+    if isinstance(s, bytes):
+        return s
+    if isinstance(s, str):
+        return s.encode('utf-8')
+    # wptserve coerces a non-str/bytes header value (e.g. an int Access-Control-Max-Age,
+    # as header-user-agent.py sets) to its string form before sending.
+    return str(s).encode('utf-8')
 
 
 class Headers:
@@ -348,6 +355,16 @@ def main():
         status = _status_code(response.status)
         hdrs = [(_b(k), _b(v)) for k, v in response.headers]
         out_body = _to_bytes(response.content if response.content else result)
+
+    # wptserve injects Server + Date on every non-writer response (its
+    # `add_required_headers` default) — the getResponseHeader server-and-date test
+    # asserts both are present even though the handler set neither.
+    if response.add_required_headers and not response.writer.used:
+        have = {k.lower() for k, _ in hdrs}
+        if b'date' not in have:
+            hdrs.append((b'Date', _b(formatdate(usegmt=True))))
+        if b'server' not in have:
+            hdrs.append((b'Server', b'capybara-simulated-wpt-shim'))
 
     meta = {
         'status': status,

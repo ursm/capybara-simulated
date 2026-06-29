@@ -159,8 +159,15 @@ module WptRunner
     return nil unless nl
     meta  = JSON.parse(out.byteslice(0, nl))
     rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
+    # Collapse the handler's on-the-wire header list into Rack's name→value Hash.
+    # A handler that emits the same field twice (headers.py: `set` then `append` on
+    # X-Custom-Header-Comma) is combined with ", " — what a browser does when it
+    # builds the response header list — so getResponseHeader sees "1, 2", not "2".
     hdrs  = {}
-    Array(meta['headers']).each {|k, v| hdrs[k.to_s.downcase] = v.to_s }
+    Array(meta['headers']).each do |k, v|
+      key = k.to_s.downcase
+      hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{v}" : v.to_s
+    end
     hdrs['content-type'] ||= 'text/plain'
     # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
     # internal header; rack_fetch lifts it into the response's statusText and strips it.

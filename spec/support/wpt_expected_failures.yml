@@ -63,10 +63,6 @@ xhr/access-control-preflight-headers-async.htm:
 - Preflighted async request with custom header
 xhr/access-control-preflight-headers-sync.htm:
 - Preflighted sync request with custom header
-xhr/access-control-preflight-request-header-lowercase.htm:
-- Request with uppercase header set
-xhr/access-control-preflight-request-header-sorted.htm:
-- Tests that Access-Control-Request-Headers are sorted.
 xhr/access-control-preflight-request-invalid-status-301.htm:
 - Request with 301 preflight response
 xhr/access-control-preflight-request-invalid-status-400.htm:
@@ -84,11 +80,6 @@ xhr/access-control-preflight-sync-not-supported.htm:
 xhr/access-control-recursive-failed-request.htm:
 - Recursively repeated CORS requests with failed preflights should never result in
   unexpected behavior
-xhr/access-control-response-with-body-sync.htm:
-- Tests body from CORS preflight response and actual response with sync request
-xhr/access-control-response-with-body.htm:
-- Tests that XHR doesn't prepend the body from CORS preflight response to the actual
-  response
 xhr/access-control-response-with-exposed-headers.htm:
 - Test CORS response with 'Access-Control-Expose-Headers' header
 xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
@@ -132,8 +123,6 @@ xhr/formdata/constructor-submitter.html:
 xhr/formdata/set-formelement.html:
 - testFormDataSetToFormString
 - testFormDataSetToFormWrongPlatformObject
-xhr/getallresponseheaders-cookies.htm:
-- 'XMLHttpRequest: getAllResponseHeaders() excludes cookies'
 xhr/getallresponseheaders.htm:
 - 'XMLHttpRequest: getAllResponseHeaders()'
 - 'XMLHttpRequest: getAllResponseHeaders() 1'
@@ -142,31 +131,8 @@ xhr/getallresponseheaders.htm:
 - 'XMLHttpRequest: getAllResponseHeaders() 4'
 - 'XMLHttpRequest: getAllResponseHeaders() 5'
 - 'XMLHttpRequest: getAllResponseHeaders() 6'
-xhr/getresponseheader-case-insensitive.htm:
-- 'XMLHttpRequest: getResponseHeader() case-insensitive matching'
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
-xhr/getresponseheader-cookies-and-more.htm:
-- 'XMLHttpRequest: getResponseHeader() custom/non-existent headers and cookies'
-xhr/getresponseheader-server-date.htm:
-- 'XMLHttpRequest: getResponseHeader() server and date'
-xhr/header-user-agent-async.htm:
-- Async request has User-Agent header
-xhr/header-user-agent-sync.htm:
-- Sync request has User-Agent header
-xhr/headers-normalize-response.htm:
-- 'Header value: [tab]'
-- 'Header value: [tab]hello_world'
-- 'Header value: [tab]hello_world[tab]'
-- 'Header value: \0'
-- 'Header value: \0hello world'
-- 'Header value: ___'
-- 'Header value: __hello_world'
-- 'Header value: __hello_world__'
-- 'Header value: hello world\0'
-- 'Header value: hello\0world'
-- 'Header value: hello_world[tab]'
-- 'Header value: hello_world__'
 xhr/loadstart-and-state.html:
 - abort() during loadstart
 - open() during loadstart
@@ -389,26 +355,18 @@ xhr/send-no-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when there is no response entity
   body'
 xhr/send-non-same-origin.htm:
-- 'XMLHttpRequest: send() - non same-origin (about:blank)'
 - 'XMLHttpRequest: send() - non same-origin (blob:bogusidentifier)'
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
 - 'XMLHttpRequest: send() - non same-origin (http://www1.web-platform.test:8000)'
-- 'XMLHttpRequest: send() - non same-origin (javascript:alert(''FAIL''))'
-- 'XMLHttpRequest: send() - non same-origin (mailto:test@example.org)'
-- 'XMLHttpRequest: send() - non same-origin (tel:+31600000000)'
 xhr/send-receive-utf16.htm:
 - UTF-16 without BOM, with charset label in content-type
 xhr/send-redirect-bogus-sync.sub.htm:
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (301: foobar://abcd)'
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: http://nonexistent.web-platform.test)'
-- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: mailto:someone@example.org)'
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (303: http://nonexistent.web-platform.test)'
-- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (303: tel:1234567890)'
 xhr/send-redirect-bogus.sub.htm:
 - 'XMLHttpRequest: send() - Redirects (bogus Location header) (302: http://nonexistent.web-platform.test)'
 - 'XMLHttpRequest: send() - Redirects (bogus Location header) (303: http://nonexistent.web-platform.test)'
-xhr/send-redirect-infinite-sync.htm:
-- 'XMLHttpRequest: send() - Redirects (infinite loop; sync) (301)'
 xhr/send-redirect-post-upload.htm:
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
@@ -487,8 +445,6 @@ xhr/timeout-sync.htm:
 - setting timeout attribute on sync request
 xhr/xmlhttprequest-eventtarget.htm:
 - 'XMLHttpRequest: implements EventTarget'
-xhr/xmlhttprequest-network-error-sync.htm:
-- 'XMLHttpRequest: members during network errors (sync)'
 xhr/xmlhttprequest-timeout-aborted.html:
 - 'Timeout test: time to abort is 5000, timeout set at 2000'
 xhr/xmlhttprequest-timeout-abortedonmain.html:
