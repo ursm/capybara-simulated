@@ -18,7 +18,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 """
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
-import os, json, io, re, importlib.util
+import os, json, io, re, base64, importlib.util
 from urllib.parse import urlsplit, parse_qsl
 
 
@@ -156,6 +156,20 @@ class RequestHeaders:
         return [(k.decode('latin-1'), v.decode('latin-1')) for k, v in self._items]
 
 
+class Auth:
+    """wptserve request.auth: the decoded HTTP Basic credentials (bytes), or None
+    when the request carries no (parseable) Basic Authorization header."""
+    def __init__(self, header):
+        self.username = None
+        self.password = None
+        if header and header[:6].lower() == b'basic ':
+            try:
+                user, _, pw = base64.b64decode(header[6:]).partition(b':')
+                self.username, self.password = user, pw
+            except Exception:
+                pass
+
+
 class Stash:
     """No-op stub: cross-request stash can't persist across one-shot subprocesses."""
     def take(self, key, path=None):
@@ -232,6 +246,7 @@ class Request:
             'browser_host': self.url_parts.hostname or 'web-platform.test',
             'ports': {'http': [self.url_parts.port or 80], 'https': [443]},
         })
+        self.auth = Auth(self.headers.get(b'authorization'))
 
 
 class Response:
