@@ -943,12 +943,13 @@ module Capybara
             end
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
           # in a new browsing context (its own Browser/VM); the primary
-          # stays put (per HTML spec — original window is unaffected). No
-          # `opener_handle` is passed: modern browsers default `target=_blank`
-          # to `noopener` (so `window.opener` is null), unlike JS `window.open`
-          # which keeps the opener — see `open_window_from_js`.
+          # stays put (per HTML spec — original window is unaffected). A
+          # `target=_blank` link defaults to `noopener` (window.opener null) unless
+          # `rel=opener` (carried as `action['opener']`); open_aux_window forces
+          # noopener anyway for a cross-partition blob. Matches the scripted
+          # click / dispatchEvent activation paths.
           elsif !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
-            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, blob_snapshot: action['blob'])
+            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!action['opener'], blob_snapshot: action['blob'])
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
