@@ -4373,7 +4373,14 @@ module Capybara
       # `@rails/request.js` never deserialise and the server reads an
       # empty params hash.
       def apply_request_headers(env, headers)
+        # Preserve the author's exact header names (casing + token chars) alongside the
+        # CGI-mangled HTTP_* keys: the Rack env upcases names and drops non-alphanumerics
+        # (Status-URI → HTTP_STATUS_URI, a tchar-only name → an unrecoverable key), but a
+        # .py echo handler (inspect-headers / echo-headers) reports the names verbatim.
+        # run_py_handler reads this side list to emit the original names.
+        raw = (env['csim.raw_request_headers'] ||= [])
         headers.each {|k, v|
+          raw << [k.to_s, v.to_s]
           name = k.to_s.upcase.tr('-', '_')
           case name
           when 'CONTENT_TYPE', 'CONTENT_LENGTH' then env[name] = v.to_s

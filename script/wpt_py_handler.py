@@ -167,6 +167,14 @@ class RequestHeaders:
     def __contains__(self, name):
         return self.get(name) is not None
 
+    def __str__(self):
+        # wptserve's raw_headers stringifies to the on-the-wire header block; echo
+        # -headers.py returns `str(request.raw_headers)` and the test greps it for
+        # `Name: value` lines (with the author's exact casing + combined values).
+        return ''.join(
+            u'%s: %s\r\n' % (k.decode('latin-1'), v.decode('latin-1'))
+            for k, v in self._items)
+
     def raw_items(self):
         # wptserve exposes the on-the-wire header pairs as (str, str), preserving
         # order, case, and duplicates (inspect-headers.py re-encodes them with

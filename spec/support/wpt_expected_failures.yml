@@ -294,16 +294,8 @@ xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
 xhr/setrequestheader-bogus-value.htm:
 - Omitted value argument
-xhr/setrequestheader-case-insensitive.htm:
-- 'XMLHttpRequest: setRequestHeader() - headers that differ in case'
-- 'XMLHttpRequest: setRequestHeader() - headers that differ in case 1'
-xhr/setrequestheader-header-allowed.htm:
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (!#$%&''*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Status-URI)'
 xhr/setrequestheader-header-forbidden.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that are forbidden 1'
-xhr/setrequestheader-open-setrequestheader.htm:
-- 'XMLHttpRequest: setRequestHeader() and open()'
 xhr/template-element.html:
 - 'XMLHttpRequest: template element parsing'
 xhr/timeout-cors-async.htm:

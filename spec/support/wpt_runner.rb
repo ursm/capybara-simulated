@@ -140,16 +140,33 @@ module WptRunner
     input = env['rack.input']
     body  = input ? input.read.to_s : ''
     input.rewind if input.respond_to?(:rewind)
-    headers = []
+    # Author-set request headers keep their EXACT names (casing + token chars) via the
+    # raw side list browser.rb stashes; the CGI-mangled HTTP_* keys only reconstruct an
+    # approximate Title-Case name, so use them solely for the headers NOT in that list
+    # (the UA defaults: User-Agent, Host, Accept, …). inspect-headers / echo-headers echo
+    # the names verbatim, so the author casing must survive.
+    raw     = env['csim.raw_request_headers'] || []
+    seen    = raw.map {|name, _| name.downcase }
+    headers = raw.map {|name, value| [name, value.to_s] }
+    # Skip the HTTP_* env keys that an author header already covers — matched on the
+    # MANGLED key (apply_request_headers' upcase + '-'→'_'), since reconstructing the
+    # name back can't recover the original (a tchar name's `_` would re-emerge as `-`),
+    # so a name-level dedup would wrongly let the mangled twin through as a duplicate.
+    covered = raw.map {|name, _|
+      m = name.to_s.upcase.tr('-', '_')
+      %w[CONTENT_TYPE CONTENT_LENGTH].include?(m) ? m : "HTTP_#{m}"
+    }
     env.each do |k, v|
       next unless k.is_a?(String) && k.start_with?('HTTP_')
+      next if covered.include?(k)
       headers << [k.sub('HTTP_', '').split('_').map(&:capitalize).join('-'), v.to_s]
     end
     # CONTENT_TYPE / CONTENT_LENGTH live in env without the HTTP_ prefix (CGI
     # convention); a handler that echoes them (content.py's X-Request-Content-Length)
-    # needs them forwarded as ordinary headers.
-    headers << ['Content-Type', env['CONTENT_TYPE'].to_s] if env['CONTENT_TYPE']
-    headers << ['Content-Length', env['CONTENT_LENGTH'].to_s] if env['CONTENT_LENGTH']
+    # needs them forwarded as ordinary headers — unless an author already set them (then
+    # they're in the raw list with the author's casing, and re-adding would duplicate).
+    headers << ['Content-Type', env['CONTENT_TYPE'].to_s] if env['CONTENT_TYPE'] && !seen.include?('content-type')
+    headers << ['Content-Length', env['CONTENT_LENGTH'].to_s] if env['CONTENT_LENGTH'] && !seen.include?('content-length')
     py_env = {
       'WPT_METHOD'   => req.request_method.to_s,
       'WPT_URL'      => req.url.to_s,
