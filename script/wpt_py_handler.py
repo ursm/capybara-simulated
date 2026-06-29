@@ -235,7 +235,15 @@ class Request:
         self.raw_input = io.BytesIO(body)
         self.headers = RequestHeaders(headers)
         self.raw_headers = self.headers   # wptserve's raw (str-pair) view; same backing pairs
-        self.GET = MultiDict([(_b(k), _b(v)) for k, v in parse_qsl(self.url_parts.query, keep_blank_values=True)])
+        # wptserve's request.GET preserves the RAW percent-decoded bytes of each
+        # query field (status.py?content=%FF must yield the byte 0xFF, not a UTF-8
+        # re-decode of it). parse_qsl with the default UTF-8 decode would turn a
+        # non-UTF-8 escape into U+FFFD; parse byte-isomorphically (latin-1) and encode
+        # back to the same bytes.
+        self.GET = MultiDict([
+            (k.encode('latin-1'), v.encode('latin-1'))
+            for k, v in parse_qsl(self.url_parts.query, keep_blank_values=True,
+                                  encoding='latin-1', errors='replace')])
         ctype_raw = self.headers.get(b'content-type') or b''   # keep case for the boundary
         ctype = ctype_raw.lower()
         post_pairs = []

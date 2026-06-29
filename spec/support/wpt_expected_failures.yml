@@ -213,16 +213,8 @@ xhr/responsetext-decoding.htm:
 - 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E  text)'
 - 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
   empty)'
-- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF  text)'
-- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF empty)'
-- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF%FE%FF  text)'
-- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF%FE%FF empty)'
 - 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF  text)'
 - 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF empty)'
-- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF  text)'
-- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF empty)'
-- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF  text)'
-- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF empty)'
 xhr/responsexml-invalid-type.html:
 - 'XMLHttpRequest: response with an invalid responseXML document'
 xhr/responsexml-non-well-formed.htm:
