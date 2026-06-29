@@ -33,6 +33,3 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be revocable from a cross-partition iframe
 - Blob URL shouldn't be revocable from a cross-partition shared worker
 - Blob URL shouldn't be revocable from a service worker
-html/webappapis/timers/settimeout-detached-iframe.html:
-- setTimeout() on a detached iframe's window does not throw and its callback never
-  runs

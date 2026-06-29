@@ -279,4 +279,28 @@ RSpec.describe 'postMessage cross-document origin' do
     JS
     expect(result).to eq('threw' => false, 'idType' => 'number', 'contentWindowNull' => true)
   end
+
+  # A same-origin child shares the parent's event loop, so a child's 0 ms timer
+  # interleaves WITH the parent's tasks — it must fire before the parent's nested
+  # `setTimeout(0)` chain has finished, not after the whole chain drains. (Same
+  # contract as settimeout-detached-iframe's attached half.)
+  it "an attached child frame's 0ms timer fires within the parent's nested timer chain" do
+    session.evaluate_script(<<~JS)
+      window.__attachedRan = false;
+      const f = document.createElement('iframe');
+      document.body.appendChild(f);
+      f.contentWindow.setTimeout(() => { window.__attachedRan = true; }, 0);
+      setTimeout(() => {
+        // By this inner tick the child's co-scheduled 0ms timer must have run.
+        setTimeout(() => { window.__attachedRanAtInner = window.__attachedRan; }, 0);
+      }, 0);
+    JS
+    ran = nil
+    20.times do
+      ran = session.evaluate_script('window.__attachedRanAtInner')
+      break unless ran.nil?
+      sleep 0.02
+    end
+    expect(ran).to be(true)
+  end
 end
