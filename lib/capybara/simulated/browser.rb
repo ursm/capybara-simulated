@@ -4400,6 +4400,7 @@ module Capybara
         # thrown NetworkError for a sync XHR). See headers-normalize-response.
         return nil if hdrs.any? {|_, v| v.include?("\u0000") }
         is_text = text_response?(hdrs)
+        ct      = (hdrs['content-type'] || hdrs['Content-Type']).to_s
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
         # as UTF-8 with invalid sequences replaced (a leading BOM selects the
         # encoding per the HTML "decode" algorithm and is removed). The real
@@ -4429,7 +4430,20 @@ module Capybara
         # The BOM-detected encoding (if any) — a frame load pins its document's
         # characterSet to it (see __csimFrameWindow); highest-precedence signal.
         out['charset']  = bom_charset if bom_charset
-        out['body_b64'] = Base64.strict_encode64(raw) unless is_text
+        # The (XHR) client re-decodes responseText from the raw bytes via TextDecoder
+        # (the WHATWG decoder) when the final encoding may differ from this UTF-8 fast
+        # path: an explicit Content-Type charset, or an XML MIME (whose default
+        # -responseType decode sniffs the prolog). A BOM is already resolved into
+        # `body` above; plain UTF-8/ASCII text needs no raw bytes and pays no base64.
+        # text/html with a `<meta charset>` but no Content-Type charset also needs the
+        # raw bytes: a responseType='document' parse sniffs that meta to pick the
+        # encoding. Gate on a cheap prescan so a typical AJAX HTML response (no meta /
+        # already-charset'd) keeps the UTF-8 fast path and pays no base64.
+        html_meta = ct.downcase.start_with?('text/html') &&
+                    /<meta\b[^>]*[\s"';]charset\s*=/i.match?(raw.b[0, 1024].to_s)
+        needs_client_decode = is_text && !bom_charset &&
+                              (/;\s*charset\s*=/i.match?(ct) || xml_content_type?(ct) || html_meta)
+        out['body_b64'] = Base64.strict_encode64(raw) if !is_text || needs_client_decode
         out
       end
 

@@ -172,14 +172,8 @@ xhr/overridemimetype-blob.html:
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
 - 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
   encoding'
-xhr/overridemimetype-invalid-mime-type.htm:
-- Bogus MIME type does not override encoding
-- Bogus MIME type does not override encoding, 2
-- Bogus MIME type does override MIME type
 xhr/overridemimetype-loading-state.htm:
 - 'XMLHttpRequest: overrideMimeType() in LOADING state'
-xhr/overridemimetype-open-state-force-xml.htm:
-- 'XMLHttpRequest: overrideMimeType() in open state, XML MIME type with UTF-8 charset'
 xhr/progress-events-response-data-gzip.htm:
 - 'XMLHttpRequest: progress events and GZIP encoding'
 xhr/progressevent-constructor.html:
@@ -198,23 +192,6 @@ xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
 xhr/responseText-status.html:
 - 'XMLHttpRequest Test: responseText - status'
-xhr/responsedocument-decoding.htm:
-- 'XMLHttpRequest: response document decoding (application/xml %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
-- 'XMLHttpRequest: response document decoding (application/xml;charset=windows-1252
-  %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
-- 'XMLHttpRequest: response document decoding (text/html %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
-- 'XMLHttpRequest: response document decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
-xhr/responsetext-decoding.htm:
-- 'XMLHttpRequest: responseText decoding (application/xml %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
-  empty)'
-- 'XMLHttpRequest: responseText decoding (application/xml;charset=windows-1252 %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E  text)'
-- 'XMLHttpRequest: responseText decoding (application/xml;charset=windows-1252 %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
-  empty)'
-- 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E  text)'
-- 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
-  empty)'
-- 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF  text)'
-- 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF empty)'
 xhr/responsexml-invalid-type.html:
 - 'XMLHttpRequest: response with an invalid responseXML document'
 xhr/responsexml-non-well-formed.htm:
@@ -296,8 +273,6 @@ xhr/send-no-response-event-order.htm:
 xhr/send-non-same-origin.htm:
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
 - 'XMLHttpRequest: send() - non same-origin (http://www1.web-platform.test:8000)'
-xhr/send-receive-utf16.htm:
-- UTF-16 without BOM, with charset label in content-type
 xhr/send-redirect-bogus-sync.sub.htm:
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (301: foobar://abcd)'
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: http://nonexistent.web-platform.test)'
