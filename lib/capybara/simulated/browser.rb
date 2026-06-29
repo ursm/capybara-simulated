@@ -2705,7 +2705,13 @@ module Capybara
       # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
       # old `__rackFetch` branch did.
       def external_asset_source(url)
-        key = resolve_against_current(url.to_s)
+        # Resolve the asset URL against the document's `<base href>` (HTML base-tag
+        # semantics) — not just the document URL. This matters for a blob: document
+        # (window.open(blobURL)): its location is a `blob:` URL that can't anchor an
+        # absolute-path `src=/common/…`, but its `<base href>` points at a real http(s)
+        # origin, so the script resolves and loads. A page with no `<base>` falls back
+        # to the document URL, unchanged.
+        key = resolve_against_current(url.to_s, use_base: true)
         return nil unless key.is_a?(String)
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[key])

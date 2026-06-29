@@ -16,8 +16,6 @@ FileAPI/BlobURL/cross-partition-navigation.https.html:
   navigation
 - Blob URL area element click should enforce noopener for a cross-top-level-site navigation
 - Blob URL link click should enforce noopener for a cross-top-level-site navigation
-- Blob URL should partition subframe navigation.
-- Blob URL window.open should enforce noopener for a cross-top-level-site navigation
 FileAPI/BlobURL/cross-partition-self-fetch.https.html:
 - Blob URL created in a cross-partition context can fetch itself in a same-partition
   context.
