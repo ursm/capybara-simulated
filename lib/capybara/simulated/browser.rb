@@ -1503,7 +1503,9 @@ module Capybara
         url    = pending['url'].to_s
         target = pending['target'].to_s
         if !target.empty? && !%w[_self _top _parent].include?(target.downcase) && @driver.respond_to?(:open_aux_window)
-          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, blob_snapshot: pending['blob'])
+          # `opener` reflects rel=opener (a bare target=_blank link is noopener);
+          # open_aux_window forces noopener anyway for a cross-partition blob.
+          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!pending['opener'], blob_snapshot: pending['blob'])
         elsif pure_fragment_navigation?(url)
           update_current_hash(url)
         else
@@ -3466,6 +3468,16 @@ module Capybara
       def open_child_window(url, name, opener_realm_id = 0)
         return nil unless @driver.respond_to?(:open_window_from_js)
         @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i)
+      end
+
+      # A `target=_blank`/named link/area activation from a frame or window realm in
+      # THIS browser opens a new top-level auxiliary window. `opener` reflects
+      # rel=opener (a bare target=_blank is noopener); the Driver forces noopener for
+      # a cross-partition blob: target. `blob` is an optional click-time blob snapshot.
+      def open_aux_from_realm(url, opener, blob)
+        return unless @driver.respond_to?(:open_aux_window)
+        snap = blob.is_a?(Hash) ? blob : nil
+        @driver.open_aux_window(resolve_document_url(url.to_s), source: self, opener: !!opener, blob_snapshot: snap)
       end
 
       # Open a SAME-ORIGIN auxiliary window as a realm in THIS browser's isolate

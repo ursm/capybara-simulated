@@ -92,6 +92,11 @@ module Capybara
         # aux window forwards to the Driver; a same-origin window realm lives in this
         # isolate. a[2] is the opener's realm id (for wiring window.opener).
         '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1], a[2]) },
+        # A `target=_blank`/named link/area activation from a frame or window realm:
+        # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window
+        # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
+        # forces noopener for a cross-partition blob: target.
+        '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(a[0], a[1], a[2]); nil },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i); nil },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },

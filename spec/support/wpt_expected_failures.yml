@@ -11,11 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/BlobURL/cross-partition-navigation.https.html:
-- Blob URL SVG <a> element click should enforce noopener for a cross-top-level-site
-  navigation
-- Blob URL area element click should enforce noopener for a cross-top-level-site navigation
-- Blob URL link click should enforce noopener for a cross-top-level-site navigation
 FileAPI/BlobURL/cross-partition-self-fetch.https.html:
 - Blob URL created in a cross-partition context can fetch itself in a same-partition
   context.

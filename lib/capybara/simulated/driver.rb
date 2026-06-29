@@ -336,6 +336,11 @@ module Capybara
       # opener so the new window's `window.opener` resolves back to it.
       def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil)
         name = name.to_s
+        # A blob: URL opened from a different storage partition is forced noopener
+        # (cross-partition-navigation), overriding an explicit rel=opener — the new
+        # top-level window is the blob's own partition (so the blob still loads), but
+        # the opener relationship is severed.
+        opener = false if opener && url.to_s.start_with?('blob:') && source && cross_partition_blob?(url, source)
         # A `<form target>` keeps its opener by default (unlike a `target=_blank`
         # LINK, which is noopener) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
