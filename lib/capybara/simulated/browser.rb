@@ -54,6 +54,18 @@ module Capybara
       # `Last-Modified` per RFC 9111.
       @@asset_cache = AssetCache.new
 
+      # Opt-in: capture each request's author header names verbatim on the Rack env
+      # (`csim.raw_request_headers`) so the WPT .py-handler harness can replay them with
+      # exact casing / token chars (inspect-headers / echo-headers). OFF for real app
+      # traffic — nothing there consumes the list, so it would only allocate per request.
+      @@capture_raw_request_headers = false
+      def self.capture_raw_request_headers
+        @@capture_raw_request_headers
+      end
+      def self.capture_raw_request_headers=(v)
+        @@capture_raw_request_headers = v
+      end
+
       attr_writer :timers_active
 
       # The Driver's handle for the window this Browser backs (set right after
@@ -4378,9 +4390,9 @@ module Capybara
         # (Status-URI → HTTP_STATUS_URI, a tchar-only name → an unrecoverable key), but a
         # .py echo handler (inspect-headers / echo-headers) reports the names verbatim.
         # run_py_handler reads this side list to emit the original names.
-        raw = (env['csim.raw_request_headers'] ||= [])
+        raw = (env['csim.raw_request_headers'] ||= []) if @@capture_raw_request_headers
         headers.each {|k, v|
-          raw << [k.to_s, v.to_s]
+          raw << [k.to_s, v.to_s] if raw
           name = k.to_s.upcase.tr('-', '_')
           case name
           when 'CONTENT_TYPE', 'CONTENT_LENGTH' then env[name] = v.to_s
@@ -4407,7 +4419,6 @@ module Capybara
         # thrown NetworkError for a sync XHR). See headers-normalize-response.
         return nil if hdrs.any? {|_, v| v.include?("\u0000") }
         is_text = text_response?(hdrs)
-        ct      = (hdrs['content-type'] || hdrs['Content-Type']).to_s
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
         # as UTF-8 with invalid sequences replaced (a leading BOM selects the
         # encoding per the HTML "decode" algorithm and is removed). The real
@@ -4437,20 +4448,15 @@ module Capybara
         # The BOM-detected encoding (if any) — a frame load pins its document's
         # characterSet to it (see __csimFrameWindow); highest-precedence signal.
         out['charset']  = bom_charset if bom_charset
-        # The (XHR) client re-decodes responseText from the raw bytes via TextDecoder
-        # (the WHATWG decoder) when the final encoding may differ from this UTF-8 fast
-        # path: an explicit Content-Type charset, or an XML MIME (whose default
-        # -responseType decode sniffs the prolog). A BOM is already resolved into
-        # `body` above; plain UTF-8/ASCII text needs no raw bytes and pays no base64.
-        # text/html with a `<meta charset>` but no Content-Type charset also needs the
-        # raw bytes: a responseType='document' parse sniffs that meta to pick the
-        # encoding. Gate on a cheap prescan so a typical AJAX HTML response (no meta /
-        # already-charset'd) keeps the UTF-8 fast path and pays no base64.
-        html_meta = ct.downcase.start_with?('text/html') &&
-                    /<meta\b[^>]*[\s"';]charset\s*=/i.match?(raw.b[0, 1024].to_s)
-        needs_client_decode = is_text && !bom_charset &&
-                              (/;\s*charset\s*=/i.match?(ct) || xml_content_type?(ct) || html_meta)
-        out['body_b64'] = Base64.strict_encode64(raw) if !is_text || needs_client_decode
+        # Hand the raw bytes to the (XHR) client UNLESS the response is pure-ASCII text.
+        # ASCII decodes identically under every encoding — so responseText is already
+        # correct from the UTF-8 `body`, and it round-trips byte-for-byte as an
+        # ArrayBuffer/Blob. Any NON-ASCII body needs the bytes: a non-UTF-8 charset or an
+        # XML-prolog / <meta charset>-sniffed encoding (responseText), or multibyte UTF-8
+        # read as arraybuffer/blob — the client decodes them with the final encoding
+        # (decodeResponseBytes). `ascii_only?` is a cheap C-level scan, so the dominant
+        # pure-ASCII app JSON/HTML traffic keeps the fast path and pays no base64.
+        out['body_b64'] = Base64.strict_encode64(raw) unless is_text && raw.ascii_only?
         out
       end
 

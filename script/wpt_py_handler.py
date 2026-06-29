@@ -171,9 +171,7 @@ class RequestHeaders:
         # wptserve's raw_headers stringifies to the on-the-wire header block; echo
         # -headers.py returns `str(request.raw_headers)` and the test greps it for
         # `Name: value` lines (with the author's exact casing + combined values).
-        return ''.join(
-            u'%s: %s\r\n' % (k.decode('latin-1'), v.decode('latin-1'))
-            for k, v in self._items)
+        return ''.join(u'%s: %s\r\n' % kv for kv in self.raw_items())
 
     def raw_items(self):
         # wptserve exposes the on-the-wire header pairs as (str, str), preserving
@@ -259,8 +257,11 @@ class Request:
         # re-decode of it). parse_qsl with the default UTF-8 decode would turn a
         # non-UTF-8 escape into U+FFFD; parse byte-isomorphically (latin-1) and encode
         # back to the same bytes.
+        # encode back with errors='replace' too: a literal codepoint > U+00FF left in
+        # the query (un-percent-encoded non-Latin1) isn't latin-1-representable and would
+        # otherwise raise — a malformed-input request should degrade, not crash the handler.
         self.GET = MultiDict([
-            (k.encode('latin-1'), v.encode('latin-1'))
+            (k.encode('latin-1', 'replace'), v.encode('latin-1', 'replace'))
             for k, v in parse_qsl(self.url_parts.query, keep_blank_values=True,
                                   encoding='latin-1', errors='replace')])
         ctype_raw = self.headers.get(b'content-type') or b''   # keep case for the boundary

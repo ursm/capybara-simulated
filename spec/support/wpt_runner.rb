@@ -469,6 +469,11 @@ module WptRunner
         if prev.nil? then ENV.delete('CSIM_LOCAL_ALL_HOSTS') else ENV['CSIM_LOCAL_ALL_HOSTS'] = prev end
       end
     end
+    # The .py echo handlers (inspect-headers / echo-headers) replay request header
+    # names verbatim, which needs the author casing the Rack env's HTTP_* keys lose —
+    # opt the Browser into stashing them. WPT-only; real app traffic skips the alloc.
+    Capybara::Simulated::Browser.capture_raw_request_headers = true
+    @session
   end
 
   # Every real testharness test file under dom/ — i.e. one that pulls in
