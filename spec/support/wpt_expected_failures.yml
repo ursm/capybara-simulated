@@ -98,15 +98,6 @@ xhr/firing-events-http-content-length.html:
 - 'ProgressEvent: firing events for HTTP with Content-Length'
 xhr/firing-events-http-no-content-length.html:
 - 'ProgressEvent: firing events for HTTP with no Content-Length'
-xhr/formdata.html:
-- Newly created FormData contains entries added to "formData" IDL attribute of FormDataEvent.
-- empty formdata
-- formdata from form
-- formdata with blob
-- formdata with named blob
-- formdata with named string
-- formdata with string
-- "|new FormData()| in formdata event handler should throw"
 xhr/formdata/append-formelement.html:
 - testFormDataAppendToFormString
 - testFormDataAppendToFormWrongPlatformObject

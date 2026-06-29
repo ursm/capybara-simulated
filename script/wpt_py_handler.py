@@ -23,26 +23,29 @@ from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
 
-class FormField(bytes):
-    """A wptserve multipart POST field. Subclasses bytes so it IS its value: a
-    handler can read `field.value` (file fields, like file-submission.py) OR use
-    the field directly as bytes (`field == b'…'`, `.decode()`), matching how
-    different vendored handlers consume `request.POST.first(name)`."""
-    def __new__(cls, name, value, filename=None):
-        return super().__new__(cls, value)
+class FileUpload(bytes):
+    """A wptserve multipart FILE field (a part with a `filename`). Subclasses bytes so
+    it IS the file content, and carries the attributes upload.py reads: `.filename`
+    (str), `.headers["Content-Type"]` (str or None), and `.file` (a readable BytesIO).
+    A non-file (string) field is just plain `bytes` — it has no `.filename`, which is
+    exactly how upload.py tells the two apart (`hasattr(value, "filename")`)."""
+    def __new__(cls, content, filename=None, content_type=None):
+        return super().__new__(cls, content)
 
-    def __init__(self, name, value, filename=None):
-        self.name = name
-        self.value = value
-        self.filename = filename
-        self.file = filename is not None
+    def __init__(self, content, filename=None, content_type=None):
+        dec = lambda v: v.decode('latin-1') if isinstance(v, (bytes, bytearray)) else v
+        self.filename = dec(filename)
+        self.headers  = {u"Content-Type": dec(content_type)}
+        self.file     = io.BytesIO(content)
+        self.value    = content   # the file content bytes (file-submission.py reads .value)
 
 
 def parse_multipart(ctype, body):
-    """Parse a multipart/form-data body into [(name_bytes, FormField)] pairs,
-    preserving raw bytes (a leading CRLF after each boundary and the trailing
-    CRLF before the next are stripped without touching the part body). `ctype`
-    MUST keep its original case — the boundary token is case-sensitive."""
+    """Parse a multipart/form-data body into [(name_bytes, value)] pairs, preserving raw
+    bytes (a leading CRLF after each boundary and the trailing CRLF before the next are
+    stripped without touching the part body). A string field's value is plain bytes; a
+    file part (one with a filename) becomes a FileUpload. `ctype` MUST keep its original
+    case — the boundary token is case-sensitive."""
     m = re.search(rb'boundary=([^;]+)', ctype)
     if not m:
         return []
@@ -57,18 +60,21 @@ def parse_multipart(ctype, body):
         raw_headers, sep, content = seg.partition(b'\r\n\r\n')
         if not sep:
             continue
-        name = filename = None
+        name = filename = part_ctype = None
         for line in raw_headers.split(b'\r\n'):
-            if line.lower().startswith(b'content-disposition:'):
+            low = line.lower()
+            if low.startswith(b'content-disposition:'):
                 nm = re.search(rb'name="([^"]*)"', line)
                 fn = re.search(rb'filename="([^"]*)"', line)
                 if nm:
                     name = nm.group(1)
                 if fn:
                     filename = fn.group(1)
+            elif low.startswith(b'content-type:'):
+                part_ctype = line.split(b':', 1)[1].strip()
         if name is None:
             continue
-        pairs.append((name, FormField(name, content, filename)))
+        pairs.append((name, FileUpload(content, filename, part_ctype) if filename is not None else content))
     return pairs
 
 
@@ -97,6 +103,11 @@ class MultiDict:
 
     def keys(self):
         return self._d.keys()
+
+    def items(self):
+        # wptserve returns (key, [values]) pairs — upload.py reads values[0] and splits
+        # fields from files by whether values[0] has a `filename` attribute.
+        return [(k, list(v)) for k, v in self._d.items()]
 
 
 def _b(s):
