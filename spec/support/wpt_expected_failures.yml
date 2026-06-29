@@ -167,10 +167,6 @@ xhr/headers-normalize-response.htm:
 - 'Header value: hello\0world'
 - 'Header value: hello_world[tab]'
 - 'Header value: hello_world__'
-xhr/historical.html:
-- Support for responseType = moz-blob
-- Support for responseType = moz-chunked-arraybuffer
-- Support for responseType = moz-chunked-text
 xhr/loadstart-and-state.html:
 - abort() during loadstart
 - open() during loadstart
@@ -251,17 +247,6 @@ xhr/response-data-gzip.htm:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/response-invalid-responsetype.htm:
-- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
-  (JSON)'
-- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
-  (arrayBuffer)'
-- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
-  (glob)'
-- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
-  (text/html)'
-- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
-  (txt)'
 xhr/response-method.htm:
 - GET
 - HEAD
@@ -293,27 +278,11 @@ xhr/responsetext-decoding.htm:
 - 'XMLHttpRequest: responseText decoding (text/xml %FE%FF empty)'
 - 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF  text)'
 - 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF empty)'
-xhr/responsexml-basic.htm:
-- responseXML on empty response documents
 xhr/responsexml-invalid-type.html:
 - 'XMLHttpRequest: response with an invalid responseXML document'
-xhr/responsexml-media-type.htm:
-- 'XMLHttpRequest: responseXML MIME type tests ('''', should  parse)'
-- 'XMLHttpRequest: responseXML MIME type tests (''application'', should  parse)'
-- 'XMLHttpRequest: responseXML MIME type tests (''bogus'', should  parse)'
-xhr/responsexml-non-document-types.htm:
-- 'XMLHttpRequest: responseXML/responseText on other responseType (arraybuffer)'
-- 'XMLHttpRequest: responseXML/responseText on other responseType (blob)'
-- 'XMLHttpRequest: responseXML/responseText on other responseType (document)'
-- 'XMLHttpRequest: responseXML/responseText on other responseType (json)'
-- 'XMLHttpRequest: responseXML/responseText on other responseType (text)'
 xhr/responsexml-non-well-formed.htm:
-- 'XMLHttpRequest: responseXML non well-formed tests'
-- 'XMLHttpRequest: responseXML non well-formed tests 1'
 - 'XMLHttpRequest: responseXML non well-formed tests 2'
-- 'XMLHttpRequest: responseXML non well-formed tests 3'
 - 'XMLHttpRequest: responseXML non well-formed tests 4'
-- 'XMLHttpRequest: responseXML non well-formed tests 5'
 - 'XMLHttpRequest: responseXML non well-formed tests 6'
 xhr/security-consideration.sub.html:
 - 'ProgressEvent: security consideration'
