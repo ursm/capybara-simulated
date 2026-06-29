@@ -134,12 +134,6 @@ xhr/open-during-abort-event.htm:
 - 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
 xhr/open-during-abort-processing.htm:
 - 'XMLHttpRequest: open() during abort processing - abort() called from onloadstart'
-xhr/open-method-responsetype-set-sync.htm:
-- 'XMLHttpRequest: open() sync request not allowed if responseType is set (arraybuffer)'
-- 'XMLHttpRequest: open() sync request not allowed if responseType is set (blob)'
-- 'XMLHttpRequest: open() sync request not allowed if responseType is set (document)'
-- 'XMLHttpRequest: open() sync request not allowed if responseType is set (json)'
-- 'XMLHttpRequest: open() sync request not allowed if responseType is set (text)'
 xhr/open-open-send.htm:
 - 'XMLHttpRequest: open() - open() - send()'
 xhr/open-open-sync-send.htm:
@@ -339,9 +333,6 @@ xhr/timeout-cors-async.htm:
 xhr/timeout-multiple-fetches.html:
 - CORS preflights should not reset the timer
 - Redirects should not reset the timer
-xhr/timeout-sync.htm:
-- open() with async false when timeout is set
-- setting timeout attribute on sync request
 xhr/xmlhttprequest-eventtarget.htm:
 - 'XMLHttpRequest: implements EventTarget'
 xhr/xmlhttprequest-timeout-aborted.html:
@@ -359,11 +350,6 @@ xhr/xmlhttprequest-timeout-overridesexpires.html:
   at 1000, reset at 2000 to 500'
 xhr/xmlhttprequest-timeout-simple.html:
 - 'Timeout test: timeout hit before load, timeout scheduled at 2000'
-xhr/xmlhttprequest-timeout-synconmain.html:
-- 'Timeout test: Synchronous XHR must not allow a timeout to be set - calling open()
-  after timeout is set must throw'
-- 'Timeout test: Synchronous XHR must not allow a timeout to be set - setting timeout
-  must throw'
 xhr/xmlhttprequest-timeout-twice.html:
 - 'Timeout test: timeout fires normally with same timeout set twice, original timeout
   at 2000, reset at 1000 to 2000'
