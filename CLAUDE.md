@@ -40,8 +40,10 @@ driver bug) only when one of these holds:
 1. **It needs a subsystem we deliberately don't model.** A layout /
    rendering engine (visual hit-testing, `getBoundingClientRect`
    truthiness, viewport-clip visibility, `display: contents` / table
-   layout), a real async runtime / streams, or IDNA / Unicode-host /
-   legacy-multibyte encoding tables.
+   layout), a real async runtime, or legacy-multibyte / Unicode-version-tied
+   encoding tables (ISO-2022-JP & friends; the *residual* IDNA cases where
+   `uri-idna` diverges from the WPT reference — **not IDNA wholesale**: see
+   the in-scope note below).
 2. **It's a spec edge no real browser-built library or app depends on,
    AND satisfying it would require a library-shaped hack (rule 2) or a
    *measured* performance regression (rule 3).** Examples: attribute /
@@ -54,7 +56,34 @@ validated), not whether.** A high-cost-but-correct change (e.g. the
 namespaced-attribute model: SVG `xlink:href`, case-sensitivity — all
 real contracts) is scheduled as a careful staged effort, never skipped
 for being tedious. "Addressable but annoying" is a backlog item, not an
-exclusion.
+exclusion. **"Not modeled yet / haven't built it" is never itself a reason
+— that's the backlog.** An earned out-of-scope names the *subsystem* and
+*why it can't be satisfied here*, not the effort.
+
+**Already in scope — do NOT re-exclude these** (each has been wrongly
+earned-out before as "a subsystem we don't model", then reverted):
+- **Multi-origin: cross-origin iframes, SOP, postMessage-origin,
+  `document.domain`, storage / Blob-URL partitioning.** Buildable in-process
+  plumbing on parts we already have (per-frame V8 realms, the Rack harness);
+  cross-origin is pure ORIGIN TAGGING, not a network boundary — no real DNS
+  / `*.localhost` needed. Backlog, not a non-goal. (See the
+  `multi-origin-in-scope` memory.)
+- **IDNA, Streams, Workers, EventSource are MODELED** (uri-idna /
+  web-streams-polyfill / thread / TCPSocket). A failing IDNA test is usually
+  a driver over-/under-rejection bug to fix (e.g. an `xn--` A-label browsers
+  keep but we rejected), not a "Unicode table" to exclude — diagnose the
+  actual divergence first.
+
+**Unratified specs default OUT** — chasing an in-flux spec only bakes in
+churn. A `.tentative` path/suffix is auto-routed out-of-scope by
+`regen_wpt_expected_failures.rb` and self-heals (ratification changes the
+path → it re-enters in-scope as a fresh failure). An idea-stage **WICG**
+proposal with no `.tentative` in its name is listed explicitly with a
+`[WICG]`-tagged reason; the `wpt_spec` drift check turns the gate RED when
+that test's `<link rel=help>` stops referencing WICG (it standardized), so
+it gets re-audited — the signal the missing suffix can't give. Do **not**
+blanket-exclude every WICG-linked test: a WICG-linked feature we DO support
+(ARIA reflection) must keep failing loudly, never be hidden out-of-scope.
 
 A bounded, documented conformance gap is acceptable **only** when it's
 the deliberate cost of a load-bearing design choice and the alternative
