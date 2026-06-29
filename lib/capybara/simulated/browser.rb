@@ -3830,10 +3830,29 @@ module Capybara
         @runtime.call('__csimAdoptBlobBytes', url.to_s, b64, content_type.to_s) rescue nil
       end
 
+      # A user-initiated `URL.revokeObjectURL`. Storage-partitioned + cross-isolate:
+      # the Driver vetoes a cross-partition revoke (a same-origin but cross-top-level-
+      # site context can't revoke the blob — cross-partition.https) and, for a
+      # same-partition revoke, invalidates the blob in the CREATOR's isolate too so
+      # every window stops resolving it (the blob may have been created in another
+      # window). (Context-teardown revokes go through revoke_owned_blobs, not here.)
       def blob_unregister(url)
-        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
-        @driver.unregister_blob_partition(url.to_s) if @driver.respond_to?(:unregister_blob_partition)
+        if @driver.respond_to?(:revoke_blob_partitioned)
+          return nil unless @driver.revoke_blob_partitioned(url.to_s, self)
+        elsif @driver.respond_to?(:unregister_blob_partition)
+          @driver.unregister_blob_partition(url.to_s)
+        end
+        drop_local_blob(url)
         nil
+      end
+
+      # Forget a blob URL in THIS isolate: its validity marker / bytes in
+      # @blob_registry and its in-VM store entry. Called for a local revoke and, via
+      # the Driver, when another same-partition window revokes a blob this isolate
+      # created.
+      def drop_local_blob(url)
+        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
+        @runtime.call('__csimDropBlob', url.to_s) rescue nil
       end
 
       # Revoke every blob URL owned by a context that's going away (its blob URL

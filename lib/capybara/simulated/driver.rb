@@ -452,6 +452,21 @@ module Capybara
         @blob_partitions_lock.synchronize { @blob_partitions.delete(url.to_s) }
       end
 
+      # A user `URL.revokeObjectURL(url)` from `source`. Storage-partitioned: a revoke
+      # from a different top-level site than the blob's is a NO-OP (cross-partition.https
+      # "shouldn't be revocable from a cross-partition iframe/worker"). A same-partition
+      # revoke drops the Driver entry AND invalidates the blob in the CREATOR's isolate
+      # (the blob may have been created in another window), so every window stops
+      # resolving it. Returns false when vetoed (caller leaves its local copy intact).
+      def revoke_blob_partitioned(url, source)
+        entry = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
+        return false if entry && entry[:site] != source.blob_partition_site
+        @blob_partitions_lock.synchronize { @blob_partitions.delete(url.to_s) }
+        creator = entry && entry[:browser]
+        creator.drop_local_blob(url.to_s) if creator && creator.respond_to?(:drop_local_blob) && !creator.equal?(source)
+        true
+      end
+
       # Load a blob: document into top-level window `target`. The bytes live in
       # whichever Browser created the blob, not the target's — `blob_bytes_for` fetches
       # them cross-isolate. Returns false when the blob is unavailable (revoked), so

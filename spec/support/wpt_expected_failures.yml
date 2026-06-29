@@ -17,6 +17,5 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
 - Blob URL shouldn't be revocable from a cross-partition dedicated worker
-- Blob URL shouldn't be revocable from a cross-partition iframe
 - Blob URL shouldn't be revocable from a cross-partition shared worker
 - Blob URL shouldn't be revocable from a service worker
