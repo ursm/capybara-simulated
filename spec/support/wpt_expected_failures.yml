@@ -123,14 +123,6 @@ xhr/formdata/constructor-submitter.html:
 xhr/formdata/set-formelement.html:
 - testFormDataSetToFormString
 - testFormDataSetToFormWrongPlatformObject
-xhr/getallresponseheaders.htm:
-- 'XMLHttpRequest: getAllResponseHeaders()'
-- 'XMLHttpRequest: getAllResponseHeaders() 1'
-- 'XMLHttpRequest: getAllResponseHeaders() 2'
-- 'XMLHttpRequest: getAllResponseHeaders() 3'
-- 'XMLHttpRequest: getAllResponseHeaders() 4'
-- 'XMLHttpRequest: getAllResponseHeaders() 5'
-- 'XMLHttpRequest: getAllResponseHeaders() 6'
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
 xhr/loadstart-and-state.html:

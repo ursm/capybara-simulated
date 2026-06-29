@@ -159,15 +159,7 @@ module WptRunner
     return nil unless nl
     meta  = JSON.parse(out.byteslice(0, nl))
     rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
-    # Collapse the handler's on-the-wire header list into Rack's name→value Hash.
-    # A handler that emits the same field twice (headers.py: `set` then `append` on
-    # X-Custom-Header-Comma) is combined with ", " — what a browser does when it
-    # builds the response header list — so getResponseHeader sees "1, 2", not "2".
-    hdrs  = {}
-    Array(meta['headers']).each do |k, v|
-      key = k.to_s.downcase
-      hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{v}" : v.to_s
-    end
+    hdrs = combine_headers(meta['headers'])
     hdrs['content-type'] ||= 'text/plain'
     # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
     # internal header; rack_fetch lifts it into the response's statusText and strips it.
@@ -175,6 +167,38 @@ module WptRunner
     [meta['status'].to_i, hdrs, [rbody]]
   rescue StandardError, JSON::ParserError
     nil
+  end
+
+  # Collapse an ordered list of [name, value] response-header pairs into Rack's
+  # name→value Hash, the way a browser builds the response header list: names
+  # lowercased, each value normalized (leading/trailing HTTP whitespace stripped —
+  # NOT \v/\f, which headers-some-are-empty preserves), and a field that appears more
+  # than once combined with ", " (headers.py's repeated X-Custom-Header-Comma, the
+  # `.asis` duplicate-header fixtures). So getResponseHeader sees "1, 2", not "2".
+  def combine_headers(pairs)
+    Array(pairs).each_with_object({}) do |(name, value), hdrs|
+      key = name.to_s.downcase
+      val = value.to_s.gsub(/\A[\t\n\r ]+|[\t\n\r ]+\z/, '')
+      hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{val}" : val
+    end
+  end
+
+  # Parse a vendored `.asis` ("as is") fixture — a raw HTTP response: a status line,
+  # header lines (bare-LF in the corpus, duplicates significant), a blank line, then
+  # the body. Served verbatim with NO added Content-Type / Date / Server (the point of
+  # .asis), so getAllResponseHeaders reflects exactly the listed fields. Returns a Rack
+  # `[status, headers, [body]]`.
+  def serve_asis(file)
+    raw        = File.binread(file)
+    head, _, body = raw.partition(/\r?\n\r?\n/)
+    lines      = head.split(/\r?\n/)
+    status_line = lines.shift.to_s          # e.g. "HTTP/1.1 280 HELLO"
+    code        = (status_line[/\A\S+\s+(\d{3})/, 1] || '200').to_i
+    reason      = status_line[/\A\S+\s+\d{3}\s+(.+)/, 1]
+    pairs       = lines.filter_map {|l| n, v = l.split(':', 2); [n, v] unless n.to_s.empty? }
+    hdrs        = combine_headers(pairs)
+    hdrs['x-csim-status-text'] = reason if reason && !reason.empty?
+    [code, hdrs, [body]]
   end
 
   # Emulate wptserve's server-side `{{…}}` substitution for `.sub.` files (the
@@ -383,6 +407,10 @@ module WptRunner
         unless file.start_with?(WptRunner::ROOT + '/') && File.file?(file)
           next [404, {'content-type' => 'text/plain'}, ['not found']]
         end
+
+        # `.asis` files are raw HTTP responses, served verbatim (status line + the
+        # listed headers, no Content-Type added) — the getAllResponseHeaders fixtures.
+        next WptRunner.serve_asis(file) if path.end_with?('.asis')
 
         ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
         body = File.binread(file)
