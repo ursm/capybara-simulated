@@ -1,4 +1,4 @@
-34637df05a42cefd99ecc38e6602f7f64e4c1648
+bbe4ce211741e3b36f58ccdcffd6a7c1926fde1b
 web-platform-tests/wpt
 trees: dom, domparsing, url, encoding, shadow-dom, FileAPI, html/dom, html/webappapis/timers, html/webappapis/microtask-queuing, html/semantics/forms
-support: common, resources/testharness.js, html/resources/common.js
+support: common, resources/testharness.js, html/resources/common.js, pointerevents/pointerevent_support.js

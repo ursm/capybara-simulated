@@ -5,16 +5,36 @@
 # that now PASSes -> RED. New failures default here (in-scope) until shown to be
 # an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
 #
-# WPT `.tentative` tests (unratified specs) are the exception: they default to
-# wpt_out_of_scope.yml, since a spec still in flux only bakes in churn if chased.
-# Nothing is lost — when it ratifies, WPT drops the `.tentative` suffix and the
-# test re-enters HERE as a fresh failure automatically, so we handle it then.
-# (Exception: a `.tentative` behavior real browsers already ship AND an app
-# depends on is in-scope per the real-browser bar — keep it here.)
-#
 # Each entry is one file: a list of not-yet-passing subtest names, or the string
 # HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
---- {}
+---
+FileAPI/BlobURL/cross-partition-navigation.https.html:
+- Blob URL SVG <a> element click should enforce noopener for a cross-top-level-site
+  navigation
+- Blob URL area element click should enforce noopener for a cross-top-level-site navigation
+- Blob URL link click should enforce noopener for a cross-top-level-site navigation
+- Blob URL should partition subframe navigation.
+- Blob URL window.open should enforce noopener for a cross-top-level-site navigation
+FileAPI/BlobURL/cross-partition-self-fetch.https.html:
+- Blob URL created in a cross-partition context can fetch itself in a same-partition
+  context.
+FileAPI/BlobURL/cross-partition-worker-creation.https.html:
+- Cross-partition Dedicated worker shouldn't be created from blob URL.
+- Cross-partition Shared worker shouldn't be created from blob URL.
+FileAPI/BlobURL/cross-partition.https.html:
+- Blob URL shouldn't be fetched from a cross-partition dedicated worker
+- Blob URL shouldn't be fetched from a cross-partition iframe
+- Blob URL shouldn't be fetched from a cross-partition service worker
+- Blob URL shouldn't be fetched from a cross-partition shared worker
+- Blob URL shouldn't be revocable from a cross-partition dedicated worker
+- Blob URL shouldn't be revocable from a cross-partition iframe
+- Blob URL shouldn't be revocable from a cross-partition shared worker
+- Blob URL shouldn't be revocable from a service worker
+FileAPI/url/cross-global-revoke.sub.html:
+- It is not possible to revoke cross-origin blob URLs.
+html/webappapis/timers/settimeout-detached-iframe.html:
+- setTimeout() on a detached iframe's window does not throw and its callback never
+  runs

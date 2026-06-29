@@ -4,11 +4,6 @@
 # edge no real library/app depends on. These are NOT a backlog; each carries the
 # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
 #
-# Unratified `.tentative` specs also belong here (in flux — chasing them only bakes
-# in churn). They re-enter the in-scope roadmap automatically when they ratify and
-# WPT drops the `.tentative` suffix. Exception: a `.tentative` behavior real
-# browsers already ship AND an app depends on is in-scope (the real-browser bar).
-#
 # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
 # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
 # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
@@ -21,57 +16,6 @@
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
 #
 ---
-FileAPI/BlobURL/cross-partition-navigation.https.html:
-- name: Blob URL area element click should enforce noopener for a cross-top-level-site
-    navigation
-  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
-    not modeled.'
-- name: Blob URL link click should enforce noopener for a cross-top-level-site navigation
-  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
-    not modeled.'
-- name: Blob URL should partition subframe navigation.
-  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
-    not modeled.'
-- name: Blob URL window.open should enforce noopener for a cross-top-level-site navigation
-  reason: 'Storage-partition keying (partitioned blob: URL across a navigation); partitioning
-    not modeled.'
-FileAPI/BlobURL/cross-partition-self-fetch.https.html:
-- name: Blob URL created in a cross-partition context can fetch itself in a same-partition
-    context.
-  reason: 'Storage-partition keying (partitioned blob: URL self-fetch); partitioning
-    not modeled.'
-FileAPI/BlobURL/cross-partition-worker-creation.https.html:
-- name: Cross-partition Dedicated worker shouldn't be created from blob URL.
-  reason: 'Storage-partition keying (partitioned blob: URL worker creation); partitioning
-    not modeled.'
-- name: Cross-partition Shared worker shouldn't be created from blob URL.
-  reason: 'Storage-partition keying (partitioned blob: URL worker creation); partitioning
-    not modeled.'
-FileAPI/BlobURL/cross-partition.https.html:
-- name: Blob URL shouldn't be fetched from a cross-partition dedicated worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be fetched from a cross-partition iframe
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be fetched from a cross-partition service worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be fetched from a cross-partition shared worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be revocable from a cross-partition dedicated worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be revocable from a cross-partition iframe
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be revocable from a cross-partition shared worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
-- name: Blob URL shouldn't be revocable from a service worker
-  reason: 'Storage-partition keying for blob: URL access across sites; storage partitioning
-    is not modeled.'
 FileAPI/file/send-file-form-iso-2022-jp.html:
 - name: "Upload file-for-upload-in-form-ABC~‾¥≈¤･・•∙·☼★星\U0001F31F星★☼·∙•・･¤≈¥‾~XYZ.txt
     (Unicode) in ISO-2022-JP form"
@@ -140,14 +84,6 @@ FileAPI/file/send-file-form-x-user-defined.html:
 - name: Upload file-for-upload-in-form.txt (ASCII) in x-user-defined form
   reason: multipart/form-data in an x-user-defined form; legacy encoder not modeled
     (rule 1).
-FileAPI/url/cross-global-revoke.sub.html:
-- name: It is not possible to revoke cross-origin blob URLs.
-  reason: Needs origin-partitioned blob storage — a cross-origin iframe revoking a
-    URL must NOT affect the parent's blob (and the cross-origin frame must load its
-    document from a remote origin). Storage partitioning / cross-origin frame loading
-    is a deliberately unmodeled subsystem (rule 1, single-origin in-process driver).
-    The same-origin sibling ("from different frames") passes via the WindowProxy event.source
-    model.
 FileAPI/url/multi-global-origin-serialization.sub.html:
 - name: Blob URL serialization (specifically the origin) in multi-global situations
   reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
@@ -711,6 +647,863 @@ dom/nodes/moveBefore/selection-preserve.html:
 - name: moveBefore should not reset selection with preceding text
   reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
     — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+dom/processing-instruction-attributes.html:
+- name: 'Distinct attribute name (source: html-dom): ABC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: html-dom): abC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: html-dom): x123A and x123a'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: html-parser): ABC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: html-parser): abC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: html-parser): x123A and x123a'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-dom): ABC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-dom): abC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-dom): x123A and x123a'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-parser): ABC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-parser): abC and abc'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Distinct attribute name (source: xml-parser): x123A and x123a'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \tx (source: html-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \tx (source: html-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \tx (source: xml-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \tx (source: xml-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \nx (source: html-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \nx (source: html-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \nx (source: xml-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \nx (source: xml-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \rx (source: html-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \rx (source: html-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \rx (source: xml-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: \rx (source: xml-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: / (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: / (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: / (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: / (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: /x/ (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: /x/ (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: /x/ (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: /x/ (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: = (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: = (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: = (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: = (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: =x (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: =x (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: =x (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: =x (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: > (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: > (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: > (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: > (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: >x (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: >x (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: >x (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: >x (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: a= (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: a= (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: a= (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: a= (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: b> (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: b> (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: b> (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: b> (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\t (source: html-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\t (source: html-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\t (source: xml-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\t (source: xml-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: |-
+    Invalid attribute name: x
+     (source: html-dom)
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: |-
+    Invalid attribute name: x
+     (source: html-parser)
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: |-
+    Invalid attribute name: x
+     (source: xml-dom)
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: |-
+    Invalid attribute name: x
+     (source: xml-parser)
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\r (source: html-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\r (source: html-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\r (source: xml-dom)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: "Invalid attribute name: x\r (source: xml-parser)"
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: x/ (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: x/ (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: x/ (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Invalid attribute name: x/ (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute mutation from html-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute mutation from html-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute mutation from xml-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute mutation from xml-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing allows _ in attribute names from
+    html-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing allows _ in attribute names from
+    html-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing allows _ in attribute names from
+    xml-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing allows _ in attribute names from
+    xml-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing rejects unquoted attributes from
+    html-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing rejects unquoted attributes from
+    html-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing rejects unquoted attributes from
+    xml-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attribute parsing rejects unquoted attributes from
+    xml-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attributes with xml-stylesheet from html-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attributes with xml-stylesheet from xml-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction attributes with xml-stylesheet from xml-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction in main parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction toggleAttribute from html-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction toggleAttribute from html-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction toggleAttribute from xml-dom
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: Processing instruction toggleAttribute from xml-parser
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $ (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $ (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $ (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $ (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $foo (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $foo (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $foo (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: $foo (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _ (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _ (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _ (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _ (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _bar (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _bar (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _bar (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: _bar (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a$b (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a$b (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a$b (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a$b (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a_b (source: html-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a_b (source: html-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a_b (source: xml-dom)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'Valid attribute name: a_b (source: xml-parser)'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "''""''" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "''""''" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "''""''" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "''""''" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "=" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "=" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "=" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "=" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "aa"aa"" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "aa"aa"" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "aa"aa"" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "aa"aa"" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx"" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx"" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx"" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx"" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx>" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx>" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx>" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "axx>" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "some<>" (source: "html-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "some<>" (source: "html-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "some<>" (source: "xml-dom")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
+- name: 'check attribute value: "some<>" (source: "xml-parser")'
+  reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
+    pre-standard, no browser ships it and no app depends on it; treated like `.tentative`.
+    Has NO `.tentative` filename signal, so the wpt_spec WICG-drift check re-surfaces
+    this when its <link rel=help> stops referencing WICG (it standardized). CLAUDE.md
+    rule 1."
 domparsing/XMLSerializer-serializeToString.html:
 - name: Check if a prefix bound to an empty namespace URI ("no namespace") serialize
   reason: 'Mutually contradictory with the ''redundant/inconsistent xmlns="..." is
@@ -775,6 +1568,16 @@ domparsing/tentative/positional-methods.html:
 - name: 'Only unsafe variants should run scripts: Comment.afterHTML (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.afterHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.afterHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -791,6 +1594,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.afterHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Comment.beforeHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -805,6 +1618,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.beforeHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.beforeHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -821,6 +1644,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.beforeHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Comment.replaceWithHTML (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -837,6 +1670,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.replaceWithHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.replaceWithHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -853,6 +1696,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Comment.replaceWithHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.afterHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -865,6 +1718,16 @@ domparsing/tentative/positional-methods.html:
 - name: 'Only unsafe variants should run scripts: Element.afterHTML (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.afterHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.afterHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -881,6 +1744,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.afterHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.appendHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -895,6 +1768,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.appendHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.appendHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -911,6 +1794,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.appendHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.beforeHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -925,6 +1818,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.beforeHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.beforeHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -941,6 +1844,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.beforeHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.prependHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -955,6 +1868,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.prependHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.prependHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -971,6 +1894,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.prependHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.replaceWithHTML (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -987,6 +1920,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.replaceWithHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.replaceWithHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1003,6 +1946,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Element.replaceWithHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1019,6 +1972,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTML
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1035,6 +1998,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.afterHTMLUnsafe
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1051,6 +2024,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTML
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1067,6 +2050,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.beforeHTMLUnsafe
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1083,6 +2076,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTML
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
     (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1099,6 +2102,16 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+    (template.content) (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: ProcessingInstruction.replaceWithHTMLUnsafe
+    (template.content) (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.afterHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -1111,6 +2124,16 @@ domparsing/tentative/positional-methods.html:
 - name: 'Only unsafe variants should run scripts: Text.afterHTML (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.afterHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.afterHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -1125,6 +2148,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.afterHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.beforeHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -1137,6 +2170,16 @@ domparsing/tentative/positional-methods.html:
 - name: 'Only unsafe variants should run scripts: Text.beforeHTML (ShadowRoot) (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.beforeHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.beforeHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1153,6 +2196,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.beforeHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.replaceWithHTML (Element) (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
@@ -1167,6 +2220,16 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.replaceWithHTML (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.replaceWithHTML (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (Element)
     (runScripts=false)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1183,204 +2246,346 @@ domparsing/tentative/positional-methods.html:
     (runScripts=true)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (template.content)
+    (runScripts=false)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Only unsafe variants should run scripts: Text.replaceWithHTMLUnsafe (template.content)
+    (runScripts=true)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Comment.replaceWithHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Comment.replaceWithHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Comment.replaceWithHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.appendHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.appendHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.appendHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.appendHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.appendHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.appendHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.prependHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.prependHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.prependHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.prependHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.prependHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.prependHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Element.replaceWithHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Element.replaceWithHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Element.replaceWithHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: ProcessingInstruction.replaceWithHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: ProcessingInstruction.replaceWithHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: ProcessingInstruction.replaceWithHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Position check: Text.replaceWithHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Position check: Text.replaceWithHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Position check: Text.replaceWithHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Comment.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Comment.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Comment.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Comment.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Comment.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Comment.replaceWithHTMLUnsafe
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1389,60 +2594,101 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Comment.replaceWithHTMLUnsafe
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.appendHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.appendHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.appendHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.appendHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.appendHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.appendHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.prependHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.prependHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.prependHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.prependHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.prependHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.prependHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Element.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Element.replaceWithHTMLUnsafe
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1451,6 +2697,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Element.replaceWithHTMLUnsafe
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTML
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1459,6 +2710,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTML
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTMLUnsafe
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1467,6 +2723,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.afterHTMLUnsafe
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTML
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1475,6 +2736,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTML
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTMLUnsafe
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1483,6 +2749,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.beforeHTMLUnsafe
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTML
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1491,6 +2762,11 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTML
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTMLUnsafe
     (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
@@ -1499,78 +2775,119 @@ domparsing/tentative/positional-methods.html:
     (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: ProcessingInstruction.replaceWithHTMLUnsafe
+    (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.afterHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.afterHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.afterHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.afterHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.afterHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.afterHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.beforeHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.beforeHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.beforeHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.beforeHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.beforeHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.beforeHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTML (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTML (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTML (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTMLUnsafe (Element)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
 - name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTMLUnsafe (ShadowRoot)'
   reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
     unshipped in any browser, no library depends on it
-- name: afterHTML fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: afterHTML fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: afterHTMLUnsafe fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: afterHTMLUnsafe fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: beforeHTML fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: beforeHTML fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: beforeHTMLUnsafe fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: beforeHTMLUnsafe fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: replaceWithHTML fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: replaceWithHTML fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: replaceWithHTMLUnsafe fail silently if parent is a Document
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
-- name: replaceWithHTMLUnsafe fail silently if parent is a DocumentFragment
-  reason: WICG declarative-partial-updates {pos}HTML(Unsafe)/Sanitizer proposal; tentative,
-    unshipped in any browser, no library depends on it
+- name: 'Sanitizer should remove forbidden elements: Text.replaceWithHTMLUnsafe (template.content)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: afterHTML throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: afterHTML throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: afterHTMLUnsafe throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: afterHTMLUnsafe throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: beforeHTML throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: beforeHTML throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: beforeHTMLUnsafe throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: beforeHTMLUnsafe throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: replaceWithHTML throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: replaceWithHTML throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: replaceWithHTMLUnsafe throws HierarchyRequestError if parent is a Document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: replaceWithHTMLUnsafe throws HierarchyRequestError if parent is a DocumentFragment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/stream-append-html-unsafe.html:
 - name: Aborting streamAppendHTMLUnsafe()
   reason: 'Unshipped WICG declarative-partial-updates stream* methods: not implemented.
@@ -7356,168 +8673,6 @@ html/dom/historical.html:
     it so `if (document.all)` / `typeof document.all` feature-detection takes the
     modern path. The subtest reads document.all.war, which requires document.all to
     exist. (CLAUDE.md rule 2.)
-html/dom/partial-updates/tentative/processing-instruction-attributes.html:
-- name: 'Equivalent attribute name (source: DOM): ABC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: DOM): abC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: DOM): x123A -> x123a'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: parser): ABC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: parser): abC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: parser): x123A -> x123a'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: xml): ABC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: xml): abC -> abc'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Equivalent attribute name (source: xml): x123A -> x123a'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: "Invalid attribute name: \tx"
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: "Invalid attribute name: \nx"
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: "Invalid attribute name: \rx"
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: /'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: /x/'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: ='
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: =x'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: >'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: >x'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: a='
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: b>'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: "Invalid attribute name: x\t"
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: x
-
-    '
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: "Invalid attribute name: x\r"
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'Invalid attribute name: x/'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute mutation from DOM
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute mutation from parser
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute mutation from xml
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute parsing rejects unquoted attributes from
-    DOM
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute parsing rejects unquoted attributes from
-    parser
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attribute parsing rejects unquoted attributes from
-    xml
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attributes with xml-stylesheet from DOM
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attributes with xml-stylesheet from parser
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction attributes with xml-stylesheet from xml
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: Processing instruction toggleAttribute
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: ''""'' (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: ''""'' (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: ''""'' (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: = (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: = (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: = (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: aa"aa" (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: aa"aa" (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: aa"aa" (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx" (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx" (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx" (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx> (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx> (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: axx> (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: some<> (source: DOM)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: some<> (source: parser)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
-- name: 'check attribute value: some<> (source: xml)'
-  reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
-    unshipped feature, not modeled (rule 1).
 html/dom/partial-updates/tentative/stream-append-has-invalidation.html:
 - name: HTML partial updates - :has invalidation with streaming
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
@@ -9605,19 +10760,34 @@ html/semantics/forms/the-select-element/customizable-select/switch-picker-appear
     while the picker is open
   reason: appearance:base-select UA stylesheet + ::picker/::checkmark/::picker-icon
     pseudo-element computed style — base-select rendering not modeled.
+html/semantics/forms/the-select-element/filterable-select/filterable-select-filtered-pseudo.tentative.html:
+- name: Sibling input and select pattern should not support dropdown select elements.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'nested dropdown: Filterable select option:filtered behavior'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/filterable-select/filterable-select-keyboard-behavior.tentative.html:
-- name: 'appearance auto: Keyboard behavior for filterable select.'
-  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
-    popup + in-popup keyboard/pointer interaction not modeled.'
-- name: 'appearance auto: active option should get scrolled into view.'
-  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
-    popup + in-popup keyboard/pointer interaction not modeled.'
-- name: 'appearance base-select: Keyboard behavior for filterable select.'
-  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
-    popup + in-popup keyboard/pointer interaction not modeled.'
-- name: 'appearance base-select: active option should get scrolled into view.'
-  reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
-    popup + in-popup keyboard/pointer interaction not modeled.'
+- name: 'appearance:auto sibling input and select: Keyboard behavior for filterable
+    select.'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'appearance:base-select sibling input and select: Keyboard behavior for filterable
+    select.'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'nested input in dropdown select: Keyboard behavior for filterable select.'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'nested input in listbox select: Keyboard behavior for filterable select.'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
 - name: Using touch inputs should not deselect other options in a listbox <select
     multiple>.
@@ -10572,6 +11742,25 @@ shadow-dom/reference-target/tentative/dom-mutation.html:
   reason: computed label via tentative non-standard nested referenceTarget; not modeled
 - name: Changing the ID of the referenced element results in an empty computed label
   reason: computed label via tentative non-standard referenceTarget; not modeled
+- name: Changing the inner host's ID from a valid to an invalid value breaks the association
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Changing the inner host's ID from an invalid to a valid value establishes
+    the association
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Changing the middle shadow's reference target from a valid to an invalid ID
+    breaks the association
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Changing the middle shadow's reference target from an invalid to a valid ID
+    establishes the association
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Changing the nested referenceTarget to reference a different element updates
     the computed label
   reason: computed label via tentative non-standard nested referenceTarget mutation;
@@ -10588,11 +11777,16 @@ shadow-dom/reference-target/tentative/dom-mutation.html:
   reason: referenceTarget id-resolution ordering inside shadow; tentative non-standard
     feature not modeled
 shadow-dom/reference-target/tentative/event-path.html:
+- name: Constructed events given a source don't become composed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Event path includes all shadow hosts and shadow roots up to the root of the
-    source, but non-bubbling event fires only Non-bubbling event fires only where
-    currentTarget == retargeted original target
-  reason: event path retargeting through tentative non-standard shadowRootReferenceTarget;
-    not modeled
+    source, but non-bubbling event fires only where currentTarget == retargeted original
+    target
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Event path should go all the way to window if source is not in a shadow, but
     should only fire when currentTarget == retargeted original target
   reason: event path retargeting through tentative non-standard shadowRootReferenceTarget;
@@ -10601,10 +11795,6 @@ shadow-dom/reference-target/tentative/event-path.html:
     fires only where currentTarget == retargeted original target
   reason: event path retargeting through tentative non-standard shadowRootReferenceTarget;
     not modeled
-- name: Event propagates to source tree when source is given in synthetic event, even
-    without reference target
-  reason: relies on tentative non-standard reference-target source-tree event propagation
-    infra; not modeled
 - name: Event propagates to source's shadow tree only; source in deeper shadow root
   reason: event propagation via tentative non-standard shadowRootReferenceTarget;
     not modeled

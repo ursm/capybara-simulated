@@ -36,7 +36,7 @@ const REPO = 'web-platform-tests/wpt';
 
 // Pin. Bump deliberately; regenerate the expected-failures allowlist after
 // (`WPT_REGEN=1 bundle exec rspec spec/wpt_spec.rb`).
-const PINNED = '34637df05a42cefd99ecc38e6602f7f64e4c1648';
+const PINNED = 'bbe4ce211741e3b36f58ccdcffd6a7c1926fde1b';   // web-platform-tests/wpt @ 2026-06-27
 const REF = process.env.WPT_REF || PINNED;
 
 // Directories to vendor whole and scan for tests. Top-level trees plus a few
@@ -101,8 +101,14 @@ async function listBlobs(sha, tree) {
 async function fetchRaw(sha, path) {
   const url = `https://raw.githubusercontent.com/${REPO}/${sha}/${path}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'capybara-simulated-vendor' } });
-  if (!res.ok) throw new Error(`raw ${path}: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  if (res.ok) return Buffer.from(await res.arrayBuffer());
+  // raw.githubusercontent occasionally 400s a single valid path at a given commit
+  // (CDN quirk — the blob exists and lists in the tree). Fall back to the contents API
+  // with the `raw` media type, which returns the file's RAW bytes (and lifts the JSON
+  // endpoint's size cap). gh() throws on a non-200, so a genuinely missing path still
+  // fails loudly rather than being masked.
+  const blob = await gh(`contents/${path}?ref=${sha}`, 'application/vnd.github.raw');
+  return Buffer.from(await blob.arrayBuffer());
 }
 
 async function pool(items, n, worker) {

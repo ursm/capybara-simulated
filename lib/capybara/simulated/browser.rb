@@ -3687,10 +3687,25 @@ module Capybara
       # VerifyDnsLength off) — empty middle labels (`x..y`) and `_`/etc. are
       # allowed, matching whatwg-url's `domainToASCII(domain, false)`.
       def domain_to_ascii(domain)
-        URI::IDNA.whatwg_to_ascii(domain.to_s, be_strict: false)
+        d = domain.to_s
+        # An all-ASCII domain needs no IDNA mapping: WHATWG "domain to ASCII"
+        # (beStrict false) keeps it verbatim and only ASCII-lowercases it — including
+        # an `xn--` A-label whose punycode doesn't decode to a valid UTS46 label
+        # (`xn--pokxncvks` → disallowed U+3253…, or the bare `xn--`). Browsers (and the
+        # WPT urltestdata) keep those A-labels as-is; uri-idna RE-validates the decoded
+        # label and raises, which would wrongly fail the parse. So route only domains
+        # with non-ASCII codepoints (the ones that actually need punycode) through
+        # uri-idna. Forbidden host code points in an ASCII host are caught separately
+        # by whatwg-url's host parser, not here. (Residual: a host MIXING a non-ASCII
+        # label with a non-decodable `xn--` label still routes through uri-idna and
+        # fails — a narrow per-label gap no current test hits; the all-ASCII fast path
+        # covers every observed case.)
+        return d.downcase if d.ascii_only?
+        URI::IDNA.whatwg_to_ascii(d, be_strict: false)
       rescue URI::IDNA::Error
-        nil   # a genuine IDNA failure (bad punycode / disallowed codepoint) — let
-              # whatwg-url report "domain to ASCII failed". Non-IDNA errors propagate.
+        nil   # a genuine IDNA failure on a non-ASCII host (bad punycode / disallowed
+              # codepoint) — let whatwg-url report "domain to ASCII failed". Non-IDNA
+              # errors propagate.
       end
 
       # WHATWG URL "domain to Unicode" — best-effort (never fails the parse per

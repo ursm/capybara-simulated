@@ -628,6 +628,30 @@ module WptRunner
     Array(out_of_scope[rel]).map {|e| e.is_a?(Hash) ? e['name'] : e }
   end
 
+  # Reason tag marking a WICG / pre-standard out-of-scope entry. Such an entry is
+  # excused like a `.tentative` test, but its path carries no ratification signal.
+  WICG_REASON_TAG = '[WICG]'
+
+  # WICG out-of-scope entries that may have STANDARDIZED. A `.tentative` test signals
+  # ratification by losing its suffix (the path changes → it re-enters as a fresh
+  # in-scope failure); a WICG-tagged entry with an ordinary filename can't. So judge by
+  # the test's own `<link rel=help>`: when none of its help links reference WICG anymore,
+  # the proposal has likely moved to a standards body — surface it for re-audit (the
+  # self-healing analogue). Returns rel => [help hrefs] for each drifted entry.
+  def wicg_drift
+    out_of_scope.each_with_object({}) do |(rel, entries), drift|
+      next unless Array(entries).any? {|e| e.is_a?(Hash) && e['reason'].to_s.include?(WICG_REASON_TAG) }
+      path = File.join(ROOT, rel)
+      next unless File.exist?(path)
+      helps = File.read(path).scan(/<link\b[^>]*>/i)
+                  .select {|tag| tag.match?(/\brel\s*=\s*["']?[^"'>]*\bhelp\b/i) }
+                  .filter_map {|tag| tag[/\bhref\s*=\s*["']([^"']+)["']/i, 1] }
+      next if helps.empty?                          # no help link to judge by — leave it
+      next if helps.any? {|h| h.match?(/wicg/i) }   # still references WICG → still pre-standard
+      drift[rel] = helps
+    end
+  end
+
   def load_yaml_map(path)
     File.exist?(path) ? (YAML.safe_load_file(path) || {}) : {}
   end

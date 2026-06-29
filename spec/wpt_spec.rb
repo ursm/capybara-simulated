@@ -38,6 +38,20 @@ RSpec.describe 'WPT conformance (dom/)', :wpt do
     expect(WptRunner.test_files).not_to be_empty
   end
 
+  # Self-healing for WICG / pre-standard out-of-scope entries: unlike `.tentative`
+  # tests (whose path changes on ratification, auto-returning them to the gate), a
+  # WICG-tagged entry with an ordinary filename gives no signal when it standardizes.
+  # Detect that via the test's own `<link rel=help>` — when it no longer references
+  # WICG, re-audit (it's likely now in-scope). Runs at every gate (and WPT bump).
+  it 'WICG-excused out-of-scope entries still reference WICG (else re-audit — likely standardized)' do
+    drift = WptRunner.wicg_drift
+    expect(drift).to be_empty,
+      "Out-of-scope entries tagged #{WptRunner::WICG_REASON_TAG} (WICG/pre-standard) whose " \
+      "<link rel=help> no longer references WICG — the proposal likely standardized; re-audit " \
+      "and move to wpt_expected_failures.yml (in-scope) or fix:\n" +
+      drift.map {|rel, helps| "  - #{rel}  (help: #{helps.join(', ')})" }.join("\n")
+  end
+
   WptRunner.skip.each do |rel, reason|
     it("#{rel} (driver crasher — skipped)") { skip reason.to_s.strip }
   end

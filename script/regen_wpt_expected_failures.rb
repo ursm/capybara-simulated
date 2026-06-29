@@ -32,6 +32,40 @@
 # file is the parity roadmap.
 require_relative '../spec/support/wpt_runner'
 
+# A `.tentative` test (or one under a `tentative/` directory) targets an unratified
+# spec. Per CLAUDE.md rule 1 these default to OUT-OF-SCOPE — chasing an in-flux spec
+# only bakes in churn — and they're self-healing: when WPT ratifies it, the suffix /
+# directory goes away, the path changes, and the test re-enters as a fresh in-scope
+# failure. So auto-classify their failures out-of-scope instead of hand-listing every
+# subtest (one such file carries 100+). A manual out-of-scope entry (the `pool` check
+# below) still wins and keeps its specific reason. The rare exception CLAUDE.md notes —
+# a `.tentative` behaviour real browsers already ship AND an app depends on, which is
+# in-scope — has no carve-out here (this routes it out unconditionally); none qualify
+# today, and one that did would need an explicit in-scope allow-set added above.
+def tentative_path?(rel)
+  rel.match?(%r{(?:\A|/)tentative/}) || rel.match?(/\.tentative\./)
+end
+TENTATIVE_REASON = 'Unratified `.tentative` spec — auto-classified out-of-scope ' \
+  '(chasing in-flux specs bakes in churn). Re-enters in-scope automatically when WPT ' \
+  'drops the tentative path/suffix. CLAUDE.md rule 1.'
+
+# WICG / pre-standard files that are morally `.tentative` (an idea-stage proposal no
+# browser ships and no app depends on) but DON'T carry a `tentative` path. Listed
+# explicitly — NOT auto-routed by "links to WICG", because a WICG-linked feature we DO
+# support (e.g. ARIA reflection) must keep failing loudly, not get hidden out-of-scope.
+# The reason carries WptRunner::WICG_REASON_TAG (the SAME constant the wpt_spec drift
+# check scans for, so the writer and reader can't drift) — that check re-surfaces the
+# entry when the test's <link rel=help> stops referencing WICG, i.e. it standardized,
+# the signal a missing `.tentative` suffix can't give. Map: rel => reason.
+WICG_OUT = {
+  'dom/processing-instruction-attributes.html' =>
+    "#{WptRunner::WICG_REASON_TAG} declarative-partial-updates (ProcessingInstruction " \
+    'attributes) — pre-standard, no browser ships it and no app depends on it; treated ' \
+    'like `.tentative`. Has NO `.tentative` filename signal, so the wpt_spec WICG-drift ' \
+    'check re-surfaces this when its <link rel=help> stops referencing WICG (it ' \
+    'standardized). CLAUDE.md rule 1.'
+}.freeze
+
 files = WptRunner.test_files
 warn "Running #{files.size} WPT files…"
 
@@ -64,6 +98,10 @@ files.each_with_index do |rel, i|
       if pool && pool[name] && !pool[name].empty?
         reason = pool[name].shift
         out_list << { 'name' => name, 'reason' => reason.to_s }
+      elsif tentative_path?(rel)
+        out_list << { 'name' => name, 'reason' => TENTATIVE_REASON }
+      elsif WICG_OUT.key?(rel)
+        out_list << { 'name' => name, 'reason' => WICG_OUT[rel] }
       else
         in_list << name
       end
