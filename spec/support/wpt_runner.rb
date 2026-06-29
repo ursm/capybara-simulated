@@ -227,22 +227,39 @@ module WptRunner
   # tokens. Unknown tokens are left verbatim so a new, unhandled pattern shows
   # up loudly as a literal `{{…}}` in a failing assertion rather than silently
   # mis-substituting to something plausible.
-  def substitute(body, req_path, query = {})
+  def substitute(body, req_path, query = {}, host: nil, scheme: 'http')
+    # The `{{host}}` / `{{ports}}` / `{{domains}}` / `{{location}}` tokens resolve to the
+    # ORIGIN OF THE DOCUMENT fetching this `.sub.` resource — get-host-info.sub.js builds
+    # HTTP_ORIGIN from them and a test compares it to its own document origin. So derive
+    # them from the requesting Host, not a fixed constant: a `.sub.` test visited at the
+    # canonical web-platform.test:8000 keeps that origin (unchanged), while a plain test
+    # at www.example.com that pulls in get-host-info.sub.js gets www.example.com origins
+    # (so its "same-origin" request is actually same-origin, and HTTP_REMOTE_ORIGIN —
+    # `www1.` + host — is genuinely cross-origin). The canonical wptserve host family
+    # (web-platform.test / not-web-platform.test) runs on :8000/:8443; every other host
+    # (www.example.com) uses the default 80/443 (elided), matching its port-less origin.
+    host         = SUB_HOST if host.to_s.empty?
+    sub_family   = host == SUB_HOST || host == SUB_ALT_HOST || host.end_with?(".#{SUB_HOST}", ".#{SUB_ALT_HOST}")
+    http_port    = sub_family ? SUB_HTTP_PORT  : '80'
+    https_port   = sub_family ? SUB_HTTPS_PORT : '443'
+    cur_port     = scheme == 'https' ? https_port : http_port
+    loc_host     = (scheme == 'https' ? https_port == '443' : http_port == '80') ? host : "#{host}:#{cur_port}"
+    alt_host     = sub_family ? SUB_ALT_HOST : "alt.#{host}"
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
     body.dup.force_encoding('UTF-8').gsub(/\{\{([^}]+)\}\}/) do |whole|
       case Regexp.last_match(1)
-      when 'host'                      then SUB_HOST
-      when /\Aports\[http\]\[\d+\]\z/  then SUB_HTTP_PORT
-      when /\Aports\[https\]\[\d+\]\z/ then SUB_HTTPS_PORT
-      when 'location[scheme]'          then 'http'
-      when 'location[host]'            then "#{SUB_HOST}:#{SUB_HTTP_PORT}"
-      when 'location[port]'            then SUB_HTTP_PORT
+      when 'host'                      then host
+      when /\Aports\[http\]\[\d+\]\z/  then http_port
+      when /\Aports\[https\]\[\d+\]\z/ then https_port
+      when 'location[scheme]'          then scheme
+      when 'location[host]'            then loc_host
+      when 'location[port]'            then cur_port
       when 'location[path]'            then req_path
-      when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
-      when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? SUB_ALT_HOST : "#{m}.#{SUB_ALT_HOST}"
-      when /\Ahosts\[\]\[(\w*)\]\z/    then (m = Regexp.last_match(1)).empty? ? SUB_HOST : "#{m}.#{SUB_HOST}"
+      when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? host : "#{m}.#{host}"
+      when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? alt_host : "#{m}.#{alt_host}"
+      when /\Ahosts\[\]\[(\w*)\]\z/    then (m = Regexp.last_match(1)).empty? ? host : "#{m}.#{host}"
       # `{{GET[name]}}` → the value of the `name` query parameter (wptserve's
       # request-substitution). Absent params substitute to the empty string, which
       # the form-action tests rely on (`?action=` → an empty action attribute).
@@ -435,7 +452,7 @@ module WptRunner
 
         ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
         body = File.binread(file)
-        body = WptRunner.substitute(body, path, req.GET) if File.basename(path).include?('.sub.')
+        body = WptRunner.substitute(body, path, req.GET, host: req.host, scheme: req.scheme) if File.basename(path).include?('.sub.')
         resp_headers = {'content-type' => ct}
         # wptserve serves a sibling `<file>.headers` as extra response headers
         # (e.g. Last-Modified for document.lastModified). Merge any it declares.

@@ -236,7 +236,7 @@ xhr/send-no-response-event-order.htm:
   body'
 xhr/send-non-same-origin.htm:
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
-- 'XMLHttpRequest: send() - non same-origin (http://www1.web-platform.test:8000)'
+- 'XMLHttpRequest: send() - non same-origin (http://www1.www.example.com)'
 xhr/send-redirect-bogus-sync.sub.htm:
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (301: foobar://abcd)'
 - 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: http://nonexistent.web-platform.test)'
