@@ -274,11 +274,23 @@ module Capybara
       def visit(path)          = current_browser.visit(path)
       def refresh              = current_browser.refresh
       def reset!
+        reset_windows!
+        browser.reset!
+      end
+
+      # Dispose every auxiliary window and return focus to the primary — a fresh
+      # browsing context has no sibling windows. Disposing each aux Browser tears
+      # down its worker / SSE / websocket threads and its V8 isolate eagerly; left
+      # alone they pile into V8Runtime's process-wide `@@live` set and are only
+      # reclaimed by the at_exit hook, which on a long-lived multi-file session
+      # (the WPT runner) means a slow — sometimes minutes-long — process exit. Split
+      # out of `reset!` so a caller can drop windows WITHOUT resetting the primary's
+      # page state (the WPT runner rebuilds the primary itself, per file, via visit).
+      def reset_windows!
         @aux_windows.each {|w| w[:browser].dispose rescue nil }
         @aux_windows.clear
         @active_handle = nil
         @blob_partitions_lock.synchronize { @blob_partitions.clear }
-        browser.reset!
       end
       def go_back              = current_browser.go_back
       def go_forward           = current_browser.go_forward

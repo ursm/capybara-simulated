@@ -560,14 +560,23 @@ module WptRunner
     cross   = sub || https
     @session = nil if cross
     s = session
-    # One session runs the whole suite, so its history accumulates every prior
-    # file's visit. Clear it before each file — otherwise a test that calls
-    # `history.back()` (select-restore-invalid-option's bfcache round-trip, the
-    # selectedcontent-restore files, …) traverses the SHARED history back into
-    # the PREVIOUS file's document, re-runs its testharness, and reports THAT
-    # file's results here — making the gate depend on visit order. Per-file
-    # reset matches real WPT's fresh-browsing-context-per-file isolation.
-    s.driver.reset_history!
+    # Full per-file reset — what Capybara runs between tests, which this long-lived
+    # WPT session bypasses (it memoizes ONE session for the whole suite). It gives each
+    # file the fresh browsing context real WPT's per-file isolation provides, two parts
+    # of which are load-bearing here:
+    #   - History clearing — otherwise a test that calls `history.back()`
+    #     (select-restore-invalid-option's bfcache round-trip, the selectedcontent-
+    #     restore files, …) traverses the SHARED history back into the PREVIOUS file's
+    #     document, re-runs its testharness, and reports THAT file's results, making the
+    #     gate depend on visit order.
+    #   - Thread teardown — browser.reset! KILLS the web worker / SSE / websocket
+    #     threads a file spawned, and reset_windows! disposes its aux windows. Left
+    #     running, each file's background V8 isolates pile into V8Runtime's process-wide
+    #     @@live and are only reclaimed by the at_exit hook; on a 1900-file suite that
+    #     means disposing hundreds of thread-confined isolates at once and deadlocking,
+    #     so the process takes MINUTES to exit after the last example.
+    # The immediately-following visit rebuilds the page either way.
+    s.driver.reset!
     # The dispatcher message bus is the one cross-file channel; clear it per file so a
     # message left queued by a prior file's contexts can't leak into this one (uuids
     # are random so a collision is unreachable today, but this keeps the same
@@ -659,8 +668,13 @@ module WptRunner
     {completed: false, error: e.message}
   ensure
     # Drop the cross-origin session so the next (default-origin) file starts fresh
-    # on www.example.com — see the `cross` isolation note above.
-    @session = nil if cross
+    # on www.example.com — see the `cross` isolation note above. Dispose its aux
+    # windows first: a dropped session is never reset_windows!'d by the next file,
+    # so otherwise its aux-window isolates + threads leak to at_exit.
+    if cross && @session
+      @session.driver.reset_windows! rescue nil
+      @session = nil
+    end
   end
 
   # The behavioural-conformance allowlist is split across two files: the in-scope
