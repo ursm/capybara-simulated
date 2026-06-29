@@ -4247,6 +4247,10 @@ module Capybara
 
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
+          # A GET/HEAD request carries no body, so it sends no Content-Length (env_for
+          # always sets it to the input bytesize, i.e. 0). A POST/PUT with an empty body
+          # keeps Content-Length: 0 (send-entity-body-none / -empty).
+          env.delete('CONTENT_LENGTH') if %w[GET HEAD].include?(method.to_s.upcase)
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)

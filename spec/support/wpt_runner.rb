@@ -145,7 +145,11 @@ module WptRunner
       next unless k.is_a?(String) && k.start_with?('HTTP_')
       headers << [k.sub('HTTP_', '').split('_').map(&:capitalize).join('-'), v.to_s]
     end
+    # CONTENT_TYPE / CONTENT_LENGTH live in env without the HTTP_ prefix (CGI
+    # convention); a handler that echoes them (content.py's X-Request-Content-Length)
+    # needs them forwarded as ordinary headers.
     headers << ['Content-Type', env['CONTENT_TYPE'].to_s] if env['CONTENT_TYPE']
+    headers << ['Content-Length', env['CONTENT_LENGTH'].to_s] if env['CONTENT_LENGTH']
     py_env = {
       'WPT_METHOD'   => req.request_method.to_s,
       'WPT_URL'      => req.url.to_s,
