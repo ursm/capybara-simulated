@@ -4220,7 +4220,11 @@ module Capybara
       def rack_fetch(method, url, body, headers, redirect_mode, env_extras: nil)
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
-        method = (method || 'GET').to_s.upcase
+        # Use the method's case AS GIVEN: the JS callers already applied the spec
+        # normalization (XHR open() / Fetch upper-case the known methods, preserving
+        # an unknown method's case — open-method-case-sensitive). Upper-casing here
+        # would clobber a custom method like `xUNIcorn`.
+        method = (method || 'GET').to_s
         redirected = false
         # JS-side base64-encodes Blob/File bodies (raw bytes survive
         # the engine's UTF-8 string boundary that way); decode before
@@ -4242,6 +4246,7 @@ module Capybara
           end
 
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
+          env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)

@@ -97,8 +97,6 @@ xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
-xhr/anonymous-mode-unsupported.htm:
-- 'XMLHttpRequest: anonymous mode unsupported'
 xhr/cookies.http.html:
 - Basic non-cross-site cookie handling in XHR
 xhr/data-uri.htm:
@@ -178,41 +176,10 @@ xhr/loadstart-and-state.html:
 - open() during loadstart
 xhr/open-after-abort.htm:
 - 'XMLHttpRequest: open() after abort()'
-xhr/open-after-setrequestheader.htm:
-- 'XMLHttpRequest: open() after setRequestHeader()'
 xhr/open-during-abort-event.htm:
 - 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
 xhr/open-during-abort-processing.htm:
 - 'XMLHttpRequest: open() during abort processing - abort() called from onloadstart'
-xhr/open-method-bogus.htm:
-- 'XMLHttpRequest: open() - bogus methods ( GET)'
-- 'XMLHttpRequest: open() - bogus methods ()'
-- 'XMLHttpRequest: open() - bogus methods (>)'
-- 'XMLHttpRequest: open() - bogus methods (@GET)'
-- 'XMLHttpRequest: open() - bogus methods (G T)'
-- 'XMLHttpRequest: open() - bogus methods (G:ET)'
-- |-
-  XMLHttpRequest: open() - bogus methods (GET
-  )
-- 'XMLHttpRequest: open() - bogus methods (GET?)'
-xhr/open-method-case-sensitive.htm:
-- 'XMLHttpRequest: open() - case-sensitive methods test (COpy)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (chiCKEN)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (copy)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (inDEX)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (movE)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (patCH)'
-- 'XMLHttpRequest: open() - case-sensitive methods test (xUNIcorn)'
-xhr/open-method-insecure.htm:
-- 'XMLHttpRequest: open() - "insecure" methods (CONNECT)'
-- 'XMLHttpRequest: open() - "insecure" methods (TRACE)'
-- 'XMLHttpRequest: open() - "insecure" methods (TRACK)'
-- 'XMLHttpRequest: open() - "insecure" methods (connECT)'
-- 'XMLHttpRequest: open() - "insecure" methods (connect)'
-- 'XMLHttpRequest: open() - "insecure" methods (trAck)'
-- 'XMLHttpRequest: open() - "insecure" methods (traCE)'
-- 'XMLHttpRequest: open() - "insecure" methods (trace)'
-- 'XMLHttpRequest: open() - "insecure" methods (track)'
 xhr/open-method-responsetype-set-sync.htm:
 - 'XMLHttpRequest: open() sync request not allowed if responseType is set (arraybuffer)'
 - 'XMLHttpRequest: open() sync request not allowed if responseType is set (blob)'
@@ -225,8 +192,6 @@ xhr/open-open-sync-send.htm:
 - 'XMLHttpRequest: open() - open() (sync) - send()'
 xhr/open-parameters-toString.htm:
 - 'XMLHttpRequest: open() attempts to toString its string parameters'
-xhr/open-referer.htm:
-- 'XMLHttpRequest: open() - value of Referer header'
 xhr/open-send-open.htm:
 - 'XMLHttpRequest: open() - send() - open()'
 xhr/open-sync-open-send.htm:
@@ -270,9 +235,6 @@ xhr/overridemimetype-loading-state.htm:
 - 'XMLHttpRequest: overrideMimeType() in LOADING state'
 xhr/overridemimetype-open-state-force-xml.htm:
 - 'XMLHttpRequest: overrideMimeType() in open state, XML MIME type with UTF-8 charset'
-xhr/preserve-ua-header-on-redirect.htm:
-- 'XMLHttpRequest: User-Agent header is preserved on redirect'
-- 'XMLHttpRequest: User-Agent header is preserved on redirect 1'
 xhr/progress-events-response-data-gzip.htm:
 - 'XMLHttpRequest: progress events and GZIP encoding'
 xhr/progressevent-constructor.html:
@@ -357,7 +319,6 @@ xhr/security-consideration.sub.html:
 - 'ProgressEvent: security consideration'
 xhr/send-accept-language.htm:
 - Send "sensible" default value, whatever that means
-- 'XMLHttpRequest: send() - Accept-Language'
 xhr/send-accept.htm:
 - 'XMLHttpRequest: send() - Accept'
 xhr/send-after-setting-document-domain.htm:
@@ -424,14 +385,12 @@ xhr/send-conditional.htm:
 - 'XMLHttpRequest: send() - conditional requests (tag)'
 xhr/send-content-type-charset.htm:
 - Multiple non-UTF-8 charset parameters deduplicate, bogus parameter dropped
-- No content type set, give MIME and charset
 - charset given but wrong, fix it (known MIME, actual charset)
 - charset given but wrong, fix it (unknown MIME, bogus charset)
 - charset in double quotes with space
 - charset with leading space that is UTF-8 does change
 - unknown parameters need to be preserved
 xhr/send-content-type-string.htm:
-- 'XMLHttpRequest: send() - Content-Type'
 - 'XMLHttpRequest: send() - Content-Type 1'
 - 'XMLHttpRequest: send() - Content-Type 2'
 xhr/send-data-unexpected-tostring.htm:
@@ -596,151 +555,26 @@ xhr/send-sync-timeout.htm:
 - 'XMLHttpRequest: timeout during sync send() should not run'
 xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
-xhr/setrequestheader-after-send.htm:
-- 'XMLHttpRequest: setRequestHeader() after send()'
-xhr/setrequestheader-allow-empty-value.htm:
-- 'XMLHttpRequest: setRequestHeader() - empty header ()'
-- 'XMLHttpRequest: setRequestHeader() - empty header (null)'
-- 'XMLHttpRequest: setRequestHeader() - empty header (undefined)'
-xhr/setrequestheader-allow-whitespace-in-value.htm:
-- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( )'
-- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( t )'
-- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( t)'
-- 'XMLHttpRequest: setRequestHeader() - header value with whitespace (t )'
-xhr/setrequestheader-before-open.htm:
-- setRequestHeader invoked before open()
-xhr/setrequestheader-bogus-name.htm:
-- setRequestHeader should throw with header name " ".
-- setRequestHeader should throw with header name " tt".
-- setRequestHeader should throw with header name "".
-- setRequestHeader should throw with header name "(".
-- setRequestHeader should throw with header name "()[]{}".
-- setRequestHeader should throw with header name ")".
-- setRequestHeader should throw with header name ",".
-- setRequestHeader should throw with header name "/".
-- setRequestHeader should throw with header name ":".
-- setRequestHeader should throw with header name ":tt".
-- setRequestHeader should throw with header name ";".
-- setRequestHeader should throw with header name "<".
-- setRequestHeader should throw with header name "=".
-- setRequestHeader should throw with header name ">".
-- setRequestHeader should throw with header name "?".
-- setRequestHeader should throw with header name "@".
-- setRequestHeader should throw with header name "X-ﾃｽﾄ".
-- setRequestHeader should throw with header name "[".
-- setRequestHeader should throw with header name "\"".
-- setRequestHeader should throw with header name "\0".
-- setRequestHeader should throw with header name "\\".
-- setRequestHeader should throw with header name "\b".
-- setRequestHeader should throw with header name "\f".
-- setRequestHeader should throw with header name "\n".
-- setRequestHeader should throw with header name "\r".
-- setRequestHeader should throw with header name "\t".
-- setRequestHeader should throw with header name "\ttt".
-- setRequestHeader should throw with header name "\v".
-- setRequestHeader should throw with header name "\vtt".
-- setRequestHeader should throw with header name "\x01".
-- setRequestHeader should throw with header name "\x02".
-- setRequestHeader should throw with header name "\x03".
-- setRequestHeader should throw with header name "\x04".
-- setRequestHeader should throw with header name "\x05".
-- setRequestHeader should throw with header name "\x06".
-- setRequestHeader should throw with header name "\x07".
-- setRequestHeader should throw with header name "\x0e".
-- setRequestHeader should throw with header name "\x0f".
-- setRequestHeader should throw with header name "\x10".
-- setRequestHeader should throw with header name "\x11".
-- setRequestHeader should throw with header name "\x12".
-- setRequestHeader should throw with header name "\x13".
-- setRequestHeader should throw with header name "\x14".
-- setRequestHeader should throw with header name "\x15".
-- setRequestHeader should throw with header name "\x16".
-- setRequestHeader should throw with header name "\x17".
-- setRequestHeader should throw with header name "\x18".
-- setRequestHeader should throw with header name "\x19".
-- setRequestHeader should throw with header name "\x1a".
-- setRequestHeader should throw with header name "\x1b".
-- setRequestHeader should throw with header name "\x1c".
-- setRequestHeader should throw with header name "\x1d".
-- setRequestHeader should throw with header name "\x1e".
-- setRequestHeader should throw with header name "\x1f".
-- setRequestHeader should throw with header name "]".
-- setRequestHeader should throw with header name "a=B".
-- setRequestHeader should throw with header name "a?B".
-- setRequestHeader should throw with header name "t t".
-- setRequestHeader should throw with header name "t,t".
-- 'setRequestHeader should throw with header name "t: t".'
-- setRequestHeader should throw with header name "t:t".
-- setRequestHeader should throw with header name "t;t".
-- setRequestHeader should throw with header name "t<t".
-- setRequestHeader should throw with header name "t\"t".
-- setRequestHeader should throw with header name "t\0t".
-- setRequestHeader should throw with header name "t\nt".
-- setRequestHeader should throw with header name "t\rt".
-- setRequestHeader should throw with header name "{".
-- setRequestHeader should throw with header name "}".
-- "setRequestHeader should throw with header name \"\x7F\"."
-- setRequestHeader should throw with header name "ﾃｽﾄ".
 xhr/setrequestheader-bogus-value.htm:
 - Omitted value argument
-- 'XMLHttpRequest: setRequestHeader() value argument checks'
-- 'XMLHttpRequest: setRequestHeader() value argument checks 1'
-- 'XMLHttpRequest: setRequestHeader() value argument checks 2'
-- 'XMLHttpRequest: setRequestHeader() value argument checks 3'
 xhr/setrequestheader-case-insensitive.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that differ in case'
 - 'XMLHttpRequest: setRequestHeader() - headers that differ in case 1'
 xhr/setrequestheader-content-type.htm:
-- ArrayBuffer request keeps setRequestHeader() Content-Type and charset
-- ArrayBuffer request respects setRequestHeader("")
-- ArrayBuffer request sends no Content-Type without setRequestHeader() call
-- ArrayBufferView request keeps setRequestHeader() Content-Type and charset
-- ArrayBufferView request respects setRequestHeader("")
-- ArrayBufferView request sends no Content-Type without setRequestHeader() call
-- Blob request respects setRequestHeader("") to be specified
-- Blob request with set type keeps setRequestHeader() Content-Type and charset
-- Blob request with set type respects setRequestHeader("") to be specified
-- Blob request with set type uses that it for Content-Type unless setRequestHeader()
-- Blob request with unset type keeps setRequestHeader() Content-Type and charset
-- Blob request with unset type sends no Content-Type without setRequestHeader() call
 - FormData request has correct default Content-Type of "multipart/form-data; boundary=_"
-- FormData request keeps setRequestHeader() Content-Type and charset
-- FormData request respects setRequestHeader("")
 - HTML Document request has correct default Content-Type of "text/html;charset=UTF-8"
-- HTML Document request keeps setRequestHeader() Content-Type without charset
 - HTML Document request keeps setRequestHeader() Content-Type, with charset adjusted
   to UTF-8
-- HTML Document request respects setRequestHeader("")
-- String request has correct default Content-Type of "text/plain;charset=UTF-8"
-- String request keeps setRequestHeader() Content-Type without charset
 - String request keeps setRequestHeader() Content-Type, with charset adjusted to UTF-8
-- URLSearchParams request has correct default Content-Type of "application/x-www-form-urlencoded;charset=UTF-8"
-- URLSearchParams request keeps setRequestHeader() Content-Type without charset
 - URLSearchParams request keeps setRequestHeader() Content-Type, with charset adjusted
   to UTF-8
-- URLSearchParams respects setRequestHeader("")
 - XML Document request has correct default Content-Type of "application/xml;charset=UTF-8"
-- XML Document request keeps setRequestHeader() Content-Type without charset
 - XML Document request keeps setRequestHeader() Content-Type, with charset adjusted
   to UTF-8
-- XML Document request respects setRequestHeader("")
-- setRequestHeader(" ") sends the string " "
-- setRequestHeader("") sends a blank string
-- setRequestHeader(null) sends the string "null"
-- setRequestHeader(undefined) sends the string "undefined"
 xhr/setrequestheader-header-allowed.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (!#$%&''*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Authorization)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Content-Transfer-Encoding)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Content-Type)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (If)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Overwrite)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Pragma)'
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Status-URI)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (User-Agent)'
-- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (X-Pink-Unicorn)'
 xhr/setrequestheader-header-forbidden.htm:
-- 'XMLHttpRequest: setRequestHeader() - headers that are forbidden'
 - 'XMLHttpRequest: setRequestHeader() - headers that are forbidden 1'
 xhr/setrequestheader-open-setrequestheader.htm:
 - 'XMLHttpRequest: setRequestHeader() and open()'
@@ -839,5 +673,3 @@ xhr/xmlhttprequest-timeout-twice.html:
   at 2000, reset at 1000 to 2000'
 xhr/xmlhttprequest-timeout-worker-synconworker.html:
 - 'Timeout test: timeout hit before load, timeout scheduled at 2000'
-xhr/xmlhttprequest-unsent.htm:
-- 'XMLHttpRequest: members during UNSENT'

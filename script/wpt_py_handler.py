@@ -149,6 +149,12 @@ class RequestHeaders:
     def __contains__(self, name):
         return self.get(name) is not None
 
+    def raw_items(self):
+        # wptserve exposes the on-the-wire header pairs as (str, str), preserving
+        # order, case, and duplicates (inspect-headers.py re-encodes them with
+        # isomorphic_encode). Our pairs are stored isomorphic (latin-1) bytes.
+        return [(k.decode('latin-1'), v.decode('latin-1')) for k, v in self._items]
+
 
 class Stash:
     """No-op stub: cross-request stash can't persist across one-shot subprocesses."""
@@ -203,6 +209,7 @@ class Request:
         self.body = body
         self.raw_input = io.BytesIO(body)
         self.headers = RequestHeaders(headers)
+        self.raw_headers = self.headers   # wptserve's raw (str-pair) view; same backing pairs
         self.GET = MultiDict([(_b(k), _b(v)) for k, v in parse_qsl(self.url_parts.query, keep_blank_values=True)])
         ctype_raw = self.headers.get(b'content-type') or b''   # keep case for the boundary
         ctype = ctype_raw.lower()
