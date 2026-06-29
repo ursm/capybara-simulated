@@ -259,4 +259,25 @@ RSpec.describe 'postMessage cross-document origin' do
       'match@http://www.example.com'
     )
   end
+
+  # A reference still held to a REMOVED iframe's window (its realm is disposed) must
+  # stay safe to call: a detached Window's timer entry points are inert no-ops (return
+  # a number, never fire), not a throw. Without the neuter, `w.setTimeout` routes to a
+  # host fn that died with the context → "unknown host function".
+  # (html/webappapis/timers/settimeout-detached-iframe.html's detached half.)
+  it 'a detached iframe window keeps setTimeout callable + inert (no throw)' do
+    result = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe');
+        document.body.appendChild(f);
+        const w = f.contentWindow;   // build the realm
+        f.remove();                  // dispose it; `w` lives on
+        let ran = false;
+        let threw = false, id;
+        try { id = w.setTimeout(() => { ran = true; }, 0); } catch (e) { threw = true; }
+        return { threw, idType: typeof id, contentWindowNull: f.contentWindow === null };
+      })()
+    JS
+    expect(result).to eq('threw' => false, 'idType' => 'number', 'contentWindowNull' => true)
+  end
 end
