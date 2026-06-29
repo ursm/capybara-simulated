@@ -152,13 +152,6 @@ xhr/open-url-base-inserted.htm:
 - 'XMLHttpRequest: open() resolving URLs - insert <base>'
 xhr/open-url-base.htm:
 - 'XMLHttpRequest: open() resolving URLs - <base>'
-xhr/open-url-encoding.htm:
-- lone surrogate
-- percent encode characters
-xhr/open-url-fragment.htm:
-- 'make sure escaped # is not removed'
-- make sure fragment is removed from URL before request
-- make sure fragment is removed from URL before request (with query string)
 xhr/open-url-multi-window-2.htm:
 - 'XMLHttpRequest: open() resolving URLs (multi-Window; 2; evil)'
 xhr/open-url-multi-window-3.htm:

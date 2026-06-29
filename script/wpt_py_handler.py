@@ -227,6 +227,10 @@ class Request:
         self.method = method
         self.url = url
         self.url_parts = urlsplit(url)
+        # wptserve's request_path: the request-target — path plus query string (the
+        # fragment never reaches the server), no scheme/host. requri.py echoes it.
+        self.request_path = self.url_parts.path + (
+            '?' + self.url_parts.query if self.url_parts.query else '')
         self.body = body
         self.raw_input = io.BytesIO(body)
         self.headers = RequestHeaders(headers)
