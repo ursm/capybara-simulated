@@ -370,8 +370,6 @@ xhr/setrequestheader-bogus-value.htm:
 xhr/setrequestheader-case-insensitive.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that differ in case'
 - 'XMLHttpRequest: setRequestHeader() - headers that differ in case 1'
-xhr/setrequestheader-content-type.htm:
-- FormData request has correct default Content-Type of "multipart/form-data; boundary=_"
 xhr/setrequestheader-header-allowed.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (!#$%&''*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz)'
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Status-URI)'
