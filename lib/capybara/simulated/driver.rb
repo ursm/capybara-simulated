@@ -229,10 +229,19 @@ module Capybara
       # async / nearest-timer in so the caller keeps pumping while any window works.
       def run_event_loop_frame(frame_ms)
         state = current_browser.run_event_loop_frame(frame_ms)
-        @aux_windows.each do |w|
+        # Iterate a SNAPSHOT: a window's drain can open or close windows mid-loop (a
+        # popup spawning another, or window.close disposing one). Re-check each window
+        # is still open before stepping it, and isolate a per-window failure so one
+        # dead/half-torn-down VM can't abort the whole frame pump.
+        @aux_windows.dup.each do |w|
           b = w[:browser]
           next if b.equal?(current_browser)
-          state = merge_frame_state(state, b.run_event_loop_frame(frame_ms))
+          next unless @aux_windows.include?(w)   # closed earlier this loop → skip
+          begin
+            state = merge_frame_state(state, b.run_event_loop_frame(frame_ms))
+          rescue StandardError
+            next
+          end
         end
         state
       end
@@ -557,10 +566,20 @@ module Capybara
         return if h == PRIMARY_HANDLE
         @aux_windows.reject! {|w|
           next false unless w[:handle] == h
+          drop_blob_partitions_for(w[:browser])   # don't leave entries pointing at a disposed VM
           w[:browser].dispose rescue nil
           true
         }
         @active_handle = nil if @active_handle == h
+      end
+
+      # Drop every blob-partition entry created by `browser` — its isolate is being
+      # disposed, so the bytes are gone and the reference must not linger (a stale
+      # entry would pin the dead Browser and route blob_bytes_for to a dead VM).
+      private def drop_blob_partitions_for(browser)
+        @blob_partitions_lock.synchronize do
+          @blob_partitions.reject! {|_url, e| e[:browser].equal?(browser) }
+        end
       end
       def switch_to_window(h)
         if h == PRIMARY_HANDLE

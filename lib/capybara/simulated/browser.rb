@@ -2705,13 +2705,14 @@ module Capybara
       # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
       # old `__rackFetch` branch did.
       def external_asset_source(url)
-        # Resolve the asset URL against the document's `<base href>` (HTML base-tag
-        # semantics) — not just the document URL. This matters for a blob: document
-        # (window.open(blobURL)): its location is a `blob:` URL that can't anchor an
-        # absolute-path `src=/common/…`, but its `<base href>` points at a real http(s)
-        # origin, so the script resolves and loads. A page with no `<base>` falls back
-        # to the document URL, unchanged.
-        key = resolve_against_current(url.to_s, use_base: true)
+        # A blob:/data:/about: document's location can't anchor an absolute-path
+        # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
+        # `<base href>` points at a real http(s) origin — so for THOSE documents
+        # resolve against `<base href>` (HTML base-tag semantics) and the script loads.
+        # Ordinary http(s) pages keep the document-URL base so the hot path skips the
+        # `base_href` dom_call (CLAUDE.md rule 3).
+        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
+        key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[key])
@@ -3705,13 +3706,24 @@ module Capybara
       # in-process hosts use (web-platform.test / not-web-platform.test / *.com); a
       # full Public Suffix List isn't warranted here.
       def blob_partition_site
-        u = URI.parse(@current_url.to_s)
+        # A blob: document's location is `blob:<innerURL>` (e.g.
+        # `blob:https://host:port/uuid`) — strip the prefix so the site derives from
+        # the inner origin, not the opaque blob: scheme. data:/about: have no host →
+        # '' (an opaque origin, never same-partition with a real one).
+        u = URI.parse(@current_url.to_s.sub(/\Ablob:/, ''))
         host = u.host.to_s
         return '' if host.empty?
         labels = host.split('.')
-        regd   = labels.length <= 2 ? host : labels.last(2).join('.')
+        # An IP literal (v4 dotted / v6 bracketed) or a ≤2-label host IS its own
+        # registrable domain; otherwise approximate eTLD+1 as the last two labels
+        # (no Public Suffix List — correct for the single-label TLDs our hosts use).
+        regd = if host.start_with?('[') || host.match?(/\A\d+(\.\d+){3}\z/) || labels.length <= 2
+          host
+        else
+          labels.last(2).join('.')
+        end
         "#{u.scheme}://#{regd}"
-      rescue URI::InvalidURIError
+      rescue URI::Error
         ''
       end
 

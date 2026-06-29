@@ -565,6 +565,11 @@ module WptRunner
     # file's results here — making the gate depend on visit order. Per-file
     # reset matches real WPT's fresh-browsing-context-per-file isolation.
     s.driver.reset_history!
+    # The dispatcher message bus is the one cross-file channel; clear it per file so a
+    # message left queued by a prior file's contexts can't leak into this one (uuids
+    # are random so a collision is unreachable today, but this keeps the same
+    # run-order independence the history/session resets enforce, and bounds the map).
+    DISPATCHER_LOCK.synchronize { DISPATCHER_STASH.clear }
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
     # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
