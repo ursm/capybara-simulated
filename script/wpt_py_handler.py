@@ -18,7 +18,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 """
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
-import os, json, io, re, base64, importlib.util
+import os, json, io, re, base64, hashlib, importlib.util
 from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
@@ -194,16 +194,49 @@ class Auth:
                 pass
 
 
+class _NullLock:
+    def __enter__(self): return self
+    def __exit__(self, *exc): return False
+
+
 class Stash:
-    """No-op stub: cross-request stash can't persist across one-shot subprocesses."""
+    """wptserve request.server.stash: a per-test key→value store. Each .py runs in its
+    own subprocess, so persist across them via files in WPT_STASH_DIR (the runner makes
+    one dir per test file and clears it between files). take() is a pop (read+remove),
+    put() writes; values are bytes (the CORS preflight-denied flow stores b"Denied")."""
+    def __init__(self):
+        self.dir = os.environ.get('WPT_STASH_DIR')
+
+    def _path(self, key):
+        if not self.dir:
+            return None
+        raw = key if isinstance(key, bytes) else str(key).encode('utf-8')
+        return os.path.join(self.dir, hashlib.sha1(raw).hexdigest())
+
     def take(self, key, path=None):
-        return None
+        p = self._path(key)
+        if not p or not os.path.exists(p):
+            return None
+        try:
+            with open(p, 'rb') as f:
+                data = f.read()
+            os.remove(p)
+            return data
+        except OSError:
+            return None
 
     def put(self, key, value, path=None):
-        return None
+        p = self._path(key)
+        if not p:
+            return
+        try:
+            with open(p, 'wb') as f:
+                f.write(value if isinstance(value, (bytes, bytearray)) else str(value).encode('utf-8'))
+        except OSError:
+            pass
 
     def lock(self):
-        return None
+        return _NullLock()
 
 
 class Server:

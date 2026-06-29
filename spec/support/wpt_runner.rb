@@ -128,6 +128,13 @@ module WptRunner
   DISPATCHER_STASH = Hash.new {|h, k| h[k] = [] }
   DISPATCHER_LOCK  = Mutex.new
 
+  # File-backed request.server.stash for the .py shim (each handler runs in its own
+  # subprocess, so cross-request state must live on disk). One dir for the process,
+  # cleared per file (run_one) for the same run-order independence the session reset gives.
+  require 'tmpdir'
+  require 'fileutils'
+  STASH_DIR = Dir.mktmpdir('csim-wpt-stash')
+
   module_function
 
   # Run a vendored WPT `.py` request handler through script/wpt_py_handler.py (a
@@ -172,6 +179,10 @@ module WptRunner
       'WPT_URL'      => req.url.to_s,
       'WPT_HEADERS'  => JSON.generate(headers),
       'WPT_DOC_ROOT' => ROOT,
+      # request.server.stash backing dir — shared across a test file's .py subprocesses
+      # (the CORS preflight-denied flow stashes state across reset/preflight/complete);
+      # cleared per file in run_one.
+      'WPT_STASH_DIR' => STASH_DIR,
       'PYTHONDONTWRITEBYTECODE' => '1'   # no __pycache__ in the vendored WPT tree
     }
     out, status = Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true)
@@ -665,6 +676,8 @@ module WptRunner
     # are random so a collision is unreachable today, but this keeps the same
     # run-order independence the history/session resets enforce, and bounds the map).
     DISPATCHER_LOCK.synchronize { DISPATCHER_STASH.clear }
+    # Per-file reset of the file-backed server.stash (same run-order independence).
+    FileUtils.rm_f(Dir.glob(File.join(STASH_DIR, '*')))
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
     # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel

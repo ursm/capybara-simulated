@@ -34,28 +34,12 @@ xhr/access-control-basic-cors-safelisted-response-headers.htm:
 - Response with CORS-safelisted headers
 xhr/access-control-expose-headers-on-redirect.html:
 - XHR should respect access-control-expose-headers header on redirect
-xhr/access-control-preflight-async-header-denied.htm:
-- Async request denied at preflight
-xhr/access-control-preflight-async-method-denied.htm:
-- Async request denied at preflight
-xhr/access-control-preflight-async-not-supported.htm:
-- Async PUT request denied at preflight
 xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
 - CORS sync request with URL credentials
-xhr/access-control-preflight-headers-async.htm:
-- Preflighted async request with custom header
-xhr/access-control-preflight-headers-sync.htm:
-- Preflighted sync request with custom header
 xhr/access-control-preflight-request-must-not-contain-cookie.htm:
 - Preflight request must not contain any cookie header
-xhr/access-control-preflight-sync-header-denied.htm:
-- Sync request denied at preflight
-xhr/access-control-preflight-sync-method-denied.htm:
-- Sync request denied at preflight because of non-CORS-safelisted method
-xhr/access-control-preflight-sync-not-supported.htm:
-- Sync PUT request denied at preflight
 xhr/access-control-response-with-exposed-headers.htm:
 - Test CORS response with 'Access-Control-Expose-Headers' header
 xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
