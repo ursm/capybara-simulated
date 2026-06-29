@@ -31,6 +31,9 @@ importers:
       web-streams-polyfill:
         specifier: ^4.3.0
         version: 4.3.0
+      whatwg-mimetype:
+        specifier: ^5.0.0
+        version: 5.0.0
       xpathway:
         specifier: ^1.0.4
         version: 1.0.4
@@ -302,6 +305,10 @@ packages:
     resolution: {integrity: sha512-fxOigKkIem1iAgQ9t4cFOP+kWEA8y6Be/uh50FpJh0FijoeeT/VMrOyJzNLUgjy0rGMEcHeReKDCqj0g9dIe9A==}
     engines: {node: '>= 18'}
 
+  whatwg-mimetype@5.0.0:
+    resolution: {integrity: sha512-sXcNcHOC51uPGF0P/D4NVtrkjSU2fNsm9iog4ZvZJsL3rjoDAzXZhkm2MWt1y+PUdggKAYVoMAIYcs78wJ51Cw==}
+    engines: {node: '>=20'}
+
   whatwg-url@16.0.1:
     resolution: {integrity: sha512-1to4zXBxmXHV3IiSSEInrreIlu02vUOvrhxJJH5vcxYTBDAx51cqZiKdyTxlecdKNSjj8EcxGBxNf6Vg+945gw==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
@@ -489,6 +496,8 @@ snapshots:
   webidl-conversions@8.0.1: {}
 
   webidl2@24.5.0: {}
+
+  whatwg-mimetype@5.0.0: {}
 
   whatwg-url@16.0.1:
     dependencies:

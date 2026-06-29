@@ -284,25 +284,13 @@ xhr/send-conditional-cors.htm:
 xhr/send-conditional.htm:
 - 'XMLHttpRequest: send() - conditional requests (date)'
 - 'XMLHttpRequest: send() - conditional requests (tag)'
-xhr/send-content-type-charset.htm:
-- Multiple non-UTF-8 charset parameters deduplicate, bogus parameter dropped
-- charset given but wrong, fix it (known MIME, actual charset)
-- charset given but wrong, fix it (unknown MIME, bogus charset)
-- charset in double quotes with space
-- charset with leading space that is UTF-8 does change
-- unknown parameters need to be preserved
-xhr/send-content-type-string.htm:
-- 'XMLHttpRequest: send() - Content-Type 1'
-- 'XMLHttpRequest: send() - Content-Type 2'
 xhr/send-data-unexpected-tostring.htm:
 - send() called from data stringification
 xhr/send-entity-body-document-bogus.htm:
 - 'Serializing documents through XMLHttpRequest: '''''
-- 'Serializing documents through XMLHttpRequest: ''<test:test test:test="gee" x="�"/>'''
 - 'Serializing documents through XMLHttpRequest: ''<test:test test:test="gee"/>'''
 - 'Serializing documents through XMLHttpRequest: ''<test:test/>'''
 xhr/send-entity-body-document.htm:
-- HTML document, invalid UTF-8
 - HTML document, shift-jis
 - XML document, windows-1252
 - empty div
@@ -384,15 +372,6 @@ xhr/setrequestheader-case-insensitive.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that differ in case 1'
 xhr/setrequestheader-content-type.htm:
 - FormData request has correct default Content-Type of "multipart/form-data; boundary=_"
-- HTML Document request has correct default Content-Type of "text/html;charset=UTF-8"
-- HTML Document request keeps setRequestHeader() Content-Type, with charset adjusted
-  to UTF-8
-- String request keeps setRequestHeader() Content-Type, with charset adjusted to UTF-8
-- URLSearchParams request keeps setRequestHeader() Content-Type, with charset adjusted
-  to UTF-8
-- XML Document request has correct default Content-Type of "application/xml;charset=UTF-8"
-- XML Document request keeps setRequestHeader() Content-Type, with charset adjusted
-  to UTF-8
 xhr/setrequestheader-header-allowed.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (!#$%&''*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz)'
 - 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Status-URI)'

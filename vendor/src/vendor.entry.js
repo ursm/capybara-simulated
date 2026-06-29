@@ -46,6 +46,15 @@ const cssTree = { parse: cssTreeParse, generate: cssTreeGenerate, walk: cssTreeW
 // as whatwg-url's URL-impl does.
 import * as urlEngine from 'whatwg-url/lib/url-state-machine.js';
 
+// whatwg-mimetype: the WHATWG MIME-type parser + serializer (npm, MIT — the jsdom
+// reference impl). Backs XHR send()'s "fix the charset to UTF-8" step, which needs a
+// real parser (quoted strings, backslash escapes, duplicate-parameter dedup) and the
+// canonical serializer (lowercases type/subtype + parameter names). Pure regex
+// parse/serialize — no WebIDL / ArrayBuffer descriptors — so it's safe in the V8
+// snapshot build (unlike whatwg-url's URL wrapper).
+import { MIMEType } from 'whatwg-mimetype';
+const mimeType = { MIMEType };
+
 // web-streams-polyfill: spec-compliant pure-JS WHATWG Streams (ReadableStream /
 // WritableStream / TransformStream + queuing strategies), defined entirely over
 // promises + microtask queuing — which our event loop models. The ponyfill entry
@@ -120,4 +129,4 @@ function cssColorComputed(str) {
 }
 const color = { toHex: cssColorToHex, computed: cssColorComputed };
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, streams, parse5, color };
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color };
