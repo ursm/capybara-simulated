@@ -463,7 +463,19 @@ module WptRunner
             resp_headers[name.strip.downcase] = val.strip if name && val
           end
         end
-        [200, resp_headers, [body]]
+        # wptserve `?pipe=` response transforms: support the two the corpus uses on a
+        # static file — `header(name,value)` (set a response header; the CORS tests inject
+        # Access-Control-Allow-Origin this way) and `status(code)`. Other pipe functions
+        # (trickle / gzip / slice / …) are ignored. Pipe functions are `|`-separated but a
+        # plain `header(a,b)header(c,d)` run also occurs, so scan every `fn(args)`.
+        status_code = 200
+        req.GET['pipe'].to_s.scan(/(\w+)\(([^)]*)\)/) do |fn, args|
+          case fn
+          when 'header' then name, _, val = args.partition(','); resp_headers[name.strip.downcase] = val.strip unless name.strip.empty?
+          when 'status' then status_code = args.to_i
+          end
+        end
+        [status_code, resp_headers, [body]]
       }
     }.to_app
   end

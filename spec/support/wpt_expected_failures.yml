@@ -34,19 +34,13 @@ xhr/access-control-basic-cors-safelisted-request-headers.htm:
 - Request with CORS-safelisted headers
 xhr/access-control-basic-cors-safelisted-response-headers.htm:
 - Response with CORS-safelisted headers
-xhr/access-control-basic-denied.htm:
-- Cross-origin request denied
 xhr/access-control-basic-get-fail-non-simple.htm:
 - Preflighted cross-origin request denied
 xhr/access-control-basic-non-cors-safelisted-content-type.htm:
 - Deny cross-origin request with non-CORS-safelisted content type
-xhr/access-control-basic-post-success-no-content-type.htm:
-- POST request with text content and no Content-Type header
 xhr/access-control-basic-post-with-non-cors-safelisted-content-type.htm:
 - CORS request with non-safelisted content type sends preflight and fails
 - Same-origin request with non-safelisted content type succeeds
-xhr/access-control-basic-preflight-denied.htm:
-- Tests async XHR preflight denial due to lack of CORS headers
 xhr/access-control-expose-headers-on-redirect.html:
 - XHR should respect access-control-expose-headers header on redirect
 xhr/access-control-preflight-async-header-denied.htm:
@@ -77,9 +71,6 @@ xhr/access-control-preflight-sync-method-denied.htm:
 - Sync request denied at preflight because of non-CORS-safelisted method
 xhr/access-control-preflight-sync-not-supported.htm:
 - Sync PUT request denied at preflight
-xhr/access-control-recursive-failed-request.htm:
-- Recursively repeated CORS requests with failed preflights should never result in
-  unexpected behavior
 xhr/access-control-response-with-exposed-headers.htm:
 - Test CORS response with 'Access-Control-Expose-Headers' header
 xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
@@ -177,14 +168,6 @@ xhr/send-accept-language.htm:
 - Send "sensible" default value, whatever that means
 xhr/send-accept.htm:
 - 'XMLHttpRequest: send() - Accept'
-xhr/send-after-setting-document-domain.htm:
-- loading documents from the origin document.domain was set to should throw
-xhr/send-authentication-basic-cors-not-enabled.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated CORS requests with user name and
-  password passed to open() (asserts failure)'
-xhr/send-authentication-basic-cors.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated CORS requests with user name and
-  password passed to open() (asserts failure)'
 xhr/send-authentication-basic-repeat-no-args.htm:
 - 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
   passed to open() in first request, without in second'
@@ -227,7 +210,6 @@ xhr/send-network-error-async-events.sub.htm:
   error happens (synchronous flag is unset)'
 xhr/send-network-error-sync-events.sub.htm:
 - data URL
-- http URL
 xhr/send-no-response-event-loadend.htm:
 - 'XMLHttpRequest: The send() method: Fire a progress event named loadend (no response
   entity body)'
@@ -236,14 +218,6 @@ xhr/send-no-response-event-order.htm:
   body'
 xhr/send-non-same-origin.htm:
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
-- 'XMLHttpRequest: send() - non same-origin (http://www1.www.example.com)'
-xhr/send-redirect-bogus-sync.sub.htm:
-- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (301: foobar://abcd)'
-- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: http://nonexistent.web-platform.test)'
-- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (303: http://nonexistent.web-platform.test)'
-xhr/send-redirect-bogus.sub.htm:
-- 'XMLHttpRequest: send() - Redirects (bogus Location header) (302: http://nonexistent.web-platform.test)'
-- 'XMLHttpRequest: send() - Redirects (bogus Location header) (303: http://nonexistent.web-platform.test)'
 xhr/send-redirect-post-upload.htm:
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
@@ -263,11 +237,6 @@ xhr/send-redirect-to-cors.htm:
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
   and explicit Content-Type)'
-xhr/send-redirect-to-non-cors.htm:
-- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (301)'
-- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (302)'
-- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (303)'
-- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (307)'
 xhr/send-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is unset'
 xhr/send-sync-blocks-async.htm:

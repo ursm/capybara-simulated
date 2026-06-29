@@ -4233,9 +4233,15 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, env_extras: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, env_extras: nil)
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
+        # CORS applies only to a request whose response-tainting is "cors" (XHR / a
+        # cors-mode fetch). Other callers (sendBeacon/no-cors fetch, ESM, workers, the
+        # internal asset GET) pass nil → no enforcement. The document's origin is the
+        # request's origin; a request whose target is a different origin is cross-origin.
+        cors        = cors_mode == 'cors'
+        req_origin  = cors ? url_origin(@current_url) : nil
         # Use the method's case AS GIVEN: the JS callers already applied the spec
         # normalization (XHR open() / Fetch upper-case the known methods, preserving
         # an unknown method's case — open-method-case-sensitive). Upper-casing here
@@ -4270,6 +4276,9 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
+          # CORS request: send the document's Origin on a cross-origin hop (the server
+          # echoes it into Access-Control-Allow-Origin). The UA owns this header.
+          env['HTTP_ORIGIN'] = req_origin if req_origin && url_origin(target) != req_origin
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
           merge_set_cookie(resp_headers)
@@ -4304,6 +4313,14 @@ module Capybara
           # A HEAD response has no body — the UA discards whatever the server sent
           # (response-method: echo-method.py writes one even for HEAD).
           body_str = '' if method.to_s.upcase == 'HEAD'
+          # CORS check: a cross-origin "cors" response must carry an Access-Control-Allow
+          # -Origin of `*` or exactly the request's origin, else it's a network error
+          # (access-control-basic-allow / -denied / -star). (Credentialed `*` + preflight
+          # are not modelled yet — withCredentials is false in these basic cases.)
+          if req_origin && url_origin(target) != req_origin
+            acao = resp_headers.find {|k, _| k.to_s.downcase == 'access-control-allow-origin' }&.last.to_s
+            return nil unless acao == '*' || acao == req_origin
+          end
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
           return response_hash(status, resp_headers, body_str, target, redirected)
@@ -5663,6 +5680,20 @@ module Capybara
       # inside `within_frame`, else the main document.
       def base_href
         dom_call('__csimBaseHref').to_s
+      end
+
+      # The origin of a URL — `scheme://host[:port]` with the default port (80/443)
+      # elided — for the CORS same/cross-origin comparison. nil for a non-http(s) or
+      # unparseable URL (about:blank / data: / a relative current_url) so CORS never
+      # treats those as a comparable origin.
+      def url_origin(url)
+        u = URI.parse(url.to_s)
+        return nil unless u.scheme && u.host && u.scheme.match?(/\Ahttps?\z/i)
+        default = u.scheme.casecmp?('https') ? 443 : 80
+        port    = u.port && u.port != default ? ":#{u.port}" : ''
+        "#{u.scheme}://#{u.host}#{port}"
+      rescue URI::InvalidURIError
+        nil
       end
 
       def carry_fragment(from_url, to_url)
