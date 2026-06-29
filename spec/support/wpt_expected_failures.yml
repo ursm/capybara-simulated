@@ -417,9 +417,6 @@ xhr/send-entity-body-get-head-async.htm:
   events should fire (GET)'
 - 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD - async, no upload
   events should fire (HEAD)'
-xhr/send-entity-body-get-head.htm:
-- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD (GET)'
-- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD (HEAD)'
 xhr/send-entity-body-none.htm:
 - Explicit content type (POST)
 - Explicit content type (PUT)
@@ -475,32 +472,12 @@ xhr/send-redirect-post-upload.htm:
 xhr/send-redirect-to-cors.htm:
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 GET with explicit
   Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 POST with string
-  and explicit Content-Type safelisted)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 POST with string
-  and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (302 FOO with string
-  and explicit Content-Type safelisted)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (302 POST with string
-  and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (303 FOO with string
-  and explicit Content-Type safelisted)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 FOO with string
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
-  and explicit Content-Type safelisted)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
   and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with null)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with string)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with typed
   array)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
-  and explicit Content-Type multipart/form-data)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
-  and explicit Content-Type safelisted)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
-  and explicit Content-Type text/plain)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
@@ -510,32 +487,6 @@ xhr/send-redirect-to-non-cors.htm:
 - 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (302)'
 - 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (303)'
 - 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (307)'
-xhr/send-redirect.htm:
-- 'XMLHttpRequest: send() - Redirects (basics) (300, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (301, HEAD, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (301, HEAD, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (301, POST, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (301, POST, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (302, HEAD, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (302, HEAD, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (302, POST, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (302, POST, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (303, CHICKEN, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (303, HEAD, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (303, HEAD, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (303, POST, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (303, POST, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (304, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (305, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (306, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (307, HEAD, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (307, HEAD, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (307, POST, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (307, POST, redirect.py%3Flocation%3Dcontent.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (309, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (310, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (350, GET, content.py)'
-- 'XMLHttpRequest: send() - Redirects (basics) (399, GET, content.py)'
 xhr/send-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is unset'
 xhr/send-sync-blocks-async.htm:

@@ -4264,11 +4264,19 @@ module Capybara
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             redirected = true
-            preserve = [307, 308].include?(status)
             next_url = resolve_against(loc, target)
             target = carry_fragment(target, next_url)
-            method = 'GET' unless preserve
-            body = nil unless preserve
+            # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
+            # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
+            # non-GET/HEAD. Otherwise method, body, and headers are preserved — so a
+            # GET/HEAD redirected via 301/302/303 keeps its method and Content-Type,
+            # and 307/308 always preserve (xhr send-redirect basics).
+            up = method.to_s.upcase
+            if ([301, 302].include?(status) && up == 'POST') || (status == 303 && !%w[GET HEAD].include?(up))
+              method  = 'GET'
+              body    = nil
+              headers = headers.reject {|k, _| REDIRECT_DROPPED_HEADERS.include?(k.to_s.downcase) } if headers.is_a?(Hash)
+            end
             resp_body.close if resp_body.respond_to?(:close)
             next
           end
@@ -5556,8 +5564,14 @@ module Capybara
         out
       end
 
+      # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
+      # choice), 304 (not modified), 305/306 (deprecated) are NOT redirects: the 3xx
+      # response is returned to the caller as-is (xhr send-redirect basics).
+      REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
+      # Request-body headers removed when a redirect nulls the body (method → GET).
+      REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
       def redirect_location(status, headers)
-        return nil unless (300..399).include?(status.to_i)
+        return nil unless REDIRECT_STATUSES.include?(status.to_i)
         headers['location'] || headers['Location']
       end
 

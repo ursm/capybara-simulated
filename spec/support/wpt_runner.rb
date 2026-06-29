@@ -248,17 +248,10 @@ module WptRunner
           end
           next [200, cors, [ret]]
         end
-        # `redirect.py` — WPT's redirect CGI: respond `status` (default 302) with
-        # a `Location` header from the `location` param. rack_fetch follows it, so
-        # a frame's document.URL becomes the final target (WPT dom/nodes/Document-URL).
-        if path.end_with?('/redirect.py')
-          loc = req.params['location'].to_s
-          # A real redirect needs a target; a blank Location would self-loop
-          # (rack_fetch follows an empty-but-truthy Location back to here).
-          next [400, {'content-type' => 'text/plain'}, ['missing location']] if loc.empty?
-          status = req.params['status'].to_s =~ /\A3\d\d\z/ ? req.params['status'].to_i : 302
-          next [status, {'content-type' => 'text/plain', 'location' => loc}, []]
-        end
+        # (redirect.py is no longer special-cased: the real WPT handler runs through
+        # the generic .py shim below — it reads the `code`/`location`/`delay`/followed
+        # params the old fast-path's `status`-only stub got wrong, e.g. xhr
+        # send-redirect's non-followed 300/304/305/306 cases.)
         # `percent-encoding.py` — WPT's URL query/fragment encoder CGI. It
         # base64-decodes the `value` param (UTF-8), emits each code point as a
         # numeric character reference inside `<a href="…?REFS#REFS">`, and serves
