@@ -10,7 +10,7 @@ gem 'nokogiri'
 # Pinned to 0.18: quickjs 0.19 regressed interpreter execution ~2.8x (QuickJS spec
 # suite 5.6 → 15.5 min) and split Intl into a separate quickjs-polyfill-intl gem.
 # Unpin (and re-migrate to quickjs-polyfill-intl) once the upstream perf is fixed.
-gem 'quickjs', '~> 0.18.0'
+gem 'quickjs', '~> 0.19.0'
 
 group :development, :test do
   gem 'launchy'            # required by Capybara's shared save_and_open_page spec
