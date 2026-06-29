@@ -70,7 +70,16 @@ const SUPPORT_TREES = ['common'];
 // helpers that html/semantics/forms/the-label-element click-forwarding tests
 // pull in via an absolute `<script src>`; it is self-contained (no further
 // includes) and not scanned as a test (pointerevents is not in TREES).
-const SUPPORT_FILES = ['html/resources/common.js', 'pointerevents/pointerevent_support.js'];
+// The two `…/resources/common.js` executor helpers define the cross-context
+// orchestration primitives (importScript / newPopup / newIframe) that the
+// FileAPI/BlobURL/cross-partition* tests pull in by absolute path on top of
+// the vendored common/dispatcher framework; neither tree is in TREES.
+const SUPPORT_FILES = [
+  'html/resources/common.js',
+  'pointerevents/pointerevent_support.js',
+  'html/cross-origin-embedder-policy/credentialless/resources/common.js',
+  'html/anonymous-iframe/resources/common.js'
+];
 
 const CONCURRENCY = 24;
 

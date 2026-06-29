@@ -109,6 +109,24 @@ module WptRunner
   SUB_HTTP_PORT  = '8000'
   SUB_HTTPS_PORT = '8443'
   SUB_ORIGIN     = "http://#{SUB_HOST}:#{SUB_HTTP_PORT}"
+  # wptserve serves a `.https.*` file only over its HTTPS origin (the `.https.`
+  # filename marker IS that routing): same canonical host, the https port. A test
+  # that reads `get_host_info().HTTPS_ORIGIN` and compares it to its own
+  # `location.host` (the cross-partition blob suite) only matches when visited
+  # here, and only here does `location.protocol === 'https:'` pick the https ports.
+  SUB_HTTPS_ORIGIN = "https://#{SUB_HOST}:#{SUB_HTTPS_PORT}"
+
+  # WPT's universal cross-context message bus (common/dispatcher/dispatcher.js
+  # send()/receive()) stores per-uuid FIFO queues in a SERVER-WIDE stash shared
+  # across every browsing context and origin — that sharing is the whole point: a
+  # popup on one site reads what an opener on another wrote. The vendored
+  # dispatcher.py needs wptserve's persistent `request.server.stash`, which our
+  # per-request `python3` subprocess can't provide (a fresh process each call sees
+  # an empty stash → eternal "not ready"). So back the queue natively in-process.
+  # One Rack app serves all origins here, so a single uuid→queue map IS the
+  # server-wide stash. Guarded by a mutex (worker threads poll it concurrently).
+  DISPATCHER_STASH = Hash.new {|h, k| h[k] = [] }
+  DISPATCHER_LOCK  = Mutex.new
 
   module_function
 
@@ -193,6 +211,42 @@ module WptRunner
         if path.end_with?('/encoding.py')
           label = req.params['label'].to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;')
           next [200, {'content-type' => 'text/html'}, [%{<!doctype html><meta charset="#{label}">}]]
+        end
+        # `dispatcher.py` — WPT's cross-context message bus (see DISPATCHER_STASH).
+        # POST appends the body to the uuid queue and returns "done"; GET pops the
+        # front (or "not ready" when empty); `show-headers` pushes the request
+        # headers as JSON; OPTIONS is the CORS preflight. uuid + flags come from the
+        # query string (`req.GET`), so reading them never consumes the POST body.
+        if path.end_with?('/dispatcher/dispatcher.py')
+          gq   = req.GET
+          cors = {
+            'access-control-allow-credentials' => 'true',
+            'access-control-allow-methods'     => 'OPTIONS, GET, POST',
+            'access-control-allow-headers'     => 'Content-Type',
+            'access-control-allow-origin'      => (env['HTTP_ORIGIN'] || '*'),
+            'cache-control'                    => (gq.key?('cacheable') ? 'max-age=31536000' : 'no-cache, no-store, must-revalidate'),
+            'content-type'                     => 'text/plain'
+          }
+          next [200, cors, ['']] if req.request_method == 'OPTIONS'
+          uuid = gq['uuid'].to_s
+          ret  = WptRunner::DISPATCHER_LOCK.synchronize do
+            queue = WptRunner::DISPATCHER_STASH[uuid]
+            if gq.key?('show-headers')
+              hdrs = env.select {|k, _| k.start_with?('HTTP_') }
+                        .transform_keys {|k| k.sub(/\AHTTP_/, '').downcase.tr('_', '-') }
+              queue.push(JSON.generate(hdrs))
+              ''
+            elsif req.request_method == 'POST'
+              input = env['rack.input']
+              body  = input ? input.read.to_s : ''
+              input.rewind if input.respond_to?(:rewind)
+              queue.push(body)
+              'done'
+            else
+              queue.empty? ? 'not ready' : queue.shift
+            end
+          end
+          next [200, cors, [ret]]
         end
         # `redirect.py` — WPT's redirect CGI: respond `status` (default 302) with
         # a `Location` header from the `location` param. rack_fetch follows it, so
@@ -494,8 +548,14 @@ module WptRunner
     # the shared session leaves the *next* file's harness unable to complete, so
     # isolate `.sub.` runs behind a fresh session on both sides — cheap (a handful
     # of files) and keeps every other file on the stable www.example.com path.
-    sub = File.basename(rel).include?('.sub.')
-    @session = nil if sub
+    base    = File.basename(rel)
+    sub     = base.include?('.sub.')
+    # `.https.` files are served at the canonical HTTPS origin (see SUB_HTTPS_ORIGIN);
+    # `.sub.` files at the canonical HTTP origin. Both cross origin off the default
+    # www.example.com, so isolate them behind a fresh session on each side.
+    https   = base.include?('.https.')
+    cross   = sub || https
+    @session = nil if cross
     s = session
     # One session runs the whole suite, so its history accumulates every prior
     # file's visit. Clear it before each file — otherwise a test that calls
@@ -509,7 +569,8 @@ module WptRunner
     # a variant query (if any) is appended to the visited URL.
     visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
     visit = "#{visit}#{query}"
-    s.visit(sub ? "#{SUB_ORIGIN}/#{visit}" : "/#{visit}")
+    origin = sub ? SUB_ORIGIN : (https ? SUB_HTTPS_ORIGIN : nil)
+    s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
     # The driver doesn't auto-fire window 'load'; testharness completes its
     # sync tests off that event (then a setTimeout(0) sets `all_loaded`). Prefer
     # the bridge's `__csimFireWindowLoad`, which uses a module-captured `Event`
@@ -589,9 +650,9 @@ module WptRunner
     @session = nil
     {completed: false, error: e.message}
   ensure
-    # Drop the cross-origin session so the next (non-sub) file starts fresh on
-    # the default origin — see the `sub` isolation note above.
-    @session = nil if sub
+    # Drop the cross-origin session so the next (default-origin) file starts fresh
+    # on www.example.com — see the `cross` isolation note above.
+    @session = nil if cross
   end
 
   # The behavioural-conformance allowlist is split across two files: the in-scope

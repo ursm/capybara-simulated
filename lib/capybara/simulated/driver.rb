@@ -203,11 +203,46 @@ module Capybara
       # `wait? = false` synchronize path.
       def wait?               = current_browser.polling?
 
-      # Run one real-cadence event-loop frame in the active browsing context and
-      # return the loop's observable state. Drives "advance the page one frame"
-      # without the full poll tick `evaluate_script` would incur per read; the
-      # wpt_runner uses it to drain a page to completion at browser cadence.
-      def run_event_loop_frame(frame_ms) = current_browser.run_event_loop_frame(frame_ms)
+      # Run one real-cadence event-loop frame and return the loop's observable
+      # state. Drives "advance the page one frame" without the full poll tick
+      # `evaluate_script` would incur per read; the wpt_runner uses it to drain a
+      # page to completion at browser cadence.
+      #
+      # EVERY live window steps, not just the active one: an auxiliary window is a
+      # separate VM, but the cross-context orchestration the dispatcher framework
+      # builds on (a popup running an executor that polls a shared queue while the
+      # opener waits) needs those background windows to make progress autonomously.
+      # The active window's state leads; each aux window folds its progress / raf /
+      # async / nearest-timer in so the caller keeps pumping while any window works.
+      def run_event_loop_frame(frame_ms)
+        state = current_browser.run_event_loop_frame(frame_ms)
+        @aux_windows.each do |w|
+          b = w[:browser]
+          next if b.equal?(current_browser)
+          state = merge_frame_state(state, b.run_event_loop_frame(frame_ms))
+        end
+        state
+      end
+
+      # Fold an aux window's frame state into the running aggregate: any window that
+      # progressed / has a queued rAF / has an async channel in flight keeps the
+      # whole loop live, and `next_timer` becomes the nearest pending timer across
+      # all windows (-1 only when every window is timer-idle).
+      private def merge_frame_state(a, b)
+        an = a['next_timer'].to_f
+        bn = b['next_timer'].to_f
+        merged =
+          if an.negative? then bn
+          elsif bn.negative? then an
+          else [an, bn].min
+          end
+        {
+          'raf'        => a['raf'] || b['raf'],
+          'async'      => a['async'] || b['async'],
+          'next_timer' => merged,
+          'progressed' => a['progressed'] || b['progressed']
+        }
+      end
 
       # Clock-free read of a JS expression in the active browsing context (no
       # virtual-time advance, unlike evaluate_script) — for polling page state
