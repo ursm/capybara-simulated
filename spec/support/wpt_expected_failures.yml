@@ -30,17 +30,8 @@ xhr/abort-event-order.htm:
 - 'XMLHttpRequest: The abort() method: abort and loadend events'
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
-xhr/access-control-basic-cors-safelisted-request-headers.htm:
-- Request with CORS-safelisted headers
 xhr/access-control-basic-cors-safelisted-response-headers.htm:
 - Response with CORS-safelisted headers
-xhr/access-control-basic-get-fail-non-simple.htm:
-- Preflighted cross-origin request denied
-xhr/access-control-basic-non-cors-safelisted-content-type.htm:
-- Deny cross-origin request with non-CORS-safelisted content type
-xhr/access-control-basic-post-with-non-cors-safelisted-content-type.htm:
-- CORS request with non-safelisted content type sends preflight and fails
-- Same-origin request with non-safelisted content type succeeds
 xhr/access-control-expose-headers-on-redirect.html:
 - XHR should respect access-control-expose-headers header on redirect
 xhr/access-control-preflight-async-header-denied.htm:
@@ -57,12 +48,6 @@ xhr/access-control-preflight-headers-async.htm:
 - Preflighted async request with custom header
 xhr/access-control-preflight-headers-sync.htm:
 - Preflighted sync request with custom header
-xhr/access-control-preflight-request-invalid-status-301.htm:
-- Request with 301 preflight response
-xhr/access-control-preflight-request-invalid-status-400.htm:
-- Request with 400 preflight response
-xhr/access-control-preflight-request-invalid-status-501.htm:
-- Request with 501 preflight response
 xhr/access-control-preflight-request-must-not-contain-cookie.htm:
 - Preflight request must not contain any cookie header
 xhr/access-control-preflight-sync-header-denied.htm:

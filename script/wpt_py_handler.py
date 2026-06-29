@@ -292,7 +292,11 @@ class Response:
     def __init__(self):
         self.status = 200
         self.headers = Headers()
-        self.content = b''
+        # Default to a str so a handler that BUILDS content incrementally
+        # (`response.content += isomorphic_decode(...)`, a str) works; a handler that
+        # sets bytes (`response.content = b"..."`) just overwrites it. _to_bytes coerces
+        # either form at the end.
+        self.content = ''
         self.add_required_headers = True
         self.writer = Writer()
 

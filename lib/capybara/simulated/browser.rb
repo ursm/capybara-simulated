@@ -4255,6 +4255,14 @@ module Capybara
           body = Base64.decode64(body.to_s)
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
+        # CORS-preflight: a cross-origin "cors" request that is NOT a simple request — a
+        # non-safelisted method, a non-CORS-safelisted header, or a non-safelisted
+        # Content-Type — must pass an OPTIONS preflight before the actual request, else
+        # it's a network error (access-control-basic-get-fail-non-simple / -post-with-non
+        # -cors-safelisted-content-type / the preflight-* suite).
+        if req_origin && url_origin(target) != req_origin && cors_unsafe_request?(method, headers)
+          return nil unless cors_preflight_ok?(target, method, headers, req_origin)
+        end
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
@@ -4276,9 +4284,13 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
-          # CORS request: send the document's Origin on a cross-origin hop (the server
-          # echoes it into Access-Control-Allow-Origin). The UA owns this header.
-          env['HTTP_ORIGIN'] = req_origin if req_origin && url_origin(target) != req_origin
+          # Send the document's Origin (the UA owns this header) on a cors request when
+          # the hop is cross-origin OR the method is not GET/HEAD — Fetch appends Origin
+          # for every non-GET/HEAD request, so a same-origin POST carries it too (the
+          # server may key its Access-Control-Allow-Origin echo on Origin being present).
+          if req_origin && (url_origin(target) != req_origin || !%w[GET HEAD].include?(method.to_s.upcase))
+            env['HTTP_ORIGIN'] = req_origin
+          end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
           merge_set_cookie(resp_headers)
@@ -5680,6 +5692,69 @@ module Capybara
       # inside `within_frame`, else the main document.
       def base_href
         dom_call('__csimBaseHref').to_s
+      end
+
+      # Fetch "CORS-safelisted method" / "…request-header" / "…Content-Type". A request
+      # is "simple" (no preflight) iff its method is safelisted AND every author header is
+      # safelisted (Content-Type only for a urlencoded / multipart / text/plain value).
+      CORS_SAFELISTED_METHODS = %w[GET HEAD POST].freeze
+      CORS_SAFELISTED_HEADERS = %w[accept accept-language content-language content-type].freeze
+      CORS_SAFELISTED_CTYPES  = %w[application/x-www-form-urlencoded multipart/form-data text/plain].freeze
+
+      # The sorted, lowercased author header names that are NOT CORS-safelisted (a
+      # non-safe Content-Type counts). These are echoed in Access-Control-Request-Headers
+      # for the preflight and must be covered by Access-Control-Allow-Headers.
+      def cors_unsafe_headers(headers)
+        (headers || {}).filter_map {|k, v|
+          name = k.to_s.downcase
+          next if name.start_with?('x-csim') || name == 'content-length'
+          if name == 'content-type'
+            essence = v.to_s.split(';', 2).first.to_s.strip.downcase
+            CORS_SAFELISTED_CTYPES.include?(essence) ? nil : name
+          else
+            CORS_SAFELISTED_HEADERS.include?(name) ? nil : name
+          end
+        }.uniq.sort
+      end
+
+      def cors_unsafe_request?(method, headers)
+        !CORS_SAFELISTED_METHODS.include?(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
+      end
+
+      # Fetch "CORS-preflight fetch": send an OPTIONS with Access-Control-Request-Method
+      # / -Headers + Origin, and accept iff the response is ok-status AND its
+      # Access-Control-Allow-Origin matches AND it allows the method (or it's safelisted)
+      # AND it allows every unsafe header. (Credentialed preflight + Max-Age cache are
+      # not modelled yet — these basic cases use withCredentials=false.)
+      def cors_preflight_ok?(target, method, headers, req_origin)
+        unsafe = cors_unsafe_headers(headers)
+        env = Rack::MockRequest.env_for(target, method: 'OPTIONS')
+        env['REQUEST_METHOD'] = 'OPTIONS'
+        apply_default_request_env(env, referer: @current_url, force: false)
+        env['HTTP_ORIGIN'] = req_origin
+        env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] = method.to_s.upcase
+        env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
+        status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
+        pbody.close if pbody.respond_to?(:close)
+        return false unless (200..299).include?(status.to_i)
+        acao = cors_header(ph, 'access-control-allow-origin')
+        return false unless acao == '*' || acao == req_origin
+        m = method.to_s.upcase
+        allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
+        return false unless allow_methods.include?('*') || allow_methods.map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
+        allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
+        return false unless allow_headers.include?('*') || unsafe.all? {|h| allow_headers.include?(h) }
+        true
+      end
+
+      # Case-insensitive response-header lookup + comma-list split for the CORS checks.
+      def cors_header(headers, name)
+        pair = headers.find {|k, _| k.to_s.downcase == name }
+        pair&.last.to_s
+      end
+
+      def cors_list(value)
+        value.to_s.split(',').map(&:strip).reject(&:empty?)
       end
 
       # The origin of a URL — `scheme://host[:port]` with the default port (80/443)
