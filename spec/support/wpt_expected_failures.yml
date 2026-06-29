@@ -236,12 +236,6 @@ xhr/send-conditional-cors.htm:
 xhr/send-conditional.htm:
 - 'XMLHttpRequest: send() - conditional requests (date)'
 - 'XMLHttpRequest: send() - conditional requests (tag)'
-xhr/send-data-unexpected-tostring.htm:
-- send() called from data stringification
-xhr/send-entity-body-document-bogus.htm:
-- 'Serializing documents through XMLHttpRequest: '''''
-- 'Serializing documents through XMLHttpRequest: ''<test:test test:test="gee"/>'''
-- 'Serializing documents through XMLHttpRequest: ''<test:test/>'''
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
