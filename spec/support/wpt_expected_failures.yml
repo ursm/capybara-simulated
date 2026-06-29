@@ -170,13 +170,6 @@ xhr/overridemimetype-loading-state.htm:
 - 'XMLHttpRequest: overrideMimeType() in LOADING state'
 xhr/progress-events-response-data-gzip.htm:
 - 'XMLHttpRequest: progress events and GZIP encoding'
-xhr/progressevent-constructor.html:
-- ECMAScript value conversion test.
-xhr/progressevent-interface.html:
-- The ProgressEvent interface
-- The ProgressEvent interface 1
-- The ProgressEvent interface 2
-- The ProgressEvent interface 3
 xhr/response-data-deflate.htm:
 - 'XMLHttpRequest: content-encoding:deflate response was correctly inflated'
 xhr/response-data-gzip.htm:
