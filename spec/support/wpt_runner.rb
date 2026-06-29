@@ -162,6 +162,9 @@ module WptRunner
     hdrs  = {}
     Array(meta['headers']).each {|k, v| hdrs[k.to_s.downcase] = v.to_s }
     hdrs['content-type'] ||= 'text/plain'
+    # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
+    # internal header; rack_fetch lifts it into the response's statusText and strips it.
+    hdrs['x-csim-status-text'] = meta['status_text'].to_s if meta['status_text']
     [meta['status'].to_i, hdrs, [rbody]]
   rescue StandardError, JSON::ParserError
     nil

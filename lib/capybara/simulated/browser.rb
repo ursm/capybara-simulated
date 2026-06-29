@@ -4392,8 +4392,13 @@ module Capybara
           else
             RuntimeShared.utf8_text(raw)
           end
+        # statusText = the HTTP reason phrase: a custom one carried on the internal
+        # x-csim-status-text header (status.py), else the status code's standard
+        # reason (xhr status/statusText tests). Strip the internal header either way.
+        custom_reason = hdrs.delete('x-csim-status-text')
         out = {
           'status'     => status,
+          'statusText' => custom_reason || Rack::Utils::HTTP_STATUS_CODES[status.to_i] || '',
           'headers'    => hdrs,
           'body'       => text,
           'url'        => url,

@@ -271,6 +271,15 @@ def _status_code(status):
     return 200
 
 
+def _status_reason(status):
+    # A handler may return status as `(code, b"reason phrase")` (wptserve) — surface
+    # the reason so the client can expose it as XHR statusText.
+    if isinstance(status, (list, tuple)) and len(status) >= 2:
+        s = status[1]
+        return s.decode('latin-1') if isinstance(s, (bytes, bytearray)) else str(s)
+    return None
+
+
 def register_wptserve_stub():
     """Vendored handlers commonly do `from wptserve.utils import isomorphic_decode
     / isomorphic_encode`. We aren't wptserve; register a minimal `wptserve.utils`
@@ -305,17 +314,19 @@ def main():
     result = module.main(request, response)
 
     # Resolve the final (status, headers, body) from however the handler answered.
+    status_reason = None   # a custom HTTP reason phrase, when the handler set status = (code, "text")
     if response.writer.used:
         status = response.writer.status if response.writer.status is not None else _status_code(response.status)
         hdrs = response.writer.headers
         out_body = bytes(response.writer.body)
     elif isinstance(result, tuple):
         if len(result) == 3:
-            status, hdrs, content = result
-            status = _status_code(status)
+            raw_status, hdrs, content = result
         else:
             hdrs, content = result
-            status = _status_code(response.status)
+            raw_status = response.status
+        status = _status_code(raw_status)
+        status_reason = _status_reason(raw_status)
         hdrs = [(_b(k), _b(v)) for k, v in hdrs]
         out_body = _to_bytes(content)
     else:
@@ -325,6 +336,7 @@ def main():
 
     meta = {
         'status': status,
+        'status_text': status_reason,
         'headers': [[k.decode('latin-1'), v.decode('latin-1')] for k, v in hdrs],
         'body_len': len(out_body),
     }
