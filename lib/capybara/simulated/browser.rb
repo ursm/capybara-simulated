@@ -4071,25 +4071,25 @@ module Capybara
         release_init.call
         # A worker that called `self.close()` in its top-level script stops here —
         # the script ran (and may have posted), but no further messages are pulled.
-        unless rt.eval('!!globalThis.__csimWorkerClosed')
+        unless rt.call('__csimWorkerClosedRead')
           loop do
             msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
             break if msg == :terminate
-            if msg
-              rt.call('__csim_workerOnMessage', msg)
-              rt.drain_microtasks
-              rt.drain_timers if rt.has_ready_timer?
-            end
-            # Drive the worker's OWN event loop ~one poll interval each tick — an
+            rt.call('__csim_workerOnMessage', msg) if msg
+            # Drive the worker's OWN event loop each tick: a message handler OR an
             # AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout
-            # retry) has no inbox message but must still progress. Worker fetch is
-            # setTimeout(0)+__rackFetch, so advancing the timer clock resolves it on this
-            # thread. Gated on a pending timer so an idle message-driven worker stays lazy.
-            if rt.eval('typeof __nextTimerDelay === "function" && __nextTimerDelay() >= 0')
+            # retry, which has no inbox message) may have pending timers. Drain ~one poll
+            # interval (WorkerRuntime#drain_timers advances the worker clock a step) so
+            # they progress; worker http fetch is setTimeout(0)+__rackFetch, resolved on
+            # this thread by the drain. Gated on a PENDING timer (any, not just due-now —
+            # the clock must advance to fire a future randomDelay) so an idle
+            # message-driven worker with no timers stays lazy. Host CALLS, not string
+            # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
+            if rt.call('__nextTimerDelay').to_f >= 0
               rt.drain_microtasks
-              rt.drain_timers   # advances ~one poll interval (the WorkerRuntime drain step)
+              rt.drain_timers
             end
-            break if rt.eval('!!globalThis.__csimWorkerClosed')
+            break if rt.call('__csimWorkerClosedRead')
           end
         end
       rescue StandardError => e
