@@ -12355,3 +12355,8 @@ url/percent-encoding.window.js:
 - name: Input  with encoding gb18030
   reason: query percent-encoding per gb18030 needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
+xhr/sync-xhr-supported-by-permissions-policy.tentative.html:
+- name: document.permissionsPolicy.features should advertise sync-xhr.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.

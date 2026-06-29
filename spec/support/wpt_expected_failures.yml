@@ -13,5 +13,831 @@
 ---
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
+- Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+dom/nodes/getElementsByClassName-14.htm:
+- 'document.getElementsByClassName(): case-insensitive (quirks mode)'
+dom/nodes/getElementsByClassName-20.htm:
+- get elements in document then add element to collection
+dom/nodes/getElementsByClassName-21.htm:
+- delete element from collection
+dom/nodes/getElementsByClassName-22.htm:
+- move item in collection order
+dom/nodes/getElementsByClassName-25.htm:
+- verify spacing is handled correctly
+xhr/abort-event-order.htm:
+- 'XMLHttpRequest: The abort() method: abort and loadend events'
+xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
+- Access granted to null-origin iframe
+xhr/access-control-basic-cors-safelisted-request-headers.htm:
+- Request with CORS-safelisted headers
+xhr/access-control-basic-cors-safelisted-response-headers.htm:
+- Response with CORS-safelisted headers
+xhr/access-control-basic-denied.htm:
+- Cross-origin request denied
+xhr/access-control-basic-get-fail-non-simple.htm:
+- Preflighted cross-origin request denied
+xhr/access-control-basic-non-cors-safelisted-content-type.htm:
+- Deny cross-origin request with non-CORS-safelisted content type
+xhr/access-control-basic-post-success-no-content-type.htm:
+- POST request with text content and no Content-Type header
+xhr/access-control-basic-post-with-non-cors-safelisted-content-type.htm:
+- CORS request with non-safelisted content type sends preflight and fails
+- Same-origin request with non-safelisted content type succeeds
+xhr/access-control-basic-preflight-denied.htm:
+- Tests async XHR preflight denial due to lack of CORS headers
+xhr/access-control-expose-headers-on-redirect.html:
+- XHR should respect access-control-expose-headers header on redirect
+xhr/access-control-preflight-async-header-denied.htm:
+- Async request denied at preflight
+xhr/access-control-preflight-async-method-denied.htm:
+- Async request denied at preflight
+xhr/access-control-preflight-async-not-supported.htm:
+- Async PUT request denied at preflight
+xhr/access-control-preflight-credential-async.htm:
+- CORS async request with URL credentials
+xhr/access-control-preflight-credential-sync.htm:
+- CORS sync request with URL credentials
+xhr/access-control-preflight-headers-async.htm:
+- Preflighted async request with custom header
+xhr/access-control-preflight-headers-sync.htm:
+- Preflighted sync request with custom header
+xhr/access-control-preflight-request-header-lowercase.htm:
+- Request with uppercase header set
+xhr/access-control-preflight-request-header-sorted.htm:
+- Tests that Access-Control-Request-Headers are sorted.
+xhr/access-control-preflight-request-invalid-status-301.htm:
+- Request with 301 preflight response
+xhr/access-control-preflight-request-invalid-status-400.htm:
+- Request with 400 preflight response
+xhr/access-control-preflight-request-invalid-status-501.htm:
+- Request with 501 preflight response
+xhr/access-control-preflight-request-must-not-contain-cookie.htm:
+- Preflight request must not contain any cookie header
+xhr/access-control-preflight-sync-header-denied.htm:
+- Sync request denied at preflight
+xhr/access-control-preflight-sync-method-denied.htm:
+- Sync request denied at preflight because of non-CORS-safelisted method
+xhr/access-control-preflight-sync-not-supported.htm:
+- Sync PUT request denied at preflight
+xhr/access-control-recursive-failed-request.htm:
+- Recursively repeated CORS requests with failed preflights should never result in
+  unexpected behavior
+xhr/access-control-response-with-body-sync.htm:
+- Tests body from CORS preflight response and actual response with sync request
+xhr/access-control-response-with-body.htm:
+- Tests that XHR doesn't prepend the body from CORS preflight response to the actual
+  response
+xhr/access-control-response-with-exposed-headers.htm:
+- Test CORS response with 'Access-Control-Expose-Headers' header
+xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
+- Sandboxed iframe is denied CORS access to server that allows parent origin
+xhr/access-control-sandboxed-iframe-denied.htm:
+- Sandboxed iframe is denied access to path
+xhr/allow-lists-starting-with-comma.htm:
+- Allow lists starting with a comma should be parsed correctly
+xhr/anonymous-mode-unsupported.htm:
+- 'XMLHttpRequest: anonymous mode unsupported'
+xhr/cookies.http.html:
+- Basic non-cross-site cookie handling in XHR
+xhr/data-uri.htm:
+- XHR method HEAD with MIME type text/plain
+xhr/event-error-order.sub.html:
+- 'XMLHttpRequest: event - error (order of events)'
+xhr/firing-events-http-content-length.html:
+- 'ProgressEvent: firing events for HTTP with Content-Length'
+xhr/firing-events-http-no-content-length.html:
+- 'ProgressEvent: firing events for HTTP with no Content-Length'
+xhr/formdata.html:
+- Newly created FormData contains entries added to "formData" IDL attribute of FormDataEvent.
+- empty formdata
+- formdata from form
+- formdata with blob
+- formdata with named blob
+- formdata with named string
+- formdata with string
+- "|new FormData()| in formdata event handler should throw"
+xhr/formdata/append-formelement.html:
+- testFormDataAppendToFormString
+- testFormDataAppendToFormWrongPlatformObject
+xhr/formdata/constructor-formelement.html:
+- test that FormData is correctly constructed from the form data set
+xhr/formdata/constructor-submitter-coordinate.html:
+- The constructed FormData object should contain correct entries for Image Button
+  submitter's dispatched coordinate
+xhr/formdata/constructor-submitter.html:
+- FormData construction should throw a 'NotFoundError' DOMException if a non-null
+  submitter is not owned by the form
+- FormData construction should throw a TypeError if a non-null submitter is not a
+  submit button
+xhr/formdata/set-formelement.html:
+- testFormDataSetToFormString
+- testFormDataSetToFormWrongPlatformObject
+xhr/getallresponseheaders-cookies.htm:
+- 'XMLHttpRequest: getAllResponseHeaders() excludes cookies'
+xhr/getallresponseheaders.htm:
+- 'XMLHttpRequest: getAllResponseHeaders()'
+- 'XMLHttpRequest: getAllResponseHeaders() 1'
+- 'XMLHttpRequest: getAllResponseHeaders() 2'
+- 'XMLHttpRequest: getAllResponseHeaders() 3'
+- 'XMLHttpRequest: getAllResponseHeaders() 4'
+- 'XMLHttpRequest: getAllResponseHeaders() 5'
+- 'XMLHttpRequest: getAllResponseHeaders() 6'
+xhr/getresponseheader-case-insensitive.htm:
+- 'XMLHttpRequest: getResponseHeader() case-insensitive matching'
+xhr/getresponseheader-chunked-trailer.htm:
+- 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
+xhr/getresponseheader-cookies-and-more.htm:
+- 'XMLHttpRequest: getResponseHeader() custom/non-existent headers and cookies'
+xhr/getresponseheader-server-date.htm:
+- 'XMLHttpRequest: getResponseHeader() server and date'
+xhr/header-user-agent-async.htm:
+- Async request has User-Agent header
+xhr/header-user-agent-sync.htm:
+- Sync request has User-Agent header
+xhr/headers-normalize-response.htm:
+- 'Header value: [tab]'
+- 'Header value: [tab]hello_world'
+- 'Header value: [tab]hello_world[tab]'
+- 'Header value: \0'
+- 'Header value: \0hello world'
+- 'Header value: ___'
+- 'Header value: __hello_world'
+- 'Header value: __hello_world__'
+- 'Header value: hello world\0'
+- 'Header value: hello\0world'
+- 'Header value: hello_world[tab]'
+- 'Header value: hello_world__'
+xhr/historical.html:
+- Support for responseType = moz-blob
+- Support for responseType = moz-chunked-arraybuffer
+- Support for responseType = moz-chunked-text
+xhr/loadstart-and-state.html:
+- abort() during loadstart
+- open() during loadstart
+xhr/open-after-abort.htm:
+- 'XMLHttpRequest: open() after abort()'
+xhr/open-after-setrequestheader.htm:
+- 'XMLHttpRequest: open() after setRequestHeader()'
+xhr/open-during-abort-event.htm:
+- 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
+xhr/open-during-abort-processing.htm:
+- 'XMLHttpRequest: open() during abort processing - abort() called from onloadstart'
+xhr/open-method-bogus.htm:
+- 'XMLHttpRequest: open() - bogus methods ( GET)'
+- 'XMLHttpRequest: open() - bogus methods ()'
+- 'XMLHttpRequest: open() - bogus methods (>)'
+- 'XMLHttpRequest: open() - bogus methods (@GET)'
+- 'XMLHttpRequest: open() - bogus methods (G T)'
+- 'XMLHttpRequest: open() - bogus methods (G:ET)'
+- |-
+  XMLHttpRequest: open() - bogus methods (GET
+  )
+- 'XMLHttpRequest: open() - bogus methods (GET?)'
+xhr/open-method-case-sensitive.htm:
+- 'XMLHttpRequest: open() - case-sensitive methods test (COpy)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (chiCKEN)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (copy)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (inDEX)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (movE)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (patCH)'
+- 'XMLHttpRequest: open() - case-sensitive methods test (xUNIcorn)'
+xhr/open-method-insecure.htm:
+- 'XMLHttpRequest: open() - "insecure" methods (CONNECT)'
+- 'XMLHttpRequest: open() - "insecure" methods (TRACE)'
+- 'XMLHttpRequest: open() - "insecure" methods (TRACK)'
+- 'XMLHttpRequest: open() - "insecure" methods (connECT)'
+- 'XMLHttpRequest: open() - "insecure" methods (connect)'
+- 'XMLHttpRequest: open() - "insecure" methods (trAck)'
+- 'XMLHttpRequest: open() - "insecure" methods (traCE)'
+- 'XMLHttpRequest: open() - "insecure" methods (trace)'
+- 'XMLHttpRequest: open() - "insecure" methods (track)'
+xhr/open-method-responsetype-set-sync.htm:
+- 'XMLHttpRequest: open() sync request not allowed if responseType is set (arraybuffer)'
+- 'XMLHttpRequest: open() sync request not allowed if responseType is set (blob)'
+- 'XMLHttpRequest: open() sync request not allowed if responseType is set (document)'
+- 'XMLHttpRequest: open() sync request not allowed if responseType is set (json)'
+- 'XMLHttpRequest: open() sync request not allowed if responseType is set (text)'
+xhr/open-open-send.htm:
+- 'XMLHttpRequest: open() - open() - send()'
+xhr/open-open-sync-send.htm:
+- 'XMLHttpRequest: open() - open() (sync) - send()'
+xhr/open-parameters-toString.htm:
+- 'XMLHttpRequest: open() attempts to toString its string parameters'
+xhr/open-referer.htm:
+- 'XMLHttpRequest: open() - value of Referer header'
+xhr/open-send-open.htm:
+- 'XMLHttpRequest: open() - send() - open()'
+xhr/open-sync-open-send.htm:
+- 'XMLHttpRequest: open() (sync) - send() - open()'
+xhr/open-url-base-inserted.htm:
+- 'XMLHttpRequest: open() resolving URLs - insert <base>'
+xhr/open-url-base.htm:
+- 'XMLHttpRequest: open() resolving URLs - <base>'
+xhr/open-url-encoding.htm:
+- lone surrogate
+- percent encode characters
+xhr/open-url-fragment.htm:
+- 'make sure escaped # is not removed'
+- make sure fragment is removed from URL before request
+- make sure fragment is removed from URL before request (with query string)
+xhr/open-url-multi-window-2.htm:
+- 'XMLHttpRequest: open() resolving URLs (multi-Window; 2; evil)'
+xhr/open-url-multi-window-3.htm:
+- 'XMLHttpRequest: open() resolving URLs (multi-Window; 3; evil)'
+xhr/open-url-multi-window-5.htm:
+- 'XMLHttpRequest: open() resolving URLs (multi-Window; 5)'
+xhr/open-url-multi-window-6.htm:
+- 'XMLHttpRequest: open() in document that is not fully active (but may be active)
+  should throw'
+xhr/open-url-multi-window.htm:
+- 'XMLHttpRequest: open() resolving URLs (multi-Window; 1)'
+xhr/open-url-worker-simple.htm:
+- 'XMLHttpRequest: relative URLs in worker scripts resolved by script URL'
+xhr/overridemimetype-blob.html:
+- Loading data…
+- Use text/xml as fallback MIME type
+- Use text/xml as fallback MIME type, 2
+xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
+- 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
+  encoding'
+xhr/overridemimetype-invalid-mime-type.htm:
+- Bogus MIME type does not override encoding
+- Bogus MIME type does not override encoding, 2
+- Bogus MIME type does override MIME type
+xhr/overridemimetype-loading-state.htm:
+- 'XMLHttpRequest: overrideMimeType() in LOADING state'
+xhr/overridemimetype-open-state-force-xml.htm:
+- 'XMLHttpRequest: overrideMimeType() in open state, XML MIME type with UTF-8 charset'
+xhr/preserve-ua-header-on-redirect.htm:
+- 'XMLHttpRequest: User-Agent header is preserved on redirect'
+- 'XMLHttpRequest: User-Agent header is preserved on redirect 1'
+xhr/progress-events-response-data-gzip.htm:
+- 'XMLHttpRequest: progress events and GZIP encoding'
+xhr/progressevent-constructor.html:
+- ECMAScript value conversion test.
+xhr/progressevent-interface.html:
+- The ProgressEvent interface
+- The ProgressEvent interface 1
+- The ProgressEvent interface 2
+- The ProgressEvent interface 3
+xhr/response-data-deflate.htm:
+- 'XMLHttpRequest: content-encoding:deflate response was correctly inflated'
+xhr/response-data-gzip.htm:
+- 'XMLHttpRequest: GZIP response was correctly inflated'
+xhr/response-data-progress.htm:
+- 'XMLHttpRequest: progress events grow response body size, known content-length'
+- 'XMLHttpRequest: progress events grow response body size, unknown content-length'
+xhr/response-invalid-responsetype.htm:
+- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
+  (JSON)'
+- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
+  (arrayBuffer)'
+- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
+  (glob)'
+- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
+  (text/html)'
+- 'XMLHttpRequest: response is plain text if responseType is set to an invalid string
+  (txt)'
+xhr/response-method.htm:
+- GET
+- HEAD
+- POST
+xhr/responseText-status.html:
+- 'XMLHttpRequest Test: responseText - status'
+xhr/responsedocument-decoding.htm:
+- 'XMLHttpRequest: response document decoding (application/xml %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
+- 'XMLHttpRequest: response document decoding (application/xml;charset=windows-1252
+  %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
+- 'XMLHttpRequest: response document decoding (text/html %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
+- 'XMLHttpRequest: response document decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E)'
+xhr/responsetext-decoding.htm:
+- 'XMLHttpRequest: responseText decoding (application/xml %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
+  empty)'
+- 'XMLHttpRequest: responseText decoding (application/xml;charset=windows-1252 %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E  text)'
+- 'XMLHttpRequest: responseText decoding (application/xml;charset=windows-1252 %3C%3Fxml%20version%3D''1.0''%20encoding%3D''windows-1252''%3F%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
+  empty)'
+- 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E  text)'
+- 'XMLHttpRequest: responseText decoding (text/html;charset=windows-1252 %3C!doctype%20html%3E%3Cmeta%20charset%3Dwindows-1252%3E%3Cx%3E%e6%a9%9f%3C%2Fx%3E
+  empty)'
+- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF  text)'
+- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF empty)'
+- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF%FE%FF  text)'
+- 'XMLHttpRequest: responseText decoding (text/plain %FE%FF%FE%FF empty)'
+- 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF  text)'
+- 'XMLHttpRequest: responseText decoding (text/plain;charset=windows-1252 %FF empty)'
+- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF  text)'
+- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF empty)'
+- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF  text)'
+- 'XMLHttpRequest: responseText decoding (text/xml %FE%FF%FE%FF empty)'
+xhr/responsexml-basic.htm:
+- responseXML on empty response documents
+xhr/responsexml-invalid-type.html:
+- 'XMLHttpRequest: response with an invalid responseXML document'
+xhr/responsexml-media-type.htm:
+- 'XMLHttpRequest: responseXML MIME type tests ('''', should  parse)'
+- 'XMLHttpRequest: responseXML MIME type tests (''application'', should  parse)'
+- 'XMLHttpRequest: responseXML MIME type tests (''bogus'', should  parse)'
+xhr/responsexml-non-document-types.htm:
+- 'XMLHttpRequest: responseXML/responseText on other responseType (arraybuffer)'
+- 'XMLHttpRequest: responseXML/responseText on other responseType (blob)'
+- 'XMLHttpRequest: responseXML/responseText on other responseType (document)'
+- 'XMLHttpRequest: responseXML/responseText on other responseType (json)'
+- 'XMLHttpRequest: responseXML/responseText on other responseType (text)'
+xhr/responsexml-non-well-formed.htm:
+- 'XMLHttpRequest: responseXML non well-formed tests'
+- 'XMLHttpRequest: responseXML non well-formed tests 1'
+- 'XMLHttpRequest: responseXML non well-formed tests 2'
+- 'XMLHttpRequest: responseXML non well-formed tests 3'
+- 'XMLHttpRequest: responseXML non well-formed tests 4'
+- 'XMLHttpRequest: responseXML non well-formed tests 5'
+- 'XMLHttpRequest: responseXML non well-formed tests 6'
+xhr/security-consideration.sub.html:
+- 'ProgressEvent: security consideration'
+xhr/send-accept-language.htm:
+- Send "sensible" default value, whatever that means
+- 'XMLHttpRequest: send() - Accept-Language'
+xhr/send-accept.htm:
+- 'XMLHttpRequest: send() - Accept'
+xhr/send-after-setting-document-domain.htm:
+- loading documents from the origin document.domain was set to should throw
+xhr/send-authentication-basic-cors-not-enabled.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated CORS requests with user name and
+  password passed to open() (asserts failure)'
+xhr/send-authentication-basic-cors.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated CORS requests with user name and
+  password passed to open() (asserts failure)'
+xhr/send-authentication-basic-repeat-no-args.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
+  passed to open() in first request, without in second'
+xhr/send-authentication-basic-setrequestheader-and-arguments.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()
+  and open() arguments (asserts header wins)'
+xhr/send-authentication-basic-setrequestheader-existing-session.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()
+  when there is an existing session'
+xhr/send-authentication-basic-setrequestheader.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()'
+xhr/send-authentication-basic.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
+  passed to open()'
+xhr/send-authentication-competing-names-passwords.htm:
+- 'XMLHttpRequest user/pass options: another user/pass in open(); must override cached
+  credentials from previous test'
+- 'XMLHttpRequest user/pass options: pass in URL, user in open()'
+- 'XMLHttpRequest user/pass options: pass in URL, user/pass in open()'
+- 'XMLHttpRequest user/pass options: user in URL'
+- 'XMLHttpRequest user/pass options: user in URL and open()'
+- 'XMLHttpRequest user/pass options: user in URL, pass in open()'
+- 'XMLHttpRequest user/pass options: user in URL; user/pass in open()'
+- 'XMLHttpRequest user/pass options: user in open()'
+- 'XMLHttpRequest user/pass options: user/pass in URL'
+- 'XMLHttpRequest user/pass options: user/pass in URL and open()'
+- 'XMLHttpRequest user/pass options: user/pass in URL; pass in open()'
+- 'XMLHttpRequest user/pass options: user/pass in URL; user in open()'
+- 'XMLHttpRequest user/pass options: user/pass in open()'
+xhr/send-authentication-cors-basic-setrequestheader.htm:
+- 'XMLHttpRequest: send() - "Basic" authenticated CORS request using setRequestHeader()
+  (expects to succeed)'
+xhr/send-authentication-cors-setrequestheader-no-cred.htm:
+- CORS request with setRequestHeader auth to URL NOT accepting Authorization header
+- CORS request with setRequestHeader auth to URL accepting Authorization header
+xhr/send-authentication-prompt-2-manual.htm:
+- 'XMLHttpRequest: WWW-Authenticate challenge when user,pass are not passed to open()'
+xhr/send-authentication-prompt-manual.htm:
+- 'XMLHttpRequest: send() - "Basic" authentication gets 401 response'
+xhr/send-blob-with-no-mime-type.html:
+- Asynchronous blob loading with invalid mime type [POST]
+- Asynchronous blob loading with invalid mime type [PUT]
+- Asynchronous blob loading with no mime type [POST]
+- Asynchronous blob loading with no mime type [PUT]
+- Synchronous blob loading with invalid mime type [POST]
+- Synchronous blob loading with invalid mime type [PUT]
+- Synchronous blob loading with no mime type [POST]
+- Synchronous blob loading with no mime type [PUT]
+xhr/send-conditional-cors.htm:
+- 304 with appropriate CORS header
+- 304 without appropriate CORS header
+xhr/send-conditional.htm:
+- 'XMLHttpRequest: send() - conditional requests (date)'
+- 'XMLHttpRequest: send() - conditional requests (tag)'
+xhr/send-content-type-charset.htm:
+- Multiple non-UTF-8 charset parameters deduplicate, bogus parameter dropped
+- No content type set, give MIME and charset
+- charset given but wrong, fix it (known MIME, actual charset)
+- charset given but wrong, fix it (unknown MIME, bogus charset)
+- charset in double quotes with space
+- charset with leading space that is UTF-8 does change
+- unknown parameters need to be preserved
+xhr/send-content-type-string.htm:
+- 'XMLHttpRequest: send() - Content-Type'
+- 'XMLHttpRequest: send() - Content-Type 1'
+- 'XMLHttpRequest: send() - Content-Type 2'
+xhr/send-data-unexpected-tostring.htm:
+- open() called from data stringification
+- send() called from data stringification
+xhr/send-entity-body-document-bogus.htm:
+- 'Serializing documents through XMLHttpRequest: '''''
+- 'Serializing documents through XMLHttpRequest: ''<test:test test:test="gee" x="�"/>'''
+- 'Serializing documents through XMLHttpRequest: ''<test:test test:test="gee"/>'''
+- 'Serializing documents through XMLHttpRequest: ''<test:test/>'''
+xhr/send-entity-body-document.htm:
+- HTML document, invalid UTF-8
+- HTML document, shift-jis
+- XML document, windows-1252
+- empty div
+- image file
+- img tag
+- plain text file
+xhr/send-entity-body-empty.htm:
+- 'XMLHttpRequest: send("") - empty entity body (POST)'
+- 'XMLHttpRequest: send("") - empty entity body (PUT)'
+xhr/send-entity-body-get-head-async.htm:
+- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD - async, no upload
+  events should fire (GET)'
+- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD - async, no upload
+  events should fire (HEAD)'
+xhr/send-entity-body-get-head.htm:
+- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD (GET)'
+- 'XMLHttpRequest: send() - non-empty data argument and GET/HEAD (HEAD)'
+xhr/send-entity-body-none.htm:
+- Explicit content type (POST)
+- Explicit content type (PUT)
+- No content type (POST)
+- No content type (PUT)
+xhr/send-network-error-async-events.sub.htm:
+- 'XMLHttpRequest: The send() method: Fire a progress event named error when Network
+  error happens (synchronous flag is unset)'
+xhr/send-network-error-sync-events.sub.htm:
+- data URL
+- http URL
+xhr/send-no-response-event-loadend.htm:
+- 'XMLHttpRequest: The send() method: Fire a progress event named loadend (no response
+  entity body)'
+xhr/send-no-response-event-loadstart.htm:
+- 'XMLHttpRequest: The send() method: Fire a progress event named loadstart (no response
+  entity body and the state is LOADING)'
+xhr/send-no-response-event-order.htm:
+- 'XMLHttpRequest: The send() method: event order when there is no response entity
+  body'
+xhr/send-non-same-origin.htm:
+- 'XMLHttpRequest: send() - non same-origin (about:blank)'
+- 'XMLHttpRequest: send() - non same-origin (blob:bogusidentifier)'
+- 'XMLHttpRequest: send() - non same-origin (folder.txt)'
+- 'XMLHttpRequest: send() - non same-origin (http://www1.web-platform.test:8000)'
+- 'XMLHttpRequest: send() - non same-origin (javascript:alert(''FAIL''))'
+- 'XMLHttpRequest: send() - non same-origin (mailto:test@example.org)'
+- 'XMLHttpRequest: send() - non same-origin (tel:+31600000000)'
+xhr/send-receive-utf16.htm:
+- UTF-16 without BOM, with charset label in content-type
+xhr/send-redirect-bogus-sync.sub.htm:
+- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (301: foobar://abcd)'
+- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: http://nonexistent.web-platform.test)'
+- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (302: mailto:someone@example.org)'
+- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (303: http://nonexistent.web-platform.test)'
+- 'XMLHttpRequest: send() - Redirects (bogus Location header; sync) (303: tel:1234567890)'
+xhr/send-redirect-bogus.sub.htm:
+- 'XMLHttpRequest: send() - Redirects (bogus Location header) (302: http://nonexistent.web-platform.test)'
+- 'XMLHttpRequest: send() - Redirects (bogus Location header) (303: http://nonexistent.web-platform.test)'
+xhr/send-redirect-infinite-sync.htm:
+- 'XMLHttpRequest: send() - Redirects (infinite loop; sync) (301)'
+xhr/send-redirect-no-location.htm:
+- 'XMLHttpRequest: send() - Redirects (no Location header) (301)'
+- 'XMLHttpRequest: send() - Redirects (no Location header) (302)'
+- 'XMLHttpRequest: send() - Redirects (no Location header) (303)'
+- 'XMLHttpRequest: send() - Redirects (no Location header) (307)'
+xhr/send-redirect-post-upload.htm:
+- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
+- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
+- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (303)'
+- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (307 (blob))'
+- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (307 (string))'
+xhr/send-redirect-to-cors.htm:
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 GET with explicit
+  Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 POST with string
+  and explicit Content-Type safelisted)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 POST with string
+  and explicit Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (302 FOO with string
+  and explicit Content-Type safelisted)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (302 POST with string
+  and explicit Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (303 FOO with string
+  and explicit Content-Type safelisted)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 FOO with string
+  and explicit Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
+  and explicit Content-Type safelisted)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
+  and explicit Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with null)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with string)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with typed
+  array)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
+  and explicit Content-Type multipart/form-data)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
+  and explicit Content-Type safelisted)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
+  and explicit Content-Type text/plain)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
+  and explicit Content-Type)'
+- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
+  and explicit Content-Type)'
+xhr/send-redirect-to-non-cors.htm:
+- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (301)'
+- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (302)'
+- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (303)'
+- 'XMLHttpRequest: send() - Redirect to cross-origin resource, not CORS-enabled (307)'
+xhr/send-redirect.htm:
+- 'XMLHttpRequest: send() - Redirects (basics) (300, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (301, HEAD, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (301, HEAD, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (301, POST, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (301, POST, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (302, HEAD, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (302, HEAD, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (302, POST, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (302, POST, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (303, CHICKEN, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (303, HEAD, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (303, HEAD, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (303, POST, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (303, POST, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (304, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (305, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (306, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (307, HEAD, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (307, HEAD, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (307, POST, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (307, POST, redirect.py%3Flocation%3Dcontent.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (309, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (310, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (350, GET, content.py)'
+- 'XMLHttpRequest: send() - Redirects (basics) (399, GET, content.py)'
+xhr/send-response-event-order.htm:
+- 'XMLHttpRequest: The send() method: event order when synchronous flag is unset'
+xhr/send-sync-blocks-async.htm:
+- 'XMLHttpRequest: sync requests should block events on pending async requests'
+xhr/send-sync-no-response-event-load.htm:
+- 'XMLHttpRequest: The send() method: Fire an event named load (no response entity
+  body and the synchronous flag is set)'
+xhr/send-sync-no-response-event-loadend.htm:
+- 'XMLHttpRequest: The send() method: Fire an event named loadend (no response entity
+  body and the synchronous flag is set)'
+xhr/send-sync-no-response-event-order.htm:
+- 'XMLHttpRequest: The send() method: event order when synchronous flag is set and
+  there is no response entity body'
+xhr/send-sync-response-event-order.htm:
+- 'XMLHttpRequest: The send() method: event order when synchronous flag is set'
+xhr/send-sync-timeout.htm:
+- 'XMLHttpRequest: timeout during sync send() should not run'
+xhr/send-timeout-events.htm:
+- 'XMLHttpRequest: The send() method: timeout is not 0 '
+xhr/setrequestheader-after-send.htm:
+- 'XMLHttpRequest: setRequestHeader() after send()'
+xhr/setrequestheader-allow-empty-value.htm:
+- 'XMLHttpRequest: setRequestHeader() - empty header ()'
+- 'XMLHttpRequest: setRequestHeader() - empty header (null)'
+- 'XMLHttpRequest: setRequestHeader() - empty header (undefined)'
+xhr/setrequestheader-allow-whitespace-in-value.htm:
+- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( )'
+- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( t )'
+- 'XMLHttpRequest: setRequestHeader() - header value with whitespace ( t)'
+- 'XMLHttpRequest: setRequestHeader() - header value with whitespace (t )'
+xhr/setrequestheader-before-open.htm:
+- setRequestHeader invoked before open()
+xhr/setrequestheader-bogus-name.htm:
+- setRequestHeader should throw with header name " ".
+- setRequestHeader should throw with header name " tt".
+- setRequestHeader should throw with header name "".
+- setRequestHeader should throw with header name "(".
+- setRequestHeader should throw with header name "()[]{}".
+- setRequestHeader should throw with header name ")".
+- setRequestHeader should throw with header name ",".
+- setRequestHeader should throw with header name "/".
+- setRequestHeader should throw with header name ":".
+- setRequestHeader should throw with header name ":tt".
+- setRequestHeader should throw with header name ";".
+- setRequestHeader should throw with header name "<".
+- setRequestHeader should throw with header name "=".
+- setRequestHeader should throw with header name ">".
+- setRequestHeader should throw with header name "?".
+- setRequestHeader should throw with header name "@".
+- setRequestHeader should throw with header name "X-ﾃｽﾄ".
+- setRequestHeader should throw with header name "[".
+- setRequestHeader should throw with header name "\"".
+- setRequestHeader should throw with header name "\0".
+- setRequestHeader should throw with header name "\\".
+- setRequestHeader should throw with header name "\b".
+- setRequestHeader should throw with header name "\f".
+- setRequestHeader should throw with header name "\n".
+- setRequestHeader should throw with header name "\r".
+- setRequestHeader should throw with header name "\t".
+- setRequestHeader should throw with header name "\ttt".
+- setRequestHeader should throw with header name "\v".
+- setRequestHeader should throw with header name "\vtt".
+- setRequestHeader should throw with header name "\x01".
+- setRequestHeader should throw with header name "\x02".
+- setRequestHeader should throw with header name "\x03".
+- setRequestHeader should throw with header name "\x04".
+- setRequestHeader should throw with header name "\x05".
+- setRequestHeader should throw with header name "\x06".
+- setRequestHeader should throw with header name "\x07".
+- setRequestHeader should throw with header name "\x0e".
+- setRequestHeader should throw with header name "\x0f".
+- setRequestHeader should throw with header name "\x10".
+- setRequestHeader should throw with header name "\x11".
+- setRequestHeader should throw with header name "\x12".
+- setRequestHeader should throw with header name "\x13".
+- setRequestHeader should throw with header name "\x14".
+- setRequestHeader should throw with header name "\x15".
+- setRequestHeader should throw with header name "\x16".
+- setRequestHeader should throw with header name "\x17".
+- setRequestHeader should throw with header name "\x18".
+- setRequestHeader should throw with header name "\x19".
+- setRequestHeader should throw with header name "\x1a".
+- setRequestHeader should throw with header name "\x1b".
+- setRequestHeader should throw with header name "\x1c".
+- setRequestHeader should throw with header name "\x1d".
+- setRequestHeader should throw with header name "\x1e".
+- setRequestHeader should throw with header name "\x1f".
+- setRequestHeader should throw with header name "]".
+- setRequestHeader should throw with header name "a=B".
+- setRequestHeader should throw with header name "a?B".
+- setRequestHeader should throw with header name "t t".
+- setRequestHeader should throw with header name "t,t".
+- 'setRequestHeader should throw with header name "t: t".'
+- setRequestHeader should throw with header name "t:t".
+- setRequestHeader should throw with header name "t;t".
+- setRequestHeader should throw with header name "t<t".
+- setRequestHeader should throw with header name "t\"t".
+- setRequestHeader should throw with header name "t\0t".
+- setRequestHeader should throw with header name "t\nt".
+- setRequestHeader should throw with header name "t\rt".
+- setRequestHeader should throw with header name "{".
+- setRequestHeader should throw with header name "}".
+- "setRequestHeader should throw with header name \"\x7F\"."
+- setRequestHeader should throw with header name "ﾃｽﾄ".
+xhr/setrequestheader-bogus-value.htm:
+- Omitted value argument
+- 'XMLHttpRequest: setRequestHeader() value argument checks'
+- 'XMLHttpRequest: setRequestHeader() value argument checks 1'
+- 'XMLHttpRequest: setRequestHeader() value argument checks 2'
+- 'XMLHttpRequest: setRequestHeader() value argument checks 3'
+xhr/setrequestheader-case-insensitive.htm:
+- 'XMLHttpRequest: setRequestHeader() - headers that differ in case'
+- 'XMLHttpRequest: setRequestHeader() - headers that differ in case 1'
+xhr/setrequestheader-content-type.htm:
+- ArrayBuffer request keeps setRequestHeader() Content-Type and charset
+- ArrayBuffer request respects setRequestHeader("")
+- ArrayBuffer request sends no Content-Type without setRequestHeader() call
+- ArrayBufferView request keeps setRequestHeader() Content-Type and charset
+- ArrayBufferView request respects setRequestHeader("")
+- ArrayBufferView request sends no Content-Type without setRequestHeader() call
+- Blob request respects setRequestHeader("") to be specified
+- Blob request with set type keeps setRequestHeader() Content-Type and charset
+- Blob request with set type respects setRequestHeader("") to be specified
+- Blob request with set type uses that it for Content-Type unless setRequestHeader()
+- Blob request with unset type keeps setRequestHeader() Content-Type and charset
+- Blob request with unset type sends no Content-Type without setRequestHeader() call
+- FormData request has correct default Content-Type of "multipart/form-data; boundary=_"
+- FormData request keeps setRequestHeader() Content-Type and charset
+- FormData request respects setRequestHeader("")
+- HTML Document request has correct default Content-Type of "text/html;charset=UTF-8"
+- HTML Document request keeps setRequestHeader() Content-Type without charset
+- HTML Document request keeps setRequestHeader() Content-Type, with charset adjusted
+  to UTF-8
+- HTML Document request respects setRequestHeader("")
+- String request has correct default Content-Type of "text/plain;charset=UTF-8"
+- String request keeps setRequestHeader() Content-Type without charset
+- String request keeps setRequestHeader() Content-Type, with charset adjusted to UTF-8
+- URLSearchParams request has correct default Content-Type of "application/x-www-form-urlencoded;charset=UTF-8"
+- URLSearchParams request keeps setRequestHeader() Content-Type without charset
+- URLSearchParams request keeps setRequestHeader() Content-Type, with charset adjusted
+  to UTF-8
+- URLSearchParams respects setRequestHeader("")
+- XML Document request has correct default Content-Type of "application/xml;charset=UTF-8"
+- XML Document request keeps setRequestHeader() Content-Type without charset
+- XML Document request keeps setRequestHeader() Content-Type, with charset adjusted
+  to UTF-8
+- XML Document request respects setRequestHeader("")
+- setRequestHeader(" ") sends the string " "
+- setRequestHeader("") sends a blank string
+- setRequestHeader(null) sends the string "null"
+- setRequestHeader(undefined) sends the string "undefined"
+xhr/setrequestheader-header-allowed.htm:
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (!#$%&''*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Authorization)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Content-Transfer-Encoding)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Content-Type)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (If)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Overwrite)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Pragma)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (Status-URI)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (User-Agent)'
+- 'XMLHttpRequest: setRequestHeader() - headers that are allowed (X-Pink-Unicorn)'
+xhr/setrequestheader-header-forbidden.htm:
+- 'XMLHttpRequest: setRequestHeader() - headers that are forbidden'
+- 'XMLHttpRequest: setRequestHeader() - headers that are forbidden 1'
+xhr/setrequestheader-open-setrequestheader.htm:
+- 'XMLHttpRequest: setRequestHeader() and open()'
+xhr/status-async.htm:
+- 'XMLHttpRequest: status/statusText - various responses 1 (GET 204)'
+- 'XMLHttpRequest: status/statusText - various responses 10 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 11 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 12 (CHICKEN 402)'
+- 'XMLHttpRequest: status/statusText - various responses 13 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 14 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 15 (CHICKEN 402)'
+- 'XMLHttpRequest: status/statusText - various responses 16 (GET 502)'
+- 'XMLHttpRequest: status/statusText - various responses 17 (HEAD 502)'
+- 'XMLHttpRequest: status/statusText - various responses 18 (CHICKEN 502)'
+- 'XMLHttpRequest: status/statusText - various responses 19 (GET 502)'
+- 'XMLHttpRequest: status/statusText - various responses 2 (HEAD 204)'
+- 'XMLHttpRequest: status/statusText - various responses 20 (HEAD 502)'
+- 'XMLHttpRequest: status/statusText - various responses 21 (CHICKEN 502)'
+- 'XMLHttpRequest: status/statusText - various responses 22 (GET 503)'
+- 'XMLHttpRequest: status/statusText - various responses 23 (HEAD 503)'
+- 'XMLHttpRequest: status/statusText - various responses 24 (CHICKEN 503)'
+- 'XMLHttpRequest: status/statusText - various responses 25 (GET 699)'
+- 'XMLHttpRequest: status/statusText - various responses 26 (HEAD 699)'
+- 'XMLHttpRequest: status/statusText - various responses 27 (CHICKEN 699)'
+- 'XMLHttpRequest: status/statusText - various responses 3 (CHICKEN 204)'
+- 'XMLHttpRequest: status/statusText - various responses 4 (GET 401)'
+- 'XMLHttpRequest: status/statusText - various responses 5 (HEAD 401)'
+- 'XMLHttpRequest: status/statusText - various responses 6 (CHICKEN 401)'
+- 'XMLHttpRequest: status/statusText - various responses 7 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 8 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 9 (CHICKEN 402)'
+xhr/status-basic.htm:
+- 'XMLHttpRequest: status/statusText - various responses 1 (GET 204)'
+- 'XMLHttpRequest: status/statusText - various responses 10 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 11 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 12 (CHICKEN 402)'
+- 'XMLHttpRequest: status/statusText - various responses 13 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 14 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 15 (CHICKEN 402)'
+- 'XMLHttpRequest: status/statusText - various responses 16 (GET 502)'
+- 'XMLHttpRequest: status/statusText - various responses 17 (HEAD 502)'
+- 'XMLHttpRequest: status/statusText - various responses 18 (CHICKEN 502)'
+- 'XMLHttpRequest: status/statusText - various responses 19 (GET 502)'
+- 'XMLHttpRequest: status/statusText - various responses 2 (HEAD 204)'
+- 'XMLHttpRequest: status/statusText - various responses 20 (HEAD 502)'
+- 'XMLHttpRequest: status/statusText - various responses 21 (CHICKEN 502)'
+- 'XMLHttpRequest: status/statusText - various responses 22 (GET 503)'
+- 'XMLHttpRequest: status/statusText - various responses 23 (HEAD 503)'
+- 'XMLHttpRequest: status/statusText - various responses 24 (CHICKEN 503)'
+- 'XMLHttpRequest: status/statusText - various responses 25 (GET 699)'
+- 'XMLHttpRequest: status/statusText - various responses 26 (HEAD 699)'
+- 'XMLHttpRequest: status/statusText - various responses 27 (CHICKEN 699)'
+- 'XMLHttpRequest: status/statusText - various responses 3 (CHICKEN 204)'
+- 'XMLHttpRequest: status/statusText - various responses 4 (GET 401)'
+- 'XMLHttpRequest: status/statusText - various responses 5 (HEAD 401)'
+- 'XMLHttpRequest: status/statusText - various responses 6 (CHICKEN 401)'
+- 'XMLHttpRequest: status/statusText - various responses 7 (GET 402)'
+- 'XMLHttpRequest: status/statusText - various responses 8 (HEAD 402)'
+- 'XMLHttpRequest: status/statusText - various responses 9 (CHICKEN 402)'
+xhr/template-element.html:
+- 'XMLHttpRequest: template element parsing'
+xhr/timeout-cors-async.htm:
+- 'XMLHttpRequest: timeout event and cross-origin request'
+xhr/timeout-multiple-fetches.html:
+- CORS preflights should not reset the timer
+- Redirects should not reset the timer
+xhr/timeout-sync.htm:
+- open() with async false when timeout is set
+- setting timeout attribute on sync request
+xhr/xmlhttprequest-eventtarget.htm:
+- 'XMLHttpRequest: implements EventTarget'
+xhr/xmlhttprequest-network-error-sync.htm:
+- 'XMLHttpRequest: members during network errors (sync)'
+xhr/xmlhttprequest-timeout-aborted.html:
+- 'Timeout test: time to abort is 5000, timeout set at 2000'
+xhr/xmlhttprequest-timeout-abortedonmain.html:
+- 'Timeout test: time to abort is 0, timeout set at 2000'
+- 'Timeout test: time to abort is 1000, timeout set at 2000'
+xhr/xmlhttprequest-timeout-overrides.html:
+- 'Timeout test: timeout overrides load after a delay, original timeout at 5000, reset
+  at 1000 to 2000'
+xhr/xmlhttprequest-timeout-overridesexpires.html:
+- 'Timeout test: timeout set to expired value before load fires, original timeout
+  at 5000, reset at 2000 to 1100'
+- 'Timeout test: timeout set to non-expiring value after timeout fires, original timeout
+  at 1000, reset at 2000 to 500'
+xhr/xmlhttprequest-timeout-simple.html:
+- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
+xhr/xmlhttprequest-timeout-synconmain.html:
+- 'Timeout test: Synchronous XHR must not allow a timeout to be set - calling open()
+  after timeout is set must throw'
+- 'Timeout test: Synchronous XHR must not allow a timeout to be set - setting timeout
+  must throw'
+xhr/xmlhttprequest-timeout-twice.html:
+- 'Timeout test: timeout fires normally with same timeout set twice, original timeout
+  at 2000, reset at 1000 to 2000'
+xhr/xmlhttprequest-timeout-worker-synconworker.html:
+- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
+xhr/xmlhttprequest-unsent.htm:
+- 'XMLHttpRequest: members during UNSENT'

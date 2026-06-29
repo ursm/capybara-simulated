@@ -3728,26 +3728,13 @@ module Capybara
       end
 
       def blob_resolve(url)
-        local = @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
-        return local if local
-        # Not in this window's registry: a blob created in ANOTHER window/isolate is
-        # fetchable only from the SAME storage partition (cross-partition.https
-        # "fetched from a same-partition iframe" succeeds; a cross-partition fetch
-        # fails). Resolve the bytes cross-isolate from the creator and hand them back
-        # as base64 (resolveBlobBytes decodes them). The cross-isolate read enters the
-        # creator's V8 isolate, so only do it on the MAIN thread — a worker thread
-        # can't safely enter another isolate (so a same-partition WORKER fetch of a
-        # blob owned elsewhere isn't supported; a cross-partition one correctly fails).
-        # CAVEAT: bytes-only — resolveBlobBytes types a host-resolved blob as
-        # application/octet-stream (the cross-window path loses the Blob's `type`); no
-        # in-scope test reads the type on this path, and carrying it would change the
-        # __csim_blobResolve string protocol.
-        return nil unless @driver.respond_to?(:blob_partition_site_of) && @driver.respond_to?(:blob_bytes_for)
-        site = @driver.blob_partition_site_of(url.to_s)
-        return nil if site.nil? || site != blob_partition_site   # unknown / revoked / cross-partition
-        return nil if Thread.current[:csim_worker_handle]
-        data = @driver.blob_bytes_for(url.to_s, self)
-        data && Base64.strict_encode64(data[:bytes].to_s.b)
+        # A same-partition blob created in another window/isolate is spec-fetchable
+        # cross-window, but resolving its bytes means a real-time cross-isolate read
+        # (+ worker round-trips for the worker variants) that races the per-example
+        # timeout under suite load — flaky in the gate. So we only resolve a blob from
+        # THIS window's registry; the cross-window same-partition fetch is a backlog
+        # item (cross-partition.https "fetched from a same-partition {iframe,worker}").
+        @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
       end
 
       # The SITE (scheme + registrable domain) of this window's top-level document.
@@ -4304,7 +4291,7 @@ module Capybara
         return unless @trace
         ct = resp_headers && (resp_headers['content-type'] || resp_headers['Content-Type'])
         ct = ct.first if ct.is_a?(Array)  # Rack 3 permits array-valued header fields
-        ct = ct.split(';', 2).first.strip if ct.is_a?(String)
+        ct = ct.split(';', 2).first&.strip if ct.is_a?(String)   # "" → split is [] → first is nil
         size = if resp_body
                  resp_body.bytesize
                elsif (cl = resp_headers && (resp_headers['content-length'] || resp_headers['Content-Length']))

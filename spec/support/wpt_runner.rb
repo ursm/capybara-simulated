@@ -427,7 +427,7 @@ module WptRunner
   # (timers + microtask-queuing) and the forms semantics surface (form
   # submission / constraint validation / input / select / textarea / labels —
   # the form-driven slice every app suite exercises). See script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,xhr}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle (all time-probed crasher-free). The dom/ + forms `.any.js`
@@ -439,7 +439,7 @@ module WptRunner
 
   def test_files
     @test_files ||= begin
-      html = Dir.glob("#{TREES}/**/*.{html,xhtml,xht}", base: ROOT).reject {|rel|
+      html = Dir.glob("#{TREES}/**/*.{html,htm,xhtml,xht}", base: ROOT).reject {|rel|
         rel.end_with?('-ref.html', '-manual.html', '-notref.html', '-ref.xhtml', '-manual.xhtml') ||
           (rel.split('/') & %w[support resources reftest]).any? ||
           skipped?(rel)

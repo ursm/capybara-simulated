@@ -52,10 +52,13 @@ const TREES = [
                                        // coverage gate only checks member EXISTENCE; this checks behaviour
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing', // queueMicrotask + microtask-checkpoint ordering
-  'html/semantics/forms'               // form submission / constraint validation / FormData / input /
+  'html/semantics/forms',              // form submission / constraint validation / FormData / input /
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
                                        // earned out-of-scope in wpt_out_of_scope.yml)
+  'xhr'                                // XMLHttpRequest — responseType / FormData upload / progress events /
+                                       // timeout / abort / responseURL / headers — the request surface
+                                       // Turbo / Rails-UJS / jQuery hammer; data API, no layout
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
