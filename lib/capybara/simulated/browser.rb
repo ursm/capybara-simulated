@@ -3402,8 +3402,7 @@ module Capybara
         # Worker/SharedWorker fires `onerror`, and spawn no thread. The handle is still
         # >0 so the JS registers the worker and the queued __error reaches it.
         if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self)
-          @worker_outbox << {handle: handle, kind: '__error', message: 'Worker creation from a cross-partition blob URL is blocked'}
-          return handle
+          return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked')
         end
         inbox        = Thread::Queue.new
         outbox       = @worker_outbox
@@ -3416,10 +3415,7 @@ module Capybara
         body = fetch_worker_script(target)
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
-        if target.start_with?('blob:') && body.to_s.empty?
-          @worker_outbox << {handle: handle, kind: '__error', message: 'Worker script could not be loaded'}
-          return handle
-        end
+        return worker_fail(handle, 'Worker script could not be loaded') if target.start_with?('blob:') && body.to_s.empty?
         # Pending until the worker's initial script has run (see @worker_initializing).
         @worker_init_lock.synchronize { @worker_initializing += 1 }
         thread = Thread.new do
@@ -3427,6 +3423,15 @@ module Capybara
           run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared)
         end
         @workers[handle] = {thread: thread, inbox: inbox}
+        handle
+      end
+
+      # Fail a worker that can't be created (blocked / unloadable script): queue an
+      # error event so the JS Worker/SharedWorker fires `onerror`, spawn no thread,
+      # and return the (still >0) handle so the JS registers the worker and the error
+      # reaches it.
+      private def worker_fail(handle, message)
+        @worker_outbox << {handle: handle, kind: '__error', message: message}
         handle
       end
 
@@ -3849,9 +3854,16 @@ module Capybara
       # Forget a blob URL in THIS isolate: its validity marker / bytes in
       # @blob_registry and its in-VM store entry. Called for a local revoke and, via
       # the Driver, when another same-partition window revokes a blob this isolate
-      # created.
+      # created. The @blob_registry removal is the AUTHORITATIVE invalidation
+      # (resolveBlobBytes gates on it cross-realm); the in-VM `__csimDropBlob` is a
+      # same-thread V8 call, so it's skipped on a worker thread — a worker's
+      # `revokeObjectURL` forwards here on the WORKER thread, and calling a
+      # thread-confined isolate from a non-owning thread SEGVs (V8/quickjs isolates
+      # are thread-bound). The stale in-VM entry is harmless: resolveBlobBytes returns
+      # null once the registry marker is gone.
       def drop_local_blob(url)
         @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
+        return if Thread.current[:csim_worker_handle]   # worker thread: the registry removal above is enough
         @runtime.call('__csimDropBlob', url.to_s) rescue nil
       end
 
