@@ -193,14 +193,14 @@ module WptRunner
   # .asis), so getAllResponseHeaders reflects exactly the listed fields. Returns a Rack
   # `[status, headers, [body]]`.
   def serve_asis(file)
-    raw        = File.binread(file)
+    raw           = File.binread(file)
     head, _, body = raw.partition(/\r?\n\r?\n/)
-    lines      = head.split(/\r?\n/)
-    status_line = lines.shift.to_s          # e.g. "HTTP/1.1 280 HELLO"
-    code        = (status_line[/\A\S+\s+(\d{3})/, 1] || '200').to_i
-    reason      = status_line[/\A\S+\s+\d{3}\s+(.+)/, 1]
-    pairs       = lines.filter_map {|l| n, v = l.split(':', 2); [n, v] unless n.to_s.empty? }
-    hdrs        = combine_headers(pairs)
+    lines         = head.split(/\r?\n/)
+    status_line   = lines.shift.to_s          # e.g. "HTTP/1.1 280 HELLO"
+    code          = (status_line[/\A\S+\s+(\d{3})/, 1] || '200').to_i
+    reason        = status_line[/\A\S+\s+\d{3}\s+(.+)/, 1]
+    pairs         = lines.filter_map {|l| n, v = l.split(':', 2); [n, v] unless n.to_s.empty? }
+    hdrs          = combine_headers(pairs)
     hdrs['x-csim-status-text'] = reason if reason && !reason.empty?
     [code, hdrs, [body]]
   end

@@ -313,7 +313,6 @@ xhr/send-no-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when there is no response entity
   body'
 xhr/send-non-same-origin.htm:
-- 'XMLHttpRequest: send() - non same-origin (blob:bogusidentifier)'
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
 - 'XMLHttpRequest: send() - non same-origin (http://www1.web-platform.test:8000)'
 xhr/send-receive-utf16.htm:

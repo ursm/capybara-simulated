@@ -2599,6 +2599,10 @@ module Capybara
         reset_frame_scope
         @history.clear
         @history_idx     = -1
+        # A JS-driven history.back()/go() that scheduled a deferred traverse but
+        # never drained (the page navigated away first) must not survive the reset
+        # — otherwise the stale target replays against the NEXT page's fresh history.
+        @pending_history_traverse = nil
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
         # running after `reset_session!` (Capybara's per-test teardown
@@ -4349,7 +4353,13 @@ module Capybara
 
       def normalize_trace_headers(headers)
         return nil unless headers
-        headers.each_with_object({}) {|(k, v), out| out[k.to_s] = v.is_a?(Array) ? v.join(', ') : v.to_s }
+        headers.each_with_object({}) do |(k, v), out|
+          # `x-csim-status-text` is an internal sentinel carrying the HTTP reason
+          # phrase (response_hash lifts it into statusText); it's never a real wire
+          # header, so keep it out of the trace.
+          next if k.to_s.downcase == 'x-csim-status-text'
+          out[k.to_s] = v.is_a?(Array) ? v.join(', ') : v.to_s
+        end
       end
 
       # CGI convention: `Content-Type` and `Content-Length` land in env
@@ -5571,11 +5581,14 @@ module Capybara
       # hands them over BINARY-tagged (see `RuntimeShared.utf8_text`). Per-value HTTP
       # -whitespace normalization happens upstream, BEFORE duplicate values are
       # combined (WptRunner.combine_headers) — not here, where a combined value like
-      # `", "` (two empty fields) would wrongly lose its trailing space.
+      # `", "` (two empty fields) would wrongly lose its trailing space. An
+      # Array-valued header (a Rack app emitting a repeated field) is combined with
+      # `, ` — the WHATWG "combine" separator getAllResponseHeaders exposes, matching
+      # both real browsers and the harness's combine_headers.
       def stringify(headers)
         out = {}
         headers.each do |k, v|
-          out[k.to_s] = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(',') : v.to_s)
+          out[k.to_s] = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(', ') : v.to_s)
         end
         out
       end
@@ -5588,7 +5601,11 @@ module Capybara
       REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
       def redirect_location(status, headers)
         return nil unless REDIRECT_STATUSES.include?(status.to_i)
-        headers['location'] || headers['Location']
+        loc = headers['location'] || headers['Location']
+        # A blank Location resolves back to the current URL — following it would spin
+        # the redirect loop until MAX_FETCH_REDIRECTS. It's not a usable redirect
+        # target, so the 3xx is returned to the caller as-is.
+        loc unless loc.to_s.empty?
       end
 
       def resolve_against_current(url, use_base: false)

@@ -353,6 +353,7 @@ def main():
         out_body = _to_bytes(content)
     else:
         status = _status_code(response.status)
+        status_reason = _status_reason(response.status)
         hdrs = [(_b(k), _b(v)) for k, v in response.headers]
         out_body = _to_bytes(response.content if response.content else result)
 
