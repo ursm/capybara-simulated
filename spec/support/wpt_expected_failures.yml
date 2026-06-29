@@ -116,11 +116,6 @@ xhr/formdata/set-formelement.html:
 - testFormDataSetToFormWrongPlatformObject
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
-xhr/loadstart-and-state.html:
-- abort() during loadstart
-- open() during loadstart
-xhr/open-after-abort.htm:
-- 'XMLHttpRequest: open() after abort()'
 xhr/open-during-abort-event.htm:
 - 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
 xhr/open-during-abort-processing.htm:
@@ -236,9 +231,6 @@ xhr/send-network-error-sync-events.sub.htm:
 xhr/send-no-response-event-loadend.htm:
 - 'XMLHttpRequest: The send() method: Fire a progress event named loadend (no response
   entity body)'
-xhr/send-no-response-event-loadstart.htm:
-- 'XMLHttpRequest: The send() method: Fire a progress event named loadstart (no response
-  entity body and the state is LOADING)'
 xhr/send-no-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when there is no response entity
   body'
