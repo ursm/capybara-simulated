@@ -3801,7 +3801,18 @@ module Capybara
         # type (url-charset) is preserved so it can override <meta charset>.
         ct = "#{ct};charset=utf-8" unless ct.downcase.include?('charset')
         record_response(200, {'content-type' => ct})
+        b64 = Base64.strict_encode64(bytes.to_s.b)
+        # Make the blob URL fetchable from the document we're about to load — a blob:
+        # document that fetches itself (or a media `src` first-party load) snapshots
+        # the bytes SYNCHRONOUSLY at fetch() time, which runs DURING boot below, so the
+        # bytes must be registered in this window's @blob_registry FIRST. No partition
+        # entry — the blob keeps its original storage partition; this only makes it
+        # first-party-fetchable in the window it was navigated into.
+        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = b64 }
         boot_response_into_ctx(bytes)
+        # Adopt into the in-VM store too, so a LATER resolve keeps the correct content
+        # type (the @blob_registry b64 path resolves as application/octet-stream).
+        @runtime.call('__csimAdoptBlobBytes', url.to_s, b64, content_type.to_s) rescue nil
       end
 
       def blob_unregister(url)

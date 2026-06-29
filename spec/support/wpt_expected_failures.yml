@@ -11,9 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/BlobURL/cross-partition-self-fetch.https.html:
-- Blob URL created in a cross-partition context can fetch itself in a same-partition
-  context.
 FileAPI/BlobURL/cross-partition-worker-creation.https.html:
 - Cross-partition Dedicated worker shouldn't be created from blob URL.
 - Cross-partition Shared worker shouldn't be created from blob URL.
