@@ -4289,6 +4289,9 @@ module Capybara
             next
           end
           body_str = read_rack_body(resp_body)
+          # A HEAD response has no body — the UA discards whatever the server sent
+          # (response-method: echo-method.py writes one even for HEAD).
+          body_str = '' if method.to_s.upcase == 'HEAD'
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
           return response_hash(status, resp_headers, body_str, target, redirected)

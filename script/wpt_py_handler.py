@@ -306,6 +306,27 @@ def _status_reason(status):
     return None
 
 
+def _parse_raw_http(raw):
+    """Parse a complete raw HTTP response (status line + headers + blank line + body)
+    a handler streamed via response.writer.write. Bare-LF separators occur in the
+    corpus, so accept either. Returns (code, reason, [(name,value)bytes], body)."""
+    idx, sep = raw.find(b'\r\n\r\n'), 4
+    if idx == -1:
+        idx, sep = raw.find(b'\n\n'), 2
+    head = raw[:idx] if idx != -1 else raw
+    body = raw[idx + sep:] if idx != -1 else b''
+    lines = head.replace(b'\r\n', b'\n').split(b'\n')
+    m = re.match(rb'HTTP/\d\.\d\s+(\d{3})(?:\s+(.*))?', lines[0] if lines else b'')
+    code = int(m.group(1)) if m else 200
+    reason = m.group(2).decode('latin-1') if (m and m.group(2)) else None
+    hdrs = []
+    for line in lines[1:]:
+        if b':' in line:
+            name, _, value = line.partition(b':')
+            hdrs.append((name.strip(), value.strip()))
+    return code, reason, hdrs, body
+
+
 def register_wptserve_stub():
     """Vendored handlers commonly do `from wptserve.utils import isomorphic_decode
     / isomorphic_encode`. We aren't wptserve; register a minimal `wptserve.utils`
@@ -342,9 +363,17 @@ def main():
     # Resolve the final (status, headers, body) from however the handler answered.
     status_reason = None   # a custom HTTP reason phrase, when the handler set status = (code, "text")
     if response.writer.used:
-        status = response.writer.status if response.writer.status is not None else _status_code(response.status)
-        hdrs = response.writer.headers
-        out_body = bytes(response.writer.body)
+        raw = bytes(response.writer.body)
+        if (response.writer.status is None and not response.writer.headers
+                and raw[:5] == b'HTTP/'):
+            # A handler that wrote a COMPLETE raw HTTP response via writer.write
+            # (echo-method.py) — status line + headers + blank line + body, bypassing
+            # wptserve's framing. Parse it the way serve_asis parses a `.asis` file.
+            status, status_reason, hdrs, out_body = _parse_raw_http(raw)
+        else:
+            status = response.writer.status if response.writer.status is not None else _status_code(response.status)
+            hdrs = response.writer.headers
+            out_body = raw
     elif isinstance(result, tuple):
         if len(result) == 3:
             raw_status, hdrs, content = result
