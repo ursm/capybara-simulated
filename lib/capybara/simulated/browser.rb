@@ -182,9 +182,10 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil)
+      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
+        @all_hosts_local_override     = all_hosts_local
         @runtime                      = build_runtime(js_engine)
         # Per-poll clock decisions cached at construction (CLAUDE.md rule 3 — the
         # runtime type + env are fixed for the session): the wall-sync escape
@@ -239,7 +240,12 @@ module Capybara
         # cross-origin iframe eager-builds + is served by @app.call directly
         # (no failing net_http_fetch). Apps leave it off: an external embed stays
         # non-local → lazy → no @app.call side effect (extra visit / log row).
-        @all_hosts_local              = ENV['CSIM_LOCAL_ALL_HOSTS'] == '1'
+        # Universal-server context (every host served in-process → cross-origin frames
+        # eager-build). The Driver captures this at session-construction time (when the
+        # WPT runner has the env set) and passes it to EVERY window it builds, so an aux
+        # window opened LATER — after the runner restored the env — still inherits it.
+        # nil override (a stand-alone Browser) falls back to the live env check.
+        @all_hosts_local              = @all_hosts_local_override.nil? ? (ENV['CSIM_LOCAL_ALL_HOSTS'] == '1') : @all_hosts_local_override
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -3673,11 +3679,34 @@ module Capybara
           # that context would wrongly revoke a now-page-owned URL.
           if key then @blob_owners[url.to_s] = key else @blob_owners.delete(url.to_s) end
         end
+        # Record the blob's STORAGE PARTITION (this window's top-level site) in the
+        # Driver-level store so another window can resolve it only from the same
+        # partition (blob URL partitioning). Keyed by the creating Browser so the
+        # bytes are read back from wherever they live (the creator's isolate).
+        @driver.register_blob_partition(url.to_s, self, blob_partition_site) if @driver.respond_to?(:register_blob_partition)
         nil
       end
 
       def blob_resolve(url)
         @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
+      end
+
+      # The SITE (scheme + registrable domain) of this window's top-level document.
+      # Storage partitioning keys a blob URL on its creator's top-level site, so a
+      # same-origin iframe embedded in a cross-site top-level context is a DIFFERENT
+      # partition and can't reach the blob. Registrable domain is approximated as the
+      # host's last two dot-labels — correct for the single-label public suffixes our
+      # in-process hosts use (web-platform.test / not-web-platform.test / *.com); a
+      # full Public Suffix List isn't warranted here.
+      def blob_partition_site
+        u = URI.parse(@current_url.to_s)
+        host = u.host.to_s
+        return '' if host.empty?
+        labels = host.split('.')
+        regd   = labels.length <= 2 ? host : labels.last(2).join('.')
+        "#{u.scheme}://#{regd}"
+      rescue URI::InvalidURIError
+        ''
       end
 
       # WHATWG URL "domain to ASCII" — the JS tr46 stub delegates non-ASCII / xn--
@@ -3746,15 +3775,20 @@ module Capybara
 
       def blob_unregister(url)
         @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
+        @driver.unregister_blob_partition(url.to_s) if @driver.respond_to?(:unregister_blob_partition)
         nil
       end
 
       # Revoke every blob URL owned by a context that's going away (its blob URL
       # store is part of the global being torn down).
       def revoke_owned_blobs(key)
-        @blob_registry_lock.synchronize do
+        revoked = @blob_registry_lock.synchronize do
           urls = @blob_owners.select {|_url, owner| owner == key }.keys
           urls.each {|url| @blob_registry.delete(url); @blob_owners.delete(url) }
+          urls
+        end
+        if @driver.respond_to?(:unregister_blob_partition)
+          revoked.each {|url| @driver.unregister_blob_partition(url) }
         end
       end
       # Keys are normalized with `.to_i` on BOTH sides (register tags

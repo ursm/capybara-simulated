@@ -72,11 +72,23 @@ module Capybara
         # Browser still has its own sessionStorage + DOM + JS VM.
         @cookies         = {}
         @local_storage   = {}
+        # Capture the universal-server flag ONCE, at session construction — the WPT
+        # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
+        # restores it. Every window (incl. aux windows opened later) inherits this so
+        # cross-origin iframes eager-build consistently across the whole session.
+        @all_hosts_local = ENV['CSIM_LOCAL_ALL_HOSTS'] == '1'
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
         @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
         @active_handle   = nil
         @next_window_seq = 0
+        # Driver-level blob URL partition map: url => {browser:, site:}. A blob URL's
+        # storage partition is its creating context's top-level SITE; another window
+        # can resolve the blob only from the same partition (and same origin, which
+        # the blob: URL embeds). Bytes aren't copied here — they're read back from the
+        # creating Browser's own store, so this stays a light reference map.
+        @blob_partitions      = {}
+        @blob_partitions_lock = Mutex.new
         @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
         @browser.default_viewport   = viewport   if viewport
@@ -85,10 +97,11 @@ module Capybara
 
       private def build_window_browser
         Browser.new(@app,
-                    driver:        self,
-                    js_engine:     @js_engine,
-                    cookies:       @cookies,
-                    local_storage: @local_storage)
+                    driver:          self,
+                    js_engine:       @js_engine,
+                    cookies:         @cookies,
+                    local_storage:   @local_storage,
+                    all_hosts_local: @all_hosts_local)
       end
 
       # Per-test trace recording. Mirrors capybara-playwright-driver's
@@ -255,6 +268,7 @@ module Capybara
         @aux_windows.each {|w| w[:browser].dispose rescue nil }
         @aux_windows.clear
         @active_handle = nil
+        @blob_partitions_lock.synchronize { @blob_partitions.clear }
         browser.reset!
       end
       def go_back              = current_browser.go_back
@@ -366,6 +380,15 @@ module Capybara
       # against the opener's document and records the opener relationship.
       def open_window_from_js(opener_browser, url, name, opener_realm_id = 0)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
+        # Opening a blob: URL whose storage partition differs from the opener's
+        # top-level site is forced NOOPENER (cross-partition-navigation): the new
+        # auxiliary window is its own top-level context in the blob's partition, so the
+        # blob still loads — but there is no opener relationship and `window.open`
+        # returns null. Same-partition keeps the normal opener.
+        if resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser)
+          open_aux_window(resolved, name: name, source: opener_browser)   # no opener_handle ⇒ window.opener null
+          return nil                                                      # window.open(...) === null
+        end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
         # returned realm-id context becomes a native WindowProxy on the JS side, so
         # cross-window scripting/adoption need no cross-isolate RPC. The opener's realm
@@ -377,17 +400,57 @@ module Capybara
         open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser)
       end
 
-      # Load a blob: document into aux window `aux` from `source`'s (the opener's)
-      # local blob store — the bytes live in the opener's isolate, not the aux's.
-      # Returns false if `source`/bytes are unavailable (caller falls back).
-      private def load_blob_into_window(aux, url, source, snapshot: nil)
+      # The storage-partition site a blob: URL was created in (its creator's top-level
+      # site), or nil for an unknown / revoked / unpartitioned URL.
+      def blob_partition_site_of(url)
+        e = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
+        e && e[:site]
+      end
+
+      # Is this blob: URL in a different storage partition than `accessor`'s top-level
+      # site? Unknown blobs (no entry) are treated as same-partition (no extra gating
+      # beyond the existing same-origin behaviour).
+      def cross_partition_blob?(url, accessor)
+        site = blob_partition_site_of(url)
+        !site.nil? && site != accessor.blob_partition_site
+      end
+
+      # Resolve a blob: URL's bytes from whichever Browser created it (the bytes live
+      # in the creator's isolate, not necessarily the navigator's). Used to load a blob
+      # document into a TOP-LEVEL window (window.open / a window navigation): that new
+      # context is the blob's own partition, so no partition gate applies here — the
+      # cross-partition rule for windows is the noopener severing above, and for nested
+      # frames it is enforced at the frame-navigation site. Falls back to the
+      # accessor's own store for an unpartitioned URL (worker / legacy path).
+      def blob_bytes_for(url, accessor)
+        entry = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
+        creator = entry ? entry[:browser] : accessor
+        creator.respond_to?(:read_blob_for_window) ? creator.read_blob_for_window(url) : nil
+      end
+
+      # Record / drop a blob URL's storage partition (called by Browser#blob_register /
+      # #blob_unregister). `site` is the creating context's top-level site.
+      def register_blob_partition(url, browser, site)
+        @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] = {browser: browser, site: site.to_s} }
+      end
+
+      def unregister_blob_partition(url)
+        @blob_partitions_lock.synchronize { @blob_partitions.delete(url.to_s) }
+      end
+
+      # Load a blob: document into top-level window `target`. The bytes live in
+      # whichever Browser created the blob, not the target's — `blob_bytes_for` fetches
+      # them cross-isolate. Returns false when the blob is unavailable (revoked), so
+      # the caller falls back. A click-time `snapshot` is the navigating context's own
+      # blob captured before a deferred nav could revoke it.
+      private def load_blob_into_window(target, url, source, snapshot: nil)
         data = if snapshot.is_a?(Hash) && snapshot['b64']
           { bytes: Base64.decode64(snapshot['b64'].to_s), type: snapshot['type'].to_s }
-        elsif source.respond_to?(:read_blob_for_window)
-          source.read_blob_for_window(url)
+        else
+          blob_bytes_for(url, source)
         end
         return false unless data
-        aux.boot_blob_document(url, data[:bytes], data[:type])
+        target.boot_blob_document(url, data[:bytes], data[:type])
         true
       rescue StandardError
         false
