@@ -4079,8 +4079,17 @@ module Capybara
               rt.call('__csim_workerOnMessage', msg)
               rt.drain_microtasks
               rt.drain_timers if rt.has_ready_timer?
-              break if rt.eval('!!globalThis.__csimWorkerClosed')
             end
+            # Drive the worker's OWN event loop ~one poll interval each tick — an
+            # AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout
+            # retry) has no inbox message but must still progress. Worker fetch is
+            # setTimeout(0)+__rackFetch, so advancing the timer clock resolves it on this
+            # thread. Gated on a pending timer so an idle message-driven worker stays lazy.
+            if rt.eval('typeof __nextTimerDelay === "function" && __nextTimerDelay() >= 0')
+              rt.drain_microtasks
+              rt.drain_timers   # advances ~one poll interval (the WorkerRuntime drain step)
+            end
+            break if rt.eval('!!globalThis.__csimWorkerClosed')
           end
         end
       rescue StandardError => e

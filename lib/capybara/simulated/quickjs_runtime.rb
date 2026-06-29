@@ -361,6 +361,9 @@ module Capybara
         # flip doesn't race main's `polling?` gate. See v8_runtime's
         # build_worker for the long-form rationale.
         vm.define_function('__setTimersActive') {|_flag| nil }
+        # importScripts runs a classic script at top-level scope so its top-level
+        # const/let/class share the realm's global lexical env (see v8_runtime).
+        vm.define_function('__csim_workerImportEval') {|src| vm.eval_code(src.to_s); nil }
         vm.eval_code('__csim_installWorkerScope();')
         vm.drain_jobs!
         WorkerRuntime.new(

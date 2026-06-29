@@ -1318,6 +1318,12 @@ module Capybara
         # pending XHRs the moment the worker's queue empties. The settle
         # loop already polls `worker_pending?` for worker thread activity.
         c.attach('__setTimersActive', ->(_flag) { nil })
+        # `importScripts` runs a classic script at the worker's TOP-LEVEL script scope,
+        # so its top-level `const`/`let`/`class` (dispatcher.js's `const send`/`receive`)
+        # join the realm's shared global lexical environment where later code sees them.
+        # `(0, eval)` would block-scope them to the eval and they'd vanish. `c.eval` is
+        # the top-level-script path (same as the worker's own body eval).
+        c.attach('__csim_workerImportEval', ->(src) { c.eval(src.to_s); nil })
         c.eval('__csim_installWorkerScope();')
         WorkerRuntime.new(
           eval_fn:           ->(s)     { c.eval(s.to_s) },
