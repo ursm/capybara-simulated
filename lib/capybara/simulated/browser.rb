@@ -3450,9 +3450,22 @@ module Capybara
       # `window.open(url, name)` from JS — returns the new (or reused, by name)
       # window's handle, or nil. The URL is resolved against THIS document so a
       # relative `window.open('/x')` targets the right origin/path.
-      def open_child_window(url, name)
+      def open_child_window(url, name, opener_realm_id = 0)
         return nil unless @driver.respond_to?(:open_window_from_js)
-        @driver.open_window_from_js(self, url.to_s, name.to_s)
+        @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i)
+      end
+
+      # Open a SAME-ORIGIN auxiliary window as a realm in THIS browser's isolate
+      # (shared heap) rather than a separate Browser/VM, returning the new realm's
+      # context id for `window.open` to wrap in a NATIVE WindowProxy — so
+      # `popup.document` is a real same-isolate Document and cross-window adoptNode
+      # works (dom/nodes/remove-and-adopt-thcrash). Returns nil to fall back to the
+      # separate-VM aux-window path. First stage: about:blank only (a non-blank
+      # same-origin URL still takes the aux path until realm URL-loading lands).
+      def open_window_realm(url, name: nil, opener_realm_id: 0)
+        return nil unless @runtime.respond_to?(:create_window_realm)
+        return nil unless url.nil?
+        @runtime.create_window_realm('', '', 'text/html', window_name: name, opener_id: opener_realm_id)
       end
 
       # `targetWindow.postMessage(data, origin)` — route to the target window's
@@ -3529,9 +3542,13 @@ module Capybara
       # cross-window event channels share these drain/pending hooks.
       def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty?
 
-      # A BroadcastChannel message from another window, queued for delivery to
-      # this window's channels with the same name.
-      def enqueue_broadcast(name, data) = (@broadcast_inbox << {'name' => name.to_s, 'data' => data})
+      # A BroadcastChannel message queued for delivery to this Browser's channels.
+      # `source_realm_id` is the posting realm's context id within THIS isolate (0 =
+      # main), or nil when the post came from ANOTHER isolate (the Driver's cross-
+      # window fanout) — a nil source matches no local realm, so it reaches every one.
+      def enqueue_broadcast(name, data, source_realm_id = nil)
+        @broadcast_inbox << {'name' => name.to_s, 'data' => data, 'source' => source_realm_id}
+      end
 
       # Fire queued cross-window messages (postMessage + BroadcastChannel).
       def deliver_window_messages
@@ -3543,16 +3560,39 @@ module Capybara
         end
         unless @broadcast_inbox.empty?
           events = @broadcast_inbox.slice!(0, @broadcast_inbox.length)
-          @runtime.call('__csim_deliverBroadcasts', events)
+          # A BroadcastChannel reaches every same-origin browsing context EXCEPT the
+          # poster. Within this isolate each browsing context is a realm, so deliver to
+          # the main realm (0) and every live frame/window realm, skipping the realm
+          # that posted (it already delivered to itself in-VM via `_bcChannels`). A nil
+          # source (cross-isolate) is excluded from no realm.
+          realm_ids = @runtime.respond_to?(:frame_realm_ids) ? @runtime.frame_realm_ids : []
+          [0, *realm_ids].each do |target_id|
+            batch = events.reject {|e| e['source'] == target_id }
+            next if batch.empty?
+            if target_id.zero?
+              @runtime.call('__csim_deliverBroadcasts', batch)
+            elsif @runtime.frame_realm_alive?(target_id)
+              @runtime.realm_call(target_id, '__csim_deliverBroadcasts', batch)
+            end
+          end
           n += events.size
         end
         n
       end
 
-      # `BroadcastChannel.postMessage` in THIS window — fan out to every OTHER
-      # window's matching channels (same-window delivery happens in-VM).
-      def broadcast_to_windows(name, data)
+      # `BroadcastChannel.postMessage` in THIS window — fan out to every OTHER same-
+      # origin browsing context's matching channels (same-realm delivery happens
+      # in-VM). `source_realm_id` is the posting realm's context id. The cross-ISOLATE
+      # fanout goes through the Driver; the same-ISOLATE fanout (main ↔ sibling realms,
+      # sibling ↔ sibling) is queued here and delivered per-realm by
+      # `deliver_window_messages`, which skips the posting realm.
+      def broadcast_to_windows(name, data, source_realm_id = 0)
         @driver.broadcast_channel(self, name.to_s, data) if @driver.respond_to?(:broadcast_channel)
+        # Only queue for same-isolate delivery when sibling realms exist — a single-
+        # realm page already delivered to itself in-VM, so this stays zero-overhead.
+        if @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
+          enqueue_broadcast(name, data, source_realm_id.to_i)
+        end
       end
 
       # ── Image decode (libvips) ─────────────────────────────────────
@@ -4303,6 +4343,9 @@ module Capybara
         (@pending_frame_nav ||= {})[realm_id] = url.to_s
       end
       def consume_pending_frame_nav
+        # Window-realm self-navs are realm navs too — drain them at every frame-nav
+        # drain point (before the frame-nav early-return so a window-only nav lands).
+        consume_pending_window_nav
         return if @pending_frame_nav.nil? || @pending_frame_nav.empty?
         navs = @pending_frame_nav
         @pending_frame_nav = nil
@@ -4324,6 +4367,44 @@ module Capybara
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
+        end
+      end
+      # A same-origin WINDOW realm (window.open in this isolate) navigating itself
+      # via `win.location = …`. Like frame_navigate_self, defer (the call lands here
+      # from the realm's own location setter, mid-flight) and drain after the action.
+      # A blob: URL is resolved to bytes NOW — before the opener's typical immediate
+      # `revokeObjectURL` — since the realm reload happens later (url-in-tags-revoke).
+      def window_realm_navigate_self(url, realm_id)
+        return if realm_id.nil? || realm_id.zero?
+        spec = {url: url.to_s}
+        if url.to_s.start_with?('blob:') && (b = read_blob_for_window(url.to_s))
+          # The blob's bytes arrive BINARY-tagged (Base64-decoded). __csimLoadDocument
+          # HTML-parses TEXT, and a BINARY string marshals to V8 as a Uint8Array (not a
+          # String), which `String(...)`s to comma-joined digits — a script-less doc. Decode
+          # to UTF-8 text like every other load path (see RuntimeShared.utf8_text).
+          spec[:body]  = RuntimeShared.utf8_text(b[:bytes])
+          spec[:ctype] = b[:type].to_s.empty? ? 'text/html' : b[:type]
+        end
+        (@pending_window_nav ||= {})[realm_id] = spec
+      end
+      def consume_pending_window_nav
+        return if @pending_window_nav.nil? || @pending_window_nav.empty?
+        navs = @pending_window_nav
+        @pending_window_nav = nil
+        navs.each do |realm_id, spec|
+          invalidate_find_cache
+          body, ctype = spec[:body], spec[:ctype]
+          # http(s) / relative URL window-realm nav (rack fetch) is not modeled yet —
+          # only the blob/in-memory document case (which pre-resolved bytes above)
+          # loads here. Warn rather than silently drop so an unsupported popup
+          # navigation is diagnosable instead of looking like a frozen about:blank.
+          if body.nil?
+            log_console('warn', "window-realm navigation to #{spec[:url]} not modeled (only blob: documents load); ignoring")
+            next
+          end
+          @runtime.reload_window_realm(realm_id, spec[:url], body.to_s, ctype.to_s)
+        rescue StandardError => e
+          log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
       end
       # Mirror of `location_assign`'s deferral for `location.reload()`:

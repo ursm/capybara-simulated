@@ -364,6 +364,10 @@ module Capybara
       # Browser's `@current_realm_id` may still point at it; the Browser uses
       # this to raise a stale-element instead of running a frame handle op
       # against the main registry.
+      # Ids of every live frame / window realm in this isolate (excludes the main
+      # realm, id 0). Used to fan a BroadcastChannel post out to sibling realms.
+      def frame_realm_ids = frame_realms.keys
+
       def frame_realm_alive?(realm_id)
         !(realm_id.nil? || realm_id.zero?) && frame_realms.key?(realm_id)
       end
@@ -412,10 +416,17 @@ module Capybara
         frame_realm_parents[realm_id] || 0
       end
 
+      # Per-window-realm metadata (opener id + window.name) captured at create time so a
+      # window's self-navigation (which builds a fresh realm via `reload_window_realm`)
+      # can carry them across, the way a real popup keeps `window.opener` / `window.name`
+      # through its own navigation.
+      def window_realm_meta = (@window_realm_meta ||= {})
+
       def dispose_frame_realms
         @realm_module_handles&.clear
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
+        @window_realm_meta&.clear
         return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
@@ -433,6 +444,18 @@ module Capybara
         create_frame_realm(ctx, url, body, content_type, parent_id)
       end
 
+      # Navigate a window realm (`win.location = …`): a FRESH realm for the new
+      # document, like reload_frame_realm — an in-place `__csimLoadDocument` on an
+      # already-loaded realm does NOT re-run inline scripts, but a fresh realm does.
+      # Returns the new realm's context id. (The opener's WindowProxy, keyed by the
+      # old id, goes stale across this — acceptable while no window.open test scripts
+      # the window after navigating it; a stable WindowProxy is future work.)
+      def reload_window_realm(old_id, url, body, content_type)
+        meta = window_realm_meta[old_id] || {}
+        dispose_frame_realm(old_id)
+        create_window_realm(url, body, content_type, opener_id: meta[:opener_id], window_name: meta[:window_name])
+      end
+
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
       # ancestor frame re-navigates). No-op for nil/0/unknown ids.
       def dispose_frame_realm(id)
@@ -443,6 +466,13 @@ module Capybara
         @realm_module_handles&.delete(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
+        @window_realm_meta&.delete(id)
+        # Evict from the main realm's child-realm set so `drainChildRealms` stops
+        # stepping a disposed context. A FRAME realm is also evicted via the DOM
+        # unregister path (its iframe element going away), but a WINDOW realm has no
+        # element — this is its only eviction, and it covers the reload (dispose +
+        # recreate) path too, where the old id would otherwise leak in the set.
+        ctx.eval("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         nil
@@ -730,6 +760,23 @@ module Capybara
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
 
+      # Bring a freshly-created realm context up to a runnable bridge, shared by the
+      # frame and window realm constructors. Re-evaling the snapshot source would
+      # redefine snapshot globals (e.g. the `scrollX` accessor) and throw, so only
+      # eval it on a bare no-snapshot dev ctx where the realm boots empty. The
+      # replayed `__csim_runScriptCached` / `__csim_evalEsmEntry` close over the MAIN
+      # ctx they were first attached to, so a realm script routing through them
+      # (leading-lexical, ≥64KB, or `type=module`) would run against the main
+      # document — rebind realm-executing variants on top, then reseed per-realm JS.
+      def seed_realm_bridge(realm)
+        has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
+        realm.eval(RuntimeShared.snapshot_src) unless has_bridge
+        attach_run_script_with_cache(realm)
+        attach_realm_esm_entry(realm)
+        reseed_realm_js(realm)
+        realm
+      end
+
       def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
@@ -744,20 +791,7 @@ module Capybara
         # never trips.
         frame_realm_depths[realm.id]  = depth
         frame_realm_parents[realm.id] = parent_id.to_i   # owning realm, for contentWindow-reached rebuilds
-        # Re-evaling the snapshot source would redefine snapshot globals (e.g.
-        # the `scrollX` accessor) and throw — re-entrantly. Only eval the
-        # source on a bare no-snapshot dev ctx, where the realm boots empty.
-        # Host fns are replayed onto the realm by `Ctx#create_context`.
-        has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
-        realm.eval(RuntimeShared.snapshot_src) unless has_bridge
-        # The replayed `__csim_runScriptCached` / `__csim_runScriptEval` /
-        # `__csim_evalEsmEntry` close over the context they EXECUTE in (the
-        # main ctx) — left as-is, a frame script that routes through them
-        # (leading-lexical, ≥64KB, or `type=module`) would run against the
-        # PARENT realm's document. Rebind realm-executing variants on top.
-        attach_run_script_with_cache(realm)
-        attach_realm_esm_entry(realm)
-        reseed_realm_js(realm)
+        seed_realm_bridge(realm)
         # Wire `parent` / `top` to the realm that owns this iframe (its context
         # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
         # `top` propagates up the chain (the main realm's `top` is itself). A
@@ -836,6 +870,86 @@ module Capybara
         # including any module handles its scripts compiled before the throw.
         if realm
           @realm_module_handles&.delete(realm.id)
+          realm.dispose rescue nil
+        end
+        nil
+      end
+
+      # Build a same-origin auxiliary WINDOW (window.open / open_new_window) as a
+      # realm in THIS isolate — like an iframe's frame realm, but top-level: `parent`
+      # === `top` === the window itself (the bridge default, so unlike
+      # create_frame_realm we don't wire them to a container), and `window.opener`
+      # points at the opener realm's WindowProxy. Tracked in `frame_realms` so
+      # realm_call / drainChildRealms / dispose_frame_realms cover it for free.
+      # Returns the new realm's context id; the opener-side `window.open` wraps it in
+      # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
+      # same-isolate Document (cross-window adoptNode works). The single isolate also
+      # makes a same-origin window far cheaper than today's isolate-per-window.
+      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil)
+        realm = seed_realm_bridge(ctx.create_context)
+        # Mark it a top-level window realm so its location setter routes to
+        # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
+        # top-page path — top === self here, so neither default branch fits. Also give
+        # it the window-lifecycle surface a popup needs but a frame realm doesn't:
+        # `window.closed` (flag-backed) and `window.close()` (marks closed; the realm
+        # lingers inert until the Browser tears the isolate down — matching a real
+        # closed window whose proxy stays valid and reports closed === true).
+        realm.eval(<<~JS)
+          globalThis.__csimIsWindowRealm = true;
+          globalThis.__csimWindowClosedFlag = false;
+          try {
+            Object.defineProperty(globalThis, 'closed', {
+              configurable: true,
+              get() { return !!globalThis.__csimWindowClosedFlag; }
+            });
+          } catch (_) {}
+          globalThis.close = function () { globalThis.__csimWindowClosedFlag = true; };
+        JS
+        # window.opener → a WindowProxy for the opener realm. opener_id is the opener's
+        # context id (0 = the main realm, a VALID opener); nil means "no opener", so the
+        # guard is on nil, not on 0 (0 is falsy but real here). Assigning globalThis.opener
+        # routes through the bridge's opener setter (stores the override the getter returns).
+        unless opener_id.nil?
+          realm.eval(<<~JS)
+            if (typeof globalThis.__csimFrameWindowProxyFor === 'function') {
+              var __op = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
+              if (__op) globalThis.opener = __op;
+            }
+          JS
+        end
+        realm.call('__csimUpdateLocation', url.to_s)        unless url.to_s.empty?
+        realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
+        realm.call('__csimSetDocumentOrigin', doc_origin.to_s)         unless doc_origin.nil?
+        realm.call('__csimSetLocationOrigin', location_origin.to_s)    unless location_origin.nil?
+        # Register the realm as alive BEFORE its document loads: its inline scripts run
+        # synchronously inside __csimLoadDocument and may post to a BroadcastChannel the
+        # opener listens on (a blob popup that posts then self.close()s). The delivery
+        # path gates on `frame_realm_alive?`, so the realm must already be tracked or its
+        # own load-time post is dropped. Mirrors create_frame_realm seeding its depth /
+        # parent maps before the load for the same reason.
+        frame_realms[realm.id]        = realm
+        frame_realm_parents[realm.id] = 0   # top-level (no parent frame)
+        # Register with the opener (main) realm's child-realm set so `drainChildRealms`
+        # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
+        # BroadcastChannel delivery from a blob document) never fire.
+        ctx.eval("(globalThis.__csimChildRealmIds || (globalThis.__csimChildRealmIds = new Set())).add(#{realm.id});")
+        # Remember the window's opener / name so a self-navigation (reload_window_realm
+        # builds a FRESH realm) can carry them across — a real popup keeps window.opener
+        # and window.name through its own navigation.
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name}
+        realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        realm.call('__csimFireWindowLoad') rescue nil
+        realm.id
+      rescue StandardError => e
+        @browser.log_console('warn', "window realm load failed: #{e.message}")
+        if realm
+          # The realm is registered (frame_realms / parents / __csimChildRealmIds)
+          # BEFORE the document loads, so a load-time throw must roll all of that back
+          # — otherwise frame_realm_alive? and drainChildRealms keep treating a
+          # disposed context as live. dispose_frame_realm unwinds the registries (and
+          # disposes if registered); the explicit dispose is the backstop for a throw
+          # that happened before registration.
+          dispose_frame_realm(realm.id)
           realm.dispose rescue nil
         end
         nil

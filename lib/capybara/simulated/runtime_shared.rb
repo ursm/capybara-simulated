@@ -49,6 +49,10 @@ module Capybara
         # realm id). Deferred + applied by re-navigating the owning iframe, so a
         # frame's `location.href = …` navigates the frame, not the top page.
         '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i); nil },
+        # A same-origin window realm (window.open in this isolate) navigating itself
+        # (a[0] = url, a[1] = the window's realm id). Deferred + applied by reloading
+        # that realm's document in place — see Browser#window_realm_navigate_self.
+        '__csimWindowRealmNavigate'  => ->(b, *a) { b.window_realm_navigate_self(a[0], a[1].to_i); nil },
         # A nested browsing context reloading its OWN location (a[0] = the frame's
         # realm id). Deferred + applied by re-navigating the owning iframe to its
         # current document — see Browser#frame_reload_self.
@@ -84,12 +88,12 @@ module Capybara
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
-        # Cross-window references (window.open / opener / postMessage). Each
-        # window is a separate VM, so these forward to the Driver to route to
-        # the target window's Browser.
-        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1]) },
+        # Cross-window references (window.open / opener / postMessage). A separate-VM
+        # aux window forwards to the Driver; a same-origin window realm lives in this
+        # isolate. a[2] is the opener's realm id (for wiring window.opener).
+        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1], a[2]) },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
-        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1]); nil },
+        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i); nil },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to
