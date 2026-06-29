@@ -3395,16 +3395,31 @@ module Capybara
       # main settle drains.
       def worker_spawn(url, shared: false)
         handle       = (@worker_seq += 1)
+        target       = resolve_against_current(url.to_s)
+        # A worker script from a blob: URL in a DIFFERENT storage partition than this
+        # context can't be created (cross-partition-worker-creation): the worker would
+        # run in the creating context's partition, not the blob's. Deliver an error so
+        # Worker/SharedWorker fires `onerror`, and spawn no thread. The handle is still
+        # >0 so the JS registers the worker and the queued __error reaches it.
+        if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self)
+          @worker_outbox << {handle: handle, kind: '__error', message: 'Worker creation from a cross-partition blob URL is blocked'}
+          return handle
+        end
         inbox        = Thread::Queue.new
         outbox       = @worker_outbox
         engine_class = @runtime.class
-        target       = resolve_against_current(url.to_s)
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
         body = fetch_worker_script(target)
+        # A blob: worker script that didn't resolve (revoked / unavailable) fails the
+        # same way — fire onerror rather than spawn a worker that runs nothing.
+        if target.start_with?('blob:') && body.to_s.empty?
+          @worker_outbox << {handle: handle, kind: '__error', message: 'Worker script could not be loaded'}
+          return handle
+        end
         # Pending until the worker's initial script has run (see @worker_initializing).
         @worker_init_lock.synchronize { @worker_initializing += 1 }
         thread = Thread.new do
@@ -4052,6 +4067,13 @@ module Capybara
       private def fetch_worker_script(url)
         u = url.to_s
         if u.start_with?('blob:')
+          # Resolve via the Driver's partition store so a SAME-partition blob created
+          # in ANOTHER window/isolate (the cross-partition-worker-creation test creates
+          # the blob in the opener and the worker in a same-site iframe) is readable.
+          # Falls back to this realm's own store when there's no Driver entry.
+          if @driver.respond_to?(:blob_bytes_for) && (data = @driver.blob_bytes_for(u, self))
+            return data[:bytes]
+          end
           b64 = @runtime.call('__csimReadBlobBase64', u)
           return nil unless b64
           return Base64.decode64(b64.to_s)

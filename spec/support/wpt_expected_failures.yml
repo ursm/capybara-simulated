@@ -11,9 +11,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/BlobURL/cross-partition-worker-creation.https.html:
-- Cross-partition Dedicated worker shouldn't be created from blob URL.
-- Cross-partition Shared worker shouldn't be created from blob URL.
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
 - Blob URL shouldn't be fetched from a cross-partition iframe
