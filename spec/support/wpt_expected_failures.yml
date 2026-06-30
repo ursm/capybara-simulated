@@ -58,8 +58,6 @@ xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
 xhr/cookies.http.html:
 - Basic non-cross-site cookie handling in XHR
-xhr/data-uri.htm:
-- XHR method HEAD with MIME type text/plain
 xhr/event-error-order.sub.html:
 - 'XMLHttpRequest: event - error (order of events)'
 xhr/event-error.sub.any.js:
@@ -103,14 +101,6 @@ xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
 xhr/open-after-stop.window.js:
 - open() after window.stop()
-xhr/open-open-send.htm:
-- 'XMLHttpRequest: open() - open() - send()'
-xhr/open-open-sync-send.htm:
-- 'XMLHttpRequest: open() - open() (sync) - send()'
-xhr/open-send-open.htm:
-- 'XMLHttpRequest: open() - send() - open()'
-xhr/open-sync-open-send.htm:
-- 'XMLHttpRequest: open() (sync) - send() - open()'
 xhr/open-url-base-inserted.htm:
 - 'XMLHttpRequest: open() resolving URLs - insert <base>'
 xhr/open-url-base.htm:
@@ -149,20 +139,12 @@ xhr/response-data-gzip.htm:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/responseText-status.html:
-- 'XMLHttpRequest Test: responseText - status'
-xhr/responsexml-invalid-type.html:
-- 'XMLHttpRequest: response with an invalid responseXML document'
 xhr/responsexml-non-well-formed.htm:
 - 'XMLHttpRequest: responseXML non well-formed tests 2'
 - 'XMLHttpRequest: responseXML non well-formed tests 4'
 - 'XMLHttpRequest: responseXML non well-formed tests 6'
 xhr/security-consideration.sub.html:
 - 'ProgressEvent: security consideration'
-xhr/send-accept-language.htm:
-- Send "sensible" default value, whatever that means
-xhr/send-accept.htm:
-- 'XMLHttpRequest: send() - Accept'
 xhr/send-authentication-basic-repeat-no-args.htm:
 - 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
   passed to open() in first request, without in second'
@@ -231,10 +213,6 @@ xhr/send-sync-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is set'
 xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
-xhr/setrequestheader-bogus-value.htm:
-- Omitted value argument
-xhr/setrequestheader-header-forbidden.htm:
-- 'XMLHttpRequest: setRequestHeader() - headers that are forbidden 1'
 xhr/status.h2.window.js:
 - statusText over H2 for status 200 should be the empty string
 - statusText over H2 for status 210 should be the empty string
