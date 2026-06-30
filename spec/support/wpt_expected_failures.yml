@@ -125,10 +125,6 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/responsexml-non-well-formed.htm:
-- 'XMLHttpRequest: responseXML non well-formed tests 2'
-- 'XMLHttpRequest: responseXML non well-formed tests 4'
-- 'XMLHttpRequest: responseXML non well-formed tests 6'
 xhr/security-consideration.sub.html:
 - 'ProgressEvent: security consideration'
 xhr/send-authentication-basic-repeat-no-args.htm:
