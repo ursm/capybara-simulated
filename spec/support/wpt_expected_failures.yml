@@ -18,11 +18,2505 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition shared worker
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
+fetch/api/abort/cache.https.any.js:
+- Signals are not stored in the cache API
+- Signals are not stored in the cache API, even if they're already aborted
+fetch/api/abort/general.any.js:
+- Aborting rejects with AbortError
+- Aborting rejects with AbortError - no-cors
+- Aborting rejects with abort reason
+- Already aborted signal can be used for many fetches
+- Already aborted signal does not make request
+- Already aborted signal rejects immediately
+- Call text() twice on aborted response
+- Clone aborts with original controller
+- Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
+- Fetch aborted & connection closed when aborted after calling response.blob()
+- Fetch aborted & connection closed when aborted after calling response.bytes()
+- Fetch aborted & connection closed when aborted after calling response.formData()
+- Fetch aborted & connection closed when aborted after calling response.json()
+- Fetch aborted & connection closed when aborted after calling response.text()
+- Readable stream synchronously cancels with AbortError if aborted before reading
+- Request is still 'used' if signal is aborted before fetching
+- Request objects have a signal property
+- Signal can be used to abort other fetches, even if another fetch succeeded before
+  aborting
+- Signal on request object
+- Signal on request object created from request object
+- Signal on request object created from request object, with signal on second request
+- Signal on request object created from request object, with signal on second request
+  overriding another
+- Signal on request object should also have abort reason
+- Signal retained after unrelated properties are overridden by fetch
+- Signal state is cloned
+- Stream errors once aborted, after reading. Underlying connection closed.
+- Stream errors once aborted. Underlying connection closed.
+- Stream will not error if body is empty. It's closed with an empty queue before it
+  errors.
+- Underlying connection is closed when aborting after receiving response
+- Underlying connection is closed when aborting after receiving response - no-cors
+- response.arrayBuffer() rejects if already aborted
+- response.blob() rejects if already aborted
+- response.bytes() rejects if already aborted
+- response.formData() rejects if already aborted
+- response.json() rejects if already aborted
+- response.text() rejects if already aborted
+fetch/api/abort/keepalive.html:
+- aborting a detached keepalive fetch should not do anything
+- aborting a keepalive fetch should work
+fetch/api/abort/request.any.js:
+- Aborting a request after calling json()
+- Calling arrayBuffer() on an aborted consumed nonempty request
+- Calling blob() on an aborted consumed nonempty request
+- Calling formData() on an aborted consumed nonempty request
+- Calling json() on an aborted consumed nonempty request
+- Calling json() on an aborted request
+- Calling text() on an aborted consumed nonempty request
+fetch/api/abort/serviceworker-intercepted.https.html:
+- Abort reason serialization happens on abort
+- Already aborted request does not land in service worker
+- Service Worker can observe the fetch abort and associated abort reason
+- Stream errors once aborted.
+- fetch() rejects with abort reason
+- fetch() response body has abort reason
+- response.arrayBuffer() rejects if already aborted
+- response.blob() rejects if already aborted
+- response.bytes() rejects if already aborted
+- response.formData() rejects if already aborted
+- response.json() rejects if already aborted
+- response.text() rejects if already aborted
+fetch/api/basic/accept-header.any.js:
+- Request through fetch should have 'accept' header with value '*/*'
+- Request through fetch should have 'accept' header with value 'custom/*'
+- Request through fetch should have 'accept-language' header with value 'bzh'
+- Request through fetch should have a 'accept-language' header
+fetch/api/basic/block-mime-as-script.html:
+- Should fail loading empty script with audio/aiff MIME type
+- Should fail loading empty script with audio/midi MIME type
+- Should fail loading empty script with audio/whatever MIME type
+- Should fail loading empty script with image/gif MIME type
+- Should fail loading empty script with image/jpeg MIME type
+- Should fail loading empty script with image/whatever MIME type
+- Should fail loading empty script with text/csv MIME type
+- Should fail loading empty script with video/avi MIME type
+- Should fail loading empty script with video/fli MIME type
+- Should fail loading empty script with video/whatever MIME type
+- Should fail loading non-empty script with audio/aiff MIME type
+- Should fail loading non-empty script with audio/midi MIME type
+- Should fail loading non-empty script with audio/whatever MIME type
+- Should fail loading non-empty script with image/gif MIME type
+- Should fail loading non-empty script with image/jpeg MIME type
+- Should fail loading non-empty script with image/whatever MIME type
+- Should fail loading non-empty script with text/csv MIME type
+- Should fail loading non-empty script with video/avi MIME type
+- Should fail loading non-empty script with video/fli MIME type
+- Should fail loading non-empty script with video/whatever MIME type
+fetch/api/basic/conditional-get.any.js:
+- Testing conditional GET with ETags
+fetch/api/basic/error-after-response.any.js:
+- Response reader closed promise should reject after a network error happening after
+  resolving fetch promise
+- Response reader read() promise should reject after a network error happening after
+  resolving fetch promise
+fetch/api/basic/gc.any.js:
+- GC/CC should not abruptly close the stream while being consumed by Response
+fetch/api/basic/http-response-code.any.js:
+- Fetch on 425 response should not be retried for non TLS early data.
+fetch/api/basic/integrity.sub.any.js:
+- CORS invalid integrity
+- Empty string integrity for opaque response
+- Invalid integrity
+- 'Multiple integrities: both are invalid'
+- 'Multiple integrities: invalid stronger than valid'
+- SHA-* integrity for opaque response
+fetch/api/basic/keepalive.any.js:
+- "[keepalive] simple GET request on 'load' [no payload]"
+- "[keepalive] simple GET request on 'pagehide' [no payload]"
+- "[keepalive] simple GET request on 'unload' [no payload]"
+- "[keepalive] simple POST request on 'load' [no payload]"
+- "[keepalive] simple POST request on 'pagehide' [no payload]"
+- "[keepalive] simple POST request on 'unload' [no payload]"
+- simple keepalive test for web workers
+fetch/api/basic/mediasource.window.js:
+- 'Cannot fetch blob: URL from a MediaSource'
+fetch/api/basic/mode-no-cors.sub.any.js:
+- Fetch http://web-platform.test:8000/fetch/api/resources/top.txt with no-cors mode
+- Fetch https://web-platform.test:8443/fetch/api/resources/top.txt with no-cors mode
+fetch/api/basic/mode-same-origin.any.js:
+- Fetch /fetch/api/basic/../resources/redirect.py?location=http://www1.www.example.com/fetch/api/resources/top.txt
+  with same-origin mode
+- Fetch /fetch/api/basic/../resources/redirect.py?location=https://www.example.com/fetch/api/resources/top.txt
+  with same-origin mode
+- Fetch http://www1.www.example.com/fetch/api/resources/top.txt with same-origin mode
+- Fetch https://www.example.com/fetch/api/resources/top.txt with same-origin mode
+fetch/api/basic/referrer.any.js:
+- Referrer with credentials should be stripped
+- Referrer with fragment ID should be stripped
+- origin-when-cross-origin policy on a cross-origin URL
+- origin-when-cross-origin policy on a cross-origin URL after same-origin redirection
+- origin-when-cross-origin policy on a same-origin URL
+- origin-when-cross-origin policy on a same-origin URL after cross-origin redirection
+fetch/api/basic/request-forbidden-headers.any.js:
+- Accept-Charset is a forbidden request header
+- Accept-Encoding is a forbidden request header
+- Access-Control-Request-Headers is a forbidden request header
+- Access-Control-Request-Method is a forbidden request header
+- Connection is a forbidden request header
+- Content-Length is a forbidden request header
+- Cookie is a forbidden request header
+- Cookie2 is a forbidden request header
+- DNT is a forbidden request header
+- Date is a forbidden request header
+- Expect is a forbidden request header
+- Host is a forbidden request header
+- Keep-Alive is a forbidden request header
+- Origin is a forbidden request header
+- Proxy- is a forbidden request header
+- Proxy-Test is a forbidden request header
+- Referer is a forbidden request header
+- Sec- is a forbidden request header
+- Sec-Test is a forbidden request header
+- TE is a forbidden request header
+- Trailer is a forbidden request header
+- Transfer-Encoding is a forbidden request header
+- Upgrade is a forbidden request header
+- Via is a forbidden request header
+- header X-HTTP-METHOD is forbidden to use value CONNECT
+- header X-HTTP-METHOD is forbidden to use value TRACE
+- header X-HTTP-METHOD is forbidden to use value TRACK
+- header X-HTTP-METHOD is forbidden to use value connect
+- header X-HTTP-METHOD is forbidden to use value trace
+- header X-HTTP-METHOD is forbidden to use value trace,
+- header X-HTTP-METHOD is forbidden to use value track
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value CONNECT
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value TRACE
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value TRACK
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value connect
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value trace
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value trace,
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value track
+- header X-METHOD-OVERRIDE is forbidden to use value CONNECT
+- header X-METHOD-OVERRIDE is forbidden to use value TRACE
+- header X-METHOD-OVERRIDE is forbidden to use value TRACK
+- header X-METHOD-OVERRIDE is forbidden to use value connect
+- header X-METHOD-OVERRIDE is forbidden to use value trace
+- header X-METHOD-OVERRIDE is forbidden to use value trace,
+- header X-METHOD-OVERRIDE is forbidden to use value track
+- header x-http-method is forbidden to use value CONNECT
+- header x-http-method is forbidden to use value TRACE
+- header x-http-method is forbidden to use value TRACK
+- header x-http-method is forbidden to use value connect
+- header x-http-method is forbidden to use value trace
+- header x-http-method is forbidden to use value trace,
+- header x-http-method is forbidden to use value track
+- header x-http-method-override is forbidden to use value CONNECT
+- header x-http-method-override is forbidden to use value TRACE
+- header x-http-method-override is forbidden to use value TRACK
+- header x-http-method-override is forbidden to use value connect
+- header x-http-method-override is forbidden to use value trace
+- header x-http-method-override is forbidden to use value trace,
+- header x-http-method-override is forbidden to use value track
+- header x-method-override is forbidden to use value CONNECT
+- header x-method-override is forbidden to use value TRACE
+- header x-method-override is forbidden to use value TRACK
+- header x-method-override is forbidden to use value connect
+- header x-method-override is forbidden to use value trace
+- header x-method-override is forbidden to use value trace,
+- header x-method-override is forbidden to use value track
+fetch/api/basic/request-head.any.js:
+- Fetch with HEAD with body
+fetch/api/basic/request-headers-case.any.js:
+- Multiple headers with the same name, different case (THIS-IS-A-TEST first)
+- Multiple headers with the same name, different case (THIS-is-A-test first)
+fetch/api/basic/request-headers-nonascii.any.js:
+- Non-ascii bytes in request headers
+fetch/api/basic/request-headers.any.js:
+- Fetch with Chicken
+- Fetch with Chicken with body
+- Fetch with POST and mode "no-cors" needs an Origin header
+- Fetch with POST and mode "same-origin" needs an Origin header
+- Fetch with POST with ArrayBuffer body
+- Fetch with POST with Blob body
+- Fetch with POST with Blob body with mime type
+- Fetch with POST with DataView body
+- Fetch with POST with Float16Array body
+- Fetch with POST with Float32Array body
+- Fetch with POST with Float64Array body
+- Fetch with POST with FormData body
+- Fetch with POST with Int8Array body
+- Fetch with POST with URLSearchParams body
+- Fetch with POST with Uint8Array body
+- Fetch with POST with text body
+- Fetch with POST without body
+- Fetch with PUT and mode "same-origin" needs an Origin header
+- Fetch with PUT with body
+- Fetch with PUT without body
+- Fetch with TacO and mode "cors" needs an Origin header
+- Fetch with TacO and mode "same-origin" needs an Origin header
+fetch/api/basic/request-referrer.any.js:
+- url referrer
+fetch/api/basic/request-upload.any.js:
+- Fetch with POST with ReadableStream containing ArrayBuffer
+- Fetch with POST with ReadableStream containing Blob
+- Fetch with POST with ReadableStream containing String
+- Fetch with POST with ReadableStream containing null
+- Fetch with POST with ReadableStream containing number
+- Fetch with POST with text body on 421 response should be retried once on new connection.
+- Streaming upload shouldn't work on Http/1.1.
+fetch/api/basic/request-upload.h2.any.js:
+- Feature detect for POST with ReadableStream
+- Feature detect for POST with ReadableStream, using request object
+- Fetch with POST with ReadableStream
+- Fetch with POST with ReadableStream on 421 response should return the response and
+  not retry.
+- Fetch with POST with empty ReadableStream
+- ReadbleStream should be closed on signal.abort
+- Streaming upload should fail on a 401 response
+- Streaming upload with body containing a String
+- Streaming upload with body containing a number
+- Streaming upload with body containing null
+- Synchronous feature detect
+fetch/api/basic/response-null-body.any.js:
+- Response.body is null for responses with method=HEAD
+- Response.body is null for responses with status=204 (method=GET)
+- Response.body is null for responses with status=204 (method=OPTIONS)
+- Response.body is null for responses with status=204 (method=POST)
+- Response.body is null for responses with status=205 (method=GET)
+- Response.body is null for responses with status=205 (method=OPTIONS)
+- Response.body is null for responses with status=205 (method=POST)
+- Response.body is null for responses with status=304 (method=GET)
+- Response.body is null for responses with status=304 (method=OPTIONS)
+- Response.body is null for responses with status=304 (method=POST)
+fetch/api/basic/response-url.sub.any.js:
+- Testing response url getter with http://web-platform.test:8000#ada
+- Testing response url getter with http://web-platform.test:8000/#
+- Testing response url getter with http://web-platform.test:8000/#ada
+fetch/api/basic/scheme-blob.sub.any.js:
+- Blob content is not sniffed for a content type [text/xml]
+- Blob.slice should not sniff the content for a content type
+- Fetching URL.createObjectURL(empty_blob) is OK
+- Fetching URL.createObjectURL(empty_data_blob) is OK
+- Fetching URL.createObjectURL(empty_type_blob) is OK
+- Fetching URL.createObjectURL(invalid_type_blob) is OK
+- Fetching [GET] URL.createObjectURL(blob) is OK
+- Set content type to the empty string for slice with invalid content type
+- 'Set content type to the empty string for slice with no content type '
+fetch/api/basic/scheme-data.any.js:
+- Fetching [HEAD] data:,response%27s%20body is OK
+- Fetching [POST] data:,response%27s%20body is OK
+- Fetching data:,response%27s%20body is OK
+- Fetching data:,response%27s%20body is OK (cors)
+- Fetching data:,response%27s%20body is OK (same-origin)
+- Fetching data:image/png;base64,cmVzcG9uc2UncyBib2[...] is OK
+- Fetching data:text/plain;base64,cmVzcG9uc2UncyBib[...] is OK
+fetch/api/basic/stream-response.any.js:
+- Stream response's body when content-type is not present
+- Stream response's body when content-type is present
+fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
+fetch/api/basic/text-utf8.any.js:
+- UTF-16 without BOM decoded as UTF-8 (Request object)
+- UTF-16 without BOM decoded as UTF-8 (Response object)
+- UTF-16 without BOM decoded as UTF-8 with Request.text()
+- UTF-16 without BOM decoded as UTF-8 with Response.text()
+- UTF-16BE with BOM decoded as UTF-8 (Request object)
+- UTF-16BE with BOM decoded as UTF-8 (Response object)
+- UTF-16BE with BOM decoded as UTF-8 with Request.text()
+- UTF-16BE with BOM decoded as UTF-8 with Response.text()
+- UTF-16BE with BOM decoded as UTF-8 with fetched data (UTF-16 charset)
+- UTF-16BE with BOM decoded as UTF-8 with fetched data (UTF-8 charset)
+- UTF-16LE with BOM decoded as UTF-8 (Request object)
+- UTF-16LE with BOM decoded as UTF-8 (Response object)
+- UTF-16LE with BOM decoded as UTF-8 with Request.text()
+- UTF-16LE with BOM decoded as UTF-8 with Response.text()
+- UTF-16LE with BOM decoded as UTF-8 with fetched data (UTF-16 charset)
+- UTF-16LE with BOM decoded as UTF-8 with fetched data (UTF-8 charset)
+- UTF-8 with BOM (Request object)
+- UTF-8 with BOM (Response object)
+- UTF-8 with BOM with Request.text()
+- UTF-8 with BOM with Response.text()
+- UTF-8 without BOM (Request object)
+- UTF-8 without BOM (Response object)
+- UTF-8 without BOM with Request.text()
+- UTF-8 without BOM with Response.text()
+fetch/api/basic/url-parsing.sub.html:
+- Request uses the UTF-8 URL parser
+- Request uses the UTF-8 URL parser
+- Request uses the UTF-8 URL parser
+- Request's referrer uses the UTF-8 URL parser
+- Request's referrer uses the UTF-8 URL parser
+- Request's referrer uses the UTF-8 URL parser
+- Response.redirect() uses the UTF-8 URL parser
+- Response.redirect() uses the UTF-8 URL parser
+- Response.redirect() uses the UTF-8 URL parser
+fetch/api/body/formdata.any.js:
+- Consume multipart/form-data headers case-insensitively
+fetch/api/body/mime-type.any.js:
+- 'Request: Content-Type in headers wins Blob"s type'
+- 'Request: Extract a MIME type with clone'
+- 'Request: MIME type for Blob from empty body with Content-Type'
+- 'Request: MIME type for Blob with non-empty type'
+- 'Request: overriding explicit Content-Type'
+- 'Request: removing implicit Content-Type'
+- 'Request: setting missing Content-Type'
+- 'Request: setting missing Content-Type in headers and it wins Blob"s type'
+- 'Response: MIME type for Blob with non-empty type'
+- 'Response: removing implicit Content-Type'
+- 'Response: setting missing Content-Type in headers and it wins Blob"s type'
+fetch/api/body/textstream.any.js:
+- Request.textStream() basic functionality
+- Request.textStream() ignores Content-Type charset (UTF-16LE)
+- Request.textStream() on locked body throws TypeError
+- Request.textStream() with null body
+- Response.textStream() basic functionality
+- Response.textStream() ignores Content-Type charset (UTF-16LE)
+- Response.textStream() ignores invalid Content-Type charset (invalid-charset)
+- Response.textStream() on locked body throws TypeError
+- Response.textStream() with empty body
+- Response.textStream() with null body
+- textStream method existence
+- textStream() handles chunked byte stream input
+fetch/api/cors/cors-basic.any.js:
+- Cross domain basic usage [cors mode]
+- Cross domain basic usage [no-cors mode]
+- Cross domain basic usage [server forbid CORS]
+- Cross domain different port [cors mode]
+- Cross domain different port [no-cors mode]
+- Cross domain different port [server forbid CORS]
+- Cross domain different protocol [cors mode]
+- Cross domain different protocol [no-cors mode]
+- Cross domain different protocol [server forbid CORS]
+- Same domain different port [cors mode]
+- Same domain different port [no-cors mode]
+- Same domain different port [server forbid CORS]
+- Same domain different protocol different port [cors mode]
+- Same domain different protocol different port [no-cors mode]
+- Same domain different protocol different port [server forbid CORS]
+fetch/api/cors/cors-cookies.any.js:
+- 'Include mode: 1 cookie'
+- 'Include mode: local cookies are not sent with remote request'
+- 'Include mode: remote cookies are not sent with local request'
+- 'Include mode: remote cookies are not sent with other remote request'
+- 'Omit mode: no cookie sent'
+- 'Same-origin mode: cookies are discarded in cors request'
+fetch/api/cors/cors-expose-star.sub.any.js:
+- "* can be one of several values"
+- "* for credentialed fetches only matches literally"
+- 'Basic Access-Control-Expose-Headers: * support'
+fetch/api/cors/cors-filtering.sub.any.js:
+- CORS filter on Age header
+- CORS filter on Age header, header is exposed
+- CORS filter on Cache-Control header
+- CORS filter on Content-Language header
+- CORS filter on Content-Length header
+- CORS filter on Content-Type header
+- CORS filter on Expires header
+- CORS filter on Last-Modified header
+- CORS filter on Pragma header
+- CORS filter on Server header
+- CORS filter on Server header, header is exposed
+- CORS filter on Set-Cookie header
+- CORS filter on Set-Cookie header, header is forbidden
+- CORS filter on Set-Cookie header, header is forbidden(credentials = include)
+- CORS filter on Set-Cookie2 header
+- CORS filter on Set-Cookie2 header, header is forbidden
+- CORS filter on Set-Cookie2 header, header is forbidden(credentials = include)
+- CORS filter on Warning header
+- CORS filter on Warning header, header is exposed
+fetch/api/cors/cors-keepalive.any.js:
+- "[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid
+  CORS]; setting up"
+- "[keepalive] Cross domain basic usage GET request in unload [cors mode]; setting
+  up"
+- "[keepalive] Cross domain basic usage GET request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain basic usage GET request in unload [no-cors mode]; setting
+  up"
+- "[keepalive] Cross domain basic usage POST request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain basic usage POST request in unload [cors mode]; setting
+  up"
+- "[keepalive] Cross domain basic usage POST request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain basic usage POST request in unload [no-cors mode]; setting
+  up"
+- "[keepalive] Cross domain basic usage [cors mode, server forbid CORS]"
+- "[keepalive] Cross domain basic usage [cors mode]"
+- "[keepalive] Cross domain basic usage [no-cors mode]"
+- "[keepalive] Cross domain different port GET request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain different port GET request in unload [cors mode]; setting
+  up"
+- "[keepalive] Cross domain different port GET request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain different port GET request in unload [no-cors mode]; setting
+  up"
+- "[keepalive] Cross domain different port POST request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain different port POST request in unload [cors mode]; setting
+  up"
+- "[keepalive] Cross domain different port POST request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain different port POST request in unload [no-cors mode];
+  setting up"
+- "[keepalive] Cross domain different port [cors mode, server forbid CORS]"
+- "[keepalive] Cross domain different port [cors mode]"
+- "[keepalive] Cross domain different port [no-cors mode]"
+- "[keepalive] Cross domain different protocol GET request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Cross domain different protocol GET request in unload [cors mode];
+  setting up"
+- "[keepalive] Cross domain different protocol GET request in unload [no-cors mode,
+  server forbid CORS]; setting up"
+- "[keepalive] Cross domain different protocol GET request in unload [no-cors mode];
+  setting up"
+- "[keepalive] Cross domain different protocol POST request in unload [cors mode,
+  server forbid CORS]; setting up"
+- "[keepalive] Cross domain different protocol POST request in unload [cors mode];
+  setting up"
+- "[keepalive] Cross domain different protocol POST request in unload [no-cors mode,
+  server forbid CORS]; setting up"
+- "[keepalive] Cross domain different protocol POST request in unload [no-cors mode];
+  setting up"
+- "[keepalive] Cross domain different protocol [cors mode, server forbid CORS]"
+- "[keepalive] Cross domain different protocol [cors mode]"
+- "[keepalive] Cross domain different protocol [no-cors mode]"
+- "[keepalive] Same domain different port GET request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Same domain different port GET request in unload [cors mode]; setting
+  up"
+- "[keepalive] Same domain different port GET request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Same domain different port GET request in unload [no-cors mode]; setting
+  up"
+- "[keepalive] Same domain different port POST request in unload [cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Same domain different port POST request in unload [cors mode]; setting
+  up"
+- "[keepalive] Same domain different port POST request in unload [no-cors mode, server
+  forbid CORS]; setting up"
+- "[keepalive] Same domain different port POST request in unload [no-cors mode]; setting
+  up"
+- "[keepalive] Same domain different port [cors mode, server forbid CORS]"
+- "[keepalive] Same domain different port [cors mode]"
+- "[keepalive] Same domain different port [no-cors mode]"
+- "[keepalive] Same domain different protocol different port GET request in unload
+  [cors mode, server forbid CORS]; setting up"
+- "[keepalive] Same domain different protocol different port GET request in unload
+  [cors mode]; setting up"
+- "[keepalive] Same domain different protocol different port GET request in unload
+  [no-cors mode, server forbid CORS]; setting up"
+- "[keepalive] Same domain different protocol different port GET request in unload
+  [no-cors mode]; setting up"
+- "[keepalive] Same domain different protocol different port POST request in unload
+  [cors mode, server forbid CORS]; setting up"
+- "[keepalive] Same domain different protocol different port POST request in unload
+  [cors mode]; setting up"
+- "[keepalive] Same domain different protocol different port POST request in unload
+  [no-cors mode, server forbid CORS]; setting up"
+- "[keepalive] Same domain different protocol different port POST request in unload
+  [no-cors mode]; setting up"
+- "[keepalive] Same domain different protocol different port [cors mode, server forbid
+  CORS]"
+- "[keepalive] Same domain different protocol different port [cors mode]"
+- "[keepalive] Same domain different protocol different port [no-cors mode]"
+fetch/api/cors/cors-multiple-origins.sub.any.js:
+- 'Listing multiple origins is illegal: "",http://example.com,*'
+- 'Listing multiple origins is illegal: "",http://example.com,http://web-platform.test:8000'
+- 'Listing multiple origins is illegal: "",http://web-platform.test:8000,http://web-platform.test:8000'
+- 'Listing multiple origins is illegal: *,http://example.com,*'
+- 'Listing multiple origins is illegal: *,http://example.com,http://web-platform.test:8000'
+- 'Listing multiple origins is illegal: ,http://example.com,https://example2.com'
+fetch/api/cors/cors-origin.any.js:
+- 'Allowed origin: "" [origin KO]'
+- CORS preflight [PUT] [origin KO]
+- Cross domain [HEAD] [origin KO]
+- Cross domain [POST] [origin KO]
+- Cross domain different port [origin KO]
+- Cross domain different protocol [origin KO]
+- Cross domain different subdomain [origin KO]
+- Same domain different port [origin KO]
+- Same domain different protocol different port [origin KO]
+fetch/api/cors/cors-preflight-cache.any.js:
+- CORS preflight cache does not reuse wildcard header entries for Authorization
+- CORS preflight cache reuses explicit header entries
+fetch/api/cors/cors-preflight-not-cors-safelisted.any.js:
+- "Need CORS-preflight for accept-language/\x01 header"
+- Need CORS-preflight for accept-language/@ header
+- Need CORS-preflight for accept/" header
+- Need CORS-preflight for accept/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
+  header
+- Need CORS-preflight for authorization/basics header
+- "Need CORS-preflight for content-language/\x01 header"
+- Need CORS-preflight for content-language/@ header
+- Need CORS-preflight for content-type/text/html header
+- Need CORS-preflight for content-type/text/plain; long=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
+  header
+- Need CORS-preflight for range/bytes 0- header
+- Need CORS-preflight for test/hi header
+fetch/api/cors/cors-preflight-redirect.any.js:
+- Redirection 301 after preflight failed
+- Redirection 301 on preflight failed
+- Redirection 302 after preflight failed
+- Redirection 302 on preflight failed
+- Redirection 303 after preflight failed
+- Redirection 303 on preflight failed
+- Redirection 307 after preflight failed
+- Redirection 307 on preflight failed
+- Redirection 308 after preflight failed
+- Redirection 308 on preflight failed
+fetch/api/cors/cors-preflight-referrer.any.js:
+- 'Referrer policy: "" and referrer: ''myreferrer'''
+- 'Referrer policy: "" and referrer: default'
+- 'Referrer policy: no-referrer and referrer: ''myreferrer'''
+- 'Referrer policy: no-referrer and referrer: default'
+- 'Referrer policy: no-referrer-when-downgrade and referrer: ''myreferrer'''
+- 'Referrer policy: no-referrer-when-downgrade and referrer: default'
+- 'Referrer policy: origin and referrer: ''myreferrer'''
+- 'Referrer policy: origin and referrer: default'
+- 'Referrer policy: origin-when-cross-origin and referrer: ''myreferrer'''
+- 'Referrer policy: origin-when-cross-origin and referrer: default'
+- 'Referrer policy: unsafe-url and referrer: ''myreferrer'''
+- 'Referrer policy: unsafe-url and referrer: default'
+fetch/api/cors/cors-preflight-response-validation.any.js:
+- Preflight response with a bad Access-Control-Allow-Headers
+- Preflight response with a bad Access-Control-Allow-Methods
+fetch/api/cors/cors-preflight-star.any.js:
+- 'CORS that fails with credentials: false; method: POST (allowed: *); header: Authorization,123
+  (allowed: *)'
+- 'CORS that fails with credentials: true; method: DELETE (allowed: delete); header:  (allowed:
+  *)'
+- 'CORS that fails with credentials: true; method: GET (allowed: *); header: X-Test,1
+  (allowed: *)'
+- 'CORS that fails with credentials: true; method: GET (allowed: get); header: X-Test,1
+  (allowed: *)'
+- 'CORS that fails with credentials: true; method: OK (allowed: *); header: X-Test,1
+  (allowed: *)'
+- 'CORS that fails with credentials: true; method: PATCH (allowed: patch); header:  (allowed:
+  *)'
+- 'CORS that fails with credentials: true; method: PUT (allowed: *); header:  (allowed:
+  )'
+- 'CORS that fails with credentials: true; method: PUT (allowed: put); header:  (allowed:
+  *)'
+- 'CORS that fails with credentials: true; method: delete (allowed: delete); header:  (allowed:
+  *)'
+- 'CORS that fails with credentials: true; method: patch (allowed: PATCH); header:  (allowed:
+  *)'
+- 'CORS that fails with credentials: true; method: put (allowed: put); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: false; method: GET (allowed: get); header:
+  X-Test,1 (allowed: x-test)'
+- 'CORS that succeeds with credentials: false; method: OK (allowed: *); header: X-Test,1
+  (allowed: *)'
+- 'CORS that succeeds with credentials: false; method: POST (allowed: *); header:
+  Authorization,123 (allowed: *, Authorization)'
+- 'CORS that succeeds with credentials: false; method: SUPER (allowed: *); header:
+  X-Test,1 (allowed: x-test)'
+- 'CORS that succeeds with credentials: true; method: * (allowed: *); header: *,1
+  (allowed: *)'
+- 'CORS that succeeds with credentials: true; method: DELETE (allowed: DELETE); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: GET (allowed: GET); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: GET (allowed: get); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: HEAD (allowed: HEAD); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: HEAD (allowed: head); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: PATCH (allowed: PATCH); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: POST (allowed: POST); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: POST (allowed: post); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: PUT (allowed: PUT); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: delete (allowed: DELETE); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: get (allowed: GET); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: get (allowed: get); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: head (allowed: HEAD); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: head (allowed: head); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: patch (allowed: patch); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: post (allowed: POST); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: post (allowed: post); header:  (allowed:
+  *)'
+- 'CORS that succeeds with credentials: true; method: put (allowed: PUT); header:  (allowed:
+  *)'
+fetch/api/cors/cors-preflight-status.any.js:
+- Preflight answered with status 200
+- Preflight answered with status 201
+- Preflight answered with status 202
+- Preflight answered with status 203
+- Preflight answered with status 204
+- Preflight answered with status 205
+- Preflight answered with status 206
+- Preflight answered with status 300
+- Preflight answered with status 301
+- Preflight answered with status 302
+- Preflight answered with status 303
+- Preflight answered with status 304
+- Preflight answered with status 305
+- Preflight answered with status 306
+- Preflight answered with status 307
+- Preflight answered with status 308
+- Preflight answered with status 400
+- Preflight answered with status 401
+- Preflight answered with status 402
+- Preflight answered with status 403
+- Preflight answered with status 404
+- Preflight answered with status 405
+- Preflight answered with status 501
+- Preflight answered with status 502
+- Preflight answered with status 503
+- Preflight answered with status 504
+- Preflight answered with status 505
+fetch/api/cors/cors-preflight.any.js:
+- '"authorization" should not be covered by the wildcard symbol'
+- CORS [DELETE], server allows
+- CORS [DELETE], server refuses
+- CORS [GET] [several headers], server allows
+- CORS [GET] [several headers], server refuses
+- 'CORS [GET] [x-test-header: allowed], server allows'
+- 'CORS [GET] [x-test-header: refused], server refuses'
+- CORS [NEW], server allows
+- CORS [NEW], server refuses
+- CORS [PATCH], server allows
+- CORS [PATCH], server refuses
+- CORS [PUT] [only safe headers], server allows
+- CORS [PUT] [several headers], server allows
+- CORS [PUT] [several headers], server refuses
+- CORS [PUT], server allows
+- CORS [PUT], server allows, check preflight has user agent
+- CORS [PUT], server refuses
+- CORS [chicken], server allows
+- CORS [chicken], server refuses
+- CORS [patcH], server allows
+- CORS [patcH], server refuses
+fetch/api/cors/cors-redirect-credentials.any.js:
+- Redirect 301 from remote to another remote with password
+- Redirect 301 from remote to another remote with user
+- Redirect 301 from remote to another remote with user and password
+- Redirect 301 from remote to same origin with password
+- Redirect 301 from remote to same origin with user
+- Redirect 301 from remote to same origin with user and password
+- Redirect 301 from remote to same remote with password
+- Redirect 301 from remote to same remote with user
+- Redirect 301 from remote to same remote with user and password
+- Redirect 301 from same origin to remote with password
+- Redirect 301 from same origin to remote with user
+- Redirect 301 from same origin to remote with user and password
+- Redirect 302 from remote to another remote with password
+- Redirect 302 from remote to another remote with user
+- Redirect 302 from remote to another remote with user and password
+- Redirect 302 from remote to same origin with password
+- Redirect 302 from remote to same origin with user
+- Redirect 302 from remote to same origin with user and password
+- Redirect 302 from remote to same remote with password
+- Redirect 302 from remote to same remote with user
+- Redirect 302 from remote to same remote with user and password
+- Redirect 302 from same origin to remote with password
+- Redirect 302 from same origin to remote with user
+- Redirect 302 from same origin to remote with user and password
+- Redirect 303 from remote to another remote with password
+- Redirect 303 from remote to another remote with user
+- Redirect 303 from remote to another remote with user and password
+- Redirect 303 from remote to same origin with password
+- Redirect 303 from remote to same origin with user
+- Redirect 303 from remote to same origin with user and password
+- Redirect 303 from remote to same remote with password
+- Redirect 303 from remote to same remote with user
+- Redirect 303 from remote to same remote with user and password
+- Redirect 303 from same origin to remote with password
+- Redirect 303 from same origin to remote with user
+- Redirect 303 from same origin to remote with user and password
+- Redirect 307 from remote to another remote with password
+- Redirect 307 from remote to another remote with user
+- Redirect 307 from remote to another remote with user and password
+- Redirect 307 from remote to same origin with password
+- Redirect 307 from remote to same origin with user
+- Redirect 307 from remote to same origin with user and password
+- Redirect 307 from remote to same remote with password
+- Redirect 307 from remote to same remote with user
+- Redirect 307 from remote to same remote with user and password
+- Redirect 307 from same origin to remote with password
+- Redirect 307 from same origin to remote with user
+- Redirect 307 from same origin to remote with user and password
+- Redirect 308 from remote to another remote with password
+- Redirect 308 from remote to another remote with user
+- Redirect 308 from remote to another remote with user and password
+- Redirect 308 from remote to same origin with password
+- Redirect 308 from remote to same origin with user
+- Redirect 308 from remote to same origin with user and password
+- Redirect 308 from remote to same remote with password
+- Redirect 308 from remote to same remote with user
+- Redirect 308 from remote to same remote with user and password
+- Redirect 308 from same origin to remote with password
+- Redirect 308 from same origin to remote with user
+- Redirect 308 from same origin to remote with user and password
+fetch/api/cors/cors-redirect-preflight.any.js:
+- 'Redirect 301: cors to another cors (preflight after redirection failure case)'
+- 'Redirect 301: cors to another cors (preflight after redirection success case)'
+- 'Redirect 301: cors to same origin (preflight after redirection failure case)'
+- 'Redirect 301: cors to same origin (preflight after redirection success case)'
+- 'Redirect 301: same origin to cors (preflight after redirection failure case)'
+- 'Redirect 301: same origin to cors (preflight after redirection success case)'
+- 'Redirect 302: cors to another cors (preflight after redirection failure case)'
+- 'Redirect 302: cors to another cors (preflight after redirection success case)'
+- 'Redirect 302: cors to same origin (preflight after redirection failure case)'
+- 'Redirect 302: cors to same origin (preflight after redirection success case)'
+- 'Redirect 302: same origin to cors (preflight after redirection failure case)'
+- 'Redirect 302: same origin to cors (preflight after redirection success case)'
+- 'Redirect 303: cors to another cors (preflight after redirection failure case)'
+- 'Redirect 303: cors to another cors (preflight after redirection success case)'
+- 'Redirect 303: cors to same origin (preflight after redirection failure case)'
+- 'Redirect 303: cors to same origin (preflight after redirection success case)'
+- 'Redirect 303: same origin to cors (preflight after redirection failure case)'
+- 'Redirect 303: same origin to cors (preflight after redirection success case)'
+- 'Redirect 307: cors to another cors (preflight after redirection failure case)'
+- 'Redirect 307: cors to another cors (preflight after redirection success case)'
+- 'Redirect 307: cors to same origin (preflight after redirection failure case)'
+- 'Redirect 307: cors to same origin (preflight after redirection success case)'
+- 'Redirect 307: same origin to cors (preflight after redirection failure case)'
+- 'Redirect 307: same origin to cors (preflight after redirection success case)'
+- 'Redirect 308: cors to another cors (preflight after redirection failure case)'
+- 'Redirect 308: cors to another cors (preflight after redirection success case)'
+- 'Redirect 308: cors to same origin (preflight after redirection failure case)'
+- 'Redirect 308: cors to same origin (preflight after redirection success case)'
+- 'Redirect 308: same origin to cors (preflight after redirection failure case)'
+- 'Redirect 308: same origin to cors (preflight after redirection success case)'
+fetch/api/cors/cors-redirect.any.js:
+- 'Redirect 301: cors to another cors'
+- 'Redirect 301: cors to same cors'
+- 'Redirect 301: cors to same origin'
+- 'Redirect 301: same origin to cors'
+- 'Redirect 302: cors to another cors'
+- 'Redirect 302: cors to same cors'
+- 'Redirect 302: cors to same origin'
+- 'Redirect 302: same origin to cors'
+- 'Redirect 303: cors to another cors'
+- 'Redirect 303: cors to same cors'
+- 'Redirect 303: cors to same origin'
+- 'Redirect 303: same origin to cors'
+- 'Redirect 307: cors to another cors'
+- 'Redirect 307: cors to same cors'
+- 'Redirect 307: cors to same origin'
+- 'Redirect 307: same origin to cors'
+- 'Redirect 308: cors to another cors'
+- 'Redirect 308: cors to same cors'
+- 'Redirect 308: cors to same origin'
+- 'Redirect 308: same origin to cors'
+fetch/api/cors/data-url-iframe.html:
+- fetching "top.txt" without ACAO should be rejected.
+fetch/api/cors/data-url-shared-worker.html:
+- fetching "top.txt" with CORS allowing null origin should be allowed.
+- fetching "top.txt" without ACAO should be rejected.
+- fetching data url script should be allowed.
+fetch/api/cors/data-url-worker.html:
+- fetching "top.txt" with CORS allowing null origin should be allowed.
+- fetching "top.txt" without ACAO should be rejected.
+- fetching data url script should be allowed.
+fetch/api/cors/sandboxed-iframe.html:
+- CORS with sandboxed iframe
+fetch/api/crashtests/huge-fetch.any.js:
+- fetching a huge cacheable file but not reading it should not crash
+fetch/api/credentials/authentication-redirection.any.js:
+- getAuthorizationHeaderValue - cross origin redirection
+fetch/api/credentials/cookies.any.js:
+- 'Include mode: 1 cookie'
+- 'Include mode: 2 cookies'
+- 'Omit mode: discard cookies'
+- 'Omit mode: no cookie is sent'
+- 'Omit mode: no cookie is stored'
+- 'Same-origin mode: 1 cookie'
+- 'Same-origin mode: 2 cookies'
+fetch/api/headers/header-setcookie.any.js:
+- Adding Set-Cookie headers normalizes their value
+- Adding invalid Set-Cookie headers throws
+- Headers iterator does not combine set-cookie & set-cookie2 headers
+- Headers iterator does not combine set-cookie headers
+- Headers iterator is correctly updated with set-cookie changes
+- 'Headers iterator is correctly updated with set-cookie changes #2'
+- Headers iterator preserves per header ordering, but sorts keys alphabetically
+- Headers iterator preserves per header ordering, but sorts keys alphabetically (and
+  ignores value ordering)
+- Headers iterator preserves set-cookie ordering
+- Headers.prototype.append works for set-cookie
+- Headers.prototype.getSetCookie with an empty header
+- Headers.prototype.getSetCookie with two equal headers
+- Set-Cookie is a forbidden response header
+fetch/api/headers/header-values.any.js:
+- XMLHttpRequest with all valid values
+- fetch() with all valid values
+- fetch() with value x%00x needs to throw
+- fetch() with value x%0Ax needs to throw
+- fetch() with value x%0Dx needs to throw
+fetch/api/headers/headers-basic.any.js:
+- Appending a value pair during iteration causes it to be reached during iteration
+- Check Symbol.iterator method
+- Check entries method
+- Check forEach method
+- Check keys method
+- Check values method
+- Create headers with 1 should throw
+- Create headers with existing headers with custom iterator
+- Create headers with null should throw
+- Iteration skips elements removed while iterating
+- Prepending a value pair before the current element position causes it to be skipped
+  during iteration and adds the current element a second time
+- Removing elements already iterated over causes an element to be skipped during iteration
+fetch/api/headers/headers-combine.any.js:
+- Iterate combined values in sorted order
+fetch/api/headers/headers-errors.any.js:
+- Check headers append with an invalid name [object Object]
+- Check headers append with an invalid name invalidĀ
+- Check headers append with an invalid value invalidĀ
+- Check headers delete with an invalid name [object Object]
+- Check headers delete with an invalid name invalidĀ
+- Check headers get with an invalid name [object Object]
+- Check headers get with an invalid name invalidĀ
+- Check headers has with an invalid name [object Object]
+- Check headers has with an invalid name invalidĀ
+- Check headers set with an invalid name [object Object]
+- Check headers set with an invalid name invalidĀ
+- Check headers set with an invalid value invalidĀ
+- Create headers giving an array having one string as init argument
+- Create headers giving an array having three strings as init argument
+- Create headers giving bad header name as init argument
+- Create headers giving bad header value as init argument
+fetch/api/headers/headers-forbidden-override.any.js:
+- "header X-HTTP-METHOD is forbidden to use value \ttrack"
+- "header X-HTTP-METHOD is forbidden to use value \nconnect"
+- "header X-HTTP-METHOD is forbidden to use value \rtrace"
+- header X-HTTP-METHOD is forbidden to use value  connect
+- header X-HTTP-METHOD is forbidden to use value CONNECT
+- 'header X-HTTP-METHOD is forbidden to use value GET,track '
+- header X-HTTP-METHOD is forbidden to use value TRACE
+- header X-HTTP-METHOD is forbidden to use value TRACK
+- header X-HTTP-METHOD is forbidden to use value connect
+- header X-HTTP-METHOD is forbidden to use value trace
+- header X-HTTP-METHOD is forbidden to use value trace,
+- header X-HTTP-METHOD is forbidden to use value track
+- "header X-HTTP-METHOD-OVERRIDE is forbidden to use value \ttrack"
+- "header X-HTTP-METHOD-OVERRIDE is forbidden to use value \nconnect"
+- "header X-HTTP-METHOD-OVERRIDE is forbidden to use value \rtrace"
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value  connect
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value CONNECT
+- 'header X-HTTP-METHOD-OVERRIDE is forbidden to use value GET,track '
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value TRACE
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value TRACK
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value connect
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value trace
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value trace,
+- header X-HTTP-METHOD-OVERRIDE is forbidden to use value track
+- "header X-METHOD-OVERRIDE is forbidden to use value \ttrack"
+- "header X-METHOD-OVERRIDE is forbidden to use value \nconnect"
+- "header X-METHOD-OVERRIDE is forbidden to use value \rtrace"
+- header X-METHOD-OVERRIDE is forbidden to use value  connect
+- header X-METHOD-OVERRIDE is forbidden to use value CONNECT
+- 'header X-METHOD-OVERRIDE is forbidden to use value GET,track '
+- header X-METHOD-OVERRIDE is forbidden to use value TRACE
+- header X-METHOD-OVERRIDE is forbidden to use value TRACK
+- header X-METHOD-OVERRIDE is forbidden to use value connect
+- header X-METHOD-OVERRIDE is forbidden to use value trace
+- header X-METHOD-OVERRIDE is forbidden to use value trace,
+- header X-METHOD-OVERRIDE is forbidden to use value track
+- "header x-http-method is forbidden to use value \ttrack"
+- "header x-http-method is forbidden to use value \nconnect"
+- "header x-http-method is forbidden to use value \rtrace"
+- header x-http-method is forbidden to use value  connect
+- header x-http-method is forbidden to use value CONNECT
+- 'header x-http-method is forbidden to use value GET,track '
+- header x-http-method is forbidden to use value TRACE
+- header x-http-method is forbidden to use value TRACK
+- header x-http-method is forbidden to use value connect
+- header x-http-method is forbidden to use value trace
+- header x-http-method is forbidden to use value trace,
+- header x-http-method is forbidden to use value track
+- "header x-http-method-override is forbidden to use value \ttrack"
+- "header x-http-method-override is forbidden to use value \nconnect"
+- "header x-http-method-override is forbidden to use value \rtrace"
+- header x-http-method-override is forbidden to use value  connect
+- header x-http-method-override is forbidden to use value CONNECT
+- 'header x-http-method-override is forbidden to use value GET,track '
+- header x-http-method-override is forbidden to use value TRACE
+- header x-http-method-override is forbidden to use value TRACK
+- header x-http-method-override is forbidden to use value connect
+- header x-http-method-override is forbidden to use value trace
+- header x-http-method-override is forbidden to use value trace,
+- header x-http-method-override is forbidden to use value track
+- "header x-method-override is forbidden to use value \ttrack"
+- "header x-method-override is forbidden to use value \nconnect"
+- "header x-method-override is forbidden to use value \rtrace"
+- header x-method-override is forbidden to use value  connect
+- header x-method-override is forbidden to use value CONNECT
+- 'header x-method-override is forbidden to use value GET,track '
+- header x-method-override is forbidden to use value TRACE
+- header x-method-override is forbidden to use value TRACK
+- header x-method-override is forbidden to use value connect
+- header x-method-override is forbidden to use value trace
+- header x-method-override is forbidden to use value trace,
+- header x-method-override is forbidden to use value track
+fetch/api/headers/headers-no-cors.any.js:
+- '"no-cors" Headers object cannot have accept set to , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- '"no-cors" Headers object cannot have accept set to sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss,
+  , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- '"no-cors" Headers object cannot have accept-language set to , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- '"no-cors" Headers object cannot have accept-language set to sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss,
+  , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- "\"no-cors\" Headers object cannot have accept-language/\x01 as header"
+- '"no-cors" Headers object cannot have accept-language/@ as header'
+- '"no-cors" Headers object cannot have accept/" as header'
+- '"no-cors" Headers object cannot have accept/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
+  as header'
+- '"no-cors" Headers object cannot have authorization/basics as header'
+- '"no-cors" Headers object cannot have content-language set to , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- '"no-cors" Headers object cannot have content-language set to sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss,
+  , sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss'
+- "\"no-cors\" Headers object cannot have content-language/\x01 as header"
+- '"no-cors" Headers object cannot have content-language/@ as header'
+- '"no-cors" Headers object cannot have content-type set to text/plain;ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss,
+  text/plain'
+- '"no-cors" Headers object cannot have content-type/text/html as header'
+- '"no-cors" Headers object cannot have content-type/text/plain; long=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
+  as header'
+- '"no-cors" Headers object cannot have downlink/-1.0 as header'
+- '"no-cors" Headers object cannot have dpr/2 as header'
+- '"no-cors" Headers object cannot have ect/6g as header'
+- '"no-cors" Headers object cannot have range/bytes 0- as header'
+- '"no-cors" Headers object cannot have rtt/1.0 as header'
+- '"no-cors" Headers object cannot have save-data/on as header'
+- '"no-cors" Headers object cannot have test/hi as header'
+- '"no-cors" Headers object cannot have unknown/doesitmatter as header'
+- '"no-cors" Headers object cannot have viewport-width/100 as header'
+- '"no-cors" Headers object cannot have width/100 as header'
+fetch/api/headers/headers-normalize.any.js:
+- Check append method with not normalized values
+- Check set method with not normalized values
+- Create headers with not normalized values
+fetch/api/headers/headers-record.any.js:
+- Basic operation with Symbol keys
+- Basic operation with one property
+- Basic operation with one property and a proto
+- Correct operation ordering with non-enumerable properties
+- Correct operation ordering with repeated keys
+- Correct operation ordering with two properties
+- Correct operation ordering with two properties one of which has an invalid name
+- Correct operation ordering with two properties one of which has an invalid value
+- Correct operation ordering with undefined descriptors
+- Operation with non-enumerable Symbol keys
+- Passing null to Headers constructor
+fetch/api/policies/csp-blocked.html:
+- Fetch is blocked by CSP, got a TypeError
+fetch/api/policies/referrer-origin-when-cross-origin.html:
+- Request's referrer is origin
+fetch/api/policies/referrer-origin.html:
+- Cross-origin referrer is overridden by client origin
+- Request's referrer is origin
+fetch/api/redirect/redirect-back-to-original-origin.any.js:
+- 'original => remote => original with mode: "cors"'
+- 'original => remote => original with mode: "no-cors"'
+fetch/api/redirect/redirect-count.any.js:
+- Redirect 301 20 times
+- Redirect 301 21 times
+- Redirect 302 20 times
+- Redirect 302 21 times
+- Redirect 303 20 times
+- Redirect 303 21 times
+- Redirect 307 20 times
+- Redirect 307 21 times
+- Redirect 308 20 times
+- Redirect 308 21 times
+fetch/api/redirect/redirect-empty-location.any.js:
+- redirect response with empty Location, follow mode
+- redirect response with empty Location, manual mode
+fetch/api/redirect/redirect-keepalive.any.js:
+- "[keepalive][new window][unload] cross-origin redirect"
+- "[keepalive][new window][unload] cross-origin redirect + preflight"
+- "[keepalive][new window][unload] same-origin redirect"
+- "[keepalive][new window][unload] same-origin redirect + preflight"
+fetch/api/redirect/redirect-location.any.js:
+- Redirect 301 in "error" mode with invalid location
+- Redirect 301 in "error" mode with valid location
+- Redirect 301 in "follow" mode with invalid location
+- Redirect 301 in "manual" mode with data location
+- Redirect 301 in "manual" mode with invalid location
+- Redirect 301 in "manual" mode with valid location
+- Redirect 301 in "manual" mode without location
+- Redirect 302 in "error" mode with invalid location
+- Redirect 302 in "error" mode with valid location
+- Redirect 302 in "follow" mode with invalid location
+- Redirect 302 in "manual" mode with data location
+- Redirect 302 in "manual" mode with invalid location
+- Redirect 302 in "manual" mode with valid location
+- Redirect 302 in "manual" mode without location
+- Redirect 303 in "error" mode with invalid location
+- Redirect 303 in "error" mode with valid location
+- Redirect 303 in "follow" mode with invalid location
+- Redirect 303 in "manual" mode with data location
+- Redirect 303 in "manual" mode with invalid location
+- Redirect 303 in "manual" mode with valid location
+- Redirect 303 in "manual" mode without location
+- Redirect 307 in "error" mode with invalid location
+- Redirect 307 in "error" mode with valid location
+- Redirect 307 in "follow" mode with invalid location
+- Redirect 307 in "manual" mode with data location
+- Redirect 307 in "manual" mode with invalid location
+- Redirect 307 in "manual" mode with valid location
+- Redirect 307 in "manual" mode without location
+- Redirect 308 in "error" mode with invalid location
+- Redirect 308 in "error" mode with valid location
+- Redirect 308 in "follow" mode with invalid location
+- Redirect 308 in "manual" mode with data location
+- Redirect 308 in "manual" mode with invalid location
+- Redirect 308 in "manual" mode with valid location
+- Redirect 308 in "manual" mode without location
+fetch/api/redirect/redirect-mode.any.js:
+- http://www.example.com redirect 301 in error redirect and cors mode
+- http://www.example.com redirect 301 in error redirect and cors mode
+- http://www.example.com redirect 301 in error redirect and no-cors mode
+- http://www.example.com redirect 301 in error redirect and no-cors mode
+- http://www.example.com redirect 301 in follow redirect and no-cors mode
+- http://www.example.com redirect 301 in follow redirect and no-cors mode
+- http://www.example.com redirect 301 in manual redirect and cors mode
+- http://www.example.com redirect 301 in manual redirect and cors mode
+- http://www.example.com redirect 301 in manual redirect and no-cors mode
+- http://www.example.com redirect 301 in manual redirect and no-cors mode
+- http://www.example.com redirect 302 in error redirect and cors mode
+- http://www.example.com redirect 302 in error redirect and cors mode
+- http://www.example.com redirect 302 in error redirect and no-cors mode
+- http://www.example.com redirect 302 in error redirect and no-cors mode
+- http://www.example.com redirect 302 in follow redirect and no-cors mode
+- http://www.example.com redirect 302 in follow redirect and no-cors mode
+- http://www.example.com redirect 302 in manual redirect and cors mode
+- http://www.example.com redirect 302 in manual redirect and cors mode
+- http://www.example.com redirect 302 in manual redirect and no-cors mode
+- http://www.example.com redirect 302 in manual redirect and no-cors mode
+- http://www.example.com redirect 303 in error redirect and cors mode
+- http://www.example.com redirect 303 in error redirect and cors mode
+- http://www.example.com redirect 303 in error redirect and no-cors mode
+- http://www.example.com redirect 303 in error redirect and no-cors mode
+- http://www.example.com redirect 303 in follow redirect and no-cors mode
+- http://www.example.com redirect 303 in follow redirect and no-cors mode
+- http://www.example.com redirect 303 in manual redirect and cors mode
+- http://www.example.com redirect 303 in manual redirect and cors mode
+- http://www.example.com redirect 303 in manual redirect and no-cors mode
+- http://www.example.com redirect 303 in manual redirect and no-cors mode
+- http://www.example.com redirect 307 in error redirect and cors mode
+- http://www.example.com redirect 307 in error redirect and cors mode
+- http://www.example.com redirect 307 in error redirect and no-cors mode
+- http://www.example.com redirect 307 in error redirect and no-cors mode
+- http://www.example.com redirect 307 in follow redirect and no-cors mode
+- http://www.example.com redirect 307 in follow redirect and no-cors mode
+- http://www.example.com redirect 307 in manual redirect and cors mode
+- http://www.example.com redirect 307 in manual redirect and cors mode
+- http://www.example.com redirect 307 in manual redirect and no-cors mode
+- http://www.example.com redirect 307 in manual redirect and no-cors mode
+- http://www.example.com redirect 308 in error redirect and cors mode
+- http://www.example.com redirect 308 in error redirect and cors mode
+- http://www.example.com redirect 308 in error redirect and no-cors mode
+- http://www.example.com redirect 308 in error redirect and no-cors mode
+- http://www.example.com redirect 308 in follow redirect and no-cors mode
+- http://www.example.com redirect 308 in follow redirect and no-cors mode
+- http://www.example.com redirect 308 in manual redirect and cors mode
+- http://www.example.com redirect 308 in manual redirect and cors mode
+- http://www.example.com redirect 308 in manual redirect and no-cors mode
+- http://www.example.com redirect 308 in manual redirect and no-cors mode
+- manual redirect with a CORS error should be rejected
+fetch/api/redirect/redirect-origin.any.js:
+- "[GET] Redirect 301 Other origin to other origin"
+- "[GET] Redirect 301 Other origin to same origin"
+- "[GET] Redirect 301 Same origin to other origin"
+- "[GET] Redirect 302 Other origin to other origin"
+- "[GET] Redirect 302 Other origin to same origin"
+- "[GET] Redirect 302 Same origin to other origin"
+- "[GET] Redirect 303 Other origin to other origin"
+- "[GET] Redirect 303 Other origin to same origin"
+- "[GET] Redirect 303 Same origin to other origin"
+- "[GET] Redirect 307 Other origin to other origin"
+- "[GET] Redirect 307 Other origin to same origin"
+- "[GET] Redirect 307 Same origin to other origin"
+- "[GET] Redirect 308 Other origin to other origin"
+- "[GET] Redirect 308 Other origin to same origin"
+- "[GET] Redirect 308 Same origin to other origin"
+- "[POST] Redirect 301 Other origin to other origin"
+- "[POST] Redirect 301 Other origin to same origin"
+- "[POST] Redirect 301 Same origin to other origin"
+- "[POST] Redirect 302 Other origin to other origin"
+- "[POST] Redirect 302 Other origin to same origin"
+- "[POST] Redirect 302 Same origin to other origin"
+- "[POST] Redirect 303 Other origin to other origin"
+- "[POST] Redirect 303 Other origin to same origin"
+- "[POST] Redirect 303 Same origin to other origin"
+- "[POST] Redirect 307 Other origin to other origin"
+- "[POST] Redirect 307 Other origin to same origin"
+- "[POST] Redirect 307 Same origin to other origin"
+- "[POST] Redirect 308 Other origin to other origin"
+- "[POST] Redirect 308 Other origin to same origin"
+- "[POST] Redirect 308 Same origin to other origin"
+fetch/api/redirect/redirect-referrer-override.any.js:
+- 'Cross origin redirection, no-referrer init, no-referrer redirect header '
+- 'Cross origin redirection, no-referrer init, no-referrer-when-downgrade redirect
+  header '
+- 'Cross origin redirection, no-referrer init, origin redirect header '
+- 'Cross origin redirection, no-referrer init, origin-when-cross-origin redirect header '
+- 'Cross origin redirection, no-referrer init, same-origin redirect header '
+- 'Cross origin redirection, no-referrer init, strict-origin redirect header '
+- 'Cross origin redirection, no-referrer init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, no-referrer init, unsafe-url redirect header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, no-referrer redirect
+  header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, no-referrer-when-downgrade
+  redirect header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, origin redirect header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, same-origin redirect
+  header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, strict-origin redirect
+  header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, strict-origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, no-referrer-when-downgrade init, unsafe-url redirect
+  header '
+- 'Cross origin redirection, origin init, no-referrer redirect header '
+- 'Cross origin redirection, origin init, no-referrer-when-downgrade redirect header '
+- 'Cross origin redirection, origin init, origin redirect header '
+- 'Cross origin redirection, origin init, origin-when-cross-origin redirect header '
+- 'Cross origin redirection, origin init, same-origin redirect header '
+- 'Cross origin redirection, origin init, strict-origin redirect header '
+- 'Cross origin redirection, origin init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, origin init, unsafe-url redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, no-referrer redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, no-referrer-when-downgrade
+  redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, origin redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, same-origin redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, strict-origin redirect
+  header '
+- 'Cross origin redirection, origin-when-cross-origin init, strict-origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, origin-when-cross-origin init, unsafe-url redirect header '
+- 'Cross origin redirection, same-origin init, no-referrer redirect header '
+- 'Cross origin redirection, same-origin init, no-referrer-when-downgrade redirect
+  header '
+- 'Cross origin redirection, same-origin init, origin redirect header '
+- 'Cross origin redirection, same-origin init, origin-when-cross-origin redirect header '
+- 'Cross origin redirection, same-origin init, same-origin redirect header '
+- 'Cross origin redirection, same-origin init, strict-origin redirect header '
+- 'Cross origin redirection, same-origin init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, same-origin init, unsafe-url redirect header '
+- 'Cross origin redirection, strict-origin init, no-referrer redirect header '
+- 'Cross origin redirection, strict-origin init, no-referrer-when-downgrade redirect
+  header '
+- 'Cross origin redirection, strict-origin init, origin redirect header '
+- 'Cross origin redirection, strict-origin init, origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, strict-origin init, same-origin redirect header '
+- 'Cross origin redirection, strict-origin init, strict-origin redirect header '
+- 'Cross origin redirection, strict-origin init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, strict-origin init, unsafe-url redirect header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, no-referrer redirect
+  header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, no-referrer-when-downgrade
+  redirect header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, origin redirect
+  header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, same-origin redirect
+  header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, strict-origin redirect
+  header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, strict-origin-when-cross-origin
+  redirect header '
+- 'Cross origin redirection, strict-origin-when-cross-origin init, unsafe-url redirect
+  header '
+- 'Cross origin redirection, unsafe-url init, no-referrer redirect header '
+- 'Cross origin redirection, unsafe-url init, no-referrer-when-downgrade redirect
+  header '
+- 'Cross origin redirection, unsafe-url init, origin redirect header '
+- 'Cross origin redirection, unsafe-url init, origin-when-cross-origin redirect header '
+- 'Cross origin redirection, unsafe-url init, same-origin redirect header '
+- 'Cross origin redirection, unsafe-url init, strict-origin redirect header '
+- 'Cross origin redirection, unsafe-url init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, unsafe-url init, unsafe-url redirect header '
+- 'Same origin redirection, no-referrer init, no-referrer redirect header '
+- 'Same origin redirection, no-referrer init, no-referrer-when-downgrade redirect
+  header '
+- 'Same origin redirection, no-referrer init, origin redirect header '
+- 'Same origin redirection, no-referrer init, origin-when-cross-origin redirect header '
+- 'Same origin redirection, no-referrer init, same-origin redirect header '
+- 'Same origin redirection, no-referrer init, strict-origin redirect header '
+- 'Same origin redirection, no-referrer init, strict-origin-when-cross-origin redirect
+  header '
+- 'Same origin redirection, no-referrer init, unsafe-url redirect header '
+- 'Same origin redirection, no-referrer-when-downgrade init, no-referrer redirect
+  header '
+- 'Same origin redirection, no-referrer-when-downgrade init, origin redirect header '
+- 'Same origin redirection, no-referrer-when-downgrade init, strict-origin redirect
+  header '
+- 'Same origin redirection, origin init, no-referrer redirect header '
+- 'Same origin redirection, origin init, no-referrer-when-downgrade redirect header '
+- 'Same origin redirection, origin init, origin redirect header '
+- 'Same origin redirection, origin init, origin-when-cross-origin redirect header '
+- 'Same origin redirection, origin init, same-origin redirect header '
+- 'Same origin redirection, origin init, strict-origin redirect header '
+- 'Same origin redirection, origin init, strict-origin-when-cross-origin redirect
+  header '
+- 'Same origin redirection, origin init, unsafe-url redirect header '
+- 'Same origin redirection, origin-when-cross-origin init, no-referrer redirect header '
+- 'Same origin redirection, origin-when-cross-origin init, origin redirect header '
+- 'Same origin redirection, origin-when-cross-origin init, strict-origin redirect
+  header '
+- 'Same origin redirection, same-origin init, no-referrer redirect header '
+- 'Same origin redirection, same-origin init, origin redirect header '
+- 'Same origin redirection, same-origin init, strict-origin redirect header '
+- 'Same origin redirection, strict-origin init, no-referrer redirect header '
+- 'Same origin redirection, strict-origin init, no-referrer-when-downgrade redirect
+  header '
+- 'Same origin redirection, strict-origin init, origin redirect header '
+- 'Same origin redirection, strict-origin init, origin-when-cross-origin redirect
+  header '
+- 'Same origin redirection, strict-origin init, same-origin redirect header '
+- 'Same origin redirection, strict-origin init, strict-origin redirect header '
+- 'Same origin redirection, strict-origin init, strict-origin-when-cross-origin redirect
+  header '
+- 'Same origin redirection, strict-origin init, unsafe-url redirect header '
+- 'Same origin redirection, strict-origin-when-cross-origin init, no-referrer redirect
+  header '
+- 'Same origin redirection, strict-origin-when-cross-origin init, origin redirect
+  header '
+- 'Same origin redirection, strict-origin-when-cross-origin init, strict-origin redirect
+  header '
+- 'Same origin redirection, unsafe-url init, no-referrer redirect header '
+- 'Same origin redirection, unsafe-url init, origin redirect header '
+- 'Same origin redirection, unsafe-url init, strict-origin redirect header '
+fetch/api/redirect/redirect-referrer.any.js:
+- 'Cross origin redirection, empty init, no-referrer redirect header '
+- 'Cross origin redirection, empty init, no-referrer-when-downgrade redirect header '
+- 'Cross origin redirection, empty init, origin redirect header '
+- 'Cross origin redirection, empty init, origin-when-cross-origin redirect header '
+- 'Cross origin redirection, empty init, same-origin redirect header '
+- 'Cross origin redirection, empty init, strict-origin redirect header '
+- 'Cross origin redirection, empty init, strict-origin-when-cross-origin redirect
+  header '
+- 'Cross origin redirection, empty init, unsafe-url redirect header '
+- 'Cross origin redirection, empty redirect header, no-referrer init '
+- 'Cross origin redirection, empty redirect header, no-referrer-when-downgrade init '
+- 'Cross origin redirection, empty redirect header, origin init '
+- 'Cross origin redirection, empty redirect header, origin-when-cross-origin init '
+- 'Cross origin redirection, empty redirect header, same-origin init '
+- 'Cross origin redirection, empty redirect header, strict-origin init '
+- 'Cross origin redirection, empty redirect header, strict-origin-when-cross-origin
+  init '
+- 'Cross origin redirection, empty redirect header, unsafe-url init '
+- 'Same origin redirection, empty init, no-referrer redirect header '
+- 'Same origin redirection, empty init, origin redirect header '
+- 'Same origin redirection, empty init, strict-origin redirect header '
+- 'Same origin redirection, empty redirect header, no-referrer init '
+- 'Same origin redirection, empty redirect header, origin init '
+- 'Same origin redirection, empty redirect header, strict-origin init '
+fetch/api/redirect/redirect-upload.h2.any.js:
+- Fetch upload streaming should be accepted on 303
+- Fetch upload streaming should fail on 301
+- Fetch upload streaming should fail on 302
+- Fetch upload streaming should fail on 307
+- Fetch upload streaming should fail on 308
+fetch/api/request/destination/fetch-destination-frame.https.html:
+- Initialize global state
+- frame fetches with a "frame" Request.destination
+fetch/api/request/destination/fetch-destination-iframe.https.html:
+- Initialize global state
+- iframe fetches with a "iframe" Request.destination
+fetch/api/request/destination/fetch-destination-no-load-event.https.html:
+- '@import fetches with a "style" Request.destination'
+- Background image fetches with an "image" Request.destination
+- CSS font fetches with an "font" Request.destination
+- Cache.add() fetches with an empty string Request.destination
+- Font loading API fetches with an "font" Request.destination
+- Initialize global state
+- SVG use element fetches with an "image" Request.destination
+- importScripts() fetches with a "script" Request.destination
+- sendBeacon() fetches with an empty string Request.destination
+fetch/api/request/destination/fetch-destination-prefetch.https.html:
+- HTMLLinkElement with rel=prefetch fetches with an empty string Request.destination
+- Initialize global state
+fetch/api/request/destination/fetch-destination-worker.https.html:
+- DedicatedWorker fetches with a "worker" Request.destination
+- Initialize global state
+- SharedWorker fetches with a "sharedworker" Request.destination
+fetch/api/request/destination/fetch-destination.https.html:
+- AudioWorklet module fetches with a "audioworklet" Request.destination
+- EventSource() fetches with an empty string Request.destination
+- HTMLAudioElement fetches with an "audio" Request.destination
+- HTMLImageElement fetches with an "image" Request.destination
+- HTMLImageElement with a HTMLPictureElement parent attribute fetches with an "image"
+  Request.destination
+- HTMLImageElement with srcset attribute fetches with an "image" Request.destination
+- HTMLLinkElement with rel=preload and as=audio fetches with a "audio" Request.destination
+- HTMLLinkElement with rel=preload and as=document fetches with a "document" Request.destination
+- HTMLLinkElement with rel=preload and as=fetch fetches with an empty string Request.destination
+- HTMLLinkElement with rel=preload and as=font fetches with a "font" Request.destination
+- HTMLLinkElement with rel=preload and as=image fetches with a "image" Request.destination
+- HTMLLinkElement with rel=preload and as=json fetches with a "json" Request.destination
+- HTMLLinkElement with rel=preload and as=manifest fetches with a "manifest" Request.destination
+- HTMLLinkElement with rel=preload and as=script fetches with a "script" Request.destination
+- HTMLLinkElement with rel=preload and as=sharedworker fetches with a "sharedworker"
+  Request.destination
+- HTMLLinkElement with rel=preload and as=style fetches with a "style" Request.destination
+- HTMLLinkElement with rel=preload and as=track fetches with a "track" Request.destination
+- HTMLLinkElement with rel=preload and as=video fetches with a "video" Request.destination
+- HTMLLinkElement with rel=preload and as=worker fetches with a "worker" Request.destination
+- HTMLLinkElement with rel=preload and as=xslt fetches with a "xslt" Request.destination
+- HTMLLinkElement with rel=stylesheet fetches with a "style" Request.destination
+- HTMLScriptElement fetches with a "script" Request.destination
+- HTMLVideoElement fetches with a "video" Request.destination
+- 'Import declaration with `type: "css"` fetches with a "style" Request.destination'
+- 'Import declaration with `type: "json"` fetches with a "json" Request.destination'
+- 'Import declaration with `type: "text"` fetches with a "text" Request.destination'
+- Initialize global state
+- SVGImageElement fetches with an "image" Request.destination
+- XMLHttpRequest() fetches with an empty string Request.destination
+- fetch() fetches with an empty string Request.destination
+fetch/api/request/forbidden-method.any.js:
+- Request() with a forbidden method CONNECT must throw.
+- Request() with a forbidden method TRACE must throw.
+- Request() with a forbidden method TRACK must throw.
+- Request() with a forbidden method connect must throw.
+- Request() with a forbidden method trace must throw.
+- Request() with a forbidden method track must throw.
+fetch/api/request/multi-globals/construct-in-detached-frame.window.js:
+- creating a request from another request in a detached realm should work
+fetch/api/request/multi-globals/url-parsing.html:
+- should parse the URL relative to the current settings object
+fetch/api/request/request-bad-port.any.js:
+- Request on bad port 0 should throw TypeError.
+- Request on bad port 1 should throw TypeError.
+- Request on bad port 10080 should throw TypeError.
+- Request on bad port 101 should throw TypeError.
+- Request on bad port 102 should throw TypeError.
+- Request on bad port 103 should throw TypeError.
+- Request on bad port 104 should throw TypeError.
+- Request on bad port 109 should throw TypeError.
+- Request on bad port 11 should throw TypeError.
+- Request on bad port 110 should throw TypeError.
+- Request on bad port 111 should throw TypeError.
+- Request on bad port 113 should throw TypeError.
+- Request on bad port 115 should throw TypeError.
+- Request on bad port 117 should throw TypeError.
+- Request on bad port 119 should throw TypeError.
+- Request on bad port 123 should throw TypeError.
+- Request on bad port 13 should throw TypeError.
+- Request on bad port 135 should throw TypeError.
+- Request on bad port 137 should throw TypeError.
+- Request on bad port 139 should throw TypeError.
+- Request on bad port 143 should throw TypeError.
+- Request on bad port 15 should throw TypeError.
+- Request on bad port 161 should throw TypeError.
+- Request on bad port 17 should throw TypeError.
+- Request on bad port 1719 should throw TypeError.
+- Request on bad port 1720 should throw TypeError.
+- Request on bad port 1723 should throw TypeError.
+- Request on bad port 179 should throw TypeError.
+- Request on bad port 19 should throw TypeError.
+- Request on bad port 20 should throw TypeError.
+- Request on bad port 2049 should throw TypeError.
+- Request on bad port 21 should throw TypeError.
+- Request on bad port 22 should throw TypeError.
+- Request on bad port 23 should throw TypeError.
+- Request on bad port 25 should throw TypeError.
+- Request on bad port 3659 should throw TypeError.
+- Request on bad port 37 should throw TypeError.
+- Request on bad port 389 should throw TypeError.
+- Request on bad port 4045 should throw TypeError.
+- Request on bad port 4190 should throw TypeError.
+- Request on bad port 42 should throw TypeError.
+- Request on bad port 427 should throw TypeError.
+- Request on bad port 43 should throw TypeError.
+- Request on bad port 465 should throw TypeError.
+- Request on bad port 5060 should throw TypeError.
+- Request on bad port 5061 should throw TypeError.
+- Request on bad port 512 should throw TypeError.
+- Request on bad port 513 should throw TypeError.
+- Request on bad port 514 should throw TypeError.
+- Request on bad port 515 should throw TypeError.
+- Request on bad port 526 should throw TypeError.
+- Request on bad port 53 should throw TypeError.
+- Request on bad port 530 should throw TypeError.
+- Request on bad port 531 should throw TypeError.
+- Request on bad port 532 should throw TypeError.
+- Request on bad port 540 should throw TypeError.
+- Request on bad port 548 should throw TypeError.
+- Request on bad port 554 should throw TypeError.
+- Request on bad port 556 should throw TypeError.
+- Request on bad port 563 should throw TypeError.
+- Request on bad port 587 should throw TypeError.
+- Request on bad port 6000 should throw TypeError.
+- Request on bad port 601 should throw TypeError.
+- Request on bad port 636 should throw TypeError.
+- Request on bad port 6566 should throw TypeError.
+- Request on bad port 6665 should throw TypeError.
+- Request on bad port 6666 should throw TypeError.
+- Request on bad port 6667 should throw TypeError.
+- Request on bad port 6668 should throw TypeError.
+- Request on bad port 6669 should throw TypeError.
+- Request on bad port 6679 should throw TypeError.
+- Request on bad port 6697 should throw TypeError.
+- Request on bad port 69 should throw TypeError.
+- Request on bad port 7 should throw TypeError.
+- Request on bad port 77 should throw TypeError.
+- Request on bad port 79 should throw TypeError.
+- Request on bad port 87 should throw TypeError.
+- Request on bad port 9 should throw TypeError.
+- Request on bad port 95 should throw TypeError.
+- Request on bad port 989 should throw TypeError.
+- Request on bad port 990 should throw TypeError.
+- Request on bad port 993 should throw TypeError.
+- Request on bad port 995 should throw TypeError.
+fetch/api/request/request-cache-default-conditional.any.js:
+- RequestCache "default" mode with an If-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
+  response
+- RequestCache "default" mode with an If-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and stale
+  response
+- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
+  with Etag and fresh response
+- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
+  with Etag and stale response
+- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
+  with Last-Modified and fresh response
+- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
+  with Last-Modified and stale response
+- RequestCache "default" mode with an If-Modified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Etag and fresh
+  response
+- RequestCache "default" mode with an If-Modified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Etag and stale
+  response
+- RequestCache "default" mode with an If-Modified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Last-Modified
+  and fresh response
+- RequestCache "default" mode with an If-Modified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Last-Modified
+  and stale response
+- RequestCache "default" mode with an If-Modified-Since header is treated similarly
+  to "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-Modified-Since header is treated similarly
+  to "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-Modified-Since header is treated similarly
+  to "no-store" with Last-Modified and fresh response
+- RequestCache "default" mode with an If-Modified-Since header is treated similarly
+  to "no-store" with Last-Modified and stale response
+- RequestCache "default" mode with an If-None-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-None-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-None-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
+  response
+- RequestCache "default" mode with an If-None-Match header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and stale
+  response
+- RequestCache "default" mode with an If-None-Match header is treated similarly to
+  "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-None-Match header is treated similarly to
+  "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-None-Match header is treated similarly to
+  "no-store" with Last-Modified and fresh response
+- RequestCache "default" mode with an If-None-Match header is treated similarly to
+  "no-store" with Last-Modified and stale response
+- RequestCache "default" mode with an If-Range header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-Range header (following a request without
+  additional headers) is treated similarly to "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-Range header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
+  response
+- RequestCache "default" mode with an If-Range header (following a request without
+  additional headers) is treated similarly to "no-store" with Last-Modified and stale
+  response
+- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
+  with Etag and fresh response
+- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
+  with Etag and stale response
+- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
+  with Last-Modified and fresh response
+- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
+  with Last-Modified and stale response
+- RequestCache "default" mode with an If-Unmodified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Etag and fresh
+  response
+- RequestCache "default" mode with an If-Unmodified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Etag and stale
+  response
+- RequestCache "default" mode with an If-Unmodified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Last-Modified
+  and fresh response
+- RequestCache "default" mode with an If-Unmodified-Since header (following a request
+  without additional headers) is treated similarly to "no-store" with Last-Modified
+  and stale response
+- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
+  to "no-store" with Etag and fresh response
+- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
+  to "no-store" with Etag and stale response
+- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
+  to "no-store" with Last-Modified and fresh response
+- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
+  to "no-store" with Last-Modified and stale response
+fetch/api/request/request-cache-default.any.js:
+- RequestCache "default" mode checks the cache for previously cached content and avoids
+  going to the network if a fresh response exists with Etag and fresh response
+- RequestCache "default" mode checks the cache for previously cached content and avoids
+  going to the network if a fresh response exists with Last-Modified and fresh response
+- RequestCache "default" mode checks the cache for previously cached content and goes
+  to the network for stale responses with Etag and stale response
+- RequestCache "default" mode checks the cache for previously cached content and goes
+  to the network for stale responses with Last-Modified and stale response
+- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
+  with Etag and fresh response'
+- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
+  with Etag and stale response'
+- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
+  with Last-Modified and fresh response'
+- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
+  with Last-Modified and stale response'
+fetch/api/request/request-cache-force-cache.any.js:
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  avoid revalidation for fresh responses with Etag and fresh response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  avoid revalidation for fresh responses with Last-Modified and fresh response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  avoid revalidation for stale responses with Etag and stale response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  avoid revalidation for stale responses with Last-Modified and stale response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response is not found with Etag and fresh response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response is not found with Etag and stale response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response is not found with Last-Modified and fresh
+  response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response is not found with Last-Modified and stale
+  response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response would vary with Etag and fresh response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response would vary with Etag and stale response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response would vary with Last-Modified and fresh
+  response
+- RequestCache "force-cache" mode checks the cache for previously cached content and
+  goes to the network if a cached response would vary with Last-Modified and stale
+  response
+- RequestCache "force-cache" stores the response in the cache if it goes to the network
+  with Etag and fresh response
+- RequestCache "force-cache" stores the response in the cache if it goes to the network
+  with Etag and stale response
+- RequestCache "force-cache" stores the response in the cache if it goes to the network
+  with Last-Modified and fresh response
+- RequestCache "force-cache" stores the response in the cache if it goes to the network
+  with Last-Modified and stale response
+fetch/api/request/request-cache-no-cache.any.js:
+- RequestCache "no-cache" mode revalidates fresh responses found in the cache with
+  Etag and fresh response
+- RequestCache "no-cache" mode revalidates fresh responses found in the cache with
+  Last-Modified and fresh response
+- RequestCache "no-cache" mode revalidates stale responses found in the cache with
+  Etag and stale response
+- RequestCache "no-cache" mode revalidates stale responses found in the cache with
+  Last-Modified and stale response
+fetch/api/request/request-cache-no-store.any.js:
+- RequestCache "no-store" mode does not check the cache for previously cached content
+  and goes to the network regardless with Etag and fresh response
+- RequestCache "no-store" mode does not check the cache for previously cached content
+  and goes to the network regardless with Etag and stale response
+- RequestCache "no-store" mode does not check the cache for previously cached content
+  and goes to the network regardless with Last-Modified and fresh response
+- RequestCache "no-store" mode does not check the cache for previously cached content
+  and goes to the network regardless with Last-Modified and stale response
+- RequestCache "no-store" mode does not store the response in the cache with Etag
+  and fresh response
+- RequestCache "no-store" mode does not store the response in the cache with Etag
+  and stale response
+- RequestCache "no-store" mode does not store the response in the cache with Last-Modified
+  and fresh response
+- RequestCache "no-store" mode does not store the response in the cache with Last-Modified
+  and stale response
+fetch/api/request/request-cache-only-if-cached.any.js:
+- RequestCache "only-if-cached" (with "same-origin") does not follow redirects across
+  origins and rejects with Etag and fresh response
+- RequestCache "only-if-cached" (with "same-origin") does not follow redirects across
+  origins and rejects with Etag and stale response
+- RequestCache "only-if-cached" (with "same-origin") does not follow redirects across
+  origins and rejects with Last-Modified and fresh response
+- RequestCache "only-if-cached" (with "same-origin") does not follow redirects across
+  origins and rejects with Last-Modified and stale response
+- RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects
+  to same-origin content with Etag and fresh response
+- RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects
+  to same-origin content with Etag and stale response
+- RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects
+  to same-origin content with Last-Modified and fresh response
+- RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects
+  to same-origin content with Last-Modified and stale response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and avoids revalidation for fresh responses with Etag and fresh response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and avoids revalidation for fresh responses with Last-Modified and fresh response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and avoids revalidation for stale responses with Etag and stale response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and avoids revalidation for stale responses with Last-Modified and stale response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and does not go to the network if a cached response is not found with Etag and fresh
+  response
+- RequestCache "only-if-cached" mode checks the cache for previously cached content
+  and does not go to the network if a cached response is not found with Last-Modified
+  and fresh response
+fetch/api/request/request-cache-reload.any.js:
+- RequestCache "reload" mode does not check the cache for previously cached content
+  and goes to the network regardless with Etag and fresh response
+- RequestCache "reload" mode does not check the cache for previously cached content
+  and goes to the network regardless with Etag and stale response
+- RequestCache "reload" mode does not check the cache for previously cached content
+  and goes to the network regardless with Last-Modified and fresh response
+- RequestCache "reload" mode does not check the cache for previously cached content
+  and goes to the network regardless with Last-Modified and stale response
+- RequestCache "reload" mode does store the response in the cache even if a previous
+  response is already stored with Etag and fresh response
+- RequestCache "reload" mode does store the response in the cache even if a previous
+  response is already stored with Etag and stale response
+- RequestCache "reload" mode does store the response in the cache even if a previous
+  response is already stored with Last-Modified and fresh response
+- RequestCache "reload" mode does store the response in the cache even if a previous
+  response is already stored with Last-Modified and stale response
+- RequestCache "reload" mode does store the response in the cache with Etag and fresh
+  response
+- RequestCache "reload" mode does store the response in the cache with Etag and stale
+  response
+- RequestCache "reload" mode does store the response in the cache with Last-Modified
+  and fresh response
+- RequestCache "reload" mode does store the response in the cache with Last-Modified
+  and stale response
+fetch/api/request/request-clone-readable-stream-body.any.js:
+- new Request(clone) preserves a ReadableStream body that came from clone()
+fetch/api/request/request-clone.sub.html:
+- Check cloning a request
+fetch/api/request/request-consume-empty.any.js:
+- Consume empty ArrayBuffer request body as text
+- Consume empty FormData request body as text
+- Consume empty blob request body as arrayBuffer
+- Consume empty blob request body as text
+- Consume request's body as arrayBuffer
+- Consume request's body as blob
+- Consume request's body as formData with correct multipart type (error case)
+- Consume request's body as formData without correct type (error case)
+- Consume request's body as json (error case)
+- Consume request's body as text
+fetch/api/request/request-consume.any.js:
+- Consume ArrayBuffer request's body as JSON
+- Consume ArrayBuffer request's body as arrayBuffer
+- Consume ArrayBuffer request's body as blob
+- Consume ArrayBuffer request's body as bytes
+- Consume ArrayBuffer request's body as text
+- Consume DataView request's body as JSON
+- Consume DataView request's body as arrayBuffer
+- Consume DataView request's body as blob
+- Consume DataView request's body as bytes
+- Consume DataView request's body as text
+- Consume Float32Array request's body as JSON
+- Consume Float32Array request's body as arrayBuffer
+- Consume Float32Array request's body as blob
+- Consume Float32Array request's body as bytes
+- Consume Float32Array request's body as text
+- Consume FormData request's body as FormData
+- Consume Int8Array request's body as JSON
+- Consume Int8Array request's body as arrayBuffer
+- Consume Int8Array request's body as blob
+- Consume Int8Array request's body as bytes
+- Consume Int8Array request's body as text
+- Consume String request's body as bytes
+- Consume Uint8Array request's body as JSON
+- Consume Uint8Array request's body as arrayBuffer
+- Consume Uint8Array request's body as blob
+- Consume Uint8Array request's body as bytes
+- Consume Uint8Array request's body as text
+- Consume blob response's body as arrayBuffer
+- Consume blob response's body as blob
+- Consume blob response's body as blob (empty blob as input)
+- Consume blob response's body as bytes
+- Consume blob response's body as json
+- Consume blob response's body as text
+fetch/api/request/request-disturbed.any.js:
+- Check cloning a disturbed request
+- Check creating a new request from a disturbed request
+- Input request used for creating new request became disturbed
+- Input request used for creating new request became disturbed even if body is not
+  used
+- Request construction failure should not set "bodyUsed"
+- Request without body cannot be disturbed
+- 'Request''s body: initial state'
+fetch/api/request/request-error.any.js:
+- Bad cache init parameter value
+- Bad credentials init parameter value
+- Bad mode init parameter value
+- Bad redirect init parameter value
+- Bad referrerPolicy init parameter value
+- Input URL has credentials
+- Input URL is not valid
+- Request should get its content-type from the body if none is provided
+- Request should not get its content-type from the init request if init headers are
+  provided
+- 'Request with cache mode: only-if-cached and fetch mode cors'
+- 'Request with cache mode: only-if-cached and fetch mode no-cors'
+- RequestInit's cache mode is only-if-cached and mode is not same-origin
+- RequestInit's method is forbidden
+- RequestInit's method is invalid
+- RequestInit's mode is navigate
+- RequestInit's mode is no-cors and method is not simple
+- RequestInit's referrer is invalid
+- RequestInit's window is not null
+fetch/api/request/request-headers.any.js:
+- 'Adding invalid no-cors request header "Content-Type: KO"'
+- 'Adding invalid no-cors request header "Empty-Value: "'
+- 'Adding invalid no-cors request header "Potato: KO"'
+- 'Adding invalid no-cors request header "proxy: KO"'
+- 'Adding invalid no-cors request header "proxya: KO"'
+- 'Adding invalid no-cors request header "sec: KO"'
+- 'Adding invalid no-cors request header "secb: KO"'
+- 'Adding invalid request header "ACCEPT-ENCODING: KO"'
+- 'Adding invalid request header "Accept-Charset: KO"'
+- 'Adding invalid request header "Accept-Encoding: KO"'
+- 'Adding invalid request header "Access-Control-Request-Headers: KO"'
+- 'Adding invalid request header "Access-Control-Request-Method: KO"'
+- 'Adding invalid request header "Connection: KO"'
+- 'Adding invalid request header "Content-Length: KO"'
+- 'Adding invalid request header "Cookie2: KO"'
+- 'Adding invalid request header "Cookie: KO"'
+- 'Adding invalid request header "DNT: KO"'
+- 'Adding invalid request header "Date: KO"'
+- 'Adding invalid request header "Expect: KO"'
+- 'Adding invalid request header "Host: KO"'
+- 'Adding invalid request header "Keep-Alive: KO"'
+- 'Adding invalid request header "Origin: KO"'
+- 'Adding invalid request header "Proxy-: KO"'
+- 'Adding invalid request header "Referer: KO"'
+- 'Adding invalid request header "Sec-: KO"'
+- 'Adding invalid request header "Set-Cookie: KO"'
+- 'Adding invalid request header "TE: KO"'
+- 'Adding invalid request header "Trailer: KO"'
+- 'Adding invalid request header "Transfer-Encoding: KO"'
+- 'Adding invalid request header "Upgrade: KO"'
+- 'Adding invalid request header "Via: KO"'
+- 'Adding invalid request header "accept-charset: KO"'
+- 'Adding invalid request header "proxy-a: KO"'
+- 'Adding invalid request header "sec-b: KO"'
+- Check that no-cors request constructor is filtering headers provided as init parameter
+- Check that no-cors request constructor is filtering headers provided as part of
+  request parameter
+- Check that request constructor is filtering headers provided as init parameter
+- Request should get its content-type from the body if none is provided
+- Request should not get its content-type from the init request if init headers are
+  provided
+- Testing request header creations with various objects
+fetch/api/request/request-init-001.sub.html:
+- Check method init value of patCh and associated getter
+- Check method init value of patch and associated getter
+- Check referrer init value of  and associated getter
+- Check referrer init value of /relative/ressource and associated getter
+- Check referrer init value of http://test.url and associated getter
+- Check referrerPolicy init value of  and associated getter
+- Check referrerPolicy init value of no-referrer and associated getter
+- Check referrerPolicy init value of no-referrer-when-downgrade and associated getter
+- Check referrerPolicy init value of origin and associated getter
+- Check referrerPolicy init value of origin-when-cross-origin and associated getter
+- Check referrerPolicy init value of same-origin and associated getter
+- Check referrerPolicy init value of strict-origin and associated getter
+- Check referrerPolicy init value of strict-origin-when-cross-origin and associated
+  getter
+- Check referrerPolicy init value of unsafe-url and associated getter
+fetch/api/request/request-init-002.any.js:
+- Initialize Request's body with "This is a USVString", text/plain;charset=UTF-8
+- Initialize Request's body with "[object Blob]", application/octet-binary
+- Initialize Request's body with "[object Object]", multipart/form-data
+- Initialize Request's body with "hi!", text/plain;charset=UTF-8
+- Initialize Request's body with "name=value", application/x-www-form-urlencoded;charset=UTF-8
+fetch/api/request/request-init-003.sub.html:
+- Check request values when initialized from Request
+- Check request values when initialized from Request and init values
+- Check request values when initialized from url and init values
+- Check request values when initialized from url string
+fetch/api/request/request-init-contenttype.any.js:
+- Default Content-Type for Request with Blob body (set type)
+- Default Content-Type for Request with FormData body
+- Default Content-Type for Request with URLSearchParams body
+- Default Content-Type for Request with string body
+fetch/api/request/request-init-priority.any.js:
+- fetch() with an invalid priority returns a rejected promise with a TypeError
+- new Request() throws a TypeError if any of RequestInit's members' values are invalid
+fetch/api/request/request-init-stream.any.js:
+- Constructing a Request with a Request on which body.getReader() is called
+- Constructing a Request with a Request on which body.getReader().read() is called
+- Constructing a Request with a Request on which read() and releaseLock() are called
+- Constructing a Request with a stream on which getReader() is called
+- Constructing a Request with a stream on which read() and releaseLock() are called
+- Constructing a Request with a stream on which read() is called
+- It is error to omit .duplex when the body is a ReadableStream.
+- It is error to set .duplex = 'full' when the body is a Blob.
+- It is error to set .duplex = 'full' when the body is a ReadableStream.
+- It is error to set .duplex = 'full' when the body is a Uint8Array.
+- It is error to set .duplex = 'full' when the body is a string.
+- It is error to set .duplex = 'full' when the body is null.
+fetch/api/request/request-keepalive-quota.html:
+- A Keep-Alive fetch() should not be allowed if the Quota is used up.
+- A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
+- A Keep-Alive fetch() with a body over the Quota Limit should reject.
+fetch/api/request/request-keepalive.any.js:
+- keepalive flag
+- keepalive flag with stream body
+fetch/api/request/request-reset-attributes.https.html:
+- Request.isHistoryNavigation is reset with non-empty RequestInit
+- Request.isReloadNavigation is reset with non-empty RequestInit
+- Request.mode is reset with non-empty RequestInit when it's "navigate"
+fetch/api/request/request-structure.any.js:
+- Check bodyUsed attribute
+- Check cache attribute
+- Check credentials attribute
+- Check destination attribute
+- Check duplex attribute
+- Check integrity attribute
+- Check isHistoryNavigation attribute
+- Check isReloadNavigation attribute
+- Check method attribute
+- Check mode attribute
+- Check redirect attribute
+- Check referrer attribute
+- Check referrerPolicy attribute
+- Check url attribute
+fetch/api/request/url-encoding.html:
+- URL encoding and Request
+- URL encoding and fetch()
+fetch/api/response/json.any.js:
+- Ensure UTF-16 results in an error
+- Ensure the correct JSON parser is used
+fetch/api/response/multi-globals/url-parsing.html:
+- should parse the redirect Location URL relative to the current settings object
+fetch/api/response/response-arraybuffer-realm.window.js:
+- realm of the ArrayBuffer from Response arrayBuffer()
+fetch/api/response/response-blob-realm.any.js:
+- realm of the Uint8Array from Response bytes()
+fetch/api/response/response-body-read-task-handling.html:
+- piping from a body stream to a JS-written WritableStream should occur in a microtask
+  scope
+- reading from a body stream should occur in a microtask scope
+fetch/api/response/response-cancel-stream.any.js:
+- Accessing .body after canceling it
+- Cancelling a closed Response stream
+- Cancelling a closed blob Response stream
+- Cancelling a loading Response stream
+- Cancelling a loading blob Response stream
+- Cancelling a starting Response stream
+- Cancelling a starting blob Response stream
+fetch/api/response/response-clone.any.js:
+- Cancelling stream should not affect cloned one
+- Cannot clone a disturbed response
+- Check Response's clone has the expected attribute values
+- Check Response's clone with default values, without body
+- Check cloned response's body
+- Check original response's body after cloning
+- Check response clone use structureClone for teed ReadableStreams (ArrayBufferchunk)
+- Check response clone use structureClone for teed ReadableStreams (BigInt64Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (BigUint64Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (DataViewchunk)
+- Check response clone use structureClone for teed ReadableStreams (Float16Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Float32Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Float64Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Int16Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Int32Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Int8Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Uint16Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Uint32Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Uint8Arraychunk)
+- Check response clone use structureClone for teed ReadableStreams (Uint8ClampedArraychunk)
+fetch/api/response/response-consume-empty.any.js:
+- Consume empty ArrayBuffer response body as text
+- Consume empty FormData response body as text
+- Consume empty blob response body as arrayBuffer
+- Consume empty blob response body as text
+- Consume response's body as arrayBuffer
+- Consume response's body as blob
+- Consume response's body as formData with correct multipart type (error case)
+- Consume response's body as formData without correct type (error case)
+- Consume response's body as json (error case)
+- Consume response's body as text
+fetch/api/response/response-consume-stream.any.js:
+- Getting a redirect Response stream
+- Getting an error Response stream
+- Read URLSearchParams response's body as readableStream with mode=byob
+- Read URLSearchParams response's body as readableStream with mode=undefined
+- Read array buffer response's body as readableStream with mode=byob
+- Read array buffer response's body as readableStream with mode=undefined
+- Read blob response's body as readableStream with mode=byob
+- Read blob response's body as readableStream with mode=undefined
+- Read empty blob response's body as readableStream
+- Read empty text response's body as readableStream
+- Read form data response's body as readableStream with mode=byob
+- Read form data response's body as readableStream with mode=undefined
+- Read text response's body as readableStream with mode=byob
+- Read text response's body as readableStream with mode=undefined
+- Reading with offset from Response stream
+fetch/api/response/response-consume.html:
+- 'Consume response''s body: from FormData to arrayBuffer'
+- 'Consume response''s body: from FormData to blob'
+- 'Consume response''s body: from FormData to formData'
+- 'Consume response''s body: from FormData to text'
+- 'Consume response''s body: from FormData without correct type to formData (error
+  case)'
+- 'Consume response''s body: from URLSearchParams to blob'
+- 'Consume response''s body: from URLSearchParams to formData'
+- 'Consume response''s body: from URLSearchParams without correct type to formData
+  (error case)'
+- 'Consume response''s body: from blob to arrayBuffer'
+- 'Consume response''s body: from blob to blob'
+- 'Consume response''s body: from blob to json'
+- 'Consume response''s body: from blob to text'
+- 'Consume response''s body: from blob with correct multipart type to formData'
+- 'Consume response''s body: from blob with correct urlencoded type to formData'
+- 'Consume response''s body: from blob without correct multipart type to formData
+  (error case)'
+- 'Consume response''s body: from blob without correct urlencoded type to formData
+  (error case)'
+- 'Consume response''s body: from fetch without correct type to formData (error case)'
+- 'Consume response''s body: from multipart form data blob to formData'
+- 'Consume response''s body: from stream to arrayBuffer'
+- 'Consume response''s body: from stream to blob'
+- 'Consume response''s body: from stream to json'
+- 'Consume response''s body: from stream to text'
+- 'Consume response''s body: from stream with correct multipart type to formData'
+- 'Consume response''s body: from stream with correct urlencoded type to formData'
+- 'Consume response''s body: from stream without correct multipart type to formData
+  (error case)'
+- 'Consume response''s body: from stream without correct urlencoded type to formData
+  (error case)'
+- 'Consume response''s body: from text with correct multipart type to formData'
+- 'Consume response''s body: from text with correct multipart type to formData with
+  BOM'
+- 'Consume response''s body: from text with correct urlencoded type to formData'
+- 'Consume response''s body: from text without correct multipart type to formData
+  (error case)'
+- 'Consume response''s body: from text without correct urlencoded type to formData
+  (error case)'
+fetch/api/response/response-error-from-stream.any.js:
+- ReadableStream pull() Error propagates to Response.arrayBuffer() Promise
+- ReadableStream pull() Error propagates to Response.blob() Promise
+- ReadableStream pull() Error propagates to Response.bytes() Promise
+- ReadableStream pull() Error propagates to Response.formData() Promise
+- ReadableStream pull() Error propagates to Response.json() Promise
+- ReadableStream pull() Error propagates to Response.text() Promise
+- ReadableStream start() Error propagates to Response.arrayBuffer() Promise
+- ReadableStream start() Error propagates to Response.blob() Promise
+- ReadableStream start() Error propagates to Response.bytes() Promise
+- ReadableStream start() Error propagates to Response.formData() Promise
+- ReadableStream start() Error propagates to Response.json() Promise
+- ReadableStream start() Error propagates to Response.text() Promise
+fetch/api/response/response-error.any.js:
+- Throws RangeError when responseInit's status is 0
+- Throws RangeError when responseInit's status is 100
+- Throws RangeError when responseInit's status is 1000
+- Throws RangeError when responseInit's status is 199
+- Throws RangeError when responseInit's status is 600
+- Throws TypeError when building a response with body and a body status of 204
+- Throws TypeError when building a response with body and a body status of 205
+- Throws TypeError when building a response with body and a body status of 304
+- "Throws TypeError when responseInit's statusText is \n"
+- Throws TypeError when responseInit's statusText is Ā
+fetch/api/response/response-form-data.html:
+- Empty form data
+- Validate buggy form data - boundary
+- Validate buggy form data - cr1
+- Validate buggy form data - cr2
+- Validate buggy form data - cr3
+- Validate buggy form data - cr_
+- Validate buggy form data - dashes
+- Validate buggy form data - empty
+- Validate form data - onePartWithEpilogue
+- Validate form data - onePartWithTransportPadding
+- Validate form data - onePartWithoutEpilogue
+- Validate form data - twoPartsWithEpilogue
+- Validate form data - twoPartsWithTransportPadding
+- Validate form data - twoPartsWithoutEpilogue
+fetch/api/response/response-from-stream.any.js:
+- Constructing a Response with a stream on which getReader() is called
+- Constructing a Response with a stream on which read() and releaseLock() are called
+- Constructing a Response with a stream on which read() is called
+fetch/api/response/response-headers-guard.any.js:
+- Ensure response headers are immutable
+fetch/api/response/response-init-001.any.js:
+- Check default value for body attribute
+fetch/api/response/response-init-002.any.js:
+- Initialize Response's body with application/octet-binary
+- Initialize Response's body with application/x-www-form-urlencoded;charset=UTF-8
+- Initialize Response's body with multipart/form-data
+- Initialize Response's body with text/plain;charset=UTF-8
+- Read Response's body as readableStream
+- Testing null Response body
+fetch/api/response/response-init-contenttype.any.js:
+- Default Content-Type for Response with Blob body (set type)
+- Default Content-Type for Response with FormData body
+- Default Content-Type for Response with URLSearchParams body
+- Default Content-Type for Response with string body
+fetch/api/response/response-static-error.any.js:
+- Check response returned by static method error()
+- the 'guard' of the Headers instance should be immutable
+fetch/api/response/response-static-json.any.js:
+- "Check response returned by static json() with input \U0001D306"
+- Check static json() throws when data is not encodable
+- Throws TypeError when calling static json() with a status of 204
+- Throws TypeError when calling static json() with a status of 205
+- Throws TypeError when calling static json() with a status of 304
+fetch/api/response/response-static-redirect.any.js:
+- Check error returned when giving invalid status to redirect(), status = 200
+- Check error returned when giving invalid status to redirect(), status = 309
+- Check error returned when giving invalid status to redirect(), status = 400
+- Check error returned when giving invalid status to redirect(), status = 500
+- Check error returned when giving invalid url to redirect()
+fetch/api/response/response-stream-bad-chunk.any.js:
+- ReadableStream with non-Uint8Array chunk passed to Response.arrayBuffer() causes
+  TypeError
+- ReadableStream with non-Uint8Array chunk passed to Response.blob() causes TypeError
+- ReadableStream with non-Uint8Array chunk passed to Response.bytes() causes TypeError
+- ReadableStream with non-Uint8Array chunk passed to Response.formData() causes TypeError
+- ReadableStream with non-Uint8Array chunk passed to Response.json() causes TypeError
+- ReadableStream with non-Uint8Array chunk passed to Response.text() causes TypeError
+fetch/api/response/response-stream-disturbed-1.any.js:
+- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
+  (body source: fetch)'
+- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
+  (body source: stream)'
+- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
+  (body source: string)'
+- 'Getting blob after getting the Response body - not disturbed, not locked (body
+  source: fetch)'
+- 'Getting blob after getting the Response body - not disturbed, not locked (body
+  source: stream)'
+- 'Getting blob after getting the Response body - not disturbed, not locked (body
+  source: string)'
+- 'Getting json after getting the Response body - not disturbed, not locked (body
+  source: fetch)'
+- 'Getting json after getting the Response body - not disturbed, not locked (body
+  source: stream)'
+- 'Getting json after getting the Response body - not disturbed, not locked (body
+  source: string)'
+- 'Getting text after getting the Response body - not disturbed, not locked (body
+  source: fetch)'
+- 'Getting text after getting the Response body - not disturbed, not locked (body
+  source: stream)'
+- 'Getting text after getting the Response body - not disturbed, not locked (body
+  source: string)'
+fetch/api/response/response-stream-disturbed-2.any.js:
+- 'Getting arrayBuffer after getting a locked Response body (body source: fetch)'
+- 'Getting arrayBuffer after getting a locked Response body (body source: stream)'
+- 'Getting arrayBuffer after getting a locked Response body (body source: string)'
+- 'Getting blob after getting a locked Response body (body source: fetch)'
+- 'Getting blob after getting a locked Response body (body source: stream)'
+- 'Getting blob after getting a locked Response body (body source: string)'
+- 'Getting json after getting a locked Response body (body source: fetch)'
+- 'Getting json after getting a locked Response body (body source: stream)'
+- 'Getting json after getting a locked Response body (body source: string)'
+- 'Getting text after getting a locked Response body (body source: fetch)'
+- 'Getting text after getting a locked Response body (body source: stream)'
+- 'Getting text after getting a locked Response body (body source: string)'
+fetch/api/response/response-stream-disturbed-3.any.js:
+- 'Getting arrayBuffer after reading the Response body (body source: fetch)'
+- 'Getting arrayBuffer after reading the Response body (body source: stream)'
+- 'Getting arrayBuffer after reading the Response body (body source: string)'
+- 'Getting blob after reading the Response body (body source: fetch)'
+- 'Getting blob after reading the Response body (body source: stream)'
+- 'Getting blob after reading the Response body (body source: string)'
+- 'Getting json after reading the Response body (body source: fetch)'
+- 'Getting json after reading the Response body (body source: stream)'
+- 'Getting json after reading the Response body (body source: string)'
+- 'Getting text after reading the Response body (body source: fetch)'
+- 'Getting text after reading the Response body (body source: stream)'
+- 'Getting text after reading the Response body (body source: string)'
+fetch/api/response/response-stream-disturbed-4.any.js:
+- 'Getting arrayBuffer after cancelling the Response body (body source: fetch)'
+- 'Getting arrayBuffer after cancelling the Response body (body source: stream)'
+- 'Getting arrayBuffer after cancelling the Response body (body source: string)'
+- 'Getting blob after cancelling the Response body (body source: fetch)'
+- 'Getting blob after cancelling the Response body (body source: stream)'
+- 'Getting blob after cancelling the Response body (body source: string)'
+- 'Getting json after cancelling the Response body (body source: fetch)'
+- 'Getting json after cancelling the Response body (body source: stream)'
+- 'Getting json after cancelling the Response body (body source: string)'
+- 'Getting text after cancelling the Response body (body source: fetch)'
+- 'Getting text after cancelling the Response body (body source: stream)'
+- 'Getting text after cancelling the Response body (body source: string)'
+fetch/api/response/response-stream-disturbed-6.any.js:
+- A closed stream on which read() has been called
+- A non-closed stream on which cancel() has been called
+- A non-closed stream on which read() has been called
+- An errored stream on which cancel() has been called
+- An errored stream on which read() has been called
+fetch/api/response/response-stream-disturbed-by-pipe.any.js:
+- using pipeThrough on Response body should disturb it synchronously
+- using pipeTo on Response body should disturb it synchronously
+fetch/api/response/response-stream-with-broken-then.any.js:
+- Attempt to inject 8.2 via Object.prototype.then.
+- Attempt to inject undefined via Object.prototype.then.
+- 'Attempt to inject value: undefined via Object.prototype.then.'
+- 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
+- intercepting arraybuffer to body readable stream conversion via Object.prototype.then
+  should not be possible
+- intercepting arraybuffer to text conversion via Object.prototype.then should not
+  be possible
+fetch/data-urls/base64.any.js:
+- 'data: URL base64 handling: " \t\n\f\r ab\t\n\f\r cd\t\n\f\r "'
+- 'data: URL base64 handling: " abcd"'
+- 'data: URL base64 handling: " abcd==="'
+- 'data: URL base64 handling: "--"'
+- 'data: URL base64 handling: ".."'
+- 'data: URL base64 handling: "/"'
+- 'data: URL base64 handling: "////A"'
+- 'data: URL base64 handling: "///A"'
+- 'data: URL base64 handling: "//A"'
+- 'data: URL base64 handling: "/A"'
+- 'data: URL base64 handling: "="'
+- 'data: URL base64 handling: "=="'
+- 'data: URL base64 handling: "==="'
+- 'data: URL base64 handling: "===="'
+- 'data: URL base64 handling: "====="'
+- 'data: URL base64 handling: "=a"'
+- 'data: URL base64 handling: "=a="'
+- 'data: URL base64 handling: "A"'
+- 'data: URL base64 handling: "A/"'
+- 'data: URL base64 handling: "AA/"'
+- 'data: URL base64 handling: "AAA/"'
+- 'data: URL base64 handling: "AAAA/"'
+- 'data: URL base64 handling: "YQ"'
+- 'data: URL base64 handling: "YR"'
+- 'data: URL base64 handling: "\0nonsense"'
+- 'data: URL base64 handling: "__"'
+- 'data: URL base64 handling: "a"'
+- 'data: URL base64 handling: "a="'
+- 'data: URL base64 handling: "a=="'
+- 'data: URL base64 handling: "a==="'
+- 'data: URL base64 handling: "a===="'
+- 'data: URL base64 handling: "a====="'
+- 'data: URL base64 handling: "a=b"'
+- 'data: URL base64 handling: "a=b="'
+- 'data: URL base64 handling: "ab cd"'
+- 'data: URL base64 handling: "ab"'
+- 'data: URL base64 handling: "ab="'
+- 'data: URL base64 handling: "ab=="'
+- 'data: URL base64 handling: "ab==="'
+- 'data: URL base64 handling: "ab===="'
+- 'data: URL base64 handling: "ab====="'
+- 'data: URL base64 handling: "ab=c"'
+- 'data: URL base64 handling: "ab=c="'
+- 'data: URL base64 handling: "ab\fcd"'
+- 'data: URL base64 handling: "ab\ncd"'
+- 'data: URL base64 handling: "ab\rcd"'
+- 'data: URL base64 handling: "ab\t\n\f\r =\t\n\f\r =\t\n\f\r "'
+- 'data: URL base64 handling: "ab\t\n\f\r cd"'
+- 'data: URL base64 handling: "ab\tcd"'
+- 'data: URL base64 handling: "ab\vcd"'
+- 'data: URL base64 handling: "abc"'
+- 'data: URL base64 handling: "abc="'
+- 'data: URL base64 handling: "abc=="'
+- 'data: URL base64 handling: "abc==="'
+- 'data: URL base64 handling: "abc===="'
+- 'data: URL base64 handling: "abc====="'
+- 'data: URL base64 handling: "abc=d"'
+- 'data: URL base64 handling: "abc=d="'
+- 'data: URL base64 handling: "abcd "'
+- 'data: URL base64 handling: "abcd ==="'
+- 'data: URL base64 handling: "abcd"'
+- 'data: URL base64 handling: "abcd="'
+- 'data: URL base64 handling: "abcd=="'
+- 'data: URL base64 handling: "abcd=== "'
+- 'data: URL base64 handling: "abcd==="'
+- 'data: URL base64 handling: "abcd===="'
+- 'data: URL base64 handling: "abcd====="'
+- 'data: URL base64 handling: "abcd\0nonsense"'
+- 'data: URL base64 handling: "abcde"'
+- 'data: URL base64 handling: "abcde="'
+- 'data: URL base64 handling: "abcde=="'
+- 'data: URL base64 handling: "abcde==="'
+- 'data: URL base64 handling: "abcde===="'
+- 'data: URL base64 handling: "abcde====="'
+- 'data: URL base64 handling: "ab cd"'
+- 'data: URL base64 handling: "ab　cd"'
+- 'data: URL base64 handling: "ab、cd"'
+- 'data: URL base64 handling: "~~"'
+- "data: URL base64 handling: \"\U00010000\""
+fetch/data-urls/navigate.window.js:
+- ASCII whitespace in the input is removed
+- base64 with incorrect padding
+fetch/data-urls/processing.any.js:
+- '"data:  ;charset=x   ;  base64,WA"'
+- '"data: ,%FF"'
+- '"data:%00,%FF"'
+- '"data:%1F,%FF"'
+- '"data:%20,%FF"'
+- '"data:%3Bbase64,WA"'
+- '"data:,%FF"'
+- '"data:,X"'
+- '"data:,X#X"'
+- '"data://test/,X"'
+- '"data://test:test/,X"'
+- '"data:;  base64,WA"'
+- '"data:; base64,WA"'
+- '"data:; charset=x,X"'
+- '"data:;%62ase64,WA"'
+- '"data:;BASe64,WA"'
+- '"data:;CHARSET=\"X\",X"'
+- '"data:;base 64,WA"'
+- '"data:;base64   ,WA"'
+- '"data:;base64 ,WA"'
+- '"data:;base64,W%0CA"'
+- '"data:;base64,W%20A"'
+- '"data:;base64;,WA"'
+- '"data:;base64;base64,WA"'
+- '"data:;charset =x,X"'
+- '"data:;charset,X"'
+- '"data:;charset= x,X"'
+- '"data:;charset=,X"'
+- '"data:;charset=\"x\",X"'
+- '"data:;charset=x,X"'
+- '"data:;x=x,X"'
+- '"data:;x=x;charset=x,X"'
+- '"data:IMAGE/gif,%C2%B1"'
+- '"data:IMAGE/gif;CHARSET=x,%C2%B1"'
+- '"data:IMAGE/gif;hi=x,%C2%B1"'
+- '"data:X,X"'
+- '"data:\0,%FF"'
+- '"data:\f,%FF"'
+- '"data:application/javascript,X X"'
+- '"data:application/xml,X X"'
+- '"data:image/gif,%C2%B1"'
+- '"data:image/png,X X"'
+- '"data:text / html,X"'
+- '"data:text/html  ,X"'
+- '"data:text/javascript,X X"'
+- '"data:text/plain ,X"'
+- '"data:text/plain%0C,X"'
+- '"data:text/plain%20,X"'
+- '"data:text/plain,X X"'
+- '"data:text/plain,X"'
+- '"data:text/plain;,X"'
+- '"data:text/plain;Charset=UTF-8,%C2%B1"'
+- '"data:text/plain;a=%2C,X"'
+- '"data:text/plain;a=\",\",X"'
+- "\"data:text/plain;charset=UTF-8,áñçə\U0001F4A9\""
+- '"data:text/plain;charset=windows-1252,%C2%B1"'
+- "\"data:text/plain;charset=windows-1252,áñçə\U0001F4A9\""
+- '"data:text/plain\f,X"'
+- '"data:unknown/unknown,X X"'
+- '"data:x/x;base64;base64,WA"'
+- '"data:x/x;base64;base64x,WA"'
+- '"data:x/x;base64;charset=x,WA"'
+- '"data:x/x;base64;charset=x;base64,WA"'
+- '"data:x;base64;x,WA"'
+- '"data:x;base64=x,WA"'
+- '"data:x;base64x,WA"'
+- '"data:†,X"'
+- '"data:†/†,X"'
+fetch/h1-parsing/lone-cr.window.js:
+- "Parsing response with a lone CR before message-body (HTTP/1.1\r200 OK\n\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200\rOK\n\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\n\rHeader:
+  Value\n\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader\r:
+  Value\n\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader:\r
+  Value\n\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\n\r)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\n\rBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\r\n\nBody)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\r\r\nBODY)"
+- "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\rHeader2:
+  Value2\n\nBODY)"
+fetch/h1-parsing/resources-with-0x00-in-header.window.js:
+- Expect network error for image with 0x00 in a header
+fetch/h1-parsing/status-code.window.js:
+- HTTP/1.1  (network error)
+- HTTP/1.1 -200 TEST (network error)
+- 'HTTP/1.1 0 OK '
+- HTTP/1.1 0200 BOO (network error)
+- 'HTTP/1.1 077 77 '
+- 'HTTP/1.1 099 HELLO '
+- HTTP/1.1 0xA (network error)
+- 'HTTP/1.1 1 OK '
+- HTTP/1.1 1000 BOO (network error)
+- HTTP/1.1 131072 HI (network error)
+- HTTP/1.1 65736 NOT 200 OR SOME SUCH (network error)
+- 'HTTP/1.1 99 NOT OK '
+- 'HTTP/1.1 999 DOES IT MATTER '
+- HTTP/1.1 BLAH (network error)
+- HTTP/1.1 C8 (network error)
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
 html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
+html/webappapis/atob/base64.any.js:
+- atob(" abcd===")
+- atob("--")
+- atob("..")
+- atob("/")
+- atob("////A")
+- atob("=")
+- atob("==")
+- atob("===")
+- atob("====")
+- atob("=====")
+- atob("=a")
+- atob("=a=")
+- atob("A")
+- atob("AAAA/")
+- atob("\0nonsense")
+- atob("__")
+- atob("a")
+- atob("a=")
+- atob("a==")
+- atob("a===")
+- atob("a====")
+- atob("a=====")
+- atob("a=b")
+- atob("a=b=")
+- atob("ab=")
+- atob("ab===")
+- atob("ab====")
+- atob("ab=====")
+- atob("ab=c")
+- atob("ab=c=")
+- atob("ab\vcd")
+- atob("abc==")
+- atob("abc===")
+- atob("abc====")
+- atob("abc=====")
+- atob("abc=d")
+- atob("abc=d=")
+- atob("abcd ===")
+- atob("abcd=")
+- atob("abcd==")
+- atob("abcd=== ")
+- atob("abcd===")
+- atob("abcd====")
+- atob("abcd=====")
+- atob("abcd\0nonsense")
+- atob("abcde")
+- atob("abcde=")
+- atob("abcde==")
+- atob("abcde===")
+- atob("abcde====")
+- atob("abcde=====")
+- atob("ab cd")
+- atob("ab　cd")
+- atob("ab、cd")
+- atob("~~")
+- "atob(\"\U00010000\")"
+- atob(-0)
+- atob(-Infinity)
+- atob(0)
+- atob(1.5)
+- atob(7)
+- atob(false)
+- atob(undefined)
+- btoa("\ufffe") must raise INVALID_CHARACTER_ERR
+- btoa("\uffff") must raise INVALID_CHARACTER_ERR
+- btoa("Ā") must raise INVALID_CHARACTER_ERR
+- btoa("ā") must raise INVALID_CHARACTER_ERR
+- btoa("עברית") must raise INVALID_CHARACTER_ERR
+- btoa("✐") must raise INVALID_CHARACTER_ERR
+- "btoa(\"\U00010000\") must raise INVALID_CHARACTER_ERR"
+html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
+- Array instance
+- Date instance
+- Object instance
+- RegExp instance
+html/webappapis/structured-clone/structured-clone.any.js:
+- A detached ArrayBuffer cannot be transferred
+- A detached platform object cannot be transferred
+- A subclass instance will be received as its closest transferable superclass
+- An object whose interface is deleted from the global object must still be received
+- Array Boolean objects
+- Array FileList object, FileList empty
+- Array ImageBitmap object, ImageBitmap 1x1 transparent black
+- Array ImageBitmap object, ImageBitmap 1x1 transparent non-black
+- Array Number objects
+- Array String objects
+- Array with non-index property
+- ArrayBuffer
+- BigInt -9007199254740994n
+- Boolean false
+- Boolean true
+- Empty Error object
+- Error object
+- EvalError object
+- FileList empty
+- Growable SharedArrayBuffer
+- ImageBitmap
+- ImageBitmap 1x1 non-transparent non-black
+- ImageBitmap 1x1 transparent black
+- Length-tracking DataView is transferable
+- Length-tracking TypedArray is transferable
+- MessagePort
+- Number -0
+- Number -9007199254740992
+- Number -9007199254740994
+- Number -Infinity
+- Number 0
+- Number 0.2
+- Number 9007199254740992
+- Number 9007199254740994
+- Number Infinity
+- Number NaN
+- Object Boolean objects
+- Object FileList object, FileList empty
+- Object ImageBitmap object, ImageBitmap 1x1 transparent black
+- Object ImageBitmap object, ImageBitmap 1x1 transparent non-black
+- Object Number objects
+- Object String objects
+- RangeError object
+- ReferenceError object
+- Resizable ArrayBuffer
+- Resizable ArrayBuffer is transferable
+- Serializing OOB DataView throws
+- Serializing OOB TypedArray throws
+- Serializing a non-serializable platform object fails
+- String NUL
+- String astral character
+- String empty string
+- String lone high surrogate
+- String lone low surrogate
+- SyntaxError object
+- Transferring OOB DataView throws
+- Transferring OOB TypedArray throws
+- Transferring a non-transferable platform object fails
+- TypeError object
+- URIError object
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
@@ -43,6 +2537,8 @@ xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
+xhr/cors-expose-star.sub.any.js:
+- "* for credentialed fetches only matches literally"
 xhr/event-error.sub.any.js:
 - error while reading body should report zeros for loaded and total
 xhr/event-readystatechange-loaded.any.js:
@@ -148,8 +2644,6 @@ xhr/timeout-multiple-fetches.html:
 - Redirects should not reset the timer
 xhr/xhr-authorization-redirect.any.js:
 - getAuthorizationHeaderValue - cross origin redirection
-- getAuthorizationHeaderValue - no redirection
-- getAuthorizationHeaderValue - same origin redirection
 xhr/xmlhttprequest-eventtarget.htm:
 - 'XMLHttpRequest: implements EventTarget'
 xhr/xmlhttprequest-timeout-aborted.html:

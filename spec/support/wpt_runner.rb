@@ -526,16 +526,18 @@ module WptRunner
   # (timers + microtask-queuing) and the forms semantics surface (form
   # submission / constraint validation / input / select / textarea / labels —
   # the form-driven slice every app suite exercises). See script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,xhr}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
-  # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ — each was swept
-  # per-file with a hang timeout and found crasher-free (xhr 86, html/dom+forms 26:
-  # 0 hangs). The TOP-LEVEL dom/ tree is still excluded: it has synchronous-infinite
-  # -loop crashers that hang the V8 call (no virtual-clock timeout catches them) and
-  # needs a skip-list before it can be scanned. (.tentative files auto-route to
-  # out-of-scope, so the one tentative window.js here self-excludes.)
-  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,xhr,html/dom,html/semantics/forms}'
+  # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
+  # structured-clone + the fetch/ request slice (api/data-urls/h1-parsing) — each was
+  # swept per-file with a hang timeout and found crasher-free (xhr 86, html/dom+forms
+  # 26, fetch+atob+structured-clone 145: 0 hangs). The TOP-LEVEL dom/ tree is still
+  # excluded: it has synchronous-infinite-loop crashers that hang the V8 call (no
+  # virtual-clock timeout catches them) and needs a skip-list before it can be
+  # scanned. (.tentative files auto-route to out-of-scope, so a tentative window.js
+  # here self-excludes.)
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,fetch/api,fetch/data-urls,fetch/h1-parsing}'
 
   def test_files
     @test_files ||= begin

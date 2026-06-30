@@ -56,9 +56,16 @@ const TREES = [
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
                                        // earned out-of-scope in wpt_out_of_scope.yml)
-  'xhr'                                // XMLHttpRequest — responseType / FormData upload / progress events /
+  'xhr',                               // XMLHttpRequest — responseType / FormData upload / progress events /
                                        // timeout / abort / responseURL / headers — the request surface
                                        // Turbo / Rails-UJS / jQuery hammer; data API, no layout
+  'fetch/api',                         // fetch() Request/Response/Headers/Body — the same request stack as
+                                       // xhr (rack_fetch / CORS / body serialization / URL / redirects), so
+                                       // the foundations hardened for xhr should pay off here for free
+  'fetch/data-urls',                   // data: URL parsing (reuses the whatwg-url backend)
+  'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
+  'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
+  'html/webappapis/structured-clone'   // structuredClone — deep-clone of platform objects, no layout
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
