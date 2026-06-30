@@ -2611,6 +2611,7 @@ module Capybara
         reset_frame_scope
         @history.clear
         @history_idx     = -1
+        @cors_preflight_cache = {}   # CORS-preflight cache is per browsing context
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
@@ -5733,12 +5734,40 @@ module Capybara
         !CORS_SAFELISTED_METHODS.include?(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
       end
 
-      # Fetch "CORS-preflight fetch": send an OPTIONS with Access-Control-Request-Method
-      # / -Headers + Origin, and accept iff the response is ok-status AND its
-      # Access-Control-Allow-Origin matches AND it allows the method (or it's safelisted)
-      # AND it allows every unsafe header. (Credentialed preflight + Max-Age cache are
-      # not modelled yet — these basic cases use withCredentials=false.)
+      # Run the CORS preflight unless a cached result already covers this request (Fetch
+      # "CORS-preflight cache"): a prior preflight to the same (origin, url) within its
+      # Access-Control-Max-Age that allows this method + headers lets the actual request
+      # skip the OPTIONS (access-control-basic-allow-preflight-cache). Returns false (=
+      # network error) only when a fresh preflight is needed AND fails.
       def cors_preflight_ok?(target, method, headers, req_origin)
+        return true if cors_preflight_cached?(target, req_origin, method, headers)
+        result = cors_run_preflight(target, method, headers, req_origin)
+        return false unless result
+        # Cache the grant for Max-Age seconds so a covered follow-up skips the preflight.
+        @cors_preflight_cache[[req_origin, target]] = result.merge(stored_at: Process.clock_gettime(Process::CLOCK_MONOTONIC)) if result[:max_age].positive?
+        true
+      end
+
+      # Whether a cached preflight grant covers this request (not expired, method allowed
+      # or safelisted, every unsafe header allowed). A method/header the cache doesn't
+      # cover — or an expired entry — forces a fresh preflight (cache-invalidation-by
+      # -method / -header / -timeout).
+      def cors_preflight_cached?(target, req_origin, method, headers)
+        entry = (@cors_preflight_cache ||= {})[[req_origin, target]]
+        return false unless entry
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) - entry[:stored_at] >= entry[:max_age]
+        m = method.to_s.upcase
+        methods_ok = entry[:methods].include?('*') || entry[:methods].map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
+        headers_ok = entry[:headers].include?('*') || cors_unsafe_headers(headers).all? {|h| entry[:headers].include?(h) }
+        methods_ok && headers_ok
+      end
+
+      # Fetch "CORS-preflight fetch": send an OPTIONS with Access-Control-Request-Method
+      # / -Headers + Origin; on success (ok-status, ACAO match, method allowed or
+      # safelisted, every unsafe header allowed) return the grant {methods, headers,
+      # max_age} for the cache, else nil. (Credentialed preflight is not modelled yet —
+      # the basic cases use withCredentials=false.)
+      def cors_run_preflight(target, method, headers, req_origin)
         unsafe = cors_unsafe_headers(headers)
         env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
@@ -5748,15 +5777,15 @@ module Capybara
         env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
         status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
         pbody.close if pbody.respond_to?(:close)
-        return false unless (200..299).include?(status.to_i)
+        return nil unless (200..299).include?(status.to_i)
         acao = cors_header(ph, 'access-control-allow-origin')
-        return false unless acao == '*' || acao == req_origin
+        return nil unless acao == '*' || acao == req_origin
         m             = method.to_s.upcase
         allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
-        return false unless allow_methods.include?('*') || allow_methods.map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
+        return nil unless allow_methods.include?('*') || allow_methods.map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
         allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
-        return false unless allow_headers.include?('*') || unsafe.all? {|h| allow_headers.include?(h) }
-        true
+        return nil unless allow_headers.include?('*') || unsafe.all? {|h| allow_headers.include?(h) }
+        { methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i }
       end
 
       # Fetch "CORS-safelisted response-header name" — always exposed to script for a
