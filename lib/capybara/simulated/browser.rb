@@ -4272,16 +4272,20 @@ module Capybara
         end
         # The request's origin starts as the document origin; a cross-origin REDIRECT
         # taints it to an opaque origin (serialized "null") per Fetch "HTTP-redirect
-        # fetch". `effective_origin` is what the Origin header carries and what the CORS
-        # check / preflight compare against from that hop on.
+        # fetch". `effective_origin` IS that origin — it's what the Origin header
+        # carries and what the CORS check / preflight compare against from that hop on
+        # ('null' once tainted, so the server must then allow 'null' or '*').
         effective_origin = req_origin
-        tainted = false
+        # An author conditional (If-None-Match / …) means the caller is doing its own
+        # revalidation, so the UA cache must step aside (computed once — the headers
+        # carrying it survive every redirect hop unchanged).
+        skip_cache = request_has_conditional_headers?(headers)
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
           # entirely; stale-but-revalidatable → fall through with conditional
           # headers added so the server can return 304.
-          cache_entry = (method == 'GET' && !request_has_conditional_headers?(headers)) ? @@asset_cache.lookup(target) : nil
+          cache_entry = (method == 'GET' && !skip_cache) ? @@asset_cache.lookup(target) : nil
           if cache_entry&.fresh?
             # Cached static asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
@@ -4300,7 +4304,7 @@ module Capybara
           # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
           # cross-origin to every real target; otherwise compare the target to the
           # document origin. Drives the Origin header, preflight, and the CORS check.
-          cross_origin = cors && (tainted || url_origin(target) != req_origin)
+          cross_origin = cors && (effective_origin == 'null' || url_origin(target) != req_origin)
           # A CORS request to a URL carrying credentials (`user:pass@`) is a network
           # error (access-control-and-redirects "user info" subtest).
           return nil if cross_origin && url_has_userinfo?(target)
@@ -4340,8 +4344,9 @@ module Capybara
             redirected = true
             next_url = resolve_against(loc, target)
             # A redirect to a DIFFERENT origin taints the request's origin to opaque
-            # ("null"), so every subsequent hop is cross-origin and sends Origin: null.
-            tainted = true if cors && url_origin(next_url) != url_origin(target)
+            # ("null"), so every subsequent hop is cross-origin and sends Origin: null
+            # (and the CORS check then demands the server allow "null" or "*").
+            effective_origin = 'null' if cors && url_origin(next_url) != url_origin(target)
             target = carry_fragment(target, next_url)
             # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
             # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
