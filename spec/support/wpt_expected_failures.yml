@@ -131,10 +131,6 @@ xhr/send-conditional-cors.htm:
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
-- empty div
-- image file
-- img tag
-- plain text file
 xhr/send-network-error-sync-events.sub.htm:
 - data URL
 xhr/send-sync-blocks-async.htm:
