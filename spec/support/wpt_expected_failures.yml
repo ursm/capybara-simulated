@@ -146,19 +146,10 @@ xhr/send-network-error-async-events.sub.htm:
   error happens (synchronous flag is unset)'
 xhr/send-network-error-sync-events.sub.htm:
 - data URL
-xhr/send-no-response-event-order.htm:
-- 'XMLHttpRequest: The send() method: event order when there is no response entity
-  body'
 xhr/send-non-same-origin.htm:
 - 'XMLHttpRequest: send() - non same-origin (folder.txt)'
-xhr/send-redirect-post-upload.htm:
-- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
-- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
-- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (303)'
 xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
-xhr/send-sync-response-event-order.htm:
-- 'XMLHttpRequest: The send() method: event order when synchronous flag is set'
 xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
 xhr/status.h2.window.js:
