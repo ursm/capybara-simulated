@@ -370,6 +370,13 @@ class Response:
     def status_code(self, v):
         self.status = v
 
+    def write_status_headers(self):
+        # wptserve: flush the status line + the headers set so far, then let the
+        # handler stream the (possibly chunked) body via response.writer.write.
+        self.writer.used    = True
+        self.writer.status  = self.status_code
+        self.writer.headers = [(_b(k), _b(v)) for k, v in self.headers]
+
     def set_cookie(self, name, value, expires=None, secure=False, path=b'/',
                    domain=None, max_age=None, httponly=False, **kw):
         # Append a Set-Cookie header (the driver's cookie store applies Secure /
@@ -444,6 +451,31 @@ def _parse_raw_http(raw):
     return code, reason, hdrs, body
 
 
+def _dechunk(body):
+    """Decode an HTTP chunked-transfer body: `<hex-size>[;ext]\\r\\n<data>\\r\\n` repeated,
+    ending at a `0\\r\\n` last-chunk (any trailers after it are discarded). Bytes after a
+    malformed size line are left as-is rather than raising."""
+    out = bytearray()
+    i = 0
+    while i < len(body):
+        eol = body.find(b'\r\n', i)
+        if eol == -1:
+            break
+        size_field = body[i:eol].split(b';', 1)[0].strip()   # drop any chunk-extension
+        try:
+            size = int(size_field, 16)
+        except ValueError:
+            break
+        i = eol + 2
+        if size == 0:
+            break
+        out += body[i:i + size]
+        i += size
+        if body[i:i + 2] == b'\r\n':   # CRLF terminating the chunk data
+            i += 2
+    return bytes(out)
+
+
 def register_wptserve_stub():
     """Vendored handlers commonly do `from wptserve.utils import isomorphic_decode
     / isomorphic_encode`. We aren't wptserve; register a minimal `wptserve.utils`
@@ -506,6 +538,20 @@ def main():
         status_reason = _status_reason(response.status)
         hdrs = [(_b(k), _b(v)) for k, v in response.headers]
         out_body = _to_bytes(response.content if response.content else result)
+
+    # A handler that STREAMED a `Transfer-Encoding: chunked` body via the writer
+    # (chunked.py) wrote the chunk framing + any trailers by hand. A real client
+    # dechunks transparently: the XHR sees the decoded body, the hop-by-hop
+    # Transfer-Encoding header is stripped, and trailers are dropped (only the
+    # `Trailer` header that announced them survives — getresponseheader-chunked-trailer).
+    # Gated on writer.used: only a hand-framed writer body carries the chunk framing;
+    # a tuple/content handler that merely sets the header returns an already-decoded
+    # body that must not be re-decoded. (A malformed/truncated stream — bad-chunk
+    # -encoding.py — is decoded leniently; surfacing it as a network error is the
+    # separate response-body-errors backlog item.)
+    if response.writer.used and any(k.lower() == b'transfer-encoding' and b'chunked' in v.lower() for k, v in hdrs):
+        out_body = _dechunk(out_body)
+        hdrs = [(k, v) for k, v in hdrs if k.lower() != b'transfer-encoding']
 
     # wptserve injects Server + Date on every non-writer response (its
     # `add_required_headers` default) — the getResponseHeader server-and-date test
