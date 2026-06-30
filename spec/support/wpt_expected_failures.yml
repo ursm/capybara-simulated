@@ -30,18 +30,12 @@ xhr/abort-event-order.htm:
 - 'XMLHttpRequest: The abort() method: abort and loadend events'
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
-xhr/access-control-basic-cors-safelisted-response-headers.htm:
-- Response with CORS-safelisted headers
-xhr/access-control-expose-headers-on-redirect.html:
-- XHR should respect access-control-expose-headers header on redirect
 xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
 - CORS sync request with URL credentials
 xhr/access-control-preflight-request-must-not-contain-cookie.htm:
 - Preflight request must not contain any cookie header
-xhr/access-control-response-with-exposed-headers.htm:
-- Test CORS response with 'Access-Control-Expose-Headers' header
 xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
 - Sandboxed iframe is denied CORS access to server that allows parent origin
 xhr/access-control-sandboxed-iframe-denied.htm:
@@ -191,8 +185,6 @@ xhr/send-redirect-post-upload.htm:
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (303)'
-- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (307 (blob))'
-- 'XMLHttpRequest: The send() method: POSTing to URL that redirects (307 (string))'
 xhr/send-redirect-to-cors.htm:
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 GET with explicit
   Content-Type)'

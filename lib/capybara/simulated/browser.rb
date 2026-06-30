@@ -4329,13 +4329,20 @@ module Capybara
           # -Origin of `*` or exactly the request's origin, else it's a network error
           # (access-control-basic-allow / -denied / -star). (Credentialed `*` + preflight
           # are not modelled yet — withCredentials is false in these basic cases.)
+          exposed_headers = resp_headers
           if req_origin && url_origin(target) != req_origin
-            acao = resp_headers.find {|k, _| k.to_s.downcase == 'access-control-allow-origin' }&.last.to_s
+            acao = cors_header(resp_headers, 'access-control-allow-origin')
             return nil unless acao == '*' || acao == req_origin
+            # A cross-origin response only EXPOSES (getResponseHeader / getAllResponse
+            # Headers) the CORS-safelisted response headers plus those named in
+            # Access-Control-Expose-Headers (`*` = all). content-type stays safelisted,
+            # so response decoding is unaffected. (Filtered for script exposure only —
+            # trace / set-cookie / cache above still see the full set.)
+            exposed_headers = cors_exposed_headers(resp_headers)
           end
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
-          return response_hash(status, resp_headers, body_str, target, redirected)
+          return response_hash(status, exposed_headers, body_str, target, redirected)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -5745,6 +5752,23 @@ module Capybara
         allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
         return false unless allow_headers.include?('*') || unsafe.all? {|h| allow_headers.include?(h) }
         true
+      end
+
+      # Fetch "CORS-safelisted response-header name" — always exposed to script for a
+      # cross-origin response, without being listed in Access-Control-Expose-Headers.
+      CORS_SAFELISTED_RESPONSE_HEADERS = %w[
+        cache-control content-language content-length content-type expires last-modified pragma
+      ].freeze
+
+      # The response headers a cross-origin "cors" response exposes to getResponseHeader /
+      # getAllResponseHeaders: the CORS-safelisted set plus any named in Access-Control
+      # -Expose-Headers (`*` exposes all — only valid without credentials, which these
+      # cases don't use).
+      def cors_exposed_headers(headers)
+        expose = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
+        return headers if expose.include?('*')
+        allowed = CORS_SAFELISTED_RESPONSE_HEADERS + expose
+        headers.select {|k, _| allowed.include?(k.to_s.downcase) }
       end
 
       # Case-insensitive response-header lookup + comma-list split for the CORS checks.

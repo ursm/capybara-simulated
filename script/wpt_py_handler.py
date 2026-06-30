@@ -464,6 +464,10 @@ def main():
             hdrs.append((b'Date', _b(formatdate(usegmt=True))))
         if b'server' not in have:
             hdrs.append((b'Server', b'capybara-simulated-wpt-shim'))
+        # A real server frames the response with Content-Length when the handler didn't
+        # (cors-safelisted-response-headers asserts getResponseHeader('content-length')).
+        if b'content-length' not in have:
+            hdrs.append((b'Content-Length', str(len(out_body)).encode('latin-1')))
 
     meta = {
         'status': status,
