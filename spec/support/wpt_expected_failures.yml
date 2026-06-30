@@ -87,8 +87,6 @@ fetch/api/abort/serviceworker-intercepted.https.html:
 - response.text() rejects if already aborted
 fetch/api/basic/accept-header.any.js:
 - Request through fetch should have 'accept' header with value '*/*'
-- Request through fetch should have 'accept' header with value 'custom/*'
-- Request through fetch should have 'accept-language' header with value 'bzh'
 - Request through fetch should have a 'accept-language' header
 fetch/api/basic/block-mime-as-script.html:
 - Should fail loading empty script with audio/aiff MIME type

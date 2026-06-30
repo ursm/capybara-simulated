@@ -4257,6 +4257,18 @@ module Capybara
         6669, 6679, 6697, 10080
       ].freeze
 
+      # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
+      # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed
+      # (the vast majority don't), so the rack_fetch hot path — every asset / xhr /
+      # fetch, cache hits included — skips URI.parse entirely.
+      def bad_port?(url_str)
+        return false unless url_str =~ %r{\A[a-z]+://[^/]*:\d}i
+        port = URI.parse(url_str).port
+        port && BAD_PORTS.include?(port)
+      rescue URI::Error
+        false
+      end
+
       # URLs we won't even try to route through Rack: anything that
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
@@ -4269,15 +4281,11 @@ module Capybara
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
-        # request to one of these ports is a network error before any connection —
+        # request to a blocked port is a network error before any connection —
         # fetch() rejects with TypeError, a sync XHR throws NetworkError
-        # (request-bad-port). An absent port (the scheme default) is never blocked.
-        begin
-          port = URI.parse(target).port
-          return nil if port && BAD_PORTS.include?(port)
-        rescue URI::InvalidURIError
-          # fall through — a malformed URI is handled by the dispatch below
-        end
+        # (request-bad-port). Re-checked per redirect hop below ("HTTP-redirect fetch"
+        # re-runs the block), so a 3xx Location to a bad port is refused too.
+        return nil if bad_port?(target)
         # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
         # XHR passes it; fetch() (whose default mode IS cors) and every other caller
         # (sendBeacon, ESM, workers, the internal asset GET) pass nil → no enforcement.
@@ -4376,6 +4384,7 @@ module Capybara
             # (and the CORS check then demands the server allow "null" or "*").
             effective_origin = 'null' if cors && url_origin(next_url) != url_origin(target)
             target = carry_fragment(target, next_url)
+            return nil if bad_port?(target)   # a redirect to a blocked port is a network error too
             # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
             # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
             # non-GET/HEAD. Otherwise method, body, and headers are preserved — so a
