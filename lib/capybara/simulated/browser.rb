@@ -4247,7 +4247,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, env_extras: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, with_credentials: false, env_extras: nil)
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
@@ -4270,14 +4270,12 @@ module Capybara
           body = Base64.decode64(body.to_s)
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
-        # CORS-preflight: a cross-origin "cors" request that is NOT a simple request — a
-        # non-safelisted method, a non-CORS-safelisted header, or a non-safelisted
-        # Content-Type — must pass an OPTIONS preflight before the actual request, else
-        # it's a network error (access-control-basic-get-fail-non-simple / -post-with-non
-        # -cors-safelisted-content-type / the preflight-* suite).
-        if req_origin && url_origin(target) != req_origin && cors_unsafe_request?(method, headers)
-          return nil unless cors_preflight_ok?(target, method, headers, req_origin)
-        end
+        # The request's origin starts as the document origin; a cross-origin REDIRECT
+        # taints it to an opaque origin (serialized "null") per Fetch "HTTP-redirect
+        # fetch". `effective_origin` is what the Origin header carries and what the CORS
+        # check / preflight compare against from that hop on.
+        effective_origin = req_origin
+        tainted = false
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
@@ -4299,16 +4297,27 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
-          # Whether this hop crosses the document origin (only meaningful for a cors
-          # request, where req_origin is set) — computed once and reused for the Origin
-          # header + the response CORS check (target is constant within a hop).
-          cross_origin = req_origin && url_origin(target) != req_origin
-          # Send the document's Origin (the UA owns this header) on a cors request when
-          # the hop is cross-origin OR the method is not GET/HEAD — Fetch appends Origin
-          # for every non-GET/HEAD request, so a same-origin POST carries it too (the
-          # server may key its Access-Control-Allow-Origin echo on Origin being present).
+          # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
+          # cross-origin to every real target; otherwise compare the target to the
+          # document origin. Drives the Origin header, preflight, and the CORS check.
+          cross_origin = cors && (tainted || url_origin(target) != req_origin)
+          # A CORS request to a URL carrying credentials (`user:pass@`) is a network
+          # error (access-control-and-redirects "user info" subtest).
+          return nil if cross_origin && url_has_userinfo?(target)
+          # CORS-preflight, re-evaluated PER HOP: a cross-origin non-simple request (a
+          # non-safelisted method / header / Content-Type) must pass an OPTIONS preflight
+          # first — so a same-origin request redirected cross-origin to an unsafe resource
+          # is preflighted on the NEW origin (send-redirect-to-cors), not just an initially
+          # cross-origin one (access-control-basic-get-fail-non-simple / preflight-*).
+          if cross_origin && cors_unsafe_request?(method, headers)
+            return nil unless cors_preflight_ok?(target, method, headers, effective_origin)
+          end
+          # Send the (effective) Origin — the UA owns this header — on a cors request when
+          # the hop is cross-origin OR the method is not GET/HEAD (Fetch appends Origin to
+          # every non-GET/HEAD request, so a same-origin POST carries it too). After a
+          # cross-origin redirect the origin is the opaque "null".
           if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
-            env['HTTP_ORIGIN'] = req_origin
+            env['HTTP_ORIGIN'] = effective_origin
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
@@ -4319,12 +4328,20 @@ module Capybara
             @@asset_cache.refresh(cache_entry, resp_headers)
             return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
+          # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
+          # UA is about to follow (a redirect whose response lacks a valid Access-Control
+          # -Allow-Origin is itself a network error: access-control-and-redirects). A
+          # credentialed request additionally forbids `*` and needs Allow-Credentials.
+          return nil if cross_origin && !cors_response_ok?(resp_headers, effective_origin, with_credentials)
           if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
             raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             redirected = true
             next_url = resolve_against(loc, target)
+            # A redirect to a DIFFERENT origin taints the request's origin to opaque
+            # ("null"), so every subsequent hop is cross-origin and sends Origin: null.
+            tainted = true if cors && url_origin(next_url) != url_origin(target)
             target = carry_fragment(target, next_url)
             # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
             # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
@@ -4344,21 +4361,12 @@ module Capybara
           # A HEAD response has no body — the UA discards whatever the server sent
           # (response-method: echo-method.py writes one even for HEAD).
           body_str = '' if method.to_s.upcase == 'HEAD'
-          # CORS check: a cross-origin "cors" response must carry an Access-Control-Allow
-          # -Origin of `*` or exactly the request's origin, else it's a network error
-          # (access-control-basic-allow / -denied / -star). (Credentialed `*` + preflight
-          # are not modelled yet — withCredentials is false in these basic cases.)
-          exposed_headers = resp_headers
-          if cross_origin
-            acao = cors_header(resp_headers, 'access-control-allow-origin')
-            return nil unless acao == '*' || acao == req_origin
-            # A cross-origin response only EXPOSES (getResponseHeader / getAllResponse
-            # Headers) the CORS-safelisted response headers plus those named in
-            # Access-Control-Expose-Headers (`*` = all). content-type stays safelisted,
-            # so response decoding is unaffected. (Filtered for script exposure only —
-            # trace / set-cookie / cache above still see the full set.)
-            exposed_headers = cors_exposed_headers(resp_headers)
-          end
+          # A cross-origin response only EXPOSES (getResponseHeader / getAllResponseHeaders)
+          # the CORS-safelisted response headers plus those named in Access-Control-Expose
+          # -Headers (`*` = all). content-type stays safelisted, so response decoding is
+          # unaffected. (Filtered for script exposure only — trace / set-cookie / cache see
+          # the full set.) The CORS check itself already ran above (incl. on 3xx hops).
+          exposed_headers = cross_origin ? cors_exposed_headers(resp_headers) : resp_headers
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
           return response_hash(status, exposed_headers, body_str, target, redirected)
@@ -5751,6 +5759,31 @@ module Capybara
 
       def cors_unsafe_request?(method, headers)
         !CORS_SAFELISTED_METHODS.include?(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
+      end
+
+      # Fetch "CORS check" on a cross-origin response: it must allow the request's
+      # (effective) origin via Access-Control-Allow-Origin. A NON-credentialed request
+      # accepts `*` or the exact origin; a CREDENTIALED one (withCredentials) forbids
+      # `*` — the ACAO must be the exact origin AND Access-Control-Allow-Credentials
+      # must be `true` (access-control-and-redirects-async-same-origin credentials cases).
+      def cors_response_ok?(resp_headers, origin, credentialed)
+        acao = cors_header(resp_headers, 'access-control-allow-origin')
+        return false if acao.nil?
+        if credentialed
+          return false unless acao == origin
+          cors_header(resp_headers, 'access-control-allow-credentials').to_s.downcase == 'true'
+        else
+          acao == '*' || acao == origin
+        end
+      end
+
+      # Whether a URL carries userinfo (`user[:password]@`). A CORS request to such a
+      # URL is a network error (access-control-and-redirects "user info" subtest).
+      def url_has_userinfo?(url)
+        u = URI.parse(url.to_s)
+        !u.userinfo.to_s.empty?
+      rescue URI::InvalidURIError
+        false
       end
 
       # Run the CORS preflight unless a cached result already covers this request (Fetch

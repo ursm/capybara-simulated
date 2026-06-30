@@ -32,14 +32,6 @@ xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
 - abort-after-timeout
-xhr/access-control-and-redirects-async-same-origin.any.js:
-- Request with credentials is redirected to a cross-origin response with Access-Control-Allow-Origin=*
-  (with star)
-- Request with credentials is redirected to a cross-origin response with a specific
-  Access-Control-Allow-Origin (no credentials)
-xhr/access-control-and-redirects-async.any.js:
-- Request is redirected without CORS headers to a response with Access-Control-Allow-Origin=*
-- Request with user info is redirected to a response with Access-Control-Allow-Origin=*
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
@@ -196,17 +188,6 @@ xhr/send-redirect-post-upload.htm:
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (301)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (302)'
 - 'XMLHttpRequest: The send() method: POSTing to URL that redirects (303)'
-xhr/send-redirect-to-cors.htm:
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (301 GET with explicit
-  Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 FOO with string
-  and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
-  and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
-  and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
-  and explicit Content-Type)'
 xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
 xhr/send-sync-response-event-order.htm:
