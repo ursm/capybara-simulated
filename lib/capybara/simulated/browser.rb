@@ -4491,9 +4491,14 @@ module Capybara
         # x-csim-status-text header (status.py), else the status code's standard
         # reason (xhr status/statusText tests). Strip the internal header either way.
         custom_reason = hdrs.delete('x-csim-status-text')
+        # Rack::Utils::HTTP_STATUS_CODES values are ASCII-8BIT (binary) strings — the V8
+        # bridge marshals a binary string as a byte array, not a JS string, so statusText
+        # would arrive as [79,75] instead of "OK" (abort-during-loading reads statusText
+        # on a static-file response). Force text so it crosses as a JS string.
+        reason = (custom_reason || Rack::Utils::HTTP_STATUS_CODES[status.to_i] || '').to_s.dup.force_encoding(Encoding::UTF_8)
         out = {
           'status'     => status,
-          'statusText' => custom_reason || Rack::Utils::HTTP_STATUS_CODES[status.to_i] || '',
+          'statusText' => reason,
           'headers'    => hdrs,
           'body'       => text,
           'url'        => url,

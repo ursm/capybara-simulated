@@ -90,14 +90,6 @@ xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
 - abort-after-timeout
-xhr/abort-during-done.window.js:
-- " (async)"
-- " (sync aborted in readystatechange)"
-- " (sync)"
-xhr/abort-during-headers-received.window.js:
-- abort-during-headers-received
-xhr/abort-during-loading.window.js:
-- abort-during-loading
 xhr/abort-during-upload.any.js:
 - abort-during-upload
 xhr/abort-event-order.htm:
@@ -307,8 +299,6 @@ xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
 xhr/send-sync-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is set'
-xhr/send-sync-timeout.htm:
-- 'XMLHttpRequest: timeout during sync send() should not run'
 xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
 xhr/setrequestheader-bogus-value.htm:
