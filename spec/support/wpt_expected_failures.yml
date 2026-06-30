@@ -51,17 +51,6 @@ html/semantics/forms/form-submission-0/urlencoded2.window.js:
   (normal form)'
 - 'application/x-www-form-urlencoded: lone surrogate in name and value (formdata event)'
 - 'application/x-www-form-urlencoded: lone surrogate in name and value (normal form)'
-html/semantics/forms/the-input-element/color-attributes.window.js:
-- "<input type=color>: alpha attribute"
-- "<input type=color>: colorspace attribute"
-html/semantics/forms/the-textarea-element/wrapping-transformation.window.js:
-- Textarea hard-wrapping should honor the col count unconditionally,
-- 'Textarea wrapping transformation: Newlines should be normalized to LF.'
-- 'Textarea wrapping transformation: Wrapping happens with LF newlines.'
-- |-
-  Textarea wrapping transformation: wrapping round-trips: exact  len
-  and then
-  some
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
@@ -117,8 +106,6 @@ xhr/firing-events-http-no-content-length.html:
 xhr/formdata/append-formelement.html:
 - testFormDataAppendToFormString
 - testFormDataAppendToFormWrongPlatformObject
-xhr/formdata/constructor-formelement.html:
-- test that FormData is correctly constructed from the form data set
 xhr/formdata/constructor-submitter-coordinate.html:
 - The constructed FormData object should contain correct entries for Image Button
   submitter's dispatched coordinate
