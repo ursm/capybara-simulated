@@ -41,12 +41,6 @@ html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
 - lang only on host
 html/dom/elements/global-attributes/lang-attribute.window.js:
 - unnamespaced lang attribute only works on elements in the HTML namespace
-html/semantics/forms/form-submission-0/FormDataEvent.window.js:
-- Failing FormDataEvent constructor
-html/semantics/forms/form-submission-0/SubmitEvent.window.js:
-- Failing SubmitEvent constructor
-html/semantics/forms/form-submission-0/form-data-set-empty-file.window.js:
-- Empty <input type=file> shows up in the text/plain serialization
 html/semantics/forms/form-submission-0/multipart-formdata.window.js:
 - 'multipart/form-data: character not in encoding in filename (formdata event)'
 - 'multipart/form-data: character not in encoding in filename (normal form)'
@@ -58,87 +52,13 @@ html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
 html/semantics/forms/form-submission-0/text-plain.window.js:
-- 'text/plain: 0x00 in filename (formdata event)'
-- 'text/plain: 0x00 in filename (normal form)'
-- 'text/plain: 0x00 in name (formdata event)'
-- 'text/plain: 0x00 in name (normal form)'
-- 'text/plain: 0x00 in value (formdata event)'
-- 'text/plain: 0x00 in value (normal form)'
-- 'text/plain: Basic File test (formdata event)'
-- 'text/plain: Basic File test (normal form)'
-- 'text/plain: Basic test (formdata event)'
-- 'text/plain: Basic test (normal form)'
-- 'text/plain: \n in filename (formdata event)'
-- 'text/plain: \n in filename (normal form)'
-- 'text/plain: \n in name (formdata event)'
-- 'text/plain: \n in name (normal form)'
-- 'text/plain: \n in value (formdata event)'
-- 'text/plain: \n in value (normal form)'
-- 'text/plain: \n\r in filename (formdata event)'
-- 'text/plain: \n\r in filename (normal form)'
-- 'text/plain: \n\r in name (formdata event)'
-- 'text/plain: \n\r in name (normal form)'
-- 'text/plain: \n\r in value (formdata event)'
-- 'text/plain: \n\r in value (normal form)'
-- 'text/plain: \r in filename (formdata event)'
-- 'text/plain: \r in filename (normal form)'
-- 'text/plain: \r in name (formdata event)'
-- 'text/plain: \r in name (normal form)'
-- 'text/plain: \r in value (formdata event)'
-- 'text/plain: \r in value (normal form)'
-- 'text/plain: \r\n in filename (formdata event)'
-- 'text/plain: \r\n in filename (normal form)'
-- 'text/plain: \r\n in name (formdata event)'
-- 'text/plain: \r\n in name (normal form)'
-- 'text/plain: \r\n in value (formdata event)'
-- 'text/plain: \r\n in value (normal form)'
-- 'text/plain: backslash in filename (formdata event)'
-- 'text/plain: backslash in filename (normal form)'
-- 'text/plain: backslash in name (formdata event)'
-- 'text/plain: backslash in name (normal form)'
-- 'text/plain: backslash in value (formdata event)'
-- 'text/plain: backslash in value (normal form)'
 - 'text/plain: character not in encoding in filename (formdata event)'
 - 'text/plain: character not in encoding in filename (normal form)'
 - 'text/plain: characters not in encoding in name and value (formdata event)'
 - 'text/plain: characters not in encoding in name and value (normal form)'
-- 'text/plain: double quote in filename (formdata event)'
-- 'text/plain: double quote in filename (normal form)'
-- 'text/plain: double quote in name (formdata event)'
-- 'text/plain: double quote in name (normal form)'
-- 'text/plain: double quote in value (formdata event)'
-- 'text/plain: double quote in value (normal form)'
 - 'text/plain: lone surrogate in name and value (formdata event)'
 - 'text/plain: lone surrogate in name and value (normal form)'
-- 'text/plain: non-ASCII in filename (formdata event)'
-- 'text/plain: non-ASCII in filename (normal form)'
-- 'text/plain: non-ASCII in name and value (formdata event)'
-- 'text/plain: non-ASCII in name and value (normal form)'
-- 'text/plain: single quote in filename (formdata event)'
-- 'text/plain: single quote in filename (normal form)'
-- 'text/plain: single quote in name (formdata event)'
-- 'text/plain: single quote in name (normal form)'
-- 'text/plain: single quote in value (formdata event)'
-- 'text/plain: single quote in value (normal form)'
 html/semantics/forms/form-submission-0/urlencoded2.window.js:
-- 'application/x-www-form-urlencoded: \n in filename (formdata event)'
-- 'application/x-www-form-urlencoded: \n in filename (normal form)'
-- 'application/x-www-form-urlencoded: \n in name (formdata event)'
-- 'application/x-www-form-urlencoded: \n in name (normal form)'
-- 'application/x-www-form-urlencoded: \n in value (formdata event)'
-- 'application/x-www-form-urlencoded: \n in value (normal form)'
-- 'application/x-www-form-urlencoded: \n\r in filename (formdata event)'
-- 'application/x-www-form-urlencoded: \n\r in filename (normal form)'
-- 'application/x-www-form-urlencoded: \n\r in name (formdata event)'
-- 'application/x-www-form-urlencoded: \n\r in name (normal form)'
-- 'application/x-www-form-urlencoded: \n\r in value (formdata event)'
-- 'application/x-www-form-urlencoded: \n\r in value (normal form)'
-- 'application/x-www-form-urlencoded: \r in filename (formdata event)'
-- 'application/x-www-form-urlencoded: \r in filename (normal form)'
-- 'application/x-www-form-urlencoded: \r in name (formdata event)'
-- 'application/x-www-form-urlencoded: \r in name (normal form)'
-- 'application/x-www-form-urlencoded: \r in value (formdata event)'
-- 'application/x-www-form-urlencoded: \r in value (normal form)'
 - 'application/x-www-form-urlencoded: character not in encoding in filename (formdata
   event)'
 - 'application/x-www-form-urlencoded: character not in encoding in filename (normal
@@ -424,27 +344,6 @@ xhr/send-conditional-cors.htm:
 xhr/send-conditional.htm:
 - 'XMLHttpRequest: send() - conditional requests (date)'
 - 'XMLHttpRequest: send() - conditional requests (tag)'
-xhr/send-data-arraybuffer.any.js:
-- send-data-arraybuffer
-xhr/send-data-arraybufferview.any.js:
-- send-data-arraybufferview
-xhr/send-data-es-object.any.js:
-- sending a new XHR instance
-xhr/send-data-sharedarraybuffer.any.js:
-- sending a BigInt64Array backed by a SharedArrayBuffer
-- sending a BigUint64Array backed by a SharedArrayBuffer
-- sending a DataView backed by a SharedArrayBuffer
-- sending a Float16Array backed by a SharedArrayBuffer
-- sending a Float32Array backed by a SharedArrayBuffer
-- sending a Float64Array backed by a SharedArrayBuffer
-- sending a Int16Array backed by a SharedArrayBuffer
-- sending a Int32Array backed by a SharedArrayBuffer
-- sending a Int8Array backed by a SharedArrayBuffer
-- sending a SharedArrayBuffer
-- sending a Uint16Array backed by a SharedArrayBuffer
-- sending a Uint32Array backed by a SharedArrayBuffer
-- sending a Uint8Array backed by a SharedArrayBuffer
-- sending a Uint8ClampedArray backed by a SharedArrayBuffer
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
@@ -476,8 +375,6 @@ xhr/send-redirect-to-cors.htm:
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 POST with string
   and explicit Content-Type)'
-- 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (307 post with typed
-  array)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 FOO with string
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
