@@ -77,8 +77,6 @@ HTMLElement:
   - headingReset
   - scrollParent
 HTMLInputElement:
-  - alpha
-  - colorSpace
   - popoverTargetElement
   - webkitEntries
 Location:

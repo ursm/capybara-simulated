@@ -16,6 +16,8 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+dom/nodes/ParentNode-querySelector-All-xht.xht:
+- 'Selectors-API Test Suite: XHTML'
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
 html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
@@ -23,34 +25,9 @@ html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
 - lang only on host
 html/dom/elements/global-attributes/lang-attribute.window.js:
 - unnamespaced lang attribute only works on elements in the HTML namespace
-html/semantics/forms/form-submission-0/multipart-formdata.window.js:
-- 'multipart/form-data: character not in encoding in filename (formdata event)'
-- 'multipart/form-data: character not in encoding in filename (normal form)'
-- 'multipart/form-data: characters not in encoding in name and value (formdata event)'
-- 'multipart/form-data: characters not in encoding in name and value (normal form)'
-- 'multipart/form-data: lone surrogate in name and value (formdata event)'
-- 'multipart/form-data: lone surrogate in name and value (normal form)'
 html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
-html/semantics/forms/form-submission-0/text-plain.window.js:
-- 'text/plain: character not in encoding in filename (formdata event)'
-- 'text/plain: character not in encoding in filename (normal form)'
-- 'text/plain: characters not in encoding in name and value (formdata event)'
-- 'text/plain: characters not in encoding in name and value (normal form)'
-- 'text/plain: lone surrogate in name and value (formdata event)'
-- 'text/plain: lone surrogate in name and value (normal form)'
-html/semantics/forms/form-submission-0/urlencoded2.window.js:
-- 'application/x-www-form-urlencoded: character not in encoding in filename (formdata
-  event)'
-- 'application/x-www-form-urlencoded: character not in encoding in filename (normal
-  form)'
-- 'application/x-www-form-urlencoded: characters not in encoding in name and value
-  (formdata event)'
-- 'application/x-www-form-urlencoded: characters not in encoding in name and value
-  (normal form)'
-- 'application/x-www-form-urlencoded: lone surrogate in name and value (formdata event)'
-- 'application/x-www-form-urlencoded: lone surrogate in name and value (normal form)'
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:

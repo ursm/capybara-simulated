@@ -85,6 +85,7 @@ module WptRunner
     '.html' => 'text/html',
     '.htm'  => 'text/html',
     '.xhtml' => 'application/xhtml+xml',
+    '.xht'  => 'application/xhtml+xml',
     '.xml'  => 'application/xml',
     '.js'   => 'text/javascript',
     '.json' => 'application/json',
