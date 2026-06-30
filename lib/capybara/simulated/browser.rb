@@ -2481,13 +2481,25 @@ module Capybara
           body << "--#{boundary}--\r\n"
           [body, "multipart/form-data; boundary=#{boundary}"]
         else
-          pairs = entries.map {|e| [e['name'].to_s, e['file'] ? e['filename'].to_s : e['value'].to_s] }
+          # The urlencoded / text-plain encoders normalize CR/LF → CRLF in each entry's
+          # name and value (a file entry's filename is the value) — the entry list itself
+          # stays raw, so normalization lives here, matching the JS encoders and real
+          # browsers (newline-normalization.html).
+          pairs = entries.map {|e|
+            [normalize_form_newlines(e['name']), normalize_form_newlines(e['file'] ? e['filename'] : e['value'])]
+          }
           if enctype == 'text/plain'
             [pairs.map {|name, value| "#{name}=#{value}\r\n" }.join, 'text/plain']
           else
             [URI.encode_www_form(pairs), 'application/x-www-form-urlencoded']
           end
         end
+      end
+
+      # HTML form-submission newline normalization: every lone CR, lone LF, and CRLF in an
+      # entry name/value becomes a CRLF (the JS encoders' `normalizeNL` counterpart).
+      def normalize_form_newlines(s)
+        s.to_s.gsub(/\r\n?|\n/, "\r\n")
       end
 
       # Resolve a threaded file entry's on-disk path via the `@file_picks` slot
