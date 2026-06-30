@@ -73,10 +73,6 @@ xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
 xhr/open-after-stop.window.js:
 - open() after window.stop()
-xhr/open-url-base-inserted.htm:
-- 'XMLHttpRequest: open() resolving URLs - insert <base>'
-xhr/open-url-base.htm:
-- 'XMLHttpRequest: open() resolving URLs - <base>'
 xhr/open-url-multi-window-2.htm:
 - 'XMLHttpRequest: open() resolving URLs (multi-Window; 2; evil)'
 xhr/open-url-multi-window-3.htm:
@@ -146,8 +142,6 @@ xhr/send-network-error-async-events.sub.htm:
   error happens (synchronous flag is unset)'
 xhr/send-network-error-sync-events.sub.htm:
 - data URL
-xhr/send-non-same-origin.htm:
-- 'XMLHttpRequest: send() - non same-origin (folder.txt)'
 xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
 xhr/send-timeout-events.htm:

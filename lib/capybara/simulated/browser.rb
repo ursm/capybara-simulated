@@ -4249,6 +4249,10 @@ module Capybara
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, with_credentials: false, env_extras: nil)
+        # NB: a relative fetch/XHR URL is resolved against the document's API base URL
+        # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
+        # would wrongly pick up a `<base href>` inserted after open() (open-url-base
+        # -inserted-after-open). So this resolves only against the document URL.
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
