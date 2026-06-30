@@ -189,8 +189,6 @@ xhr/status.h2.window.js:
 - statusText over H2 for status 410 should be the empty string
 - statusText over H2 for status 500 should be the empty string
 - statusText over H2 for status 502 should be the empty string
-xhr/template-element.html:
-- 'XMLHttpRequest: template element parsing'
 xhr/timeout-cors-async.htm:
 - 'XMLHttpRequest: timeout event and cross-origin request'
 xhr/timeout-multiple-fetches.html:
