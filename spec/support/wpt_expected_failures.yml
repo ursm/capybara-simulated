@@ -20,11 +20,6 @@ dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
-html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
-- lang on host and slotted element
-- lang only on host
-html/dom/elements/global-attributes/lang-attribute.window.js:
-- unnamespaced lang attribute only works on elements in the HTML namespace
 html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
