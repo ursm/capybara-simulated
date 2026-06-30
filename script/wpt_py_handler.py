@@ -305,7 +305,6 @@ class Request:
         self.method = method
         self.url = url
         self.url_parts = urlsplit(url)
-        self.cookies = Cookies(RequestHeaders(headers).get(b'cookie'))
         # wptserve's request_path: the request-target — path plus query string (the
         # fragment never reaches the server), no scheme/host. requri.py echoes it.
         self.request_path = self.url_parts.path + (
@@ -314,6 +313,7 @@ class Request:
         self.raw_input = io.BytesIO(body)
         self.headers = RequestHeaders(headers)
         self.raw_headers = self.headers   # wptserve's raw (str-pair) view; same backing pairs
+        self.cookies = Cookies(self.headers.get(b'cookie'))
         # wptserve's request.GET preserves the RAW percent-decoded bytes of each
         # query field (status.py?content=%FF must yield the byte 0xFF, not a UTF-8
         # re-decode of it). parse_qsl with the default UTF-8 decode would turn a
@@ -382,7 +382,12 @@ class Response:
         if max_age is not None:  parts.append(b'Max-Age=' + _b(str(max_age)))
         if expires is not None:
             import datetime as _dt
-            exp = (_dt.datetime.now(_dt.timezone.utc) + expires) if isinstance(expires, _dt.timedelta) else expires
+            if isinstance(expires, _dt.timedelta):
+                exp = _dt.datetime.now(_dt.timezone.utc) + expires
+            else:
+                exp = expires
+                if exp.tzinfo is None:   # a naive datetime is UTC, not the host's local zone
+                    exp = exp.replace(tzinfo=_dt.timezone.utc)
             parts.append(b'Expires=' + _b(formatdate(exp.timestamp(), usegmt=True)))
         if secure:               parts.append(b'Secure')
         if httponly:             parts.append(b'HttpOnly')
