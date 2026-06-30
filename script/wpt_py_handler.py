@@ -272,11 +272,40 @@ class Writer:
         self.body += _to_bytes(data)
 
 
+class CookieValue:
+    """wptserve request.cookies value: `.value` is the cookie's bytes."""
+    def __init__(self, value):
+        self.value = value
+
+
+class Cookies:
+    """wptserve request.cookies: iterates cookie NAMES (bytes); `.get(name).value`
+    is the value. Parsed from the request Cookie header."""
+    def __init__(self, header):
+        self._d = {}
+        for part in (header or b'').split(b';'):
+            part = part.strip()
+            if not part:
+                continue
+            name, _, value = part.partition(b'=')
+            self._d[name.strip()] = CookieValue(value.strip())
+
+    def __iter__(self):
+        return iter(self._d)
+
+    def get(self, name, default=None):
+        return self._d.get(_b(name), default)
+
+    def __contains__(self, name):
+        return _b(name) in self._d
+
+
 class Request:
     def __init__(self, method, url, headers, body, doc_root):
         self.method = method
         self.url = url
         self.url_parts = urlsplit(url)
+        self.cookies = Cookies(RequestHeaders(headers).get(b'cookie'))
         # wptserve's request_path: the request-target — path plus query string (the
         # fragment never reaches the server), no scheme/host. requri.py echoes it.
         self.request_path = self.url_parts.path + (
@@ -340,6 +369,24 @@ class Response:
     @status_code.setter
     def status_code(self, v):
         self.status = v
+
+    def set_cookie(self, name, value, expires=None, secure=False, path=b'/',
+                   domain=None, max_age=None, httponly=False, **kw):
+        # Append a Set-Cookie header (the driver's cookie store applies Secure /
+        # Expires when deciding what to send on later requests). `expires` may be a
+        # datetime.timedelta (relative) — a negative one (get-set-cookie.py?clear=1)
+        # yields a past date, i.e. a deletion.
+        parts = [_b(name) + b'=' + _b(value)]
+        if path:                 parts.append(b'Path=' + _b(path))
+        if domain:               parts.append(b'Domain=' + _b(domain))
+        if max_age is not None:  parts.append(b'Max-Age=' + _b(str(max_age)))
+        if expires is not None:
+            import datetime as _dt
+            exp = (_dt.datetime.now(_dt.timezone.utc) + expires) if isinstance(expires, _dt.timedelta) else expires
+            parts.append(b'Expires=' + _b(formatdate(exp.timestamp(), usegmt=True)))
+        if secure:               parts.append(b'Secure')
+        if httponly:             parts.append(b'HttpOnly')
+        self.headers.append(b'Set-Cookie', b'; '.join(parts))
 
 
 def _to_bytes(v):

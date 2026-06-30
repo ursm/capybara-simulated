@@ -43,8 +43,6 @@ xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
-xhr/cookies.http.html:
-- Basic non-cross-site cookie handling in XHR
 xhr/event-error-order.sub.html:
 - 'XMLHttpRequest: event - error (order of events)'
 xhr/event-error.sub.any.js:
