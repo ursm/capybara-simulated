@@ -16,16 +16,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-dom/nodes/getElementsByClassName-14.htm:
-- 'document.getElementsByClassName(): case-insensitive (quirks mode)'
-dom/nodes/getElementsByClassName-20.htm:
-- get elements in document then add element to collection
-dom/nodes/getElementsByClassName-21.htm:
-- delete element from collection
-dom/nodes/getElementsByClassName-22.htm:
-- move item in collection order
-dom/nodes/getElementsByClassName-25.htm:
-- verify spacing is handled correctly
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
 html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
@@ -64,18 +54,6 @@ html/semantics/forms/form-submission-0/urlencoded2.window.js:
 html/semantics/forms/the-input-element/color-attributes.window.js:
 - "<input type=color>: alpha attribute"
 - "<input type=color>: colorspace attribute"
-html/semantics/forms/the-select-element/select-selectedOptions-nesting.window.js:
-- "<select> containing <hr><option selected>"
-- "<select> containing <option><option selected>"
-- "<select> containing <select><option selected>"
-- "<select><div><optgroup><div> containing <hr><option selected>"
-- "<select><div><optgroup><div> containing <optgroup><option selected>"
-- "<select><div><optgroup><div> containing <option><option selected>"
-- "<select><div><optgroup><div> containing <select><option selected>"
-- "<select><optgroup> containing <hr><option selected>"
-- "<select><optgroup> containing <optgroup><option selected>"
-- "<select><optgroup> containing <option><option selected>"
-- "<select><optgroup> containing <select><option selected>"
 html/semantics/forms/the-textarea-element/wrapping-transformation.window.js:
 - Textarea hard-wrapping should honor the col count unconditionally,
 - 'Textarea wrapping transformation: Newlines should be normalized to LF.'
