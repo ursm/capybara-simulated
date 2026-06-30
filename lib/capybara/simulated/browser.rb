@@ -4236,10 +4236,11 @@ module Capybara
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, env_extras: nil)
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
-        # CORS applies only to a request whose response-tainting is "cors" (XHR / a
-        # cors-mode fetch). Other callers (sendBeacon/no-cors fetch, ESM, workers, the
-        # internal asset GET) pass nil → no enforcement. The document's origin is the
-        # request's origin; a request whose target is a different origin is cross-origin.
+        # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
+        # XHR passes it; fetch() (whose default mode IS cors) and every other caller
+        # (sendBeacon, ESM, workers, the internal asset GET) pass nil → no enforcement.
+        # Threading fetch()'s real mode through is a known follow-up. The document's
+        # origin is the request's origin; a different target origin is cross-origin.
         cors        = cors_mode == 'cors'
         req_origin  = cors ? url_origin(@current_url) : nil
         # Use the method's case AS GIVEN: the JS callers already applied the spec
@@ -4284,11 +4285,15 @@ module Capybara
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           apply_default_request_env(env, referer: @current_url, force: false)
+          # Whether this hop crosses the document origin (only meaningful for a cors
+          # request, where req_origin is set) — computed once and reused for the Origin
+          # header + the response CORS check (target is constant within a hop).
+          cross_origin = req_origin && url_origin(target) != req_origin
           # Send the document's Origin (the UA owns this header) on a cors request when
           # the hop is cross-origin OR the method is not GET/HEAD — Fetch appends Origin
           # for every non-GET/HEAD request, so a same-origin POST carries it too (the
           # server may key its Access-Control-Allow-Origin echo on Origin being present).
-          if req_origin && (url_origin(target) != req_origin || !%w[GET HEAD].include?(method.to_s.upcase))
+          if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
             env['HTTP_ORIGIN'] = req_origin
           end
           env.merge!(env_extras) if env_extras
@@ -4330,7 +4335,7 @@ module Capybara
           # (access-control-basic-allow / -denied / -star). (Credentialed `*` + preflight
           # are not modelled yet — withCredentials is false in these basic cases.)
           exposed_headers = resp_headers
-          if req_origin && url_origin(target) != req_origin
+          if cross_origin
             acao = cors_header(resp_headers, 'access-control-allow-origin')
             return nil unless acao == '*' || acao == req_origin
             # A cross-origin response only EXPOSES (getResponseHeader / getAllResponse
@@ -5735,7 +5740,7 @@ module Capybara
       # not modelled yet — these basic cases use withCredentials=false.)
       def cors_preflight_ok?(target, method, headers, req_origin)
         unsafe = cors_unsafe_headers(headers)
-        env = Rack::MockRequest.env_for(target, method: 'OPTIONS')
+        env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
         apply_default_request_env(env, referer: @current_url, force: false)
         env['HTTP_ORIGIN'] = req_origin
@@ -5746,7 +5751,7 @@ module Capybara
         return false unless (200..299).include?(status.to_i)
         acao = cors_header(ph, 'access-control-allow-origin')
         return false unless acao == '*' || acao == req_origin
-        m = method.to_s.upcase
+        m             = method.to_s.upcase
         allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
         return false unless allow_methods.include?('*') || allow_methods.map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
         allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
@@ -5765,9 +5770,15 @@ module Capybara
       # -Expose-Headers (`*` exposes all — only valid without credentials, which these
       # cases don't use).
       def cors_exposed_headers(headers)
-        expose = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
-        return headers if expose.include?('*')
-        allowed = CORS_SAFELISTED_RESPONSE_HEADERS + expose
+        # set-cookie / set-cookie2 are forbidden response-header names — NEVER exposed to
+        # script, even under `Access-Control-Expose-Headers: *`. x-csim-status-text is our
+        # internal reason-phrase sentinel (response_hash lifts it into statusText, which
+        # IS exposed cross-origin, then strips it from the script-visible map), so it must
+        # survive the filter.
+        forbidden = %w[set-cookie set-cookie2]
+        expose    = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
+        return headers.reject {|k, _| forbidden.include?(k.to_s.downcase) } if expose.include?('*')
+        allowed = CORS_SAFELISTED_RESPONSE_HEADERS + expose + ['x-csim-status-text']
         headers.select {|k, _| allowed.include?(k.to_s.downcase) }
       end
 
@@ -5788,9 +5799,13 @@ module Capybara
       def url_origin(url)
         u = URI.parse(url.to_s)
         return nil unless u.scheme && u.host && u.scheme.match?(/\Ahttps?\z/i)
-        default = u.scheme.casecmp?('https') ? 443 : 80
+        # An origin is (scheme, host, port) compared case-insensitively on scheme+host —
+        # so canonicalize both to lowercase, else http://Example.com vs http://example.com
+        # would mis-classify a same-origin request as cross-origin.
+        scheme  = u.scheme.downcase
+        default = scheme == 'https' ? 443 : 80
         port    = u.port && u.port != default ? ":#{u.port}" : ''
-        "#{u.scheme}://#{u.host}#{port}"
+        "#{scheme}://#{u.host.downcase}#{port}"
       rescue URI::InvalidURIError
         nil
       end

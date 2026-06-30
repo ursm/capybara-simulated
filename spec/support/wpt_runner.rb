@@ -134,6 +134,7 @@ module WptRunner
   require 'tmpdir'
   require 'fileutils'
   STASH_DIR = Dir.mktmpdir('csim-wpt-stash')
+  at_exit { FileUtils.remove_entry(STASH_DIR, true) }
 
   module_function
 
@@ -483,7 +484,7 @@ module WptRunner
         req.GET['pipe'].to_s.scan(/(\w+)\(([^)]*)\)/) do |fn, args|
           case fn
           when 'header' then name, _, val = args.partition(','); resp_headers[name.strip.downcase] = val.strip unless name.strip.empty?
-          when 'status' then status_code = args.to_i
+          when 'status' then status_code = args.to_i if args.to_i.positive?
           end
         end
         [status_code, resp_headers, [body]]
