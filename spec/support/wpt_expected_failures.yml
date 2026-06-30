@@ -70,25 +70,12 @@ xhr/firing-events-http-content-length.html:
 - 'ProgressEvent: firing events for HTTP with Content-Length'
 xhr/firing-events-http-no-content-length.html:
 - 'ProgressEvent: firing events for HTTP with no Content-Length'
-xhr/formdata/append-formelement.html:
-- testFormDataAppendToFormString
-- testFormDataAppendToFormWrongPlatformObject
 xhr/formdata/constructor-submitter-coordinate.html:
 - The constructed FormData object should contain correct entries for Image Button
   submitter's dispatched coordinate
-xhr/formdata/constructor-submitter.html:
-- FormData construction should throw a 'NotFoundError' DOMException if a non-null
-  submitter is not owned by the form
-- FormData construction should throw a TypeError if a non-null submitter is not a
-  submit button
-xhr/formdata/constructor.any.js:
-- Constructors should throw a type error
 xhr/formdata/iteration.any.js:
 - Iteration skips elements removed while iterating
 - Removing elements already iterated over causes an element to be skipped during iteration
-xhr/formdata/set-formelement.html:
-- testFormDataSetToFormString
-- testFormDataSetToFormWrongPlatformObject
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
 xhr/open-after-stop.window.js:
