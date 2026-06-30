@@ -112,8 +112,6 @@ xhr/open-url-worker-simple.htm:
 - 'XMLHttpRequest: relative URLs in worker scripts resolved by script URL'
 xhr/overridemimetype-blob.html:
 - Loading data…
-- Use text/xml as fallback MIME type
-- Use text/xml as fallback MIME type, 2
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
 - 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
   encoding'
@@ -164,9 +162,6 @@ xhr/send-authentication-prompt-manual.htm:
 xhr/send-conditional-cors.htm:
 - 304 with appropriate CORS header
 - 304 without appropriate CORS header
-xhr/send-conditional.htm:
-- 'XMLHttpRequest: send() - conditional requests (date)'
-- 'XMLHttpRequest: send() - conditional requests (tag)'
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252

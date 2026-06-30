@@ -4281,7 +4281,7 @@ module Capybara
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
           # entirely; stale-but-revalidatable → fall through with conditional
           # headers added so the server can return 304.
-          cache_entry = method == 'GET' ? @@asset_cache.lookup(target) : nil
+          cache_entry = (method == 'GET' && !request_has_conditional_headers?(headers)) ? @@asset_cache.lookup(target) : nil
           if cache_entry&.fresh?
             # Cached static asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
@@ -5784,6 +5784,14 @@ module Capybara
         !u.userinfo.to_s.empty?
       rescue URI::InvalidURIError
         false
+      end
+
+      # An author-set conditional header means the CALLER is doing its own revalidation,
+      # so the UA cache must step aside: the request reaches the origin and the server's
+      # own 304/200 decision is returned (send-conditional), not a cached hit.
+      CONDITIONAL_REQUEST_HEADERS = %w[if-none-match if-modified-since if-match if-unmodified-since if-range].freeze
+      def request_has_conditional_headers?(headers)
+        headers.is_a?(Hash) && headers.any? {|k, _| CONDITIONAL_REQUEST_HEADERS.include?(k.to_s.downcase) }
       end
 
       # Run the CORS preflight unless a cached result already covers this request (Fetch
