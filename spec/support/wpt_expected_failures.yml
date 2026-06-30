@@ -108,8 +108,6 @@ xhr/abort-during-loading.window.js:
 - abort-during-loading
 xhr/abort-during-upload.any.js:
 - abort-during-upload
-xhr/abort-event-loadend.any.js:
-- abort-event-loadend
 xhr/abort-event-order.htm:
 - 'XMLHttpRequest: The abort() method: abort and loadend events'
 xhr/access-control-and-redirects-async-same-origin.any.js:
@@ -172,11 +170,6 @@ xhr/event-error-order.sub.html:
 - 'XMLHttpRequest: event - error (order of events)'
 xhr/event-error.sub.any.js:
 - error while reading body should report zeros for loaded and total
-- onerror should be called
-xhr/event-load.any.js:
-- event-load
-xhr/event-loadend.any.js:
-- event-loadend
 xhr/event-readystatechange-loaded.any.js:
 - event-readystatechange-loaded
 xhr/event-timeout-order.any.js:
@@ -326,9 +319,6 @@ xhr/send-network-error-async-events.sub.htm:
   error happens (synchronous flag is unset)'
 xhr/send-network-error-sync-events.sub.htm:
 - data URL
-xhr/send-no-response-event-loadend.htm:
-- 'XMLHttpRequest: The send() method: Fire a progress event named loadend (no response
-  entity body)'
 xhr/send-no-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when there is no response entity
   body'
@@ -353,12 +343,6 @@ xhr/send-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is unset'
 xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
-xhr/send-sync-no-response-event-load.htm:
-- 'XMLHttpRequest: The send() method: Fire an event named load (no response entity
-  body and the synchronous flag is set)'
-xhr/send-sync-no-response-event-loadend.htm:
-- 'XMLHttpRequest: The send() method: Fire an event named loadend (no response entity
-  body and the synchronous flag is set)'
 xhr/send-sync-response-event-order.htm:
 - 'XMLHttpRequest: The send() method: event order when synchronous flag is set'
 xhr/send-sync-timeout.htm:
