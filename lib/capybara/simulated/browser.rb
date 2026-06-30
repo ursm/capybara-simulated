@@ -4,7 +4,6 @@ require 'base64'
 require 'date'
 require 'digest'
 require 'fileutils'
-require 'zlib'
 require 'json'
 require 'net/http'
 require 'openssl'
@@ -15,6 +14,7 @@ require 'thread'
 require 'time'
 require 'uri'
 require 'uri/idna'   # WHATWG/UTS46 domain-to-ASCII/Unicode (uri-idna gem)
+require 'zlib'
 require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'stack_resolver'
@@ -4617,17 +4617,23 @@ module Capybara
       # would error, but we keep the bytes so the caller still sees a response.
       def decode_content_encoding(body, headers)
         return body if body.nil? || body.empty?
-        enc = headers.find {|k, _| k.to_s.downcase == 'content-encoding' }&.last.to_s.strip.downcase
-        case enc
-        when 'gzip', 'x-gzip' then Zlib.gunzip(body.b)
-        when 'deflate'
-          begin
-            Zlib::Inflate.inflate(body.b)
-          rescue Zlib::DataError
-            Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(body.b)
+        raw = headers.find {|k, _| k.to_s.downcase == 'content-encoding' }&.last
+        enc = (raw.is_a?(Array) ? raw.join(',') : raw.to_s).strip.downcase   # Rack 3 may hand the value as an array
+        # The decoded bytes re-enter the UTF-8 text pipeline the same as an
+        # un-encoded body (read_rack_body yields UTF-8), so re-tag them — Zlib
+        # output is ASCII-8BIT, which would otherwise marshal to V8 as a byte array.
+        decoded =
+          case enc
+          when 'gzip', 'x-gzip' then Zlib.gunzip(body.b)
+          when 'deflate'
+            begin
+              Zlib::Inflate.inflate(body.b)
+            rescue Zlib::Error
+              Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(body.b)   # raw (header-less) DEFLATE
+            end
+          else return body
           end
-        else body
-        end
+        decoded.force_encoding('UTF-8')
       rescue Zlib::Error
         body
       end
