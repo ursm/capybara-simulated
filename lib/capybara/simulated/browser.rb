@@ -4,6 +4,7 @@ require 'base64'
 require 'date'
 require 'digest'
 require 'fileutils'
+require 'zlib'
 require 'json'
 require 'net/http'
 require 'openssl'
@@ -4366,6 +4367,9 @@ module Capybara
           # A HEAD response has no body — the UA discards whatever the server sent
           # (response-method: echo-method.py writes one even for HEAD).
           body_str = '' if method.to_s.upcase == 'HEAD'
+          # The UA transparently decodes a Content-Encoding'd body (gzip/deflate); the
+          # header stays, the bytes are inflated (response-data-gzip / -deflate).
+          body_str = decode_content_encoding(body_str, resp_headers)
           # A cross-origin response only EXPOSES (getResponseHeader / getAllResponseHeaders)
           # the CORS-safelisted response headers plus those named in Access-Control-Expose
           # -Headers (`*` = all). content-type stays safelisted, so response decoding is
@@ -4604,6 +4608,28 @@ module Capybara
         body.each {|chunk| buf << chunk.to_s } if body.respond_to?(:each)
         body.close if body.respond_to?(:close)
         buf
+      end
+
+      # Transparently decode a Content-Encoding'd response body (HTTP "content coding"):
+      # gzip / x-gzip via Zlib.gunzip; deflate via zlib-wrapped inflate, falling back to
+      # raw DEFLATE (the "deflate" coding is ambiguously used for both). Unknown codings
+      # (e.g. br) and malformed data are left untouched — best-effort, like a browser that
+      # would error, but we keep the bytes so the caller still sees a response.
+      def decode_content_encoding(body, headers)
+        return body if body.nil? || body.empty?
+        enc = headers.find {|k, _| k.to_s.downcase == 'content-encoding' }&.last.to_s.strip.downcase
+        case enc
+        when 'gzip', 'x-gzip' then Zlib.gunzip(body.b)
+        when 'deflate'
+          begin
+            Zlib::Inflate.inflate(body.b)
+          rescue Zlib::DataError
+            Zlib::Inflate.new(-Zlib::MAX_WBITS).inflate(body.b)
+          end
+        else body
+        end
+      rescue Zlib::Error
+        body
       end
 
       # Defer the navigation: doing it from inside the running V8 call
