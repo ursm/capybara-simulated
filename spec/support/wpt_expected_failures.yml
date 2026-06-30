@@ -26,10 +26,38 @@ dom/nodes/getElementsByClassName-22.htm:
 - move item in collection order
 dom/nodes/getElementsByClassName-25.htm:
 - verify spacing is handled correctly
+xhr/abort-after-send.any.js:
+- abort-after-send
+xhr/abort-after-stop.window.js:
+- abort-after-stop
+xhr/abort-after-timeout.any.js:
+- abort-after-timeout
+xhr/abort-during-done.window.js:
+- " (async)"
+- " (sync aborted in readystatechange)"
+- " (sync)"
+xhr/abort-during-headers-received.window.js:
+- abort-during-headers-received
+xhr/abort-during-loading.window.js:
+- abort-during-loading
+xhr/abort-during-upload.any.js:
+- abort-during-upload
+xhr/abort-event-loadend.any.js:
+- abort-event-loadend
 xhr/abort-event-order.htm:
 - 'XMLHttpRequest: The abort() method: abort and loadend events'
+xhr/access-control-and-redirects-async-same-origin.any.js:
+- Request with credentials is redirected to a cross-origin response with Access-Control-Allow-Origin=*
+  (with star)
+- Request with credentials is redirected to a cross-origin response with a specific
+  Access-Control-Allow-Origin (no credentials)
+xhr/access-control-and-redirects-async.any.js:
+- Request is redirected without CORS headers to a response with Access-Control-Allow-Origin=*
+- Request with user info is redirected to a response with Access-Control-Allow-Origin=*
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
+xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
+- Preflight cache should be invalidated on timeout
 xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
@@ -42,12 +70,59 @@ xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
+xhr/blob-range.any.js:
+- A blob range request with no end.
+- A blob range request with no start.
+- A blob range request with no type.
+- A simple blob range request with whitespace.
+- A simple blob range request.
+- Blob content with short content and a large range end
+- Blob content with short content and a large range start
+- Blob content with short content and a range end matching content length
+- Blob content with short content and a range start matching the content length
+- Blob range end should be an ASCII digit
+- Blob range request with multiple range values
+- Blob range request with multiple range values and whitespace
+- Blob range request with short range end
+- Blob range request with trailing comma
+- Blob range should have a dash
+- Blob range should include '-'
+- Blob range should include '='
+- Blob range should include 'bytes='
+- Blob range start should be an ASCII digit
+- Blob range with incorrect range header
+- 'Blob range with incorrect range header #2'
+- 'Blob range with incorrect range header #3'
+- Blob range with no start or end
+- Blob range with no value
+- Blob range with whitespace after hyphen
+- Blob range with whitespace around equals sign
+- Blob range with whitespace before and after hyphen
 xhr/cookies.http.html:
 - Basic non-cross-site cookie handling in XHR
 xhr/data-uri.htm:
 - XHR method HEAD with MIME type text/plain
 xhr/event-error-order.sub.html:
 - 'XMLHttpRequest: event - error (order of events)'
+xhr/event-error.sub.any.js:
+- error while reading body should report zeros for loaded and total
+- onerror should be called
+xhr/event-load.any.js:
+- event-load
+xhr/event-loadend.any.js:
+- event-loadend
+xhr/event-readystatechange-loaded.any.js:
+- event-readystatechange-loaded
+xhr/event-timeout-order.any.js:
+- event-timeout-order
+xhr/event-timeout.any.js:
+- event-timeout
+xhr/event-upload-progress-crossorigin.any.js:
+- Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
+- Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
+xhr/event-upload-progress.any.js:
+- Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
+- Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
 xhr/firing-events-http-content-length.html:
 - 'ProgressEvent: firing events for HTTP with Content-Length'
 xhr/firing-events-http-no-content-length.html:
@@ -65,11 +140,20 @@ xhr/formdata/constructor-submitter.html:
   submitter is not owned by the form
 - FormData construction should throw a TypeError if a non-null submitter is not a
   submit button
+xhr/formdata/constructor.any.js:
+- Constructors should throw a type error
+xhr/formdata/iteration.any.js:
+- Iteration skips elements removed while iterating
+- Removing elements already iterated over causes an element to be skipped during iteration
 xhr/formdata/set-formelement.html:
 - testFormDataSetToFormString
 - testFormDataSetToFormWrongPlatformObject
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
+xhr/json.any.js:
+- Ensure UTF-16 results in an error
+xhr/open-after-stop.window.js:
+- open() after window.stop()
 xhr/open-during-abort-event.htm:
 - 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
 xhr/open-during-abort-processing.htm:
@@ -103,13 +187,22 @@ xhr/overridemimetype-blob.html:
 - Loading data…
 - Use text/xml as fallback MIME type
 - Use text/xml as fallback MIME type, 2
+xhr/overridemimetype-done-state.any.js:
+- overridemimetype-done-state
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
 - 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
   encoding'
 xhr/overridemimetype-loading-state.htm:
 - 'XMLHttpRequest: overrideMimeType() in LOADING state'
+xhr/overridemimetype-unsent-state-force-shiftjis.any.js:
+- 'XMLHttpRequest: overrideMimeType() in unsent state, enforcing Shift-JIS encoding'
 xhr/progress-events-response-data-gzip.htm:
 - 'XMLHttpRequest: progress events and GZIP encoding'
+xhr/request-content-length.any.js:
+- 'Fetched blob: URLs set the Content-Length header'
+xhr/response-body-errors.any.js:
+- Asynchronous XMLHttpRequest should clear response on bad chunk
+- Synchronous XMLHttpRequest should throw on bad chunk
 xhr/response-data-deflate.htm:
 - 'XMLHttpRequest: content-encoding:deflate response was correctly inflated'
 xhr/response-data-gzip.htm:
@@ -119,6 +212,30 @@ xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
 xhr/responseText-status.html:
 - 'XMLHttpRequest Test: responseText - status'
+xhr/responsetype.any.js:
+- Set responseType to "" when readyState is DONE.
+- Set responseType to "" when readyState is OPENED and the sync flag is set.
+- Set responseType to "arraybuffer" when readyState is DONE.
+- Set responseType to "arraybuffer" when readyState is OPENED and the sync flag is
+  set.
+- Set responseType to "blob" when readyState is DONE.
+- Set responseType to "blob" when readyState is OPENED and the sync flag is set.
+- Set responseType to "document" when readyState is DONE and the sync flag is set.
+- Set responseType to "document" when readyState is DONE.
+- Set responseType to "document" when readyState is HEADERS_RECEIVED.
+- Set responseType to "document" when readyState is LOADING.
+- Set responseType to "document" when readyState is OPENED and the sync flag is set.
+- Set responseType to "document" when readyState is OPENED.
+- Set responseType to "document" when readyState is UNSENT.
+- Set responseType to "json" when readyState is DONE.
+- Set responseType to "json" when readyState is OPENED and the sync flag is set.
+- Set responseType to "nosuchtype" when readyState is DONE and the sync flag is set.
+- Set responseType to "nosuchtype" when readyState is DONE.
+- Set responseType to "nosuchtype" when readyState is LOADING.
+- Set responseType to "nosuchtype" when readyState is OPENED and the sync flag is
+  set.
+- Set responseType to "text" when readyState is DONE.
+- Set responseType to "text" when readyState is OPENED and the sync flag is set.
 xhr/responsexml-invalid-type.html:
 - 'XMLHttpRequest: response with an invalid responseXML document'
 xhr/responsexml-non-well-formed.htm:
@@ -161,6 +278,27 @@ xhr/send-conditional-cors.htm:
 xhr/send-conditional.htm:
 - 'XMLHttpRequest: send() - conditional requests (date)'
 - 'XMLHttpRequest: send() - conditional requests (tag)'
+xhr/send-data-arraybuffer.any.js:
+- send-data-arraybuffer
+xhr/send-data-arraybufferview.any.js:
+- send-data-arraybufferview
+xhr/send-data-es-object.any.js:
+- sending a new XHR instance
+xhr/send-data-sharedarraybuffer.any.js:
+- sending a BigInt64Array backed by a SharedArrayBuffer
+- sending a BigUint64Array backed by a SharedArrayBuffer
+- sending a DataView backed by a SharedArrayBuffer
+- sending a Float16Array backed by a SharedArrayBuffer
+- sending a Float32Array backed by a SharedArrayBuffer
+- sending a Float64Array backed by a SharedArrayBuffer
+- sending a Int16Array backed by a SharedArrayBuffer
+- sending a Int32Array backed by a SharedArrayBuffer
+- sending a Int8Array backed by a SharedArrayBuffer
+- sending a SharedArrayBuffer
+- sending a Uint16Array backed by a SharedArrayBuffer
+- sending a Uint32Array backed by a SharedArrayBuffer
+- sending a Uint8Array backed by a SharedArrayBuffer
+- sending a Uint8ClampedArray backed by a SharedArrayBuffer
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
@@ -218,6 +356,16 @@ xhr/setrequestheader-bogus-value.htm:
 - Omitted value argument
 xhr/setrequestheader-header-forbidden.htm:
 - 'XMLHttpRequest: setRequestHeader() - headers that are forbidden 1'
+xhr/status.h2.window.js:
+- statusText over H2 for status 200 should be the empty string
+- statusText over H2 for status 210 should be the empty string
+- statusText over H2 for status 400 should be the empty string
+- statusText over H2 for status 404 should be the empty string
+- statusText over H2 for status 410 should be the empty string
+- statusText over H2 for status 500 should be the empty string
+- statusText over H2 for status 502 should be the empty string
+xhr/sync-no-progress.any.js:
+- progress event should not be fired by sync XHR
 xhr/template-element.html:
 - 'XMLHttpRequest: template element parsing'
 xhr/timeout-cors-async.htm:
@@ -225,6 +373,10 @@ xhr/timeout-cors-async.htm:
 xhr/timeout-multiple-fetches.html:
 - CORS preflights should not reset the timer
 - Redirects should not reset the timer
+xhr/xhr-authorization-redirect.any.js:
+- getAuthorizationHeaderValue - cross origin redirection
+- getAuthorizationHeaderValue - no redirection
+- getAuthorizationHeaderValue - same origin redirection
 xhr/xmlhttprequest-eventtarget.htm:
 - 'XMLHttpRequest: implements EventTarget'
 xhr/xmlhttprequest-timeout-aborted.html:
