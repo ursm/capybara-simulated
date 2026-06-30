@@ -838,7 +838,6 @@ fetch/api/credentials/cookies.any.js:
 - 'Same-origin mode: 2 cookies'
 fetch/api/headers/header-setcookie.any.js:
 - Adding Set-Cookie headers normalizes their value
-- Adding invalid Set-Cookie headers throws
 - Headers iterator does not combine set-cookie & set-cookie2 headers
 - Headers iterator does not combine set-cookie headers
 - Headers iterator is correctly updated with set-cookie changes
@@ -854,42 +853,6 @@ fetch/api/headers/header-setcookie.any.js:
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - fetch() with all valid values
-- fetch() with value x%00x needs to throw
-- fetch() with value x%0Ax needs to throw
-- fetch() with value x%0Dx needs to throw
-fetch/api/headers/headers-basic.any.js:
-- Appending a value pair during iteration causes it to be reached during iteration
-- Check Symbol.iterator method
-- Check entries method
-- Check forEach method
-- Check keys method
-- Check values method
-- Create headers with 1 should throw
-- Create headers with existing headers with custom iterator
-- Create headers with null should throw
-- Iteration skips elements removed while iterating
-- Prepending a value pair before the current element position causes it to be skipped
-  during iteration and adds the current element a second time
-- Removing elements already iterated over causes an element to be skipped during iteration
-fetch/api/headers/headers-combine.any.js:
-- Iterate combined values in sorted order
-fetch/api/headers/headers-errors.any.js:
-- Check headers append with an invalid name [object Object]
-- Check headers append with an invalid name invalidĀ
-- Check headers append with an invalid value invalidĀ
-- Check headers delete with an invalid name [object Object]
-- Check headers delete with an invalid name invalidĀ
-- Check headers get with an invalid name [object Object]
-- Check headers get with an invalid name invalidĀ
-- Check headers has with an invalid name [object Object]
-- Check headers has with an invalid name invalidĀ
-- Check headers set with an invalid name [object Object]
-- Check headers set with an invalid name invalidĀ
-- Check headers set with an invalid value invalidĀ
-- Create headers giving an array having one string as init argument
-- Create headers giving an array having three strings as init argument
-- Create headers giving bad header name as init argument
-- Create headers giving bad header value as init argument
 fetch/api/headers/headers-forbidden-override.any.js:
 - "header X-HTTP-METHOD is forbidden to use value \ttrack"
 - "header X-HTTP-METHOD is forbidden to use value \nconnect"
@@ -996,22 +959,14 @@ fetch/api/headers/headers-no-cors.any.js:
 - '"no-cors" Headers object cannot have unknown/doesitmatter as header'
 - '"no-cors" Headers object cannot have viewport-width/100 as header'
 - '"no-cors" Headers object cannot have width/100 as header'
-fetch/api/headers/headers-normalize.any.js:
-- Check append method with not normalized values
-- Check set method with not normalized values
-- Create headers with not normalized values
 fetch/api/headers/headers-record.any.js:
 - Basic operation with Symbol keys
-- Basic operation with one property
-- Basic operation with one property and a proto
 - Correct operation ordering with non-enumerable properties
-- Correct operation ordering with repeated keys
 - Correct operation ordering with two properties
 - Correct operation ordering with two properties one of which has an invalid name
 - Correct operation ordering with two properties one of which has an invalid value
 - Correct operation ordering with undefined descriptors
 - Operation with non-enumerable Symbol keys
-- Passing null to Headers constructor
 fetch/api/policies/csp-blocked.html:
 - Fetch is blocked by CSP, got a TypeError
 fetch/api/policies/referrer-origin-when-cross-origin.html:
