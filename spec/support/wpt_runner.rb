@@ -448,11 +448,11 @@ module WptRunner
           end
         end
         file = File.expand_path(File.join(WptRunner::ROOT, path))
-        # wptserve answers a directory request (e.g. GET `/`) with a 200 listing;
-        # Document.currentScript's xhr-test does a sync GET `/` and gates on
-        # status === 200. Mirror that for in-tree directories.
+        # wptserve answers a directory request (e.g. GET `/`) with a 200 HTML listing;
+        # Document.currentScript's xhr-test gates on status === 200, and responsetype's
+        # DONE cases assert the body is non-empty — so serve a minimal non-empty listing.
         if (file == WptRunner::ROOT || file.start_with?(WptRunner::ROOT + '/')) && File.directory?(file)
-          next [200, {'content-type' => 'text/html'}, ['']]
+          next [200, {'content-type' => 'text/html'}, ["<!doctype html>\n<title>Directory listing</title>\n"]]
         end
         unless file.start_with?(WptRunner::ROOT + '/') && File.file?(file)
           next [404, {'content-type' => 'text/plain'}, ['not found']]
@@ -571,6 +571,15 @@ module WptRunner
       <!doctype html><meta charset="utf-8">
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
+      <script>
+        // The `GLOBAL` scope-probe wptserve injects into every multi-global wrapper
+        // (tests branch on window vs worker via it). This is the window variant.
+        self.GLOBAL = {
+          isWindow:      function () { return true; },
+          isWorker:      function () { return false; },
+          isShadowRealm: function () { return false; }
+        };
+      </script>
       #{tags.join("\n")}
       <script src="/#{js_rel}"></script>
     HTML

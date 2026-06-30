@@ -216,8 +216,6 @@ xhr/formdata/set-formelement.html:
 - testFormDataSetToFormWrongPlatformObject
 xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
-xhr/json.any.js:
-- Ensure UTF-16 results in an error
 xhr/open-after-stop.window.js:
 - open() after window.stop()
 xhr/open-during-abort-event.htm:
@@ -253,13 +251,9 @@ xhr/overridemimetype-blob.html:
 - Loading data…
 - Use text/xml as fallback MIME type
 - Use text/xml as fallback MIME type, 2
-xhr/overridemimetype-done-state.any.js:
-- overridemimetype-done-state
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
 - 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
   encoding'
-xhr/overridemimetype-loading-state.htm:
-- 'XMLHttpRequest: overrideMimeType() in LOADING state'
 xhr/overridemimetype-unsent-state-force-shiftjis.any.js:
 - 'XMLHttpRequest: overrideMimeType() in unsent state, enforcing Shift-JIS encoding'
 xhr/progress-events-response-data-gzip.htm:
@@ -278,30 +272,6 @@ xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
 xhr/responseText-status.html:
 - 'XMLHttpRequest Test: responseText - status'
-xhr/responsetype.any.js:
-- Set responseType to "" when readyState is DONE.
-- Set responseType to "" when readyState is OPENED and the sync flag is set.
-- Set responseType to "arraybuffer" when readyState is DONE.
-- Set responseType to "arraybuffer" when readyState is OPENED and the sync flag is
-  set.
-- Set responseType to "blob" when readyState is DONE.
-- Set responseType to "blob" when readyState is OPENED and the sync flag is set.
-- Set responseType to "document" when readyState is DONE and the sync flag is set.
-- Set responseType to "document" when readyState is DONE.
-- Set responseType to "document" when readyState is HEADERS_RECEIVED.
-- Set responseType to "document" when readyState is LOADING.
-- Set responseType to "document" when readyState is OPENED and the sync flag is set.
-- Set responseType to "document" when readyState is OPENED.
-- Set responseType to "document" when readyState is UNSENT.
-- Set responseType to "json" when readyState is DONE.
-- Set responseType to "json" when readyState is OPENED and the sync flag is set.
-- Set responseType to "nosuchtype" when readyState is DONE and the sync flag is set.
-- Set responseType to "nosuchtype" when readyState is DONE.
-- Set responseType to "nosuchtype" when readyState is LOADING.
-- Set responseType to "nosuchtype" when readyState is OPENED and the sync flag is
-  set.
-- Set responseType to "text" when readyState is DONE.
-- Set responseType to "text" when readyState is OPENED and the sync flag is set.
 xhr/responsexml-invalid-type.html:
 - 'XMLHttpRequest: response with an invalid responseXML document'
 xhr/responsexml-non-well-formed.htm:
@@ -407,8 +377,6 @@ xhr/status.h2.window.js:
 - statusText over H2 for status 410 should be the empty string
 - statusText over H2 for status 500 should be the empty string
 - statusText over H2 for status 502 should be the empty string
-xhr/sync-no-progress.any.js:
-- progress event should not be fired by sync XHR
 xhr/template-element.html:
 - 'XMLHttpRequest: template element parsing'
 xhr/timeout-cors-async.htm:
