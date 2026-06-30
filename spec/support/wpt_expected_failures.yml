@@ -26,16 +26,8 @@ dom/nodes/getElementsByClassName-22.htm:
 - move item in collection order
 dom/nodes/getElementsByClassName-25.htm:
 - verify spacing is handled correctly
-html/dom/elements/global-attributes/dir-assorted.window.js:
-- non-html script element text contents influence dir=auto
-- non-html style element text contents influence dir=auto
-- non-html textarea element text contents influence dir=auto
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
-html/dom/elements/global-attributes/dir-auto-form-associated.window.js:
-- "<input dir=auto type=checkbox> directionality"
-- "<input dir=auto type=image> directionality"
-- "<input dir=auto type=radio> directionality"
 html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
 - lang on host and slotted element
 - lang only on host
