@@ -84,16 +84,10 @@ html/semantics/forms/the-textarea-element/wrapping-transformation.window.js:
   Textarea wrapping transformation: wrapping round-trips: exact  len
   and then
   some
-xhr/abort-after-send.any.js:
-- abort-after-send
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
 - abort-after-timeout
-xhr/abort-during-upload.any.js:
-- abort-during-upload
-xhr/abort-event-order.htm:
-- 'XMLHttpRequest: The abort() method: abort and loadend events'
 xhr/access-control-and-redirects-async-same-origin.any.js:
 - Request with credentials is redirected to a cross-origin response with Access-Control-Allow-Origin=*
   (with star)
@@ -167,10 +161,6 @@ xhr/getresponseheader-chunked-trailer.htm:
 - 'XMLHttpRequest: getResponseHeader() and HTTP trailer'
 xhr/open-after-stop.window.js:
 - open() after window.stop()
-xhr/open-during-abort-event.htm:
-- 'XMLHttpRequest: open() during abort event - abort() called from upload.onloadstart'
-xhr/open-during-abort-processing.htm:
-- 'XMLHttpRequest: open() during abort processing - abort() called from onloadstart'
 xhr/open-open-send.htm:
 - 'XMLHttpRequest: open() - open() - send()'
 xhr/open-open-sync-send.htm:
@@ -293,8 +283,6 @@ xhr/send-redirect-to-cors.htm:
   and explicit Content-Type)'
 - 'XMLHttpRequest: send() - Redirect to CORS-enabled resource (308 POST with string
   and explicit Content-Type)'
-xhr/send-response-event-order.htm:
-- 'XMLHttpRequest: The send() method: event order when synchronous flag is unset'
 xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
 xhr/send-sync-response-event-order.htm:
