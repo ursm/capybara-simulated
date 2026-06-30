@@ -528,13 +528,13 @@ module WptRunner
   TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,xhr}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
-  # event-loop oracle + xhr/ (all time-probed crasher-free — the xhr set, 77 files,
-  # was swept per-file with a hang timeout: 0 hangs). The dom/ + forms `.any.js`
-  # sets are still excluded — dom/ has synchronous-infinite-loop crashers that
-  # hang the V8 call (no virtual-clock timeout catches them); forms `.any.js`
-  # (~17 files) is deferred until the `.html` set is triaged. Both need skip-list
-  # triage before they can be scanned.
-  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,xhr}'
+  # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ — each was swept
+  # per-file with a hang timeout and found crasher-free (xhr 86, html/dom+forms 26:
+  # 0 hangs). The TOP-LEVEL dom/ tree is still excluded: it has synchronous-infinite
+  # -loop crashers that hang the V8 call (no virtual-clock timeout catches them) and
+  # needs a skip-list before it can be scanned. (.tentative files auto-route to
+  # out-of-scope, so the one tentative window.js here self-excludes.)
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,xhr,html/dom,html/semantics/forms}'
 
   def test_files
     @test_files ||= begin

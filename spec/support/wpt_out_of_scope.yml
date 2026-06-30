@@ -10158,6 +10158,19 @@ html/semantics/forms/the-input-element/input-type-button.html:
 - name: label value
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/semantics/forms/the-input-element/input-type-checkbox-switch.tentative.window.js:
+- name: Cloning a switch control
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: switch IDL attribute, getter
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: switch IDL attribute, setter
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/the-input-element/radio-focused-and-scrolled-into-view.html:
 - name: Focusing offscreen radio via keyboard should scroll it into view
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /

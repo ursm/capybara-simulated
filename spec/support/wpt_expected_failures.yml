@@ -26,6 +26,152 @@ dom/nodes/getElementsByClassName-22.htm:
 - move item in collection order
 dom/nodes/getElementsByClassName-25.htm:
 - verify spacing is handled correctly
+html/dom/elements/global-attributes/dir-assorted.window.js:
+- non-html script element text contents influence dir=auto
+- non-html style element text contents influence dir=auto
+- non-html textarea element text contents influence dir=auto
+html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
+- dir=auto changes for slot reassignment
+html/dom/elements/global-attributes/dir-auto-form-associated.window.js:
+- "<input dir=auto type=checkbox> directionality"
+- "<input dir=auto type=image> directionality"
+- "<input dir=auto type=radio> directionality"
+html/dom/elements/global-attributes/lang-attribute-shadow.window.js:
+- lang on host and slotted element
+- lang only on host
+html/dom/elements/global-attributes/lang-attribute.window.js:
+- unnamespaced lang attribute only works on elements in the HTML namespace
+html/semantics/forms/form-submission-0/FormDataEvent.window.js:
+- Failing FormDataEvent constructor
+html/semantics/forms/form-submission-0/SubmitEvent.window.js:
+- Failing SubmitEvent constructor
+html/semantics/forms/form-submission-0/form-data-set-empty-file.window.js:
+- Empty <input type=file> shows up in the text/plain serialization
+html/semantics/forms/form-submission-0/multipart-formdata.window.js:
+- 'multipart/form-data: character not in encoding in filename (formdata event)'
+- 'multipart/form-data: character not in encoding in filename (normal form)'
+- 'multipart/form-data: characters not in encoding in name and value (formdata event)'
+- 'multipart/form-data: characters not in encoding in name and value (normal form)'
+- 'multipart/form-data: lone surrogate in name and value (formdata event)'
+- 'multipart/form-data: lone surrogate in name and value (normal form)'
+html/semantics/forms/form-submission-0/submission-checks.window.js:
+- "<form> not connected to a document after submit event cannot navigate"
+- "<form> not connected to a document cannot navigate"
+html/semantics/forms/form-submission-0/text-plain.window.js:
+- 'text/plain: 0x00 in filename (formdata event)'
+- 'text/plain: 0x00 in filename (normal form)'
+- 'text/plain: 0x00 in name (formdata event)'
+- 'text/plain: 0x00 in name (normal form)'
+- 'text/plain: 0x00 in value (formdata event)'
+- 'text/plain: 0x00 in value (normal form)'
+- 'text/plain: Basic File test (formdata event)'
+- 'text/plain: Basic File test (normal form)'
+- 'text/plain: Basic test (formdata event)'
+- 'text/plain: Basic test (normal form)'
+- 'text/plain: \n in filename (formdata event)'
+- 'text/plain: \n in filename (normal form)'
+- 'text/plain: \n in name (formdata event)'
+- 'text/plain: \n in name (normal form)'
+- 'text/plain: \n in value (formdata event)'
+- 'text/plain: \n in value (normal form)'
+- 'text/plain: \n\r in filename (formdata event)'
+- 'text/plain: \n\r in filename (normal form)'
+- 'text/plain: \n\r in name (formdata event)'
+- 'text/plain: \n\r in name (normal form)'
+- 'text/plain: \n\r in value (formdata event)'
+- 'text/plain: \n\r in value (normal form)'
+- 'text/plain: \r in filename (formdata event)'
+- 'text/plain: \r in filename (normal form)'
+- 'text/plain: \r in name (formdata event)'
+- 'text/plain: \r in name (normal form)'
+- 'text/plain: \r in value (formdata event)'
+- 'text/plain: \r in value (normal form)'
+- 'text/plain: \r\n in filename (formdata event)'
+- 'text/plain: \r\n in filename (normal form)'
+- 'text/plain: \r\n in name (formdata event)'
+- 'text/plain: \r\n in name (normal form)'
+- 'text/plain: \r\n in value (formdata event)'
+- 'text/plain: \r\n in value (normal form)'
+- 'text/plain: backslash in filename (formdata event)'
+- 'text/plain: backslash in filename (normal form)'
+- 'text/plain: backslash in name (formdata event)'
+- 'text/plain: backslash in name (normal form)'
+- 'text/plain: backslash in value (formdata event)'
+- 'text/plain: backslash in value (normal form)'
+- 'text/plain: character not in encoding in filename (formdata event)'
+- 'text/plain: character not in encoding in filename (normal form)'
+- 'text/plain: characters not in encoding in name and value (formdata event)'
+- 'text/plain: characters not in encoding in name and value (normal form)'
+- 'text/plain: double quote in filename (formdata event)'
+- 'text/plain: double quote in filename (normal form)'
+- 'text/plain: double quote in name (formdata event)'
+- 'text/plain: double quote in name (normal form)'
+- 'text/plain: double quote in value (formdata event)'
+- 'text/plain: double quote in value (normal form)'
+- 'text/plain: lone surrogate in name and value (formdata event)'
+- 'text/plain: lone surrogate in name and value (normal form)'
+- 'text/plain: non-ASCII in filename (formdata event)'
+- 'text/plain: non-ASCII in filename (normal form)'
+- 'text/plain: non-ASCII in name and value (formdata event)'
+- 'text/plain: non-ASCII in name and value (normal form)'
+- 'text/plain: single quote in filename (formdata event)'
+- 'text/plain: single quote in filename (normal form)'
+- 'text/plain: single quote in name (formdata event)'
+- 'text/plain: single quote in name (normal form)'
+- 'text/plain: single quote in value (formdata event)'
+- 'text/plain: single quote in value (normal form)'
+html/semantics/forms/form-submission-0/urlencoded2.window.js:
+- 'application/x-www-form-urlencoded: \n in filename (formdata event)'
+- 'application/x-www-form-urlencoded: \n in filename (normal form)'
+- 'application/x-www-form-urlencoded: \n in name (formdata event)'
+- 'application/x-www-form-urlencoded: \n in name (normal form)'
+- 'application/x-www-form-urlencoded: \n in value (formdata event)'
+- 'application/x-www-form-urlencoded: \n in value (normal form)'
+- 'application/x-www-form-urlencoded: \n\r in filename (formdata event)'
+- 'application/x-www-form-urlencoded: \n\r in filename (normal form)'
+- 'application/x-www-form-urlencoded: \n\r in name (formdata event)'
+- 'application/x-www-form-urlencoded: \n\r in name (normal form)'
+- 'application/x-www-form-urlencoded: \n\r in value (formdata event)'
+- 'application/x-www-form-urlencoded: \n\r in value (normal form)'
+- 'application/x-www-form-urlencoded: \r in filename (formdata event)'
+- 'application/x-www-form-urlencoded: \r in filename (normal form)'
+- 'application/x-www-form-urlencoded: \r in name (formdata event)'
+- 'application/x-www-form-urlencoded: \r in name (normal form)'
+- 'application/x-www-form-urlencoded: \r in value (formdata event)'
+- 'application/x-www-form-urlencoded: \r in value (normal form)'
+- 'application/x-www-form-urlencoded: character not in encoding in filename (formdata
+  event)'
+- 'application/x-www-form-urlencoded: character not in encoding in filename (normal
+  form)'
+- 'application/x-www-form-urlencoded: characters not in encoding in name and value
+  (formdata event)'
+- 'application/x-www-form-urlencoded: characters not in encoding in name and value
+  (normal form)'
+- 'application/x-www-form-urlencoded: lone surrogate in name and value (formdata event)'
+- 'application/x-www-form-urlencoded: lone surrogate in name and value (normal form)'
+html/semantics/forms/the-input-element/color-attributes.window.js:
+- "<input type=color>: alpha attribute"
+- "<input type=color>: colorspace attribute"
+html/semantics/forms/the-select-element/select-selectedOptions-nesting.window.js:
+- "<select> containing <hr><option selected>"
+- "<select> containing <option><option selected>"
+- "<select> containing <select><option selected>"
+- "<select><div><optgroup><div> containing <hr><option selected>"
+- "<select><div><optgroup><div> containing <optgroup><option selected>"
+- "<select><div><optgroup><div> containing <option><option selected>"
+- "<select><div><optgroup><div> containing <select><option selected>"
+- "<select><optgroup> containing <hr><option selected>"
+- "<select><optgroup> containing <optgroup><option selected>"
+- "<select><optgroup> containing <option><option selected>"
+- "<select><optgroup> containing <select><option selected>"
+html/semantics/forms/the-textarea-element/wrapping-transformation.window.js:
+- Textarea hard-wrapping should honor the col count unconditionally,
+- 'Textarea wrapping transformation: Newlines should be normalized to LF.'
+- 'Textarea wrapping transformation: Wrapping happens with LF newlines.'
+- |-
+  Textarea wrapping transformation: wrapping round-trips: exact  len
+  and then
+  some
 xhr/abort-after-send.any.js:
 - abort-after-send
 xhr/abort-after-stop.window.js:
