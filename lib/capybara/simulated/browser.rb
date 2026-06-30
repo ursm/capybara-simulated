@@ -9,6 +9,7 @@ require 'net/http'
 require 'openssl'
 require 'rack/mock'
 require 'securerandom'
+require 'set'
 require 'socket'
 require 'thread'
 require 'time'
@@ -4244,6 +4245,18 @@ module Capybara
       end
 
       MAX_FETCH_REDIRECTS = 20
+      # Fetch "bad port" blocklist (https://fetch.spec.whatwg.org/#port-blocking) —
+      # ports tied to non-HTTP protocols a request must never reach. Frozen Set for
+      # O(1) membership on the rack_fetch path.
+      BAD_PORTS = Set[
+        0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77,
+        79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135,
+        137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531,
+        532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720,
+        1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
+        6669, 6679, 6697, 10080
+      ].freeze
+
       # URLs we won't even try to route through Rack: anything that
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
@@ -4255,6 +4268,16 @@ module Capybara
         # -inserted-after-open). So this resolves only against the document URL.
         target = resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
+        # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
+        # request to one of these ports is a network error before any connection —
+        # fetch() rejects with TypeError, a sync XHR throws NetworkError
+        # (request-bad-port). An absent port (the scheme default) is never blocked.
+        begin
+          port = URI.parse(target).port
+          return nil if port && BAD_PORTS.include?(port)
+        rescue URI::InvalidURIError
+          # fall through — a malformed URI is handled by the dispatch below
+        end
         # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
         # XHR passes it; fetch() (whose default mode IS cors) and every other caller
         # (sendBeacon, ESM, workers, the internal asset GET) pass nil → no enforcement.
