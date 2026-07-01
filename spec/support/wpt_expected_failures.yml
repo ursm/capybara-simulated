@@ -740,9 +740,6 @@ fetch/api/response/response-cancel-stream.any.js:
 - Cancelling a starting blob Response stream
 fetch/api/response/response-clone.any.js:
 - Cancelling stream should not affect cloned one
-- Cannot clone a disturbed response
-- Check Response's clone has the expected attribute values
-- Check Response's clone with default values, without body
 - Check cloned response's body
 - Check original response's body after cloning
 - Check response clone use structureClone for teed ReadableStreams (ArrayBufferchunk)
