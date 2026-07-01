@@ -4322,7 +4322,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, with_credentials: false, env_extras: nil, referrer_policy: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -4355,6 +4355,10 @@ module Capybara
         # (form submission) or a nil-mode internal caller gets a plain readable response.
         doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil
         crossed          = false
+        # A request is "credentialed" (cookies + the credentialed CORS check) only in
+        # `include` mode; `same-origin` (default) and `omit` are uncredentialed for the
+        # CORS check, while the cookie decision below distinguishes all three.
+        with_credentials = credentials == 'include'
         # Use the method's case AS GIVEN: the JS callers already applied the spec
         # normalization (XHR open() / Fetch upper-case the known methods, preserving
         # an unknown method's case — open-method-case-sensitive). Upper-casing here
@@ -4419,6 +4423,15 @@ module Capybara
           # cross-origin to every real target; otherwise compare the target to the
           # document origin. Drives the Origin header, preflight, and the CORS check.
           cross_origin = cors && (effective_origin == 'null' || url_origin(target) != req_origin)
+          # Fetch credentials mode decides cookie attachment, independent of the CORS
+          # mode: `omit` never sends them; `include` always does; `same-origin` (default)
+          # sends them only to a same-origin target — so an uncredentialed cross-origin
+          # hop (cors OR no-cors) must not leak the document's cookies
+          # (cors-redirect-credentials / cors-cookies). A navigation / internal caller has
+          # no doc_origin, so it counts as same-origin and keeps them.
+          hop_cross_origin = !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
+          send_cookies     = credentials == 'include' || (credentials != 'omit' && !hop_cross_origin)
+          env.delete('HTTP_COOKIE') unless send_cookies
           # A CORS request to a URL carrying credentials (`user:pass@`) is a network
           # error (access-control-and-redirects "user info" subtest).
           return nil if cross_origin && url_has_userinfo?(target)
@@ -4428,7 +4441,7 @@ module Capybara
           # is preflighted on the NEW origin (send-redirect-to-cors), not just an initially
           # cross-origin one (access-control-basic-get-fail-non-simple / preflight-*).
           if cross_origin && cors_unsafe_request?(method, headers)
-            return nil unless cors_preflight_ok?(target, method, headers, effective_origin)
+            return nil unless cors_preflight_ok?(target, method, headers, effective_origin, with_credentials)
           end
           # Send the (effective) Origin — the UA owns this header — on a cors request when
           # the hop is cross-origin OR the method is not GET/HEAD (Fetch appends Origin to
@@ -5961,43 +5974,61 @@ module Capybara
       # Access-Control-Max-Age that allows this method + headers lets the actual request
       # skip the OPTIONS (access-control-basic-allow-preflight-cache). Returns false (=
       # network error) only when a fresh preflight is needed AND fails.
-      def cors_preflight_ok?(target, method, headers, req_origin)
-        return true if cors_preflight_cached?(target, req_origin, method, headers)
-        result = cors_run_preflight(target, method, headers, req_origin)
+      def cors_preflight_ok?(target, method, headers, req_origin, credentialed)
+        return true if cors_preflight_cached?(target, req_origin, method, headers, credentialed)
+        result = cors_run_preflight(target, method, headers, req_origin, credentialed)
         return false unless result
         # Cache the grant for Max-Age seconds so a covered follow-up skips the preflight.
-        # The key is (origin, url) only — correct while credentials are fixed-false; a
-        # credentialed-vs-not distinction must enter the key once withCredentials is
-        # modelled. Expiry uses the REAL monotonic clock (not the virtual one), so a
-        # test that virtual-sleeps past Max-Age to force a re-preflight isn't caught yet.
-        @cors_preflight_cache[[req_origin, target]] = result.merge(stored_at: Process.clock_gettime(Process::CLOCK_MONOTONIC)) if result[:max_age].positive?
+        # The key is (origin, url, credentialed): a credentialed grant (ACAO echoing the
+        # origin, no `*` matching) can't cover an uncredentialed follow-up or vice versa,
+        # so the two are cached apart. Expiry uses the REAL monotonic clock (not the
+        # virtual one), so a test that virtual-sleeps past Max-Age to force a re-preflight
+        # isn't caught yet.
+        @cors_preflight_cache[[req_origin, target, credentialed]] = result.merge(stored_at: Process.clock_gettime(Process::CLOCK_MONOTONIC)) if result[:max_age].positive?
         true
       end
 
       # Whether a cached preflight grant covers this request (not expired + method/headers
       # allowed). A method/header the cache doesn't cover — or an expired entry — forces a
       # fresh preflight (cache-invalidation-by-method / -header / -timeout).
-      def cors_preflight_cached?(target, req_origin, method, headers)
-        entry = @cors_preflight_cache[[req_origin, target]]
+      def cors_preflight_cached?(target, req_origin, method, headers, credentialed)
+        entry = @cors_preflight_cache[[req_origin, target, credentialed]]
         return false unless entry
         return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) - entry[:stored_at] >= entry[:max_age]
-        cors_grant_allows?(entry[:methods], entry[:headers], method, cors_unsafe_headers(headers))
+        cors_grant_allows?(entry[:methods], entry[:headers], method, cors_unsafe_headers(headers), credentialed)
       end
+
+      # `Authorization` is Fetch's sole "CORS non-wildcard request-header name": a preflight
+      # `Access-Control-Allow-Headers: *` never covers it — it must be listed by name — even
+      # for an uncredentialed request (cors-preflight "authorization not covered by wildcard").
+      CORS_NON_WILDCARD_REQUEST_HEADERS = %w[authorization].freeze
 
       # Does a preflight grant (its Access-Control-Allow-Methods / -Headers) cover this
       # request: the method is allowed / `*` / CORS-safelisted, and every unsafe header is
       # allowed / `*`. Shared by the fresh-preflight accept check and the cache-hit check.
-      def cors_grant_allows?(allow_methods, allow_headers, method, unsafe_headers)
-        m = method.to_s.upcase
-        return false unless allow_methods.include?('*') || allow_methods.map(&:upcase).include?(m) || CORS_SAFELISTED_METHODS.include?(m)
-        allow_headers.include?('*') || unsafe_headers.all? {|h| allow_headers.include?(h) }
+      # For a CREDENTIALED request the wildcard loses its meaning — Fetch's "CORS-preflight
+      # fetch" matches `*` against no method/header when credentials mode is include, so a
+      # non-listed method or unsafe header is rejected (cors-preflight-star credentialed).
+      def cors_grant_allows?(allow_methods, allow_headers, method, unsafe_headers, credentialed = false)
+        # The method match is byte-CASE-SENSITIVE (Fetch normalizes the request method but
+        # compares it verbatim against Access-Control-Allow-Methods): `delete` in the grant
+        # does not cover a `DELETE` request. Safelisted GET/HEAD/POST pass regardless
+        # (they're always normalized to upper-case) (cors-preflight-star method-case).
+        m = method.to_s
+        method_ok = allow_methods.include?(m) || CORS_SAFELISTED_METHODS.include?(m) || (!credentialed && allow_methods.include?('*'))
+        return false unless method_ok
+        wildcard_headers = !credentialed && allow_headers.include?('*')
+        unsafe_headers.all? {|h|
+          allow_headers.include?(h) || (wildcard_headers && !CORS_NON_WILDCARD_REQUEST_HEADERS.include?(h))
+        }
       end
 
       # Fetch "CORS-preflight fetch": send an OPTIONS with Access-Control-Request-Method
       # / -Headers + Origin; on success (ok-status, ACAO match, and the grant covers the
       # method + unsafe headers) return the grant {methods, headers, max_age} for the
-      # cache, else nil. (Credentialed preflight is not modelled yet — withCredentials=false.)
-      def cors_run_preflight(target, method, headers, req_origin)
+      # cache, else nil. A credentialed preflight additionally requires the response to
+      # allow credentials (ACAC:true) and forbids `*` in the origin/method/header grants.
+      def cors_run_preflight(target, method, headers, req_origin, credentialed)
         unsafe = cors_unsafe_headers(headers)
         env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
@@ -6006,17 +6037,25 @@ module Capybara
         # the navigation Accept apply_default_request_env sets) — some handlers reject a
         # preflight whose Accept isn't */* (preflight.py).
         env['HTTP_ACCEPT'] = '*/*'
+        # A CORS-preflight is always uncredentialed — it carries no cookies, even when the
+        # actual request that follows is credentialed.
+        env.delete('HTTP_COOKIE')
         env['HTTP_ORIGIN'] = req_origin
-        env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] = method.to_s.upcase
+        # Access-Control-Request-Method carries the request's (already-normalized) method
+        # VERBATIM — `patch` stays `patch`, matching the byte-case-sensitive grant check.
+        env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] = method.to_s
         env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
         status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
         pbody.close if pbody.respond_to?(:close)
         return nil unless (200..299).include?(status.to_i)
         acao = cors_header(ph, 'access-control-allow-origin')
-        return nil unless acao == '*' || acao == req_origin
+        # A credentialed preflight can't be allowed by the wildcard origin and must carry
+        # Access-Control-Allow-Credentials: true (cors-preflight-star credentialed).
+        return nil unless credentialed ? acao == req_origin : (acao == '*' || acao == req_origin)
+        return nil if credentialed && cors_header(ph, 'access-control-allow-credentials') != 'true'
         allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
         allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
-        return nil unless cors_grant_allows?(allow_methods, allow_headers, method, unsafe)
+        return nil unless cors_grant_allows?(allow_methods, allow_headers, method, unsafe, credentialed)
         {methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i}
       end
 
