@@ -167,6 +167,17 @@ class RequestHeaders:
     def __contains__(self, name):
         return self.get(name) is not None
 
+    def __iter__(self):
+        # wptserve iterates request.headers as header NAMES (bytes), deduped in
+        # first-seen order — inspect-headers.py's `b", ".join(request.headers)` builds
+        # Access-Control-Allow-Headers from them (without it, iterating via __getitem__
+        # raised KeyError → the cross-origin ?cors handler 500'd).
+        seen = []
+        for k, _ in self._items:
+            if k not in seen:
+                seen.append(k)
+        return iter(seen)
+
     def __str__(self):
         # wptserve's raw_headers stringifies to the on-the-wire header block; echo
         # -headers.py returns `str(request.raw_headers)` and the test greps it for
