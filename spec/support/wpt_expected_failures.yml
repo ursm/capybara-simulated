@@ -692,21 +692,6 @@ fetch/api/request/request-reset-attributes.https.html:
 - Request.isHistoryNavigation is reset with non-empty RequestInit
 - Request.isReloadNavigation is reset with non-empty RequestInit
 - Request.mode is reset with non-empty RequestInit when it's "navigate"
-fetch/api/request/request-structure.any.js:
-- Check bodyUsed attribute
-- Check cache attribute
-- Check credentials attribute
-- Check destination attribute
-- Check duplex attribute
-- Check integrity attribute
-- Check isHistoryNavigation attribute
-- Check isReloadNavigation attribute
-- Check method attribute
-- Check mode attribute
-- Check redirect attribute
-- Check referrer attribute
-- Check referrerPolicy attribute
-- Check url attribute
 fetch/api/request/url-encoding.html:
 - URL encoding and fetch()
 fetch/api/response/multi-globals/url-parsing.html:
