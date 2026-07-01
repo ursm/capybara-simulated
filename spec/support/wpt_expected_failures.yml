@@ -380,163 +380,34 @@ fetch/api/request/multi-globals/construct-in-detached-frame.window.js:
 fetch/api/request/multi-globals/url-parsing.html:
 - should parse the URL relative to the current settings object
 fetch/api/request/request-cache-default-conditional.any.js:
-- RequestCache "default" mode with an If-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and fresh response
-- RequestCache "default" mode with an If-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
-  response
-- RequestCache "default" mode with an If-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and stale
-  response
 - RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
   with Etag and fresh response
 - RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
-  with Etag and stale response
-- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
   with Last-Modified and fresh response
-- RequestCache "default" mode with an If-Match header is treated similarly to "no-store"
-  with Last-Modified and stale response
-- RequestCache "default" mode with an If-Modified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Etag and fresh
-  response
-- RequestCache "default" mode with an If-Modified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Etag and stale
-  response
-- RequestCache "default" mode with an If-Modified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Last-Modified
-  and fresh response
-- RequestCache "default" mode with an If-Modified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Last-Modified
-  and stale response
 - RequestCache "default" mode with an If-Modified-Since header is treated similarly
   to "no-store" with Etag and fresh response
-- RequestCache "default" mode with an If-Modified-Since header is treated similarly
-  to "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-Modified-Since header is treated similarly
-  to "no-store" with Last-Modified and fresh response
-- RequestCache "default" mode with an If-Modified-Since header is treated similarly
-  to "no-store" with Last-Modified and stale response
-- RequestCache "default" mode with an If-None-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and fresh response
-- RequestCache "default" mode with an If-None-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-None-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
-  response
-- RequestCache "default" mode with an If-None-Match header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and stale
-  response
 - RequestCache "default" mode with an If-None-Match header is treated similarly to
   "no-store" with Etag and fresh response
 - RequestCache "default" mode with an If-None-Match header is treated similarly to
-  "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-None-Match header is treated similarly to
   "no-store" with Last-Modified and fresh response
-- RequestCache "default" mode with an If-None-Match header is treated similarly to
-  "no-store" with Last-Modified and stale response
-- RequestCache "default" mode with an If-Range header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and fresh response
-- RequestCache "default" mode with an If-Range header (following a request without
-  additional headers) is treated similarly to "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-Range header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and fresh
-  response
-- RequestCache "default" mode with an If-Range header (following a request without
-  additional headers) is treated similarly to "no-store" with Last-Modified and stale
-  response
 - RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
   with Etag and fresh response
 - RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
-  with Etag and stale response
-- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
   with Last-Modified and fresh response
-- RequestCache "default" mode with an If-Range header is treated similarly to "no-store"
-  with Last-Modified and stale response
-- RequestCache "default" mode with an If-Unmodified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Etag and fresh
-  response
-- RequestCache "default" mode with an If-Unmodified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Etag and stale
-  response
-- RequestCache "default" mode with an If-Unmodified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Last-Modified
-  and fresh response
-- RequestCache "default" mode with an If-Unmodified-Since header (following a request
-  without additional headers) is treated similarly to "no-store" with Last-Modified
-  and stale response
 - RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
   to "no-store" with Etag and fresh response
 - RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
-  to "no-store" with Etag and stale response
-- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
   to "no-store" with Last-Modified and fresh response
-- RequestCache "default" mode with an If-Unmodified-Since header is treated similarly
-  to "no-store" with Last-Modified and stale response
-fetch/api/request/request-cache-default.any.js:
-- RequestCache "default" mode checks the cache for previously cached content and avoids
-  going to the network if a fresh response exists with Etag and fresh response
-- RequestCache "default" mode checks the cache for previously cached content and avoids
-  going to the network if a fresh response exists with Last-Modified and fresh response
-- RequestCache "default" mode checks the cache for previously cached content and goes
-  to the network for stale responses with Etag and stale response
-- RequestCache "default" mode checks the cache for previously cached content and goes
-  to the network for stale responses with Last-Modified and stale response
-- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
-  with Etag and fresh response'
-- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
-  with Etag and stale response'
-- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
-  with Last-Modified and fresh response'
-- 'Responses with the "Cache-Control: no-store" header are not stored in the cache
-  with Last-Modified and stale response'
 fetch/api/request/request-cache-force-cache.any.js:
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  avoid revalidation for fresh responses with Etag and fresh response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  avoid revalidation for fresh responses with Last-Modified and fresh response
 - RequestCache "force-cache" mode checks the cache for previously cached content and
   avoid revalidation for stale responses with Etag and stale response
 - RequestCache "force-cache" mode checks the cache for previously cached content and
   avoid revalidation for stale responses with Last-Modified and stale response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response is not found with Etag and fresh response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response is not found with Etag and stale response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response is not found with Last-Modified and fresh
-  response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response is not found with Last-Modified and stale
-  response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response would vary with Etag and fresh response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response would vary with Etag and stale response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response would vary with Last-Modified and fresh
-  response
-- RequestCache "force-cache" mode checks the cache for previously cached content and
-  goes to the network if a cached response would vary with Last-Modified and stale
-  response
-- RequestCache "force-cache" stores the response in the cache if it goes to the network
-  with Etag and fresh response
-- RequestCache "force-cache" stores the response in the cache if it goes to the network
-  with Etag and stale response
-- RequestCache "force-cache" stores the response in the cache if it goes to the network
-  with Last-Modified and fresh response
-- RequestCache "force-cache" stores the response in the cache if it goes to the network
-  with Last-Modified and stale response
 fetch/api/request/request-cache-no-cache.any.js:
 - RequestCache "no-cache" mode revalidates fresh responses found in the cache with
   Etag and fresh response
 - RequestCache "no-cache" mode revalidates fresh responses found in the cache with
   Last-Modified and fresh response
-- RequestCache "no-cache" mode revalidates stale responses found in the cache with
-  Etag and stale response
-- RequestCache "no-cache" mode revalidates stale responses found in the cache with
-  Last-Modified and stale response
 fetch/api/request/request-cache-no-store.any.js:
 - RequestCache "no-store" mode does not check the cache for previously cached content
   and goes to the network regardless with Etag and fresh response
@@ -572,10 +443,6 @@ fetch/api/request/request-cache-only-if-cached.any.js:
 - RequestCache "only-if-cached" (with "same-origin") uses cached same-origin redirects
   to same-origin content with Last-Modified and stale response
 - RequestCache "only-if-cached" mode checks the cache for previously cached content
-  and avoids revalidation for fresh responses with Etag and fresh response
-- RequestCache "only-if-cached" mode checks the cache for previously cached content
-  and avoids revalidation for fresh responses with Last-Modified and fresh response
-- RequestCache "only-if-cached" mode checks the cache for previously cached content
   and avoids revalidation for stale responses with Etag and stale response
 - RequestCache "only-if-cached" mode checks the cache for previously cached content
   and avoids revalidation for stale responses with Last-Modified and stale response
@@ -602,14 +469,6 @@ fetch/api/request/request-cache-reload.any.js:
   response is already stored with Last-Modified and fresh response
 - RequestCache "reload" mode does store the response in the cache even if a previous
   response is already stored with Last-Modified and stale response
-- RequestCache "reload" mode does store the response in the cache with Etag and fresh
-  response
-- RequestCache "reload" mode does store the response in the cache with Etag and stale
-  response
-- RequestCache "reload" mode does store the response in the cache with Last-Modified
-  and fresh response
-- RequestCache "reload" mode does store the response in the cache with Last-Modified
-  and stale response
 fetch/api/request/request-clone.sub.html:
 - Check cloning a request
 fetch/api/request/request-consume-empty.any.js:
@@ -708,15 +567,12 @@ fetch/h1-parsing/status-code.window.js:
 - HTTP/1.1 -200 TEST (network error)
 - 'HTTP/1.1 0 OK '
 - HTTP/1.1 0200 BOO (network error)
-- 'HTTP/1.1 077 77 '
-- 'HTTP/1.1 099 HELLO '
 - HTTP/1.1 0xA (network error)
 - 'HTTP/1.1 1 OK '
 - HTTP/1.1 1000 BOO (network error)
 - HTTP/1.1 131072 HI (network error)
 - HTTP/1.1 65736 NOT 200 OR SOME SUCH (network error)
 - 'HTTP/1.1 99 NOT OK '
-- 'HTTP/1.1 999 DOES IT MATTER '
 - HTTP/1.1 BLAH (network error)
 - HTTP/1.1 C8 (network error)
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
@@ -898,14 +754,6 @@ xhr/send-sync-blocks-async.htm:
 - 'XMLHttpRequest: sync requests should block events on pending async requests'
 xhr/send-timeout-events.htm:
 - 'XMLHttpRequest: The send() method: timeout is not 0 '
-xhr/status.h2.window.js:
-- statusText over H2 for status 200 should be the empty string
-- statusText over H2 for status 210 should be the empty string
-- statusText over H2 for status 400 should be the empty string
-- statusText over H2 for status 404 should be the empty string
-- statusText over H2 for status 410 should be the empty string
-- statusText over H2 for status 500 should be the empty string
-- statusText over H2 for status 502 should be the empty string
 xhr/timeout-cors-async.htm:
 - 'XMLHttpRequest: timeout event and cross-origin request'
 xhr/timeout-multiple-fetches.html:

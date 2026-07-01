@@ -489,7 +489,15 @@ def _parse_raw_http(raw):
     lines = head.replace(b'\r\n', b'\n').split(b'\n')
     m = re.match(rb'HTTP/\d\.\d\s+(\d{3})(?:\s+(.*))?', lines[0] if lines else b'')
     code = int(m.group(1)) if m else 200
-    reason = m.group(2).decode('latin-1') if (m and m.group(2)) else None
+    # For a raw response the status line IS the wire, so statusText is exactly its reason
+    # phrase — EMPTY when the phrase is empty ("HTTP/1.1 200 ") or entirely absent
+    # ("HTTP/1.1 200"), NEVER synthesized to the standard reason (h1-parsing/status-code
+    # expects ""). Only a status line that doesn't parse at all leaves reason None so the
+    # client falls back to the standard reason.
+    if m:
+        reason = m.group(2).decode('latin-1') if m.group(2) is not None else ''
+    else:
+        reason = None
     hdrs = []
     for line in lines[1:]:
         if b':' in line:

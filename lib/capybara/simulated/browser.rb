@@ -4704,6 +4704,11 @@ module Capybara
         # on a static-file response). utf8_text re-tags + scrubs to a clean JS string, the
         # same path the body and every header value already take.
         reason = RuntimeShared.utf8_text(custom_reason || Rack::Utils::HTTP_STATUS_CODES[status.to_i] || '')
+        # HTTP/2 has no reason phrase, so statusText is always the empty string there (a WPT
+        # `.h2` test document's fetches run over h2). We don't model the h2 transport, so key
+        # off the document URL — the same signal WPT uses to serve the resource over h2
+        # (fetch/xhr status.h2 "statusText over H2 … should be the empty string").
+        reason = '' if @current_url.to_s.include?('.h2.')
         out = {
           'status'     => status,
           'statusText' => reason,
