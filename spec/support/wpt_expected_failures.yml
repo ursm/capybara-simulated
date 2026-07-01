@@ -22,13 +22,7 @@ fetch/api/abort/cache.https.any.js:
 - Signals are not stored in the cache API
 - Signals are not stored in the cache API, even if they're already aborted
 fetch/api/abort/general.any.js:
-- Aborting rejects with AbortError
-- Aborting rejects with AbortError - no-cors
-- Aborting rejects with abort reason
-- Already aborted signal can be used for many fetches
 - Already aborted signal does not make request
-- Already aborted signal rejects immediately
-- Call text() twice on aborted response
 - Clone aborts with original controller
 - Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
 - Fetch aborted & connection closed when aborted after calling response.blob()
@@ -37,30 +31,12 @@ fetch/api/abort/general.any.js:
 - Fetch aborted & connection closed when aborted after calling response.json()
 - Fetch aborted & connection closed when aborted after calling response.text()
 - Readable stream synchronously cancels with AbortError if aborted before reading
-- Request is still 'used' if signal is aborted before fetching
-- Request objects have a signal property
-- Signal can be used to abort other fetches, even if another fetch succeeded before
-  aborting
-- Signal on request object
-- Signal on request object created from request object
-- Signal on request object created from request object, with signal on second request
-- Signal on request object created from request object, with signal on second request
-  overriding another
-- Signal on request object should also have abort reason
-- Signal retained after unrelated properties are overridden by fetch
-- Signal state is cloned
 - Stream errors once aborted, after reading. Underlying connection closed.
 - Stream errors once aborted. Underlying connection closed.
 - Stream will not error if body is empty. It's closed with an empty queue before it
   errors.
 - Underlying connection is closed when aborting after receiving response
 - Underlying connection is closed when aborting after receiving response - no-cors
-- response.arrayBuffer() rejects if already aborted
-- response.blob() rejects if already aborted
-- response.bytes() rejects if already aborted
-- response.formData() rejects if already aborted
-- response.json() rejects if already aborted
-- response.text() rejects if already aborted
 fetch/api/abort/keepalive.html:
 - aborting a detached keepalive fetch should not do anything
 - aborting a keepalive fetch should work
