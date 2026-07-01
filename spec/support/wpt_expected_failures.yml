@@ -439,17 +439,7 @@ fetch/api/redirect/redirect-keepalive.any.js:
 - "[keepalive][new window][unload] same-origin redirect"
 - "[keepalive][new window][unload] same-origin redirect + preflight"
 fetch/api/redirect/redirect-origin.any.js:
-- "[GET] Redirect 301 Same origin to other origin"
-- "[GET] Redirect 302 Same origin to other origin"
-- "[GET] Redirect 303 Same origin to other origin"
-- "[GET] Redirect 307 Same origin to other origin"
-- "[GET] Redirect 308 Same origin to other origin"
-- "[POST] Redirect 301 Same origin to other origin"
-- "[POST] Redirect 302 Same origin to other origin"
-- "[POST] Redirect 303 Same origin to other origin"
-- "[POST] Redirect 307 Same origin to other origin"
 - "[POST] Redirect 307 Same origin to same origin"
-- "[POST] Redirect 308 Same origin to other origin"
 - "[POST] Redirect 308 Same origin to same origin"
 fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should be accepted on 303

@@ -4501,10 +4501,13 @@ module Capybara
               resp_body.close if resp_body.respond_to?(:close)
               return nil
             end
-            # A redirect to a DIFFERENT origin taints the request's origin to opaque
-            # ("null"), so every subsequent hop is cross-origin and sends Origin: null
-            # (and the CORS check then demands the server allow "null" or "*").
-            effective_origin = 'null' if cors && url_origin(next_url) != url_origin(target)
+            # A cross-origin redirect taints the request's origin to opaque ("null") only
+            # once the request was ALREADY cross-origin (response tainting "cors", i.e.
+            # `crossed`) and the hop changes origin — so a subsequent hop sends Origin: null
+            # and the CORS check demands the server allow "null"/"*". The FIRST cross-origin
+            # hop out of a same-origin request keeps the real origin (redirect-origin
+            # "same origin to other origin" sends the document origin, not null).
+            effective_origin = 'null' if cors && crossed && url_origin(next_url) != url_origin(target)
             target = carry_fragment(target, next_url)
             if bad_port?(target)   # a redirect to a blocked port is a network error too
               resp_body.close if resp_body.respond_to?(:close)
