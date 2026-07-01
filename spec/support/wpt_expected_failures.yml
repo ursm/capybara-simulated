@@ -495,23 +495,6 @@ html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Date instance
 - Object instance
 - RegExp instance
-html/webappapis/structured-clone/structured-clone.any.js:
-- A detached ArrayBuffer cannot be transferred
-- A detached platform object cannot be transferred
-- A subclass instance will be received as its closest transferable superclass
-- An object whose interface is deleted from the global object must still be received
-- ArrayBuffer
-- Growable SharedArrayBuffer
-- Length-tracking DataView is transferable
-- Length-tracking TypedArray is transferable
-- MessagePort
-- Resizable ArrayBuffer is transferable
-- Serializing OOB DataView throws
-- Serializing OOB TypedArray throws
-- Serializing a non-serializable platform object fails
-- Transferring OOB DataView throws
-- Transferring OOB TypedArray throws
-- Transferring a non-transferable platform object fails
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:

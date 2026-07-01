@@ -11671,6 +11671,22 @@ html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - name: Bounding rect height for textarea must be the same as line-height
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/webappapis/structured-clone/structured-clone.any.js:
+- name: Growable SharedArrayBuffer
+  reason: Needs a GROWABLE SharedArrayBuffer, which this V8 build does not expose
+    (a `new SharedArrayBuffer(n, {maxByteLength})` is not growable — `.growable` is
+    undefined and it tags as `[object ArrayBuffer]`); the test's own `assert_true(sab.growable)`
+    can't pass. Engine feature not available (rule 1).
+- name: Serializing OOB TypedArray throws
+  reason: An out-of-bounds TypedArray (its resizable buffer shrank below the view's
+    offset) reports byteOffset/length 0 from JS — indistinguishable from an empty
+    length-tracking view. Detecting it needs the internal [[ByteOffset]] slot, which
+    V8 exposes for DataView (its getter throws — those cases pass) but NOT for a TypedArray.
+    Engine introspection not available from JS (rule 1).
+- name: Transferring OOB TypedArray throws
+  reason: Same as "Serializing OOB TypedArray throws" — an out-of-bounds TypedArray's
+    original offset is not observable from JS (V8 reports 0), so it can't be distinguished
+    from an empty length-tracking view. Engine introspection not available (rule 1).
 shadow-dom/Document-caretPositionFromPoint.tentative.html:
 - name: document.caretPositionFromPoint() for a point after a forced break should
     return a CaretPosition at the specified location pointing to a textarea element
