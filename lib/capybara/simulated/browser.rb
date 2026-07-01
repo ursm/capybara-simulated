@@ -4257,6 +4257,55 @@ module Capybara
         6669, 6679, 6697, 10080
       ].freeze
 
+      REFERRER_POLICIES = %w[
+        no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
+        same-origin strict-origin strict-origin-when-cross-origin unsafe-url
+      ].freeze
+
+      # The `Referer` value a request carries under a Referrer-Policy — nil = send none
+      # (https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer).
+      # `referrer_url` is the request's referrer (the initiating document); `target_url`
+      # its destination. "full" is the referrer stripped of fragment + credentials;
+      # "origin" is scheme://host[:port]/. An empty / unknown policy → the default
+      # (strict-origin-when-cross-origin).
+      def compute_referrer(policy, referrer_url, target_url)
+        return nil if referrer_url.nil? || referrer_url.to_s.empty?
+        policy = 'strict-origin-when-cross-origin' unless REFERRER_POLICIES.include?(policy)
+        return nil if policy == 'no-referrer'
+        # The referrer is almost always the (constant) document URL — memoise its parse
+        # so the rack_fetch hot path doesn't re-parse it per request (rule 3).
+        ref = parse_referrer_url(referrer_url)
+        return nil unless ref && %w[http https].include?(ref.scheme)
+        full        = -> { u = ref.dup; u.fragment = nil; u.password = nil; u.user = nil; u.to_s }
+        origin_only = -> {
+          default_port = ref.scheme == 'https' ? 443 : 80
+          port         = ref.port && ref.port != default_port ? ":#{ref.port}" : ''
+          "#{ref.scheme}://#{ref.host}#{port}/"
+        }
+        return full.call        if policy == 'unsafe-url'
+        return origin_only.call if policy == 'origin'
+        # The remaining policies need the target to know same-origin / downgrade.
+        tgt = (URI.parse(target_url) rescue nil)
+        return nil unless tgt
+        same_origin = ref.scheme == tgt.scheme && ref.host == tgt.host && ref.port == tgt.port
+        downgrade   = ref.scheme == 'https' && tgt.scheme == 'http'
+        case policy
+        when 'origin-when-cross-origin'        then same_origin ? full.call : origin_only.call
+        when 'same-origin'                     then same_origin ? full.call : nil
+        when 'strict-origin'                   then downgrade ? nil : origin_only.call
+        when 'no-referrer-when-downgrade'      then downgrade ? nil : full.call
+        when 'strict-origin-when-cross-origin' then same_origin ? full.call : (downgrade ? nil : origin_only.call)
+        end
+      end
+
+      # Parse a referrer URL, memoising the last one (the referrer is the document URL
+      # for nearly every request, so this caches across the whole page's subresources).
+      def parse_referrer_url(url)
+        return @referrer_parsed if defined?(@referrer_parsed_for) && @referrer_parsed_for == url
+        @referrer_parsed_for = url
+        @referrer_parsed     = (URI.parse(url) rescue nil)
+      end
+
       # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
       # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed
       # (the vast majority don't), so the rack_fetch hot path — every asset / xhr /
@@ -4273,7 +4322,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, with_credentials: false, env_extras: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, with_credentials: false, env_extras: nil, referrer_policy: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -4316,6 +4365,12 @@ module Capybara
         # revalidation, so the UA cache must step aside (computed once — the headers
         # carrying it survive every redirect hop unchanged).
         skip_cache = request_has_conditional_headers?(headers)
+        ref_policy = referrer_policy   # may be overridden per hop by a response Referrer-Policy
+        # The referrer is stripped PROGRESSIVELY: each hop applies its (possibly
+        # overridden) policy to the referrer the PREVIOUS hop sent, not to the original
+        # document — so once a hop reduces it to an origin (or drops it), a later, laxer
+        # policy can't widen it back (redirect-referrer-override).
+        ref_source = @current_url
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
@@ -4336,7 +4391,11 @@ module Capybara
           env.delete('CONTENT_LENGTH') if %w[GET HEAD].include?(method.to_s.upcase)
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
-          apply_default_request_env(env, referer: @current_url, force: false)
+          # The Referer follows the request's Referrer-Policy (a redirect response can
+          # override the policy for the next hop — see below). `hop_referer` also becomes
+          # the source the NEXT hop strips from.
+          hop_referer = compute_referrer(ref_policy, ref_source, target)
+          apply_default_request_env(env, referer: hop_referer, force: false)
           # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
           # cross-origin to every real target; otherwise compare the target to the
           # document origin. Drives the Origin header, preflight, and the CORS check.
@@ -4378,6 +4437,13 @@ module Capybara
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             redirected = true
+            ref_source = hop_referer   # the next hop strips from what THIS hop sent
+            # A redirect response's Referrer-Policy overrides the policy for the next hop
+            # (redirect-referrer-override): the last valid token of the header wins.
+            if (rp = resp_headers['referrer-policy'] || resp_headers['Referrer-Policy'])
+              tok = Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| REFERRER_POLICIES.include?(t) }
+              ref_policy = tok if tok
+            end
             next_url = resolve_against(loc, target)
             # A redirect to a DIFFERENT origin taints the request's origin to opaque
             # ("null"), so every subsequent hop is cross-origin and sends Origin: null
