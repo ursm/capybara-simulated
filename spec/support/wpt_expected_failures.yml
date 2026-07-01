@@ -354,27 +354,6 @@ fetch/api/cors/cors-preflight-referrer.any.js:
 fetch/api/cors/cors-preflight-response-validation.any.js:
 - Preflight response with a bad Access-Control-Allow-Headers
 - Preflight response with a bad Access-Control-Allow-Methods
-fetch/api/cors/cors-redirect.any.js:
-- 'Redirect 301: cors to another cors'
-- 'Redirect 301: cors to same cors'
-- 'Redirect 301: cors to same origin'
-- 'Redirect 301: same origin to cors'
-- 'Redirect 302: cors to another cors'
-- 'Redirect 302: cors to same cors'
-- 'Redirect 302: cors to same origin'
-- 'Redirect 302: same origin to cors'
-- 'Redirect 303: cors to another cors'
-- 'Redirect 303: cors to same cors'
-- 'Redirect 303: cors to same origin'
-- 'Redirect 303: same origin to cors'
-- 'Redirect 307: cors to another cors'
-- 'Redirect 307: cors to same cors'
-- 'Redirect 307: cors to same origin'
-- 'Redirect 307: same origin to cors'
-- 'Redirect 308: cors to another cors'
-- 'Redirect 308: cors to same cors'
-- 'Redirect 308: cors to same origin'
-- 'Redirect 308: same origin to cors'
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:

@@ -216,18 +216,26 @@ class Stash:
     one dir per test file and clears it between files). take() is a pop (read+remove),
     put() writes. Values are arbitrary Python objects (preflight.py stashes a dict of
     counters, other handlers a bytes flag), so they are pickled — matching wptserve,
-    whose stash holds live objects, not just bytes."""
-    def __init__(self):
-        self.dir = os.environ.get('WPT_STASH_DIR')
+    whose stash holds live objects, not just bytes.
 
-    def _path(self, key):
+    Scoped by request PATH, like wptserve: take()/put() default `path` to the requesting
+    handler's URL path, so two handlers using the same token don't collide (a cors-redirect
+    hop stashes {count} under redirect.py while preflight.py, reading the same token under
+    ITS path, correctly sees nothing and uses its own default state)."""
+    def __init__(self, default_path=None):
+        self.dir = os.environ.get('WPT_STASH_DIR')
+        self.default_path = default_path or ''
+
+    def _file(self, key, path):
         if not self.dir:
             return None
-        raw = key if isinstance(key, bytes) else str(key).encode('utf-8')
+        scope = path if path is not None else self.default_path
+        raw = (str(scope) + '\x00').encode('utf-8')
+        raw += key if isinstance(key, bytes) else str(key).encode('utf-8')
         return os.path.join(self.dir, hashlib.sha1(raw).hexdigest())
 
     def take(self, key, path=None):
-        p = self._path(key)
+        p = self._file(key, path)
         if not p or not os.path.exists(p):
             return None
         try:
@@ -239,7 +247,7 @@ class Stash:
             return None
 
     def put(self, key, value, path=None):
-        p = self._path(key)
+        p = self._file(key, path)
         if not p:
             return
         try:
@@ -253,9 +261,9 @@ class Stash:
 
 
 class Server:
-    def __init__(self, config):
+    def __init__(self, config, stash_path=None):
         self.config = config
-        self.stash = Stash()
+        self.stash = Stash(stash_path)
 
 
 class Writer:
@@ -359,7 +367,7 @@ class Request:
             'doc_root': doc_root,
             'browser_host': self.url_parts.hostname or 'web-platform.test',
             'ports': {'http': [self.url_parts.port or 80], 'https': [443]},
-        })
+        }, stash_path=self.url_parts.path)
         self.auth = Auth(self.headers.get(b'authorization'))
 
 
