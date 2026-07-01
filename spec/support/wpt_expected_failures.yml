@@ -795,17 +795,6 @@ fetch/api/response/response-error-from-stream.any.js:
 - ReadableStream start() Error propagates to Response.formData() Promise
 - ReadableStream start() Error propagates to Response.json() Promise
 - ReadableStream start() Error propagates to Response.text() Promise
-fetch/api/response/response-error.any.js:
-- Throws RangeError when responseInit's status is 0
-- Throws RangeError when responseInit's status is 100
-- Throws RangeError when responseInit's status is 1000
-- Throws RangeError when responseInit's status is 199
-- Throws RangeError when responseInit's status is 600
-- Throws TypeError when building a response with body and a body status of 204
-- Throws TypeError when building a response with body and a body status of 205
-- Throws TypeError when building a response with body and a body status of 304
-- "Throws TypeError when responseInit's statusText is \n"
-- Throws TypeError when responseInit's statusText is Ā
 fetch/api/response/response-form-data.html:
 - Validate buggy form data - boundary
 - Validate buggy form data - cr1
@@ -827,12 +816,8 @@ fetch/api/response/response-init-002.any.js:
 - Testing null Response body
 fetch/api/response/response-static-error.any.js:
 - Check response returned by static method error()
-- the 'guard' of the Headers instance should be immutable
 fetch/api/response/response-static-json.any.js:
 - Check static json() throws when data is not encodable
-- Throws TypeError when calling static json() with a status of 204
-- Throws TypeError when calling static json() with a status of 205
-- Throws TypeError when calling static json() with a status of 304
 fetch/api/response/response-static-redirect.any.js:
 - Check error returned when giving invalid status to redirect(), status = 200
 - Check error returned when giving invalid status to redirect(), status = 309
