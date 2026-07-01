@@ -65,12 +65,10 @@ fetch/api/abort/keepalive.html:
 - aborting a detached keepalive fetch should not do anything
 - aborting a keepalive fetch should work
 fetch/api/abort/request.any.js:
-- Aborting a request after calling json()
 - Calling arrayBuffer() on an aborted consumed nonempty request
 - Calling blob() on an aborted consumed nonempty request
 - Calling formData() on an aborted consumed nonempty request
 - Calling json() on an aborted consumed nonempty request
-- Calling json() on an aborted request
 - Calling text() on an aborted consumed nonempty request
 fetch/api/abort/serviceworker-intercepted.https.html:
 - Abort reason serialization happens on abort
@@ -195,8 +193,6 @@ fetch/api/basic/request-upload.any.js:
 - Fetch with POST with text body on 421 response should be retried once on new connection.
 - Streaming upload shouldn't work on Http/1.1.
 fetch/api/basic/request-upload.h2.any.js:
-- Feature detect for POST with ReadableStream
-- Feature detect for POST with ReadableStream, using request object
 - Fetch with POST with ReadableStream
 - Fetch with POST with ReadableStream on 421 response should return the response and
   not retry.
@@ -244,31 +240,6 @@ fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
 fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
-fetch/api/basic/text-utf8.any.js:
-- UTF-16 without BOM decoded as UTF-8 (Request object)
-- UTF-16 without BOM decoded as UTF-8 (Response object)
-- UTF-16 without BOM decoded as UTF-8 with Request.text()
-- UTF-16 without BOM decoded as UTF-8 with Response.text()
-- UTF-16BE with BOM decoded as UTF-8 (Request object)
-- UTF-16BE with BOM decoded as UTF-8 (Response object)
-- UTF-16BE with BOM decoded as UTF-8 with Request.text()
-- UTF-16BE with BOM decoded as UTF-8 with Response.text()
-- UTF-16BE with BOM decoded as UTF-8 with fetched data (UTF-16 charset)
-- UTF-16BE with BOM decoded as UTF-8 with fetched data (UTF-8 charset)
-- UTF-16LE with BOM decoded as UTF-8 (Request object)
-- UTF-16LE with BOM decoded as UTF-8 (Response object)
-- UTF-16LE with BOM decoded as UTF-8 with Request.text()
-- UTF-16LE with BOM decoded as UTF-8 with Response.text()
-- UTF-16LE with BOM decoded as UTF-8 with fetched data (UTF-16 charset)
-- UTF-16LE with BOM decoded as UTF-8 with fetched data (UTF-8 charset)
-- UTF-8 with BOM (Request object)
-- UTF-8 with BOM (Response object)
-- UTF-8 with BOM with Request.text()
-- UTF-8 with BOM with Response.text()
-- UTF-8 without BOM (Request object)
-- UTF-8 without BOM (Response object)
-- UTF-8 without BOM with Request.text()
-- UTF-8 without BOM with Response.text()
 fetch/api/basic/url-parsing.sub.html:
 - Request uses the UTF-8 URL parser
 - Request uses the UTF-8 URL parser
@@ -279,20 +250,6 @@ fetch/api/basic/url-parsing.sub.html:
 - Response.redirect() uses the UTF-8 URL parser
 - Response.redirect() uses the UTF-8 URL parser
 - Response.redirect() uses the UTF-8 URL parser
-fetch/api/body/formdata.any.js:
-- Consume multipart/form-data headers case-insensitively
-fetch/api/body/mime-type.any.js:
-- 'Request: Content-Type in headers wins Blob"s type'
-- 'Request: Extract a MIME type with clone'
-- 'Request: MIME type for Blob from empty body with Content-Type'
-- 'Request: MIME type for Blob with non-empty type'
-- 'Request: overriding explicit Content-Type'
-- 'Request: removing implicit Content-Type'
-- 'Request: setting missing Content-Type'
-- 'Request: setting missing Content-Type in headers and it wins Blob"s type'
-- 'Response: MIME type for Blob with non-empty type'
-- 'Response: removing implicit Content-Type'
-- 'Response: setting missing Content-Type in headers and it wins Blob"s type'
 fetch/api/body/textstream.any.js:
 - Request.textStream() basic functionality
 - Request.textStream() ignores Content-Type charset (UTF-16LE)
@@ -1419,50 +1376,7 @@ fetch/api/request/request-clone-readable-stream-body.any.js:
 fetch/api/request/request-clone.sub.html:
 - Check cloning a request
 fetch/api/request/request-consume-empty.any.js:
-- Consume empty ArrayBuffer request body as text
 - Consume empty FormData request body as text
-- Consume empty blob request body as arrayBuffer
-- Consume empty blob request body as text
-- Consume request's body as arrayBuffer
-- Consume request's body as blob
-- Consume request's body as formData with correct multipart type (error case)
-- Consume request's body as formData without correct type (error case)
-- Consume request's body as json (error case)
-- Consume request's body as text
-fetch/api/request/request-consume.any.js:
-- Consume ArrayBuffer request's body as JSON
-- Consume ArrayBuffer request's body as arrayBuffer
-- Consume ArrayBuffer request's body as blob
-- Consume ArrayBuffer request's body as bytes
-- Consume ArrayBuffer request's body as text
-- Consume DataView request's body as JSON
-- Consume DataView request's body as arrayBuffer
-- Consume DataView request's body as blob
-- Consume DataView request's body as bytes
-- Consume DataView request's body as text
-- Consume Float32Array request's body as JSON
-- Consume Float32Array request's body as arrayBuffer
-- Consume Float32Array request's body as blob
-- Consume Float32Array request's body as bytes
-- Consume Float32Array request's body as text
-- Consume FormData request's body as FormData
-- Consume Int8Array request's body as JSON
-- Consume Int8Array request's body as arrayBuffer
-- Consume Int8Array request's body as blob
-- Consume Int8Array request's body as bytes
-- Consume Int8Array request's body as text
-- Consume String request's body as bytes
-- Consume Uint8Array request's body as JSON
-- Consume Uint8Array request's body as arrayBuffer
-- Consume Uint8Array request's body as blob
-- Consume Uint8Array request's body as bytes
-- Consume Uint8Array request's body as text
-- Consume blob response's body as arrayBuffer
-- Consume blob response's body as blob
-- Consume blob response's body as blob (empty blob as input)
-- Consume blob response's body as bytes
-- Consume blob response's body as json
-- Consume blob response's body as text
 fetch/api/request/request-disturbed.any.js:
 - Check cloning a disturbed request
 - Check creating a new request from a disturbed request
@@ -1470,7 +1384,6 @@ fetch/api/request/request-disturbed.any.js:
 - Input request used for creating new request became disturbed even if body is not
   used
 - Request construction failure should not set "bodyUsed"
-- Request without body cannot be disturbed
 - 'Request''s body: initial state'
 fetch/api/request/request-error.any.js:
 - Bad cache init parameter value
@@ -1480,7 +1393,6 @@ fetch/api/request/request-error.any.js:
 - Bad referrerPolicy init parameter value
 - Input URL has credentials
 - Input URL is not valid
-- Request should get its content-type from the body if none is provided
 - 'Request with cache mode: only-if-cached and fetch mode cors'
 - 'Request with cache mode: only-if-cached and fetch mode no-cors'
 - RequestInit's cache mode is only-if-cached and mode is not same-origin
@@ -1490,8 +1402,6 @@ fetch/api/request/request-error.any.js:
 - RequestInit's mode is no-cors and method is not simple
 - RequestInit's referrer is invalid
 - RequestInit's window is not null
-fetch/api/request/request-headers.any.js:
-- Request should get its content-type from the body if none is provided
 fetch/api/request/request-init-001.sub.html:
 - Check method init value of patCh and associated getter
 - Check method init value of patch and associated getter
@@ -1519,11 +1429,6 @@ fetch/api/request/request-init-003.sub.html:
 - Check request values when initialized from Request and init values
 - Check request values when initialized from url and init values
 - Check request values when initialized from url string
-fetch/api/request/request-init-contenttype.any.js:
-- Default Content-Type for Request with Blob body (set type)
-- Default Content-Type for Request with FormData body
-- Default Content-Type for Request with URLSearchParams body
-- Default Content-Type for Request with string body
 fetch/api/request/request-init-priority.any.js:
 - fetch() with an invalid priority returns a rejected promise with a TypeError
 - new Request() throws a TypeError if any of RequestInit's members' values are invalid
@@ -1569,9 +1474,6 @@ fetch/api/request/request-structure.any.js:
 fetch/api/request/url-encoding.html:
 - URL encoding and Request
 - URL encoding and fetch()
-fetch/api/response/json.any.js:
-- Ensure UTF-16 results in an error
-- Ensure the correct JSON parser is used
 fetch/api/response/multi-globals/url-parsing.html:
 - should parse the redirect Location URL relative to the current settings object
 fetch/api/response/response-arraybuffer-realm.window.js:
@@ -1612,16 +1514,7 @@ fetch/api/response/response-clone.any.js:
 - Check response clone use structureClone for teed ReadableStreams (Uint8Arraychunk)
 - Check response clone use structureClone for teed ReadableStreams (Uint8ClampedArraychunk)
 fetch/api/response/response-consume-empty.any.js:
-- Consume empty ArrayBuffer response body as text
 - Consume empty FormData response body as text
-- Consume empty blob response body as arrayBuffer
-- Consume empty blob response body as text
-- Consume response's body as arrayBuffer
-- Consume response's body as blob
-- Consume response's body as formData with correct multipart type (error case)
-- Consume response's body as formData without correct type (error case)
-- Consume response's body as json (error case)
-- Consume response's body as text
 fetch/api/response/response-consume-stream.any.js:
 - Getting a redirect Response stream
 - Getting an error Response stream
@@ -1639,27 +1532,6 @@ fetch/api/response/response-consume-stream.any.js:
 - Read text response's body as readableStream with mode=undefined
 - Reading with offset from Response stream
 fetch/api/response/response-consume.html:
-- 'Consume response''s body: from FormData to arrayBuffer'
-- 'Consume response''s body: from FormData to blob'
-- 'Consume response''s body: from FormData to formData'
-- 'Consume response''s body: from FormData to text'
-- 'Consume response''s body: from FormData without correct type to formData (error
-  case)'
-- 'Consume response''s body: from URLSearchParams to blob'
-- 'Consume response''s body: from URLSearchParams to formData'
-- 'Consume response''s body: from URLSearchParams without correct type to formData
-  (error case)'
-- 'Consume response''s body: from blob to arrayBuffer'
-- 'Consume response''s body: from blob to blob'
-- 'Consume response''s body: from blob to json'
-- 'Consume response''s body: from blob to text'
-- 'Consume response''s body: from blob with correct multipart type to formData'
-- 'Consume response''s body: from blob with correct urlencoded type to formData'
-- 'Consume response''s body: from blob without correct multipart type to formData
-  (error case)'
-- 'Consume response''s body: from blob without correct urlencoded type to formData
-  (error case)'
-- 'Consume response''s body: from fetch without correct type to formData (error case)'
 - 'Consume response''s body: from multipart form data blob to formData'
 - 'Consume response''s body: from stream to arrayBuffer'
 - 'Consume response''s body: from stream to blob'
@@ -1667,18 +1539,6 @@ fetch/api/response/response-consume.html:
 - 'Consume response''s body: from stream to text'
 - 'Consume response''s body: from stream with correct multipart type to formData'
 - 'Consume response''s body: from stream with correct urlencoded type to formData'
-- 'Consume response''s body: from stream without correct multipart type to formData
-  (error case)'
-- 'Consume response''s body: from stream without correct urlencoded type to formData
-  (error case)'
-- 'Consume response''s body: from text with correct multipart type to formData'
-- 'Consume response''s body: from text with correct multipart type to formData with
-  BOM'
-- 'Consume response''s body: from text with correct urlencoded type to formData'
-- 'Consume response''s body: from text without correct multipart type to formData
-  (error case)'
-- 'Consume response''s body: from text without correct urlencoded type to formData
-  (error case)'
 fetch/api/response/response-error-from-stream.any.js:
 - ReadableStream pull() Error propagates to Response.arrayBuffer() Promise
 - ReadableStream pull() Error propagates to Response.blob() Promise
@@ -1704,7 +1564,6 @@ fetch/api/response/response-error.any.js:
 - "Throws TypeError when responseInit's statusText is \n"
 - Throws TypeError when responseInit's statusText is Ā
 fetch/api/response/response-form-data.html:
-- Empty form data
 - Validate buggy form data - boundary
 - Validate buggy form data - cr1
 - Validate buggy form data - cr2
@@ -1712,12 +1571,6 @@ fetch/api/response/response-form-data.html:
 - Validate buggy form data - cr_
 - Validate buggy form data - dashes
 - Validate buggy form data - empty
-- Validate form data - onePartWithEpilogue
-- Validate form data - onePartWithTransportPadding
-- Validate form data - onePartWithoutEpilogue
-- Validate form data - twoPartsWithEpilogue
-- Validate form data - twoPartsWithTransportPadding
-- Validate form data - twoPartsWithoutEpilogue
 fetch/api/response/response-from-stream.any.js:
 - Constructing a Response with a stream on which getReader() is called
 - Constructing a Response with a stream on which read() and releaseLock() are called
@@ -1727,22 +1580,12 @@ fetch/api/response/response-headers-guard.any.js:
 fetch/api/response/response-init-001.any.js:
 - Check default value for body attribute
 fetch/api/response/response-init-002.any.js:
-- Initialize Response's body with application/octet-binary
-- Initialize Response's body with application/x-www-form-urlencoded;charset=UTF-8
-- Initialize Response's body with multipart/form-data
-- Initialize Response's body with text/plain;charset=UTF-8
 - Read Response's body as readableStream
 - Testing null Response body
-fetch/api/response/response-init-contenttype.any.js:
-- Default Content-Type for Response with Blob body (set type)
-- Default Content-Type for Response with FormData body
-- Default Content-Type for Response with URLSearchParams body
-- Default Content-Type for Response with string body
 fetch/api/response/response-static-error.any.js:
 - Check response returned by static method error()
 - the 'guard' of the Headers instance should be immutable
 fetch/api/response/response-static-json.any.js:
-- "Check response returned by static json() with input \U0001D306"
 - Check static json() throws when data is not encodable
 - Throws TypeError when calling static json() with a status of 204
 - Throws TypeError when calling static json() with a status of 205
@@ -1758,7 +1601,6 @@ fetch/api/response/response-stream-bad-chunk.any.js:
   TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.blob() causes TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.bytes() causes TypeError
-- ReadableStream with non-Uint8Array chunk passed to Response.formData() causes TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.json() causes TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.text() causes TypeError
 fetch/api/response/response-stream-disturbed-1.any.js:
@@ -1841,19 +1683,12 @@ fetch/api/response/response-stream-with-broken-then.any.js:
 - 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
 - intercepting arraybuffer to body readable stream conversion via Object.prototype.then
   should not be possible
-- intercepting arraybuffer to text conversion via Object.prototype.then should not
-  be possible
 fetch/data-urls/base64.any.js:
-- 'data: URL base64 handling: " \t\n\f\r ab\t\n\f\r cd\t\n\f\r "'
-- 'data: URL base64 handling: " abcd"'
 - 'data: URL base64 handling: " abcd==="'
 - 'data: URL base64 handling: "--"'
 - 'data: URL base64 handling: ".."'
 - 'data: URL base64 handling: "/"'
 - 'data: URL base64 handling: "////A"'
-- 'data: URL base64 handling: "///A"'
-- 'data: URL base64 handling: "//A"'
-- 'data: URL base64 handling: "/A"'
 - 'data: URL base64 handling: "="'
 - 'data: URL base64 handling: "=="'
 - 'data: URL base64 handling: "==="'
@@ -1862,12 +1697,7 @@ fetch/data-urls/base64.any.js:
 - 'data: URL base64 handling: "=a"'
 - 'data: URL base64 handling: "=a="'
 - 'data: URL base64 handling: "A"'
-- 'data: URL base64 handling: "A/"'
-- 'data: URL base64 handling: "AA/"'
-- 'data: URL base64 handling: "AAA/"'
 - 'data: URL base64 handling: "AAAA/"'
-- 'data: URL base64 handling: "YQ"'
-- 'data: URL base64 handling: "YR"'
 - 'data: URL base64 handling: "\0nonsense"'
 - 'data: URL base64 handling: "__"'
 - 'data: URL base64 handling: "a"'
@@ -1878,33 +1708,20 @@ fetch/data-urls/base64.any.js:
 - 'data: URL base64 handling: "a====="'
 - 'data: URL base64 handling: "a=b"'
 - 'data: URL base64 handling: "a=b="'
-- 'data: URL base64 handling: "ab cd"'
-- 'data: URL base64 handling: "ab"'
 - 'data: URL base64 handling: "ab="'
-- 'data: URL base64 handling: "ab=="'
 - 'data: URL base64 handling: "ab==="'
 - 'data: URL base64 handling: "ab===="'
 - 'data: URL base64 handling: "ab====="'
 - 'data: URL base64 handling: "ab=c"'
 - 'data: URL base64 handling: "ab=c="'
-- 'data: URL base64 handling: "ab\fcd"'
-- 'data: URL base64 handling: "ab\ncd"'
-- 'data: URL base64 handling: "ab\rcd"'
-- 'data: URL base64 handling: "ab\t\n\f\r =\t\n\f\r =\t\n\f\r "'
-- 'data: URL base64 handling: "ab\t\n\f\r cd"'
-- 'data: URL base64 handling: "ab\tcd"'
 - 'data: URL base64 handling: "ab\vcd"'
-- 'data: URL base64 handling: "abc"'
-- 'data: URL base64 handling: "abc="'
 - 'data: URL base64 handling: "abc=="'
 - 'data: URL base64 handling: "abc==="'
 - 'data: URL base64 handling: "abc===="'
 - 'data: URL base64 handling: "abc====="'
 - 'data: URL base64 handling: "abc=d"'
 - 'data: URL base64 handling: "abc=d="'
-- 'data: URL base64 handling: "abcd "'
 - 'data: URL base64 handling: "abcd ==="'
-- 'data: URL base64 handling: "abcd"'
 - 'data: URL base64 handling: "abcd="'
 - 'data: URL base64 handling: "abcd=="'
 - 'data: URL base64 handling: "abcd=== "'
@@ -1934,7 +1751,6 @@ fetch/data-urls/processing.any.js:
 - '"data:%20,%FF"'
 - '"data:%3Bbase64,WA"'
 - '"data:,%FF"'
-- '"data:,X"'
 - '"data:,X#X"'
 - '"data://test/,X"'
 - '"data://test:test/,X"'
@@ -1942,7 +1758,6 @@ fetch/data-urls/processing.any.js:
 - '"data:; base64,WA"'
 - '"data:; charset=x,X"'
 - '"data:;%62ase64,WA"'
-- '"data:;BASe64,WA"'
 - '"data:;CHARSET=\"X\",X"'
 - '"data:;base 64,WA"'
 - '"data:;base64   ,WA"'
@@ -1965,27 +1780,14 @@ fetch/data-urls/processing.any.js:
 - '"data:X,X"'
 - '"data:\0,%FF"'
 - '"data:\f,%FF"'
-- '"data:application/javascript,X X"'
-- '"data:application/xml,X X"'
-- '"data:image/gif,%C2%B1"'
-- '"data:image/png,X X"'
 - '"data:text / html,X"'
 - '"data:text/html  ,X"'
-- '"data:text/javascript,X X"'
 - '"data:text/plain ,X"'
 - '"data:text/plain%0C,X"'
-- '"data:text/plain%20,X"'
-- '"data:text/plain,X X"'
-- '"data:text/plain,X"'
 - '"data:text/plain;,X"'
 - '"data:text/plain;Charset=UTF-8,%C2%B1"'
-- '"data:text/plain;a=%2C,X"'
 - '"data:text/plain;a=\",\",X"'
-- "\"data:text/plain;charset=UTF-8,áñçə\U0001F4A9\""
-- '"data:text/plain;charset=windows-1252,%C2%B1"'
-- "\"data:text/plain;charset=windows-1252,áñçə\U0001F4A9\""
 - '"data:text/plain\f,X"'
-- '"data:unknown/unknown,X X"'
 - '"data:x/x;base64;base64,WA"'
 - '"data:x/x;base64;base64x,WA"'
 - '"data:x/x;base64;charset=x,WA"'
