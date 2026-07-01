@@ -132,24 +132,6 @@ fetch/api/basic/response-url.sub.any.js:
 - Testing response url getter with http://web-platform.test:8000#ada
 - Testing response url getter with http://web-platform.test:8000/#
 - Testing response url getter with http://web-platform.test:8000/#ada
-fetch/api/basic/scheme-blob.sub.any.js:
-- Blob content is not sniffed for a content type [text/xml]
-- Blob.slice should not sniff the content for a content type
-- Fetching URL.createObjectURL(empty_blob) is OK
-- Fetching URL.createObjectURL(empty_data_blob) is OK
-- Fetching URL.createObjectURL(empty_type_blob) is OK
-- Fetching URL.createObjectURL(invalid_type_blob) is OK
-- Fetching [GET] URL.createObjectURL(blob) is OK
-- Set content type to the empty string for slice with invalid content type
-- 'Set content type to the empty string for slice with no content type '
-fetch/api/basic/scheme-data.any.js:
-- Fetching [HEAD] data:,response%27s%20body is OK
-- Fetching [POST] data:,response%27s%20body is OK
-- Fetching data:,response%27s%20body is OK
-- Fetching data:,response%27s%20body is OK (cors)
-- Fetching data:,response%27s%20body is OK (same-origin)
-- Fetching data:image/png;base64,cmVzcG9uc2UncyBib2[...] is OK
-- Fetching data:text/plain;base64,cmVzcG9uc2UncyBib[...] is OK
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
@@ -158,9 +140,6 @@ fetch/api/basic/url-parsing.sub.html:
 - Request's referrer uses the UTF-8 URL parser
 - Request's referrer uses the UTF-8 URL parser
 - Request's referrer uses the UTF-8 URL parser
-- Response.redirect() uses the UTF-8 URL parser
-- Response.redirect() uses the UTF-8 URL parser
-- Response.redirect() uses the UTF-8 URL parser
 fetch/api/cors/cors-cookies.any.js:
 - 'Include mode: 1 cookie'
 - 'Include mode: local cookies are not sent with remote request'
@@ -434,12 +413,6 @@ fetch/api/response/response-headers-guard.any.js:
 - Ensure response headers are immutable
 fetch/api/response/response-static-json.any.js:
 - Check static json() throws when data is not encodable
-fetch/api/response/response-static-redirect.any.js:
-- Check error returned when giving invalid status to redirect(), status = 200
-- Check error returned when giving invalid status to redirect(), status = 309
-- Check error returned when giving invalid status to redirect(), status = 400
-- Check error returned when giving invalid status to redirect(), status = 500
-- Check error returned when giving invalid url to redirect()
 fetch/api/response/response-stream-bad-chunk.any.js:
 - ReadableStream with non-Uint8Array chunk passed to Response.arrayBuffer() causes
   TypeError
