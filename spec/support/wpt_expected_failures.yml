@@ -657,12 +657,6 @@ fetch/api/request/request-disturbed.any.js:
 fetch/api/request/request-init-001.sub.html:
 - Check referrer init value of /relative/ressource and associated getter
 - Check referrer init value of http://test.url and associated getter
-fetch/api/request/request-init-002.any.js:
-- Initialize Request's body with "This is a USVString", text/plain;charset=UTF-8
-- Initialize Request's body with "[object Blob]", application/octet-binary
-- Initialize Request's body with "[object Object]", multipart/form-data
-- Initialize Request's body with "hi!", text/plain;charset=UTF-8
-- Initialize Request's body with "name=value", application/x-www-form-urlencoded;charset=UTF-8
 fetch/api/request/request-init-003.sub.html:
 - Check request values when initialized from Request
 fetch/api/request/request-init-priority.any.js:
