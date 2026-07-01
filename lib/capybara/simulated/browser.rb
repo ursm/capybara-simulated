@@ -4244,6 +4244,9 @@ module Capybara
         end
       end
 
+      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count).
+      # The loop below runs one iteration PER dispatch, so it needs 20 redirect hops plus
+      # the final response — MAX_FETCH_REDIRECTS + 1 iterations — to let exactly 20 succeed.
       MAX_FETCH_REDIRECTS = 20
       # Fetch "bad port" blocklist (https://fetch.spec.whatwg.org/#port-blocking) —
       # ports tied to non-HTTP protocols a request must never reach. Frozen Set for
@@ -4391,7 +4394,7 @@ module Capybara
         # document URL ("client"); an empty referrer means no-referrer (compute_referrer
         # maps a blank source to nil).
         ref_source = referrer.nil? ? @current_url : referrer
-        MAX_FETCH_REDIRECTS.times do
+        (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
           # BEFORE the cache so a cross-origin request never takes the cache fast path
@@ -5963,6 +5966,9 @@ module Capybara
       # safelisted (Content-Type only for a urlencoded / multipart / text/plain value).
       CORS_SAFELISTED_METHODS = %w[GET HEAD POST].freeze
       CORS_SAFELISTED_HEADERS = %w[accept accept-language content-language content-type].freeze
+      # RFC 7230 `token` (tchar+) — a valid HTTP method / field-name. Used to reject a
+      # preflight whose Access-Control-Allow-Methods / -Headers carries a malformed value.
+      HTTP_TOKEN = /\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/.freeze
       CORS_SAFELISTED_CTYPES  = %w[application/x-www-form-urlencoded multipart/form-data text/plain].freeze
 
       # The sorted, lowercased author header names that are NOT CORS-safelisted (a
@@ -6107,6 +6113,11 @@ module Capybara
         return nil if credentialed && cors_header(ph, 'access-control-allow-credentials') != 'true'
         allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
         allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
+        # Fetch "extract header list values" fails when a grant contains a malformed token
+        # (`Access-Control-Allow-Methods: Bad value` — a space isn't a tchar), and a failed
+        # extraction is a network error (cors-preflight-response-validation). Methods and
+        # header names are both HTTP tokens; `*` is a valid tchar so the wildcard passes.
+        return nil unless (allow_methods + allow_headers).all? {|t| t.match?(HTTP_TOKEN) }
         return nil unless cors_grant_allows?(allow_methods, allow_headers, method, unsafe, credentialed)
         {methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i}
       end

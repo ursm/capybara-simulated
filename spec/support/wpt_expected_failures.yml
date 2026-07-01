@@ -335,9 +335,6 @@ fetch/api/cors/cors-preflight-redirect.any.js:
 - Redirection 303 after preflight failed
 - Redirection 307 after preflight failed
 - Redirection 308 after preflight failed
-fetch/api/cors/cors-preflight-response-validation.any.js:
-- Preflight response with a bad Access-Control-Allow-Headers
-- Preflight response with a bad Access-Control-Allow-Methods
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -390,12 +387,6 @@ fetch/api/policies/csp-blocked.html:
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-fetch/api/redirect/redirect-count.any.js:
-- Redirect 301 20 times
-- Redirect 302 20 times
-- Redirect 303 20 times
-- Redirect 307 20 times
-- Redirect 308 20 times
 fetch/api/redirect/redirect-keepalive.any.js:
 - "[keepalive][new window][unload] cross-origin redirect"
 - "[keepalive][new window][unload] cross-origin redirect + preflight"
@@ -740,7 +731,6 @@ fetch/api/request/request-error.any.js:
 - RequestInit's referrer is invalid
 - RequestInit's window is not null
 fetch/api/request/request-init-001.sub.html:
-- Check referrer init value of  and associated getter
 - Check referrer init value of /relative/ressource and associated getter
 - Check referrer init value of http://test.url and associated getter
 fetch/api/request/request-init-002.any.js:
