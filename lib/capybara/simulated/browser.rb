@@ -4463,9 +4463,26 @@ module Capybara
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
           # -Allow-Origin is itself a network error: access-control-and-redirects). A
           # credentialed request additionally forbids `*` and needs Allow-Credentials.
-          return nil if cross_origin && !cors_response_ok?(resp_headers, effective_origin, with_credentials)
-          if redirect_mode != 'manual' && (loc = redirect_location(status, resp_headers))
+          if cross_origin && !cors_response_ok?(resp_headers, effective_origin, with_credentials)
+            resp_body.close if resp_body.respond_to?(:close)
+            return nil
+          end
+          # A redirect-status response in a NON-follow mode is handled without following,
+          # keyed on the status ALONE (the Location is never parsed): `error` is a network
+          # error; `manual` is an opaque-redirect filtered response (status 0, empty
+          # statusText/headers, the ORIGINAL request URL, type 'opaqueredirect'). The CORS
+          # check above runs first, so a cross-origin redirect that fails CORS is a network
+          # error either way (redirect-mode / -location).
+          if redirect_mode != 'follow' && REDIRECT_STATUSES.include?(status.to_i)
+            resp_body.close if resp_body.respond_to?(:close)
             raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            # A no-cors request may not even opaquely expose a CROSS-origin redirect — a
+            # no-cors non-follow redirect to a cross-origin target is a network error,
+            # while a same-origin one still yields an opaque-redirect.
+            return nil if no_cors_mode && crossed
+            return response_hash(0, {}, '', target, false, type: 'opaqueredirect')
+          end
+          if (loc = redirect_location(status, resp_headers))
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             redirected = true
@@ -4477,12 +4494,22 @@ module Capybara
               ref_policy = tok if tok
             end
             next_url = resolve_against(loc, target)
+            # The UA only follows http(s) redirects: a Location that resolves to a
+            # non-HTTP(S) URL (data:, an `invalidurl:` scheme, …) is a network error
+            # (redirect-location data/invalid in follow mode).
+            unless next_url.to_s.match?(%r{\Ahttps?://}i)
+              resp_body.close if resp_body.respond_to?(:close)
+              return nil
+            end
             # A redirect to a DIFFERENT origin taints the request's origin to opaque
             # ("null"), so every subsequent hop is cross-origin and sends Origin: null
             # (and the CORS check then demands the server allow "null" or "*").
             effective_origin = 'null' if cors && url_origin(next_url) != url_origin(target)
             target = carry_fragment(target, next_url)
-            return nil if bad_port?(target)   # a redirect to a blocked port is a network error too
+            if bad_port?(target)   # a redirect to a blocked port is a network error too
+              resp_body.close if resp_body.respond_to?(:close)
+              return nil
+            end
             # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
             # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
             # non-GET/HEAD. Otherwise method, body, and headers are preserved — so a
@@ -4496,6 +4523,19 @@ module Capybara
             end
             resp_body.close if resp_body.respond_to?(:close)
             next
+          end
+          # A follow-mode redirect whose Location header IS present but EMPTY parses to the
+          # request URL — a self-redirect that would loop until the redirect limit trips a
+          # network error. redirect_location returns nil for it (empty ⇒ no followable
+          # target, so navigation keeps rendering the 3xx), so recognize it here and fail
+          # directly — fetch-only (redirect-empty-location follow mode).
+          if REDIRECT_STATUSES.include?(status.to_i)
+            raw_loc = resp_headers['location'] || resp_headers['Location']
+            raw_loc = raw_loc.first if raw_loc.is_a?(Array)
+            if raw_loc && raw_loc.to_s.empty?
+              resp_body.close if resp_body.respond_to?(:close)
+              return nil
+            end
           end
           body_str = read_rack_body(resp_body)
           # A HEAD response has no body — the UA discards whatever the server sent
@@ -5876,9 +5916,12 @@ module Capybara
       def redirect_location(status, headers)
         return nil unless REDIRECT_STATUSES.include?(status.to_i)
         loc = headers['location'] || headers['Location']
-        # A blank Location resolves back to the current URL — following it would spin
-        # the redirect loop until MAX_FETCH_REDIRECTS. It's not a usable redirect
-        # target, so the 3xx is returned to the caller as-is.
+        loc = loc.first if loc.is_a?(Array)   # Rack 3 permits array-valued header fields
+        # A blank (or absent) Location has no FOLLOWABLE target: an empty value parses back
+        # to the current URL, so following it would just self-redirect. Return nil so a
+        # caller renders the 3xx as-is rather than looping — the several navigation handlers
+        # rely on this. (The fetch redirect loop recognizes a present-but-empty Location
+        # separately and turns it into a network error per Fetch — see rack_fetch.)
         loc unless loc.to_s.empty?
       end
 
