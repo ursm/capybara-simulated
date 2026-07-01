@@ -142,17 +142,6 @@ fetch/api/basic/request-upload.h2.any.js:
 - Streaming upload with body containing a number
 - Streaming upload with body containing null
 - Synchronous feature detect
-fetch/api/basic/response-null-body.any.js:
-- Response.body is null for responses with method=HEAD
-- Response.body is null for responses with status=204 (method=GET)
-- Response.body is null for responses with status=204 (method=OPTIONS)
-- Response.body is null for responses with status=204 (method=POST)
-- Response.body is null for responses with status=205 (method=GET)
-- Response.body is null for responses with status=205 (method=OPTIONS)
-- Response.body is null for responses with status=205 (method=POST)
-- Response.body is null for responses with status=304 (method=GET)
-- Response.body is null for responses with status=304 (method=OPTIONS)
-- Response.body is null for responses with status=304 (method=POST)
 fetch/api/basic/response-url.sub.any.js:
 - Testing response url getter with http://web-platform.test:8000#ada
 - Testing response url getter with http://web-platform.test:8000/#
@@ -760,7 +749,6 @@ fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
 fetch/api/response/response-consume-stream.any.js:
 - Getting a redirect Response stream
-- Getting an error Response stream
 - Read URLSearchParams response's body as readableStream with mode=byob
 - Read URLSearchParams response's body as readableStream with mode=undefined
 - Read array buffer response's body as readableStream with mode=byob
@@ -809,13 +797,8 @@ fetch/api/response/response-from-stream.any.js:
 - Constructing a Response with a stream on which read() is called
 fetch/api/response/response-headers-guard.any.js:
 - Ensure response headers are immutable
-fetch/api/response/response-init-001.any.js:
-- Check default value for body attribute
 fetch/api/response/response-init-002.any.js:
 - Read Response's body as readableStream
-- Testing null Response body
-fetch/api/response/response-static-error.any.js:
-- Check response returned by static method error()
 fetch/api/response/response-static-json.any.js:
 - Check static json() throws when data is not encodable
 fetch/api/response/response-static-redirect.any.js:

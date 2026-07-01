@@ -4486,7 +4486,7 @@ module Capybara
             # no-cors non-follow redirect to a cross-origin target is a network error,
             # while a same-origin one still yields an opaque-redirect.
             return nil if no_cors_mode && crossed
-            return response_hash(0, {}, '', target, false, type: 'opaqueredirect')
+            return response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
           end
           if (loc = redirect_location(status, resp_headers))
             # Log this hop (3xx) before method/body are rewritten for the next.
@@ -4547,9 +4547,12 @@ module Capybara
             end
           end
           body_str = read_rack_body(resp_body)
-          # A HEAD response has no body — the UA discards whatever the server sent
-          # (response-method: echo-method.py writes one even for HEAD).
-          body_str = '' if method.to_s.upcase == 'HEAD'
+          # A HEAD response, and a null-body status (204/205/304), have NO body — the UA
+          # discards whatever the server sent and exposes response.body as null
+          # (response-method HEAD; response-null-body). `null_body` flags it so the JS
+          # Response reports a null body + empty text.
+          null_body = method.to_s.upcase == 'HEAD' || NULL_BODY_STATUSES.include?(status.to_i)
+          body_str = '' if null_body
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate); the
           # header stays, the bytes are inflated (response-data-gzip / -deflate).
           body_str = decode_content_encoding(body_str, resp_headers)
@@ -4564,8 +4567,8 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
-          return response_hash(0, {}, '', '', false, type: 'opaque') if no_cors_mode && crossed
-          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic')
+          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true) if no_cors_mode && crossed
+          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -4670,7 +4673,7 @@ module Capybara
       # text body when `body_b64` is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
-      def response_hash(status, headers, body, url, redirected, type: 'basic')
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # A NUL in a header value is not a valid HTTP message; a real server can't
@@ -4710,6 +4713,7 @@ module Capybara
           'redirected' => redirected,
           'type'       => type
         }
+        out['body_null'] = true if body_null   # null-body status / HEAD → response.body is null
         # The BOM-detected encoding (if any) — a frame load pins its document's
         # characterSet to it (see __csimFrameWindow); highest-precedence signal.
         out['charset']  = bom_charset if bom_charset
@@ -5920,6 +5924,9 @@ module Capybara
       # choice), 304 (not modified), 305/306 (deprecated) are NOT redirects: the 3xx
       # response is returned to the caller as-is (xhr send-redirect basics).
       REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
+      # Statuses whose response has no body (Fetch "null body status") — the body is dropped
+      # and response.body is null (response-null-body). (101 is unreachable here.)
+      NULL_BODY_STATUSES = [204, 205, 304].freeze
       # Request-body headers removed when a redirect nulls the body (method → GET).
       REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
       def redirect_location(status, headers)
