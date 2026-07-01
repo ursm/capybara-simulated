@@ -66,7 +66,16 @@ module Capybara
       end
 
       # RFC 9111 §3: status codes cacheable by default.
-      CACHEABLE_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
+      # Statuses we store. 301/308 (permanent redirects) are cacheable by default; 302/307
+      # (temporary) are cacheable too but only ever served fresh with EXPLICIT freshness — they
+      # are excluded from HEURISTIC_STATUSES below, and a 302/307 with neither explicit freshness
+      # nor a validator is dropped by `store`. Storing them lets a cached redirect be followed
+      # from the cache (request-cache only-if-cached/force-cache).
+      CACHEABLE_STATUSES = [200, 203, 204, 206, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501].freeze
+      # Statuses eligible for HEURISTIC freshness (RFC 9111 §4.2.2 — "cacheable by default").
+      # 302/307 are NOT here: a temporary redirect is served fresh only with explicit freshness,
+      # never a Last-Modified-derived heuristic (which would risk serving it stale).
+      HEURISTIC_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
 
       # `Vary` fields we can safely ignore because Simulated never sends
       # the corresponding request header — the cached "no value" variant
@@ -103,7 +112,7 @@ module Capybara
         # `private` is a per-user response a shared cache MUST NOT store
         # (§5.2.2.7); this process-wide cache is shared across sessions.
         return if cc[:private]
-        max_age = freshness_seconds(cc, h)
+        max_age = freshness_seconds(cc, h, heuristic: HEURISTIC_STATUSES.include?(status))
         # Nothing useful to cache without a freshness signal or a
         # validator to revalidate against.
         return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil?
@@ -132,7 +141,7 @@ module Capybara
         h  = ensure_lowercase(new_headers)
         cc = parse_cache_control(h['cache-control'])
         entry.stored_at = Time.now
-        entry.max_age   = freshness_seconds(cc, h) || entry.max_age
+        entry.max_age   = freshness_seconds(cc, h, heuristic: HEURISTIC_STATUSES.include?(entry.status)) || entry.max_age
         # RFC 9111 §4.3.4: a 304 UPDATES stored header fields with the ones
         # it carries; it does not delete them. A bare 304 (no Cache-Control —
         # the common ETag / Last-Modified revalidation) must therefore PRESERVE
@@ -145,8 +154,9 @@ module Capybara
 
       private
 
-      def freshness_seconds(cc, headers)
-        cc[:max_age] || expires_to_max_age(headers['expires'], headers['date']) || heuristic_freshness(headers)
+      def freshness_seconds(cc, headers, heuristic: true)
+        explicit = cc[:max_age] || expires_to_max_age(headers['expires'], headers['date'])
+        explicit || (heuristic ? heuristic_freshness(headers) : nil)
       end
 
       # RFC 9111 §4.2.2: a response with no explicit freshness (no max-age, no

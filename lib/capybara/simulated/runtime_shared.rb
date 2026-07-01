@@ -41,7 +41,7 @@ module Capybara
       # JS exception that crashes the whole script chain. Bodies take
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
-        '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8]) },
+        '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default') },
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0]) },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0]); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },

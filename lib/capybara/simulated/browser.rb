@@ -4248,6 +4248,11 @@ module Capybara
       # The loop below runs one iteration PER dispatch, so it needs 20 redirect hops plus
       # the final response — MAX_FETCH_REDIRECTS + 1 iterations — to let exactly 20 succeed.
       MAX_FETCH_REDIRECTS = 20
+      # Request cache modes that never READ the store (always hit the network), and modes that
+      # serve a STORED response even when stale. Frozen so the hot rack_fetch path allocates no
+      # throwaway arrays per hop (perf).
+      CACHE_MODES_SKIP_READ  = %w[no-store reload].freeze
+      CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
       # Fetch "bad port" blocklist (https://fetch.spec.whatwg.org/#port-blocking) —
       # ports tied to non-HTTP protocols a request must never reach. Frozen Set for
       # O(1) membership on the rack_fetch path.
@@ -4325,7 +4330,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default')
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -4401,16 +4406,46 @@ module Capybara
           # (which would bypass the opaque filter / same-origin-mode error / cors type).
           crossed ||= !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
           return nil if same_origin_mode && crossed   # 'same-origin' mode forbids a cross-origin hop
-          # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
-          # entirely; stale-but-revalidatable → fall through with conditional
-          # headers added so the server can return 304. Skipped when cross-origin so the
-          # mode filtering below always runs on a fresh dispatch.
-          cache_entry = (method == 'GET' && !skip_cache && !crossed) ? @@asset_cache.lookup(target) : nil
-          if cache_entry&.fresh?
-            # Cached static asset — log headers/type/size but skip the (boring) body.
+          # HTTP cache (RFC 9111 + Fetch "HTTP-network-or-cache fetch"), gated by the request's
+          # cache MODE. GET-only, same-origin (a cross-origin hop always redispatches so the mode
+          # filtering below runs), and stepped aside when the author sent their own conditional.
+          #   - no-store / reload    : never read the store — always hit the network, no conditional
+          #   - force-cache / only-if-cached : serve a stored response even when STALE, no revalidation
+          #                                    (only-if-cached with nothing stored is a network error)
+          #   - no-cache             : always revalidate, even a fresh entry
+          #   - default              : serve fresh; revalidate stale (fall through with conditionals)
+          read_cache  = method == 'GET' && !skip_cache && !crossed && !CACHE_MODES_SKIP_READ.include?(cache_mode)
+          cache_entry = read_cache ? @@asset_cache.lookup(target) : nil
+          serve_stored = cache_entry &&
+            (CACHE_MODES_SERVE_STALE.include?(cache_mode) || (cache_entry.fresh? && cache_mode != 'no-cache'))
+          if serve_stored
+            if REDIRECT_STATUSES.include?(cache_entry.status.to_i)
+              # A cached REDIRECT obeys the redirect mode exactly like a fresh one: `error` is a
+              # network error, `manual` is an opaque-redirect, and `follow` follows it THROUGH
+              # the cache — resolve the Location and continue so the next hop serves the cached
+              # target (request-cache "uses cached … redirects"). only-if-cached / force-cache
+              # reach this only same-origin GET (read_cache excludes cross-origin), so there's no
+              # method rewrite / origin taint.
+              raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+              if redirect_mode != 'follow'
+                return response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
+              end
+              if (loc = redirect_location(cache_entry.status, cache_entry.headers))
+                trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
+                redirected = true
+                next_url   = resolve_against(loc, target)
+                return nil unless next_url.to_s.match?(%r{\Ahttps?://}i)
+                target = carry_fragment(target, next_url)
+                return nil if bad_port?(target)   # a cached redirect to a blocked port is still a network error
+                next
+              end
+            end
+            # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
           end
+          # only-if-cached forbids the network: no usable stored response → a network error.
+          return nil if cache_mode == 'only-if-cached'
 
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
@@ -4491,6 +4526,11 @@ module Capybara
           if (loc = redirect_location(status, resp_headers))
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
+            # Cache the redirect itself (a cacheable 3xx with freshness) BEFORE following it —
+            # the follow does `next`, which would otherwise skip the store below — so a later
+            # only-if-cached / force-cache request can follow the redirect chain from the cache
+            # (request-cache "uses cached … redirects"). Same store gate as the terminal hop.
+            @@asset_cache.store(target, status, resp_headers, '') if method == 'GET' && cache_mode != 'no-store' && !skip_cache
             redirected = true
             ref_source = hop_referer   # the next hop strips from what THIS hop sent
             # A redirect response's Referrer-Policy overrides the policy for the next hop
@@ -4563,7 +4603,11 @@ module Capybara
           # the full set.) The CORS check itself already ran above (incl. on 3xx hops).
           exposed_headers = cross_origin ? cors_exposed_headers(resp_headers) : resp_headers
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
-          @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
+          # A no-store request must not write the cache (RFC 9111 §5.2.1.5); a request carrying
+          # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
+          # "treated similarly to no-store" (request-cache-default-conditional). Every other mode
+          # (incl. reload, which refreshes it) stores a cacheable GET response.
+          @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET' && cache_mode != 'no-store' && !skip_cache
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
