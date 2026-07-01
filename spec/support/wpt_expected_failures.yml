@@ -272,14 +272,6 @@ fetch/api/credentials/cookies.any.js:
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - fetch() with all valid values
-fetch/api/headers/headers-record.any.js:
-- Basic operation with Symbol keys
-- Correct operation ordering with non-enumerable properties
-- Correct operation ordering with two properties
-- Correct operation ordering with two properties one of which has an invalid name
-- Correct operation ordering with two properties one of which has an invalid value
-- Correct operation ordering with undefined descriptors
-- Operation with non-enumerable Symbol keys
 fetch/api/policies/csp-blocked.html:
 - Fetch is blocked by CSP, got a TypeError
 fetch/api/policies/referrer-origin.html:
