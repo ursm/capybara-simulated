@@ -66,6 +66,20 @@ WICG_OUT = {
     'standardized). CLAUDE.md rule 1.'
 }.freeze
 
+# Unratified proposals that are morally `.tentative` (an in-flux spec no browser ships and
+# no app depends on) but carry NEITHER a `tentative` path NOR a WICG `<link rel=help>` — a
+# whatwg proposal still under discussion. Listed explicitly with a reason; routes ALL of the
+# file's failing subtests out-of-scope. Unlike WICG_OUT there's no `<link>` drift signal, so
+# a re-audit is manual — revisit when the feature lands in the published spec. CLAUDE.md
+# rule 1 ("Unratified specs default OUT"). Map: rel => reason.
+PROPOSAL_OUT = {
+  'fetch/api/body/textstream.any.js' =>
+    'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal not in ' \
+    'the published Fetch Standard — no browser ships it (absent from MDN + the Body IDL) ' \
+    'and no app depends on it. No `.tentative` path and no WICG link, so listed explicitly; ' \
+    're-audit when it lands in the spec. CLAUDE.md rule 1.'
+}.freeze
+
 files = WptRunner.test_files
 warn "Running #{files.size} WPT files…"
 
@@ -102,6 +116,8 @@ files.each_with_index do |rel, i|
         out_list << { 'name' => name, 'reason' => TENTATIVE_REASON }
       elsif WICG_OUT.key?(rel)
         out_list << { 'name' => name, 'reason' => WICG_OUT[rel] }
+      elsif PROPOSAL_OUT.key?(rel)
+        out_list << { 'name' => name, 'reason' => PROPOSAL_OUT[rel] }
       else
         in_list << name
       end

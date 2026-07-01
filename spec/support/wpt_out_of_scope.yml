@@ -5237,6 +5237,57 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
+fetch/api/body/textstream.any.js:
+- name: Request.textStream() basic functionality
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Request.textStream() ignores Content-Type charset (UTF-16LE)
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Request.textStream() with null body
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Response.textStream() basic functionality
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Response.textStream() ignores Content-Type charset (UTF-16LE)
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Response.textStream() ignores invalid Content-Type charset (invalid-charset)
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Response.textStream() with empty body
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: Response.textStream() with null body
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: textStream method existence
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
+- name: textStream() handles chunked byte stream input
+  reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
+    not in the published Fetch Standard — no browser ships it (absent from MDN + the
+    Body IDL) and no app depends on it. No `.tentative` path and no WICG link, so
+    listed explicitly; re-audit when it lands in the spec. CLAUDE.md rule 1.'
 fetch/api/redirect/redirect-location-escape.tentative.any.js:
 - name: Escaping produces double-percent
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

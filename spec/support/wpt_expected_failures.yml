@@ -33,8 +33,6 @@ fetch/api/abort/general.any.js:
 - Readable stream synchronously cancels with AbortError if aborted before reading
 - Stream errors once aborted, after reading. Underlying connection closed.
 - Stream errors once aborted. Underlying connection closed.
-- Stream will not error if body is empty. It's closed with an empty queue before it
-  errors.
 - Underlying connection is closed when aborting after receiving response
 - Underlying connection is closed when aborting after receiving response - no-cors
 fetch/api/abort/keepalive.html:
@@ -90,8 +88,6 @@ fetch/api/basic/error-after-response.any.js:
   resolving fetch promise
 - Response reader read() promise should reject after a network error happening after
   resolving fetch promise
-fetch/api/basic/gc.any.js:
-- GC/CC should not abruptly close the stream while being consumed by Response
 fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
 fetch/api/basic/integrity.sub.any.js:
@@ -125,23 +121,13 @@ fetch/api/basic/request-headers.any.js:
 - Fetch with TacO and mode "same-origin" needs an Origin header
 fetch/api/basic/request-upload.any.js:
 - Fetch with POST with ReadableStream containing ArrayBuffer
-- Fetch with POST with ReadableStream containing Blob
-- Fetch with POST with ReadableStream containing String
-- Fetch with POST with ReadableStream containing null
-- Fetch with POST with ReadableStream containing number
 - Fetch with POST with text body on 421 response should be retried once on new connection.
 - Streaming upload shouldn't work on Http/1.1.
 fetch/api/basic/request-upload.h2.any.js:
-- Fetch with POST with ReadableStream
 - Fetch with POST with ReadableStream on 421 response should return the response and
   not retry.
-- Fetch with POST with empty ReadableStream
 - ReadbleStream should be closed on signal.abort
 - Streaming upload should fail on a 401 response
-- Streaming upload with body containing a String
-- Streaming upload with body containing a number
-- Streaming upload with body containing null
-- Synchronous feature detect
 fetch/api/basic/response-url.sub.any.js:
 - Testing response url getter with http://web-platform.test:8000#ada
 - Testing response url getter with http://web-platform.test:8000/#
@@ -175,19 +161,6 @@ fetch/api/basic/url-parsing.sub.html:
 - Response.redirect() uses the UTF-8 URL parser
 - Response.redirect() uses the UTF-8 URL parser
 - Response.redirect() uses the UTF-8 URL parser
-fetch/api/body/textstream.any.js:
-- Request.textStream() basic functionality
-- Request.textStream() ignores Content-Type charset (UTF-16LE)
-- Request.textStream() on locked body throws TypeError
-- Request.textStream() with null body
-- Response.textStream() basic functionality
-- Response.textStream() ignores Content-Type charset (UTF-16LE)
-- Response.textStream() ignores invalid Content-Type charset (invalid-charset)
-- Response.textStream() on locked body throws TypeError
-- Response.textStream() with empty body
-- Response.textStream() with null body
-- textStream method existence
-- textStream() handles chunked byte stream input
 fetch/api/cors/cors-cookies.any.js:
 - 'Include mode: 1 cookie'
 - 'Include mode: local cookies are not sent with remote request'
@@ -309,8 +282,6 @@ fetch/api/cors/data-url-worker.html:
 - fetching data url script should be allowed.
 fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
-fetch/api/crashtests/huge-fetch.any.js:
-- fetching a huge cacheable file but not reading it should not crash
 fetch/api/credentials/authentication-redirection.any.js:
 - getAuthorizationHeaderValue - cross origin redirection
 fetch/api/credentials/cookies.any.js:
@@ -344,7 +315,6 @@ fetch/api/redirect/redirect-origin.any.js:
 - "[POST] Redirect 307 Same origin to same origin"
 - "[POST] Redirect 308 Same origin to same origin"
 fetch/api/redirect/redirect-upload.h2.any.js:
-- Fetch upload streaming should be accepted on 303
 - Fetch upload streaming should fail on 301
 - Fetch upload streaming should fail on 302
 - Fetch upload streaming should fail on 307
@@ -640,20 +610,15 @@ fetch/api/request/request-cache-reload.any.js:
   and fresh response
 - RequestCache "reload" mode does store the response in the cache with Last-Modified
   and stale response
-fetch/api/request/request-clone-readable-stream-body.any.js:
-- new Request(clone) preserves a ReadableStream body that came from clone()
 fetch/api/request/request-clone.sub.html:
 - Check cloning a request
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
 fetch/api/request/request-disturbed.any.js:
-- Check cloning a disturbed request
-- Check creating a new request from a disturbed request
 - Input request used for creating new request became disturbed
 - Input request used for creating new request became disturbed even if body is not
   used
 - Request construction failure should not set "bodyUsed"
-- 'Request''s body: initial state'
 fetch/api/request/request-init-001.sub.html:
 - Check referrer init value of /relative/ressource and associated getter
 - Check referrer init value of http://test.url and associated getter
@@ -662,26 +627,12 @@ fetch/api/request/request-init-003.sub.html:
 fetch/api/request/request-init-priority.any.js:
 - fetch() with an invalid priority returns a rejected promise with a TypeError
 - new Request() throws a TypeError if any of RequestInit's members' values are invalid
-fetch/api/request/request-init-stream.any.js:
-- Constructing a Request with a Request on which body.getReader() is called
-- Constructing a Request with a Request on which body.getReader().read() is called
-- Constructing a Request with a Request on which read() and releaseLock() are called
-- Constructing a Request with a stream on which getReader() is called
-- Constructing a Request with a stream on which read() and releaseLock() are called
-- Constructing a Request with a stream on which read() is called
-- It is error to omit .duplex when the body is a ReadableStream.
-- It is error to set .duplex = 'full' when the body is a Blob.
-- It is error to set .duplex = 'full' when the body is a ReadableStream.
-- It is error to set .duplex = 'full' when the body is a Uint8Array.
-- It is error to set .duplex = 'full' when the body is a string.
-- It is error to set .duplex = 'full' when the body is null.
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should not be allowed if the Quota is used up.
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
 - A Keep-Alive fetch() with a body over the Quota Limit should reject.
 fetch/api/request/request-keepalive.any.js:
 - keepalive flag
-- keepalive flag with stream body
 fetch/api/request/request-reset-attributes.https.html:
 - Request.isHistoryNavigation is reset with non-empty RequestInit
 - Request.isReloadNavigation is reset with non-empty RequestInit
@@ -694,74 +645,10 @@ fetch/api/response/response-arraybuffer-realm.window.js:
 - realm of the ArrayBuffer from Response arrayBuffer()
 fetch/api/response/response-blob-realm.any.js:
 - realm of the Uint8Array from Response bytes()
-fetch/api/response/response-body-read-task-handling.html:
-- piping from a body stream to a JS-written WritableStream should occur in a microtask
-  scope
-- reading from a body stream should occur in a microtask scope
-fetch/api/response/response-cancel-stream.any.js:
-- Accessing .body after canceling it
-- Cancelling a closed Response stream
-- Cancelling a closed blob Response stream
-- Cancelling a loading Response stream
-- Cancelling a loading blob Response stream
-- Cancelling a starting Response stream
-- Cancelling a starting blob Response stream
-fetch/api/response/response-clone.any.js:
-- Cancelling stream should not affect cloned one
-- Check cloned response's body
-- Check original response's body after cloning
-- Check response clone use structureClone for teed ReadableStreams (ArrayBufferchunk)
-- Check response clone use structureClone for teed ReadableStreams (BigInt64Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (BigUint64Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (DataViewchunk)
-- Check response clone use structureClone for teed ReadableStreams (Float16Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Float32Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Float64Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Int16Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Int32Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Int8Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Uint16Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Uint32Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Uint8Arraychunk)
-- Check response clone use structureClone for teed ReadableStreams (Uint8ClampedArraychunk)
 fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
-fetch/api/response/response-consume-stream.any.js:
-- Getting a redirect Response stream
-- Read URLSearchParams response's body as readableStream with mode=byob
-- Read URLSearchParams response's body as readableStream with mode=undefined
-- Read array buffer response's body as readableStream with mode=byob
-- Read array buffer response's body as readableStream with mode=undefined
-- Read blob response's body as readableStream with mode=byob
-- Read blob response's body as readableStream with mode=undefined
-- Read empty blob response's body as readableStream
-- Read empty text response's body as readableStream
-- Read form data response's body as readableStream with mode=byob
-- Read form data response's body as readableStream with mode=undefined
-- Read text response's body as readableStream with mode=byob
-- Read text response's body as readableStream with mode=undefined
-- Reading with offset from Response stream
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
-- 'Consume response''s body: from stream to arrayBuffer'
-- 'Consume response''s body: from stream to blob'
-- 'Consume response''s body: from stream to json'
-- 'Consume response''s body: from stream to text'
-- 'Consume response''s body: from stream with correct multipart type to formData'
-- 'Consume response''s body: from stream with correct urlencoded type to formData'
-fetch/api/response/response-error-from-stream.any.js:
-- ReadableStream pull() Error propagates to Response.arrayBuffer() Promise
-- ReadableStream pull() Error propagates to Response.blob() Promise
-- ReadableStream pull() Error propagates to Response.bytes() Promise
-- ReadableStream pull() Error propagates to Response.formData() Promise
-- ReadableStream pull() Error propagates to Response.json() Promise
-- ReadableStream pull() Error propagates to Response.text() Promise
-- ReadableStream start() Error propagates to Response.arrayBuffer() Promise
-- ReadableStream start() Error propagates to Response.blob() Promise
-- ReadableStream start() Error propagates to Response.bytes() Promise
-- ReadableStream start() Error propagates to Response.formData() Promise
-- ReadableStream start() Error propagates to Response.json() Promise
-- ReadableStream start() Error propagates to Response.text() Promise
 fetch/api/response/response-form-data.html:
 - Validate buggy form data - boundary
 - Validate buggy form data - cr1
@@ -776,8 +663,6 @@ fetch/api/response/response-from-stream.any.js:
 - Constructing a Response with a stream on which read() is called
 fetch/api/response/response-headers-guard.any.js:
 - Ensure response headers are immutable
-fetch/api/response/response-init-002.any.js:
-- Read Response's body as readableStream
 fetch/api/response/response-static-json.any.js:
 - Check static json() throws when data is not encodable
 fetch/api/response/response-static-redirect.any.js:
@@ -793,86 +678,11 @@ fetch/api/response/response-stream-bad-chunk.any.js:
 - ReadableStream with non-Uint8Array chunk passed to Response.bytes() causes TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.json() causes TypeError
 - ReadableStream with non-Uint8Array chunk passed to Response.text() causes TypeError
-fetch/api/response/response-stream-disturbed-1.any.js:
-- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
-  (body source: fetch)'
-- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
-  (body source: stream)'
-- 'Getting arrayBuffer after getting the Response body - not disturbed, not locked
-  (body source: string)'
-- 'Getting blob after getting the Response body - not disturbed, not locked (body
-  source: fetch)'
-- 'Getting blob after getting the Response body - not disturbed, not locked (body
-  source: stream)'
-- 'Getting blob after getting the Response body - not disturbed, not locked (body
-  source: string)'
-- 'Getting json after getting the Response body - not disturbed, not locked (body
-  source: fetch)'
-- 'Getting json after getting the Response body - not disturbed, not locked (body
-  source: stream)'
-- 'Getting json after getting the Response body - not disturbed, not locked (body
-  source: string)'
-- 'Getting text after getting the Response body - not disturbed, not locked (body
-  source: fetch)'
-- 'Getting text after getting the Response body - not disturbed, not locked (body
-  source: stream)'
-- 'Getting text after getting the Response body - not disturbed, not locked (body
-  source: string)'
-fetch/api/response/response-stream-disturbed-2.any.js:
-- 'Getting arrayBuffer after getting a locked Response body (body source: fetch)'
-- 'Getting arrayBuffer after getting a locked Response body (body source: stream)'
-- 'Getting arrayBuffer after getting a locked Response body (body source: string)'
-- 'Getting blob after getting a locked Response body (body source: fetch)'
-- 'Getting blob after getting a locked Response body (body source: stream)'
-- 'Getting blob after getting a locked Response body (body source: string)'
-- 'Getting json after getting a locked Response body (body source: fetch)'
-- 'Getting json after getting a locked Response body (body source: stream)'
-- 'Getting json after getting a locked Response body (body source: string)'
-- 'Getting text after getting a locked Response body (body source: fetch)'
-- 'Getting text after getting a locked Response body (body source: stream)'
-- 'Getting text after getting a locked Response body (body source: string)'
-fetch/api/response/response-stream-disturbed-3.any.js:
-- 'Getting arrayBuffer after reading the Response body (body source: fetch)'
-- 'Getting arrayBuffer after reading the Response body (body source: stream)'
-- 'Getting arrayBuffer after reading the Response body (body source: string)'
-- 'Getting blob after reading the Response body (body source: fetch)'
-- 'Getting blob after reading the Response body (body source: stream)'
-- 'Getting blob after reading the Response body (body source: string)'
-- 'Getting json after reading the Response body (body source: fetch)'
-- 'Getting json after reading the Response body (body source: stream)'
-- 'Getting json after reading the Response body (body source: string)'
-- 'Getting text after reading the Response body (body source: fetch)'
-- 'Getting text after reading the Response body (body source: stream)'
-- 'Getting text after reading the Response body (body source: string)'
-fetch/api/response/response-stream-disturbed-4.any.js:
-- 'Getting arrayBuffer after cancelling the Response body (body source: fetch)'
-- 'Getting arrayBuffer after cancelling the Response body (body source: stream)'
-- 'Getting arrayBuffer after cancelling the Response body (body source: string)'
-- 'Getting blob after cancelling the Response body (body source: fetch)'
-- 'Getting blob after cancelling the Response body (body source: stream)'
-- 'Getting blob after cancelling the Response body (body source: string)'
-- 'Getting json after cancelling the Response body (body source: fetch)'
-- 'Getting json after cancelling the Response body (body source: stream)'
-- 'Getting json after cancelling the Response body (body source: string)'
-- 'Getting text after cancelling the Response body (body source: fetch)'
-- 'Getting text after cancelling the Response body (body source: stream)'
-- 'Getting text after cancelling the Response body (body source: string)'
-fetch/api/response/response-stream-disturbed-6.any.js:
-- A closed stream on which read() has been called
-- A non-closed stream on which cancel() has been called
-- A non-closed stream on which read() has been called
-- An errored stream on which cancel() has been called
-- An errored stream on which read() has been called
-fetch/api/response/response-stream-disturbed-by-pipe.any.js:
-- using pipeThrough on Response body should disturb it synchronously
-- using pipeTo on Response body should disturb it synchronously
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.
 - 'Attempt to inject value: undefined via Object.prototype.then.'
 - 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
-- intercepting arraybuffer to body readable stream conversion via Object.prototype.then
-  should not be possible
 fetch/data-urls/navigate.window.js:
 - ASCII whitespace in the input is removed
 fetch/h1-parsing/lone-cr.window.js:

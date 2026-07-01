@@ -133,6 +133,13 @@ class Headers:
     def append(self, name, value):
         self._items.append((_b(name), _b(value)))
 
+    def update(self, pairs):
+        # wptserve response.headers.update: set each (name, value), replacing any prior
+        # value for that name (echo-content.h2.py's handle_headers sets Content-Type this way).
+        items = pairs.items() if hasattr(pairs, 'items') else pairs
+        for name, value in items:
+            self.set(name, value)
+
     def get(self, name, default=None):
         n = _b(name).lower()
         for k, v in self._items:
@@ -288,9 +295,22 @@ class Writer:
     def write_content(self, data):
         self.write(data)
 
+    def write_data(self, data, last=False):
+        # h2 DATA-frame body write (response.writer.write_data) — same buffer as write().
+        self.write(data)
+
     def write(self, data):
         self.used = True
         self.body += _to_bytes(data)
+
+
+class _H2Frame:
+    """A single buffered HTTP/2 frame handed to an h2 handler's handle_headers /
+    handle_data. `data` is the whole request body (we model the upload as one DATA
+    frame — no incremental delivery, mid-stream reset, or trailers)."""
+    def __init__(self, data):
+        self.data = data
+        self.headers = []
 
 
 class CookieValue:
@@ -534,7 +554,22 @@ def main():
     spec = importlib.util.spec_from_file_location('wpt_handler', handler_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    result = module.main(request, response)
+    if callable(getattr(module, 'main', None)):
+        result = module.main(request, response)
+    elif hasattr(module, 'handle_data') or hasattr(module, 'handle_headers'):
+        # HTTP/2 frame handler (e.g. echo-content.h2.py): emulate a single-frame buffered
+        # request — deliver the headers, then the whole body as one DATA frame. True
+        # incremental h2 framing (mid-stream abort / 401 / trailers) is not modeled.
+        frame = _H2Frame(request.body)
+        if hasattr(module, 'handle_headers'):
+            module.handle_headers(frame, request, response)
+        if hasattr(module, 'handle_data'):
+            module.handle_data(frame, request, response)
+        result = None
+    else:
+        raise AttributeError(
+            "handler module defines neither main(request, response) nor an h2 "
+            "handle_headers/handle_data pair")
 
     # Resolve the final (status, headers, body) from however the handler answered.
     status_reason = None   # a custom HTTP reason phrase, when the handler set status = (code, "text")
