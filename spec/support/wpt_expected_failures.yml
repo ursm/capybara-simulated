@@ -134,9 +134,6 @@ fetch/api/basic/keepalive.any.js:
 - simple keepalive test for web workers
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
-fetch/api/basic/referrer.any.js:
-- Referrer with credentials should be stripped
-- Referrer with fragment ID should be stripped
 fetch/api/basic/request-head.any.js:
 - Fetch with HEAD with body
 fetch/api/basic/request-headers-case.any.js:
@@ -150,8 +147,6 @@ fetch/api/basic/request-headers.any.js:
 - Fetch with POST and mode "same-origin" needs an Origin header
 - Fetch with PUT and mode "same-origin" needs an Origin header
 - Fetch with TacO and mode "same-origin" needs an Origin header
-fetch/api/basic/request-referrer.any.js:
-- url referrer
 fetch/api/basic/request-upload.any.js:
 - Fetch with POST with ReadableStream containing ArrayBuffer
 - Fetch with POST with ReadableStream containing Blob
@@ -340,17 +335,6 @@ fetch/api/cors/cors-preflight-redirect.any.js:
 - Redirection 303 after preflight failed
 - Redirection 307 after preflight failed
 - Redirection 308 after preflight failed
-fetch/api/cors/cors-preflight-referrer.any.js:
-- 'Referrer policy: "" and referrer: ''myreferrer'''
-- 'Referrer policy: "" and referrer: default'
-- 'Referrer policy: no-referrer and referrer: ''myreferrer'''
-- 'Referrer policy: no-referrer and referrer: default'
-- 'Referrer policy: no-referrer-when-downgrade and referrer: ''myreferrer'''
-- 'Referrer policy: origin and referrer: ''myreferrer'''
-- 'Referrer policy: origin and referrer: default'
-- 'Referrer policy: origin-when-cross-origin and referrer: ''myreferrer'''
-- 'Referrer policy: origin-when-cross-origin and referrer: default'
-- 'Referrer policy: unsafe-url and referrer: ''myreferrer'''
 fetch/api/cors/cors-preflight-response-validation.any.js:
 - Preflight response with a bad Access-Control-Allow-Headers
 - Preflight response with a bad Access-Control-Allow-Methods

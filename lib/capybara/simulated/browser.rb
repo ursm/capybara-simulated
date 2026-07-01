@@ -4322,7 +4322,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -4386,8 +4386,11 @@ module Capybara
         # The referrer is stripped PROGRESSIVELY: each hop applies its (possibly
         # overridden) policy to the referrer the PREVIOUS hop sent, not to the original
         # document — so once a hop reduces it to an origin (or drops it), a later, laxer
-        # policy can't widen it back (redirect-referrer-override).
-        ref_source = @current_url
+        # policy can't widen it back (redirect-referrer-override). The initial source is
+        # the request's referrer: an explicit `init.referrer` URL when given, else the
+        # document URL ("client"); an empty referrer means no-referrer (compute_referrer
+        # maps a blank source to nil).
+        ref_source = referrer.nil? ? @current_url : referrer
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -4441,7 +4444,7 @@ module Capybara
           # is preflighted on the NEW origin (send-redirect-to-cors), not just an initially
           # cross-origin one (access-control-basic-get-fail-non-simple / preflight-*).
           if cross_origin && cors_unsafe_request?(method, headers)
-            return nil unless cors_preflight_ok?(target, method, headers, effective_origin, with_credentials)
+            return nil unless cors_preflight_ok?(target, method, headers, effective_origin, with_credentials, hop_referer)
           end
           # Send the (effective) Origin — the UA owns this header — on a cors request when
           # the hop is cross-origin OR the method is not GET/HEAD (Fetch appends Origin to
@@ -6020,9 +6023,9 @@ module Capybara
       # Access-Control-Max-Age that allows this method + headers lets the actual request
       # skip the OPTIONS (access-control-basic-allow-preflight-cache). Returns false (=
       # network error) only when a fresh preflight is needed AND fails.
-      def cors_preflight_ok?(target, method, headers, req_origin, credentialed)
+      def cors_preflight_ok?(target, method, headers, req_origin, credentialed, referer)
         return true if cors_preflight_cached?(target, req_origin, method, headers, credentialed)
-        result = cors_run_preflight(target, method, headers, req_origin, credentialed)
+        result = cors_run_preflight(target, method, headers, req_origin, credentialed, referer)
         return false unless result
         # Cache the grant for Max-Age seconds so a covered follow-up skips the preflight.
         # The key is (origin, url, credentialed): a credentialed grant (ACAO echoing the
@@ -6074,11 +6077,14 @@ module Capybara
       # method + unsafe headers) return the grant {methods, headers, max_age} for the
       # cache, else nil. A credentialed preflight additionally requires the response to
       # allow credentials (ACAC:true) and forbids `*` in the origin/method/header grants.
-      def cors_run_preflight(target, method, headers, req_origin, credentialed)
+      def cors_run_preflight(target, method, headers, req_origin, credentialed, referer)
         unsafe = cors_unsafe_headers(headers)
         env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
-        apply_default_request_env(env, referer: @current_url, force: false)
+        # The preflight's Referer is the request's referrer under its referrer policy —
+        # the SAME value the actual request sends (computed by the caller), not the raw
+        # document URL (cors-preflight-referrer).
+        apply_default_request_env(env, referer: referer, force: false)
         # A CORS-preflight is a fetch, so it carries fetch's default `Accept: */*` (NOT
         # the navigation Accept apply_default_request_env sets) — some handlers reject a
         # preflight whose Accept isn't */* (preflight.py).
