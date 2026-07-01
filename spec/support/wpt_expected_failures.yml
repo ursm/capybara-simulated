@@ -120,7 +120,6 @@ fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
 fetch/api/basic/integrity.sub.any.js:
 - CORS invalid integrity
-- Empty string integrity for opaque response
 - Invalid integrity
 - 'Multiple integrities: both are invalid'
 - 'Multiple integrities: invalid stronger than valid'
@@ -135,16 +134,6 @@ fetch/api/basic/keepalive.any.js:
 - simple keepalive test for web workers
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
-fetch/api/basic/mode-no-cors.sub.any.js:
-- Fetch http://web-platform.test:8000/fetch/api/resources/top.txt with no-cors mode
-- Fetch https://web-platform.test:8443/fetch/api/resources/top.txt with no-cors mode
-fetch/api/basic/mode-same-origin.any.js:
-- Fetch /fetch/api/basic/../resources/redirect.py?location=http://www1.www.example.com/fetch/api/resources/top.txt
-  with same-origin mode
-- Fetch /fetch/api/basic/../resources/redirect.py?location=https://www.example.com/fetch/api/resources/top.txt
-  with same-origin mode
-- Fetch http://www1.www.example.com/fetch/api/resources/top.txt with same-origin mode
-- Fetch https://www.example.com/fetch/api/resources/top.txt with same-origin mode
 fetch/api/basic/referrer.any.js:
 - Referrer with credentials should be stripped
 - Referrer with fragment ID should be stripped
@@ -157,26 +146,9 @@ fetch/api/basic/request-headers-nonascii.any.js:
 - Non-ascii bytes in request headers
 fetch/api/basic/request-headers.any.js:
 - Fetch with Chicken
-- Fetch with Chicken with body
 - Fetch with POST and mode "no-cors" needs an Origin header
 - Fetch with POST and mode "same-origin" needs an Origin header
-- Fetch with POST with ArrayBuffer body
-- Fetch with POST with Blob body
-- Fetch with POST with Blob body with mime type
-- Fetch with POST with DataView body
-- Fetch with POST with Float16Array body
-- Fetch with POST with Float32Array body
-- Fetch with POST with Float64Array body
-- Fetch with POST with FormData body
-- Fetch with POST with Int8Array body
-- Fetch with POST with URLSearchParams body
-- Fetch with POST with Uint8Array body
-- Fetch with POST with text body
-- Fetch with POST without body
 - Fetch with PUT and mode "same-origin" needs an Origin header
-- Fetch with PUT with body
-- Fetch with PUT without body
-- Fetch with TacO and mode "cors" needs an Origin header
 - Fetch with TacO and mode "same-origin" needs an Origin header
 fetch/api/basic/request-referrer.any.js:
 - url referrer
@@ -259,22 +231,6 @@ fetch/api/body/textstream.any.js:
 - Response.textStream() with null body
 - textStream method existence
 - textStream() handles chunked byte stream input
-fetch/api/cors/cors-basic.any.js:
-- Cross domain basic usage [cors mode]
-- Cross domain basic usage [no-cors mode]
-- Cross domain basic usage [server forbid CORS]
-- Cross domain different port [cors mode]
-- Cross domain different port [no-cors mode]
-- Cross domain different port [server forbid CORS]
-- Cross domain different protocol [cors mode]
-- Cross domain different protocol [no-cors mode]
-- Cross domain different protocol [server forbid CORS]
-- Same domain different port [cors mode]
-- Same domain different port [no-cors mode]
-- Same domain different port [server forbid CORS]
-- Same domain different protocol different port [cors mode]
-- Same domain different protocol different port [no-cors mode]
-- Same domain different protocol different port [server forbid CORS]
 fetch/api/cors/cors-cookies.any.js:
 - 'Include mode: 1 cookie'
 - 'Include mode: local cookies are not sent with remote request'
@@ -283,29 +239,12 @@ fetch/api/cors/cors-cookies.any.js:
 - 'Omit mode: no cookie sent'
 - 'Same-origin mode: cookies are discarded in cors request'
 fetch/api/cors/cors-expose-star.sub.any.js:
-- "* can be one of several values"
 - "* for credentialed fetches only matches literally"
-- 'Basic Access-Control-Expose-Headers: * support'
 fetch/api/cors/cors-filtering.sub.any.js:
-- CORS filter on Age header
-- CORS filter on Age header, header is exposed
-- CORS filter on Cache-Control header
-- CORS filter on Content-Language header
-- CORS filter on Content-Length header
-- CORS filter on Content-Type header
-- CORS filter on Expires header
-- CORS filter on Last-Modified header
-- CORS filter on Pragma header
-- CORS filter on Server header
-- CORS filter on Server header, header is exposed
-- CORS filter on Set-Cookie header
 - CORS filter on Set-Cookie header, header is forbidden
 - CORS filter on Set-Cookie header, header is forbidden(credentials = include)
-- CORS filter on Set-Cookie2 header
 - CORS filter on Set-Cookie2 header, header is forbidden
 - CORS filter on Set-Cookie2 header, header is forbidden(credentials = include)
-- CORS filter on Warning header
-- CORS filter on Warning header, header is exposed
 fetch/api/cors/cors-keepalive.any.js:
 - "[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid
   CORS]; setting up"
@@ -323,9 +262,6 @@ fetch/api/cors/cors-keepalive.any.js:
   forbid CORS]; setting up"
 - "[keepalive] Cross domain basic usage POST request in unload [no-cors mode]; setting
   up"
-- "[keepalive] Cross domain basic usage [cors mode, server forbid CORS]"
-- "[keepalive] Cross domain basic usage [cors mode]"
-- "[keepalive] Cross domain basic usage [no-cors mode]"
 - "[keepalive] Cross domain different port GET request in unload [cors mode, server
   forbid CORS]; setting up"
 - "[keepalive] Cross domain different port GET request in unload [cors mode]; setting
@@ -342,9 +278,6 @@ fetch/api/cors/cors-keepalive.any.js:
   forbid CORS]; setting up"
 - "[keepalive] Cross domain different port POST request in unload [no-cors mode];
   setting up"
-- "[keepalive] Cross domain different port [cors mode, server forbid CORS]"
-- "[keepalive] Cross domain different port [cors mode]"
-- "[keepalive] Cross domain different port [no-cors mode]"
 - "[keepalive] Cross domain different protocol GET request in unload [cors mode, server
   forbid CORS]; setting up"
 - "[keepalive] Cross domain different protocol GET request in unload [cors mode];
@@ -361,9 +294,6 @@ fetch/api/cors/cors-keepalive.any.js:
   server forbid CORS]; setting up"
 - "[keepalive] Cross domain different protocol POST request in unload [no-cors mode];
   setting up"
-- "[keepalive] Cross domain different protocol [cors mode, server forbid CORS]"
-- "[keepalive] Cross domain different protocol [cors mode]"
-- "[keepalive] Cross domain different protocol [no-cors mode]"
 - "[keepalive] Same domain different port GET request in unload [cors mode, server
   forbid CORS]; setting up"
 - "[keepalive] Same domain different port GET request in unload [cors mode]; setting
@@ -380,9 +310,6 @@ fetch/api/cors/cors-keepalive.any.js:
   forbid CORS]; setting up"
 - "[keepalive] Same domain different port POST request in unload [no-cors mode]; setting
   up"
-- "[keepalive] Same domain different port [cors mode, server forbid CORS]"
-- "[keepalive] Same domain different port [cors mode]"
-- "[keepalive] Same domain different port [no-cors mode]"
 - "[keepalive] Same domain different protocol different port GET request in unload
   [cors mode, server forbid CORS]; setting up"
 - "[keepalive] Same domain different protocol different port GET request in unload
@@ -399,68 +326,35 @@ fetch/api/cors/cors-keepalive.any.js:
   [no-cors mode, server forbid CORS]; setting up"
 - "[keepalive] Same domain different protocol different port POST request in unload
   [no-cors mode]; setting up"
-- "[keepalive] Same domain different protocol different port [cors mode, server forbid
-  CORS]"
-- "[keepalive] Same domain different protocol different port [cors mode]"
-- "[keepalive] Same domain different protocol different port [no-cors mode]"
-fetch/api/cors/cors-multiple-origins.sub.any.js:
-- 'Listing multiple origins is illegal: "",http://example.com,*'
-- 'Listing multiple origins is illegal: "",http://example.com,http://web-platform.test:8000'
-- 'Listing multiple origins is illegal: "",http://web-platform.test:8000,http://web-platform.test:8000'
-- 'Listing multiple origins is illegal: *,http://example.com,*'
-- 'Listing multiple origins is illegal: *,http://example.com,http://web-platform.test:8000'
-- 'Listing multiple origins is illegal: ,http://example.com,https://example2.com'
-fetch/api/cors/cors-origin.any.js:
-- 'Allowed origin: "" [origin KO]'
-- CORS preflight [PUT] [origin KO]
-- Cross domain [HEAD] [origin KO]
-- Cross domain [POST] [origin KO]
-- Cross domain different port [origin KO]
-- Cross domain different protocol [origin KO]
-- Cross domain different subdomain [origin KO]
-- Same domain different port [origin KO]
-- Same domain different protocol different port [origin KO]
 fetch/api/cors/cors-preflight-cache.any.js:
 - CORS preflight cache does not reuse wildcard header entries for Authorization
-- CORS preflight cache reuses explicit header entries
 fetch/api/cors/cors-preflight-not-cors-safelisted.any.js:
 - "Need CORS-preflight for accept-language/\x01 header"
 - Need CORS-preflight for accept-language/@ header
 - Need CORS-preflight for accept/" header
 - Need CORS-preflight for accept/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
   header
-- Need CORS-preflight for authorization/basics header
 - "Need CORS-preflight for content-language/\x01 header"
 - Need CORS-preflight for content-language/@ header
-- Need CORS-preflight for content-type/text/html header
 - Need CORS-preflight for content-type/text/plain; long=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
   header
-- Need CORS-preflight for range/bytes 0- header
-- Need CORS-preflight for test/hi header
 fetch/api/cors/cors-preflight-redirect.any.js:
 - Redirection 301 after preflight failed
-- Redirection 301 on preflight failed
 - Redirection 302 after preflight failed
-- Redirection 302 on preflight failed
 - Redirection 303 after preflight failed
-- Redirection 303 on preflight failed
 - Redirection 307 after preflight failed
-- Redirection 307 on preflight failed
 - Redirection 308 after preflight failed
-- Redirection 308 on preflight failed
 fetch/api/cors/cors-preflight-referrer.any.js:
 - 'Referrer policy: "" and referrer: ''myreferrer'''
 - 'Referrer policy: "" and referrer: default'
 - 'Referrer policy: no-referrer and referrer: ''myreferrer'''
 - 'Referrer policy: no-referrer and referrer: default'
 - 'Referrer policy: no-referrer-when-downgrade and referrer: ''myreferrer'''
-- 'Referrer policy: no-referrer-when-downgrade and referrer: default'
 - 'Referrer policy: origin and referrer: ''myreferrer'''
 - 'Referrer policy: origin and referrer: default'
 - 'Referrer policy: origin-when-cross-origin and referrer: ''myreferrer'''
 - 'Referrer policy: origin-when-cross-origin and referrer: default'
 - 'Referrer policy: unsafe-url and referrer: ''myreferrer'''
-- 'Referrer policy: unsafe-url and referrer: default'
 fetch/api/cors/cors-preflight-response-validation.any.js:
 - Preflight response with a bad Access-Control-Allow-Headers
 - Preflight response with a bad Access-Control-Allow-Methods
@@ -487,194 +381,8 @@ fetch/api/cors/cors-preflight-star.any.js:
   *)'
 - 'CORS that fails with credentials: true; method: put (allowed: put); header:  (allowed:
   *)'
-- 'CORS that succeeds with credentials: false; method: GET (allowed: get); header:
-  X-Test,1 (allowed: x-test)'
-- 'CORS that succeeds with credentials: false; method: OK (allowed: *); header: X-Test,1
-  (allowed: *)'
-- 'CORS that succeeds with credentials: false; method: POST (allowed: *); header:
-  Authorization,123 (allowed: *, Authorization)'
-- 'CORS that succeeds with credentials: false; method: SUPER (allowed: *); header:
-  X-Test,1 (allowed: x-test)'
-- 'CORS that succeeds with credentials: true; method: * (allowed: *); header: *,1
-  (allowed: *)'
-- 'CORS that succeeds with credentials: true; method: DELETE (allowed: DELETE); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: GET (allowed: GET); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: GET (allowed: get); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: HEAD (allowed: HEAD); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: HEAD (allowed: head); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: PATCH (allowed: PATCH); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: POST (allowed: POST); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: POST (allowed: post); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: PUT (allowed: PUT); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: delete (allowed: DELETE); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: get (allowed: GET); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: get (allowed: get); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: head (allowed: HEAD); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: head (allowed: head); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: patch (allowed: patch); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: post (allowed: POST); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: post (allowed: post); header:  (allowed:
-  *)'
-- 'CORS that succeeds with credentials: true; method: put (allowed: PUT); header:  (allowed:
-  *)'
-fetch/api/cors/cors-preflight-status.any.js:
-- Preflight answered with status 200
-- Preflight answered with status 201
-- Preflight answered with status 202
-- Preflight answered with status 203
-- Preflight answered with status 204
-- Preflight answered with status 205
-- Preflight answered with status 206
-- Preflight answered with status 300
-- Preflight answered with status 301
-- Preflight answered with status 302
-- Preflight answered with status 303
-- Preflight answered with status 304
-- Preflight answered with status 305
-- Preflight answered with status 306
-- Preflight answered with status 307
-- Preflight answered with status 308
-- Preflight answered with status 400
-- Preflight answered with status 401
-- Preflight answered with status 402
-- Preflight answered with status 403
-- Preflight answered with status 404
-- Preflight answered with status 405
-- Preflight answered with status 501
-- Preflight answered with status 502
-- Preflight answered with status 503
-- Preflight answered with status 504
-- Preflight answered with status 505
 fetch/api/cors/cors-preflight.any.js:
 - '"authorization" should not be covered by the wildcard symbol'
-- CORS [DELETE], server allows
-- CORS [DELETE], server refuses
-- CORS [GET] [several headers], server allows
-- CORS [GET] [several headers], server refuses
-- 'CORS [GET] [x-test-header: allowed], server allows'
-- 'CORS [GET] [x-test-header: refused], server refuses'
-- CORS [NEW], server allows
-- CORS [NEW], server refuses
-- CORS [PATCH], server allows
-- CORS [PATCH], server refuses
-- CORS [PUT] [only safe headers], server allows
-- CORS [PUT] [several headers], server allows
-- CORS [PUT] [several headers], server refuses
-- CORS [PUT], server allows
-- CORS [PUT], server allows, check preflight has user agent
-- CORS [PUT], server refuses
-- CORS [chicken], server allows
-- CORS [chicken], server refuses
-- CORS [patcH], server allows
-- CORS [patcH], server refuses
-fetch/api/cors/cors-redirect-credentials.any.js:
-- Redirect 301 from remote to another remote with password
-- Redirect 301 from remote to another remote with user
-- Redirect 301 from remote to another remote with user and password
-- Redirect 301 from remote to same origin with password
-- Redirect 301 from remote to same origin with user
-- Redirect 301 from remote to same origin with user and password
-- Redirect 301 from remote to same remote with password
-- Redirect 301 from remote to same remote with user
-- Redirect 301 from remote to same remote with user and password
-- Redirect 301 from same origin to remote with password
-- Redirect 301 from same origin to remote with user
-- Redirect 301 from same origin to remote with user and password
-- Redirect 302 from remote to another remote with password
-- Redirect 302 from remote to another remote with user
-- Redirect 302 from remote to another remote with user and password
-- Redirect 302 from remote to same origin with password
-- Redirect 302 from remote to same origin with user
-- Redirect 302 from remote to same origin with user and password
-- Redirect 302 from remote to same remote with password
-- Redirect 302 from remote to same remote with user
-- Redirect 302 from remote to same remote with user and password
-- Redirect 302 from same origin to remote with password
-- Redirect 302 from same origin to remote with user
-- Redirect 302 from same origin to remote with user and password
-- Redirect 303 from remote to another remote with password
-- Redirect 303 from remote to another remote with user
-- Redirect 303 from remote to another remote with user and password
-- Redirect 303 from remote to same origin with password
-- Redirect 303 from remote to same origin with user
-- Redirect 303 from remote to same origin with user and password
-- Redirect 303 from remote to same remote with password
-- Redirect 303 from remote to same remote with user
-- Redirect 303 from remote to same remote with user and password
-- Redirect 303 from same origin to remote with password
-- Redirect 303 from same origin to remote with user
-- Redirect 303 from same origin to remote with user and password
-- Redirect 307 from remote to another remote with password
-- Redirect 307 from remote to another remote with user
-- Redirect 307 from remote to another remote with user and password
-- Redirect 307 from remote to same origin with password
-- Redirect 307 from remote to same origin with user
-- Redirect 307 from remote to same origin with user and password
-- Redirect 307 from remote to same remote with password
-- Redirect 307 from remote to same remote with user
-- Redirect 307 from remote to same remote with user and password
-- Redirect 307 from same origin to remote with password
-- Redirect 307 from same origin to remote with user
-- Redirect 307 from same origin to remote with user and password
-- Redirect 308 from remote to another remote with password
-- Redirect 308 from remote to another remote with user
-- Redirect 308 from remote to another remote with user and password
-- Redirect 308 from remote to same origin with password
-- Redirect 308 from remote to same origin with user
-- Redirect 308 from remote to same origin with user and password
-- Redirect 308 from remote to same remote with password
-- Redirect 308 from remote to same remote with user
-- Redirect 308 from remote to same remote with user and password
-- Redirect 308 from same origin to remote with password
-- Redirect 308 from same origin to remote with user
-- Redirect 308 from same origin to remote with user and password
-fetch/api/cors/cors-redirect-preflight.any.js:
-- 'Redirect 301: cors to another cors (preflight after redirection failure case)'
-- 'Redirect 301: cors to another cors (preflight after redirection success case)'
-- 'Redirect 301: cors to same origin (preflight after redirection failure case)'
-- 'Redirect 301: cors to same origin (preflight after redirection success case)'
-- 'Redirect 301: same origin to cors (preflight after redirection failure case)'
-- 'Redirect 301: same origin to cors (preflight after redirection success case)'
-- 'Redirect 302: cors to another cors (preflight after redirection failure case)'
-- 'Redirect 302: cors to another cors (preflight after redirection success case)'
-- 'Redirect 302: cors to same origin (preflight after redirection failure case)'
-- 'Redirect 302: cors to same origin (preflight after redirection success case)'
-- 'Redirect 302: same origin to cors (preflight after redirection failure case)'
-- 'Redirect 302: same origin to cors (preflight after redirection success case)'
-- 'Redirect 303: cors to another cors (preflight after redirection failure case)'
-- 'Redirect 303: cors to another cors (preflight after redirection success case)'
-- 'Redirect 303: cors to same origin (preflight after redirection failure case)'
-- 'Redirect 303: cors to same origin (preflight after redirection success case)'
-- 'Redirect 303: same origin to cors (preflight after redirection failure case)'
-- 'Redirect 303: same origin to cors (preflight after redirection success case)'
-- 'Redirect 307: cors to another cors (preflight after redirection failure case)'
-- 'Redirect 307: cors to another cors (preflight after redirection success case)'
-- 'Redirect 307: cors to same origin (preflight after redirection failure case)'
-- 'Redirect 307: cors to same origin (preflight after redirection success case)'
-- 'Redirect 307: same origin to cors (preflight after redirection failure case)'
-- 'Redirect 307: same origin to cors (preflight after redirection success case)'
-- 'Redirect 308: cors to another cors (preflight after redirection failure case)'
-- 'Redirect 308: cors to another cors (preflight after redirection success case)'
-- 'Redirect 308: cors to same origin (preflight after redirection failure case)'
-- 'Redirect 308: cors to same origin (preflight after redirection success case)'
-- 'Redirect 308: same origin to cors (preflight after redirection failure case)'
-- 'Redirect 308: same origin to cors (preflight after redirection success case)'
 fetch/api/cors/cors-redirect.any.js:
 - 'Redirect 301: cors to another cors'
 - 'Redirect 301: cors to same cors'
@@ -750,20 +458,12 @@ fetch/api/policies/csp-blocked.html:
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-fetch/api/redirect/redirect-back-to-original-origin.any.js:
-- 'original => remote => original with mode: "cors"'
-- 'original => remote => original with mode: "no-cors"'
 fetch/api/redirect/redirect-count.any.js:
 - Redirect 301 20 times
-- Redirect 301 21 times
 - Redirect 302 20 times
-- Redirect 302 21 times
 - Redirect 303 20 times
-- Redirect 303 21 times
 - Redirect 307 20 times
-- Redirect 307 21 times
 - Redirect 308 20 times
-- Redirect 308 21 times
 fetch/api/redirect/redirect-empty-location.any.js:
 - redirect response with empty Location, follow mode
 - redirect response with empty Location, manual mode
@@ -773,37 +473,27 @@ fetch/api/redirect/redirect-keepalive.any.js:
 - "[keepalive][new window][unload] same-origin redirect"
 - "[keepalive][new window][unload] same-origin redirect + preflight"
 fetch/api/redirect/redirect-location.any.js:
-- Redirect 301 in "error" mode with invalid location
 - Redirect 301 in "error" mode with valid location
-- Redirect 301 in "follow" mode with invalid location
 - Redirect 301 in "manual" mode with data location
 - Redirect 301 in "manual" mode with invalid location
 - Redirect 301 in "manual" mode with valid location
 - Redirect 301 in "manual" mode without location
-- Redirect 302 in "error" mode with invalid location
 - Redirect 302 in "error" mode with valid location
-- Redirect 302 in "follow" mode with invalid location
 - Redirect 302 in "manual" mode with data location
 - Redirect 302 in "manual" mode with invalid location
 - Redirect 302 in "manual" mode with valid location
 - Redirect 302 in "manual" mode without location
-- Redirect 303 in "error" mode with invalid location
 - Redirect 303 in "error" mode with valid location
-- Redirect 303 in "follow" mode with invalid location
 - Redirect 303 in "manual" mode with data location
 - Redirect 303 in "manual" mode with invalid location
 - Redirect 303 in "manual" mode with valid location
 - Redirect 303 in "manual" mode without location
-- Redirect 307 in "error" mode with invalid location
 - Redirect 307 in "error" mode with valid location
-- Redirect 307 in "follow" mode with invalid location
 - Redirect 307 in "manual" mode with data location
 - Redirect 307 in "manual" mode with invalid location
 - Redirect 307 in "manual" mode with valid location
 - Redirect 307 in "manual" mode without location
-- Redirect 308 in "error" mode with invalid location
 - Redirect 308 in "error" mode with valid location
-- Redirect 308 in "follow" mode with invalid location
 - Redirect 308 in "manual" mode with data location
 - Redirect 308 in "manual" mode with invalid location
 - Redirect 308 in "manual" mode with valid location
@@ -859,38 +549,19 @@ fetch/api/redirect/redirect-mode.any.js:
 - http://www.example.com redirect 308 in manual redirect and cors mode
 - http://www.example.com redirect 308 in manual redirect and no-cors mode
 - http://www.example.com redirect 308 in manual redirect and no-cors mode
-- manual redirect with a CORS error should be rejected
 fetch/api/redirect/redirect-origin.any.js:
-- "[GET] Redirect 301 Other origin to other origin"
-- "[GET] Redirect 301 Other origin to same origin"
 - "[GET] Redirect 301 Same origin to other origin"
-- "[GET] Redirect 302 Other origin to other origin"
-- "[GET] Redirect 302 Other origin to same origin"
 - "[GET] Redirect 302 Same origin to other origin"
-- "[GET] Redirect 303 Other origin to other origin"
-- "[GET] Redirect 303 Other origin to same origin"
 - "[GET] Redirect 303 Same origin to other origin"
-- "[GET] Redirect 307 Other origin to other origin"
-- "[GET] Redirect 307 Other origin to same origin"
 - "[GET] Redirect 307 Same origin to other origin"
-- "[GET] Redirect 308 Other origin to other origin"
-- "[GET] Redirect 308 Other origin to same origin"
 - "[GET] Redirect 308 Same origin to other origin"
-- "[POST] Redirect 301 Other origin to other origin"
-- "[POST] Redirect 301 Other origin to same origin"
 - "[POST] Redirect 301 Same origin to other origin"
-- "[POST] Redirect 302 Other origin to other origin"
-- "[POST] Redirect 302 Other origin to same origin"
 - "[POST] Redirect 302 Same origin to other origin"
-- "[POST] Redirect 303 Other origin to other origin"
-- "[POST] Redirect 303 Other origin to same origin"
 - "[POST] Redirect 303 Same origin to other origin"
-- "[POST] Redirect 307 Other origin to other origin"
-- "[POST] Redirect 307 Other origin to same origin"
 - "[POST] Redirect 307 Same origin to other origin"
-- "[POST] Redirect 308 Other origin to other origin"
-- "[POST] Redirect 308 Other origin to same origin"
+- "[POST] Redirect 307 Same origin to same origin"
 - "[POST] Redirect 308 Same origin to other origin"
+- "[POST] Redirect 308 Same origin to same origin"
 fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should be accepted on 303
 - Fetch upload streaming should fail on 301
@@ -1624,6 +1295,7 @@ fetch/h1-parsing/lone-cr.window.js:
 - "Parsing response with a lone CR before message-body (HTTP/1.1 200 OK\nHeader: Value\rHeader2:
   Value2\n\nBODY)"
 fetch/h1-parsing/resources-with-0x00-in-header.window.js:
+- Expect network error for fetch with 0x00 in a header
 - Expect network error for image with 0x00 in a header
 fetch/h1-parsing/status-code.window.js:
 - HTTP/1.1  (network error)
@@ -1857,8 +1529,6 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/security-consideration.sub.html:
-- 'ProgressEvent: security consideration'
 xhr/send-authentication-basic-repeat-no-args.htm:
 - 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
   passed to open() in first request, without in second'

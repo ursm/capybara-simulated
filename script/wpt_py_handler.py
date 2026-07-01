@@ -18,7 +18,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 """
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
-import os, json, io, re, base64, hashlib, importlib.util
+import os, json, io, re, base64, hashlib, importlib.util, pickle
 from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
@@ -214,7 +214,9 @@ class Stash:
     """wptserve request.server.stash: a per-test key→value store. Each .py runs in its
     own subprocess, so persist across them via files in WPT_STASH_DIR (the runner makes
     one dir per test file and clears it between files). take() is a pop (read+remove),
-    put() writes; values are bytes (the CORS preflight-denied flow stores b"Denied")."""
+    put() writes. Values are arbitrary Python objects (preflight.py stashes a dict of
+    counters, other handlers a bytes flag), so they are pickled — matching wptserve,
+    whose stash holds live objects, not just bytes."""
     def __init__(self):
         self.dir = os.environ.get('WPT_STASH_DIR')
 
@@ -232,8 +234,8 @@ class Stash:
             with open(p, 'rb') as f:
                 data = f.read()
             os.remove(p)
-            return data
-        except OSError:
+            return pickle.loads(data)
+        except (OSError, EOFError, pickle.UnpicklingError):
             return None
 
     def put(self, key, value, path=None):
@@ -242,7 +244,7 @@ class Stash:
             return
         try:
             with open(p, 'wb') as f:
-                f.write(value if isinstance(value, (bytes, bytearray)) else str(value).encode('utf-8'))
+                pickle.dump(value, f)
         except OSError:
             pass
 
@@ -380,6 +382,12 @@ class Response:
     @status_code.setter
     def status_code(self, v):
         self.status = v
+
+    def set_error(self, code, message=''):
+        # wptserve response.set_error: put the response into an error state. The handler
+        # then returns its (error) body, which main() uses; we just carry the status.
+        self.status  = int(code)
+        self.content = message.encode('utf-8') if isinstance(message, str) else (message or b'')
 
     def write_status_headers(self):
         # wptserve: flush the status line + the headers set so far, then let the

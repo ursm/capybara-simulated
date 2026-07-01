@@ -105,10 +105,16 @@ module WptRunner
   # visit `.sub.` files at this exact host:port (see `run`) so resolved-URL
   # assertions — e.g. innerhtml-mxss's `a.href` — match. Non-`.sub.` files keep
   # the default www.example.com origin, so this is scoped to the `.sub.` set.
-  SUB_HOST       = 'web-platform.test'
-  SUB_ALT_HOST   = 'not-web-platform.test'
-  SUB_HTTP_PORT  = '8000'
-  SUB_HTTPS_PORT = '8443'
+  SUB_HOST        = 'web-platform.test'
+  SUB_ALT_HOST    = 'not-web-platform.test'
+  SUB_HTTP_PORT   = '8000'
+  SUB_HTTPS_PORT  = '8443'
+  # `ports[http][1]` / `ports[https][1]` — the SECOND port wptserve exposes, a genuinely
+  # different origin from port [0]. The in-process app routes by host+path (port is
+  # ignored on dispatch), so a distinct port is purely an origin distinction that lets
+  # the "same domain, different port" CORS scenarios actually be cross-origin.
+  SUB_HTTP_PORT2  = '8001'
+  SUB_HTTPS_PORT2 = '8444'
   SUB_ORIGIN     = "http://#{SUB_HOST}:#{SUB_HTTP_PORT}"
   # wptserve serves a `.https.*` file only over its HTTPS origin (the `.https.`
   # filename marker IS that routing): same canonical host, the https port. A test
@@ -253,8 +259,10 @@ module WptRunner
     # (www.example.com) uses the default 80/443 (elided), matching its port-less origin.
     host         = SUB_HOST if host.to_s.empty?
     sub_family   = host == SUB_HOST || host == SUB_ALT_HOST || host.end_with?(".#{SUB_HOST}", ".#{SUB_ALT_HOST}")
-    http_port    = sub_family ? SUB_HTTP_PORT  : '80'
-    https_port   = sub_family ? SUB_HTTPS_PORT : '443'
+    http_port    = sub_family ? SUB_HTTP_PORT   : '80'
+    https_port   = sub_family ? SUB_HTTPS_PORT  : '443'
+    http_port2   = sub_family ? SUB_HTTP_PORT2  : '81'
+    https_port2  = sub_family ? SUB_HTTPS_PORT2 : '444'
     cur_port     = scheme == 'https' ? https_port : http_port
     loc_host     = (scheme == 'https' ? https_port == '443' : http_port == '80') ? host : "#{host}:#{cur_port}"
     alt_host     = sub_family ? SUB_ALT_HOST : "alt.#{host}"
@@ -264,7 +272,11 @@ module WptRunner
     body.dup.force_encoding('UTF-8').gsub(/\{\{([^}]+)\}\}/) do |whole|
       case Regexp.last_match(1)
       when 'host'                      then host
+      when 'ports[http][0]'            then http_port
+      when 'ports[http][1]'            then http_port2
       when /\Aports\[http\]\[\d+\]\z/  then http_port
+      when 'ports[https][0]'           then https_port
+      when 'ports[https][1]'           then https_port2
       when /\Aports\[https\]\[\d+\]\z/ then https_port
       when 'location[scheme]'          then scheme
       when 'location[host]'            then loc_host

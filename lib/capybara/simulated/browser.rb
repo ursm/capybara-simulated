@@ -4335,13 +4335,26 @@ module Capybara
         # (request-bad-port). Re-checked per redirect hop below ("HTTP-redirect fetch"
         # re-runs the block), so a 3xx Location to a bad port is refused too.
         return nil if bad_port?(target)
-        # CORS applies only to a request that opts in with cors_mode 'cors'. Today only
-        # XHR passes it; fetch() (whose default mode IS cors) and every other caller
-        # (sendBeacon, ESM, workers, the internal asset GET) pass nil → no enforcement.
-        # Threading fetch()'s real mode through is a known follow-up. The document's
+        # CORS enforcement (preflight + Access-Control checks) applies only to cors_mode
+        # 'cors' — sent by XHR and by fetch()'s default mode. fetch() also threads
+        # 'no-cors' / 'same-origin' (mode semantics below), and a form-submission
+        # navigation threads 'navigate'; other callers (sendBeacon, ESM, workers, the
+        # internal asset GET) pass nil → no CORS and no mode semantics. The document's
         # origin is the request's origin; a different target origin is cross-origin.
         cors        = cors_mode == 'cors'
         req_origin  = cors ? url_origin(@current_url) : nil
+        # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
+        # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
+        # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
+        # request a network error. `doc_origin` detects cross-origin for the response
+        # TYPE regardless of whether CORS enforcement (cors) runs; `crossed` latches once
+        # any hop leaves the document origin.
+        no_cors_mode     = cors_mode == 'no-cors'
+        same_origin_mode = cors_mode == 'same-origin'
+        # Only the real fetch request modes carry cross-origin semantics; a 'navigate'
+        # (form submission) or a nil-mode internal caller gets a plain readable response.
+        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil
+        crossed          = false
         # Use the method's case AS GIVEN: the JS callers already applied the spec
         # normalization (XHR open() / Fetch upper-case the known methods, preserving
         # an unknown method's case — open-method-case-sensitive). Upper-casing here
@@ -4373,10 +4386,16 @@ module Capybara
         ref_source = @current_url
         MAX_FETCH_REDIRECTS.times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          # Cross-origin-ness for the request mode/type, latched across hops. Computed
+          # BEFORE the cache so a cross-origin request never takes the cache fast path
+          # (which would bypass the opaque filter / same-origin-mode error / cors type).
+          crossed ||= !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
+          return nil if same_origin_mode && crossed   # 'same-origin' mode forbids a cross-origin hop
           # GET-only cache shortcut (RFC 9111). Fresh hit → skip @app.call
           # entirely; stale-but-revalidatable → fall through with conditional
-          # headers added so the server can return 304.
-          cache_entry = (method == 'GET' && !skip_cache) ? @@asset_cache.lookup(target) : nil
+          # headers added so the server can return 304. Skipped when cross-origin so the
+          # mode filtering below always runs on a fresh dispatch.
+          cache_entry = (method == 'GET' && !skip_cache && !crossed) ? @@asset_cache.lookup(target) : nil
           if cache_entry&.fresh?
             # Cached static asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
@@ -4480,7 +4499,11 @@ module Capybara
           exposed_headers = cross_origin ? cors_exposed_headers(resp_headers) : resp_headers
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           @@asset_cache.store(target, status, resp_headers, body_str) if method == 'GET'
-          return response_hash(status, exposed_headers, body_str, target, redirected)
+          # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
+          # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
+          # for a cross-origin (CORS-allowed) response, else 'basic'.
+          return response_hash(0, {}, '', '', false, type: 'opaque') if no_cors_mode && crossed
+          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic')
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -4585,7 +4608,7 @@ module Capybara
       # text body when `body_b64` is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
-      def response_hash(status, headers, body, url, redirected)
+      def response_hash(status, headers, body, url, redirected, type: 'basic')
         raw     = body.to_s
         hdrs    = stringify(headers)
         # A NUL in a header value is not a valid HTTP message; a real server can't
@@ -4623,7 +4646,7 @@ module Capybara
           'body'       => text,
           'url'        => url,
           'redirected' => redirected,
-          'type'       => 'basic'
+          'type'       => type
         }
         # The BOM-detected encoding (if any) — a frame load pins its document's
         # characterSet to it (see __csimFrameWindow); highest-precedence signal.
@@ -5979,6 +6002,10 @@ module Capybara
         env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
         apply_default_request_env(env, referer: @current_url, force: false)
+        # A CORS-preflight is a fetch, so it carries fetch's default `Accept: */*` (NOT
+        # the navigation Accept apply_default_request_env sets) — some handlers reject a
+        # preflight whose Accept isn't */* (preflight.py).
+        env['HTTP_ACCEPT'] = '*/*'
         env['HTTP_ORIGIN'] = req_origin
         env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] = method.to_s.upcase
         env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
