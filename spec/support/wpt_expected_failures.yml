@@ -204,9 +204,6 @@ fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is present
 fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
 fetch/api/basic/url-parsing.sub.html:
-- Request uses the UTF-8 URL parser
-- Request uses the UTF-8 URL parser
-- Request uses the UTF-8 URL parser
 - Request's referrer uses the UTF-8 URL parser
 - Request's referrer uses the UTF-8 URL parser
 - Request's referrer uses the UTF-8 URL parser
@@ -457,13 +454,6 @@ fetch/api/request/destination/fetch-destination.https.html:
 - SVGImageElement fetches with an "image" Request.destination
 - XMLHttpRequest() fetches with an empty string Request.destination
 - fetch() fetches with an empty string Request.destination
-fetch/api/request/forbidden-method.any.js:
-- Request() with a forbidden method CONNECT must throw.
-- Request() with a forbidden method TRACE must throw.
-- Request() with a forbidden method TRACK must throw.
-- Request() with a forbidden method connect must throw.
-- Request() with a forbidden method trace must throw.
-- Request() with a forbidden method track must throw.
 fetch/api/request/multi-globals/construct-in-detached-frame.window.js:
 - creating a request from another request in a detached realm should work
 fetch/api/request/multi-globals/url-parsing.html:
@@ -713,23 +703,6 @@ fetch/api/request/request-disturbed.any.js:
   used
 - Request construction failure should not set "bodyUsed"
 - 'Request''s body: initial state'
-fetch/api/request/request-error.any.js:
-- Bad cache init parameter value
-- Bad credentials init parameter value
-- Bad mode init parameter value
-- Bad redirect init parameter value
-- Bad referrerPolicy init parameter value
-- Input URL has credentials
-- Input URL is not valid
-- 'Request with cache mode: only-if-cached and fetch mode cors'
-- 'Request with cache mode: only-if-cached and fetch mode no-cors'
-- RequestInit's cache mode is only-if-cached and mode is not same-origin
-- RequestInit's method is forbidden
-- RequestInit's method is invalid
-- RequestInit's mode is navigate
-- RequestInit's mode is no-cors and method is not simple
-- RequestInit's referrer is invalid
-- RequestInit's window is not null
 fetch/api/request/request-init-001.sub.html:
 - Check referrer init value of /relative/ressource and associated getter
 - Check referrer init value of http://test.url and associated getter
@@ -784,7 +757,6 @@ fetch/api/request/request-structure.any.js:
 - Check referrerPolicy attribute
 - Check url attribute
 fetch/api/request/url-encoding.html:
-- URL encoding and Request
 - URL encoding and fetch()
 fetch/api/response/multi-globals/url-parsing.html:
 - should parse the redirect Location URL relative to the current settings object

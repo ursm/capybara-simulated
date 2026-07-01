@@ -18,7 +18,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 """
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
-import os, json, io, re, base64, hashlib, importlib.util, pickle
+import os, json, io, re, base64, hashlib, importlib.util, pickle, posixpath
 from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
@@ -367,7 +367,7 @@ class Request:
             'doc_root': doc_root,
             'browser_host': self.url_parts.hostname or 'web-platform.test',
             'ports': {'http': [self.url_parts.port or 80], 'https': [443]},
-        }, stash_path=self.url_parts.path)
+        }, stash_path=posixpath.normpath(self.url_parts.path or '/'))
         self.auth = Auth(self.headers.get(b'authorization'))
 
 
