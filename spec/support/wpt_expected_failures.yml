@@ -474,12 +474,6 @@ fetch/api/basic/request-headers-case.any.js:
 - Multiple headers with the same name, different case (THIS-is-A-test first)
 fetch/api/basic/request-headers-nonascii.any.js:
 - Non-ascii bytes in request headers
-fetch/api/basic/request-headers.any.js:
-- Fetch with Chicken
-- Fetch with POST and mode "no-cors" needs an Origin header
-- Fetch with POST and mode "same-origin" needs an Origin header
-- Fetch with PUT and mode "same-origin" needs an Origin header
-- Fetch with TacO and mode "same-origin" needs an Origin header
 fetch/api/basic/request-upload.any.js:
 - Fetch with POST with ReadableStream containing ArrayBuffer
 - Fetch with POST with text body on 421 response should be retried once on new connection.

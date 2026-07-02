@@ -4349,7 +4349,12 @@ module Capybara
         # internal asset GET) pass nil → no CORS and no mode semantics. The document's
         # origin is the request's origin; a different target origin is cross-origin.
         cors        = cors_mode == 'cors'
-        req_origin  = cors ? url_origin(@current_url) : nil
+        # The request's origin (document origin) for EVERY fetch mode — Fetch appends an
+        # Origin header to every non-GET/HEAD request regardless of mode (a same-origin or
+        # no-cors POST/PUT still carries it, for the server's CSRF/Origin check). CORS
+        # enforcement itself stays gated on `cors` below; a nil-mode internal caller
+        # (navigation / asset GET) has no origin semantics.
+        req_origin  = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil
         # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
         # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
         # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
@@ -4448,10 +4453,12 @@ module Capybara
 
           env = Rack::MockRequest.env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
-          # A GET/HEAD request carries no body, so it sends no Content-Length (env_for
-          # always sets it to the input bytesize, i.e. 0). A POST/PUT with an empty body
-          # keeps Content-Length: 0 (send-entity-body-none / -empty).
-          env.delete('CONTENT_LENGTH') if %w[GET HEAD].include?(method.to_s.upcase)
+          # env_for always sets Content-Length to the input bytesize (0 for an empty body).
+          # Fetch adds Content-Length: 0 for a bodyless request ONLY when the method is
+          # POST or PUT; GET/HEAD and every other method (incl. a custom one like `Chicken`)
+          # send no Content-Length when the body is empty (send-entity-body-none;
+          # request-headers custom-method). A non-empty body keeps its real length.
+          env.delete('CONTENT_LENGTH') if body.to_s.empty? && !%w[POST PUT].include?(method.to_s.upcase)
           apply_request_headers(env, headers) if headers
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
           # The Referer follows the request's Referrer-Policy (a redirect response can
