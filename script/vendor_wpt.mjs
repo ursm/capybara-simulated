@@ -65,7 +65,11 @@ const TREES = [
   'fetch/data-urls',                   // data: URL parsing (reuses the whatwg-url backend)
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
-  'html/webappapis/structured-clone'   // structuredClone — deep-clone of platform objects, no layout
+  'html/webappapis/structured-clone',  // structuredClone — deep-clone of platform objects, no layout
+  'css/cssom'                          // CSSOM object model — CSSStyleDeclaration / CSSRule / insertRule /
+                                       // cssRules / style serialization, backed by our css-tree cascade
+                                       // engine; the pure-API slice of CSS (css/cssom-view is the
+                                       // layout-dependent one and is deliberately NOT vendored)
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
@@ -93,6 +97,13 @@ const SUPPORT_FILES = [
 
 const CONCURRENCY = 24;
 
+// Percent-encode each path SEGMENT (preserving the `/` separators) so filenames
+// containing URL-reserved characters — e.g. css/cssom support images like
+// `ruler-h-50%.png` — survive the GitHub API / raw-CDN request instead of 400ing.
+function encodePath(path) {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
 async function gh(path, accept = 'application/vnd.github+json') {
   const headers = { Accept: accept, 'User-Agent': 'capybara-simulated-vendor' };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -118,7 +129,8 @@ async function listBlobs(sha, tree) {
 }
 
 async function fetchRaw(sha, path) {
-  const url = `https://raw.githubusercontent.com/${REPO}/${sha}/${path}`;
+  const encoded = encodePath(path);
+  const url = `https://raw.githubusercontent.com/${REPO}/${sha}/${encoded}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'capybara-simulated-vendor' } });
   if (res.ok) return Buffer.from(await res.arrayBuffer());
   // raw.githubusercontent occasionally 400s a single valid path at a given commit
@@ -126,7 +138,7 @@ async function fetchRaw(sha, path) {
   // with the `raw` media type, which returns the file's RAW bytes (and lifts the JSON
   // endpoint's size cap). gh() throws on a non-200, so a genuinely missing path still
   // fails loudly rather than being masked.
-  const blob = await gh(`contents/${path}?ref=${sha}`, 'application/vnd.github.raw');
+  const blob = await gh(`contents/${encoded}?ref=${sha}`, 'application/vnd.github.raw');
   return Buffer.from(await blob.arrayBuffer());
 }
 

@@ -537,8 +537,11 @@ module WptRunner
   # Top-level trees + the narrow html/ subtrees we vendor: the event-loop oracle
   # (timers + microtask-queuing) and the forms semantics surface (form
   # submission / constraint validation / input / select / textarea / labels —
-  # the form-driven slice every app suite exercises). See script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing}'
+  # the form-driven slice every app suite exercises), plus css/cssom (the pure-API
+  # CSSOM object model, backed by our css-tree cascade engine — css/cssom-view is
+  # the layout-dependent tree and is deliberately not vendored). Keep this list in
+  # sync with the vendor manifest in script/vendor_wpt.mjs.
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/

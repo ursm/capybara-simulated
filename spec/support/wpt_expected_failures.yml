@@ -16,6 +16,693 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+css/cssom/CSS-namespace-object-class-string.html:
+- "@@toStringTag exists on the namespace object with the appropriate descriptor"
+- Object.prototype.toString applied after deleting @@toStringTag
+- Object.prototype.toString applied after modifying the namespace object's @@toStringTag
+- Object.prototype.toString applied to the namespace object
+css/cssom/CSSFontFeatureValuesRule.html:
+- CSSFontFeatureValuesMap entries are settable to sequences of numbers.
+- CSSFontFeatureValuesMap entries are settable to single values.
+- CSSFontFeatureValuesRule family is settable and readable.
+- CSSFontFeatureValuesRule is correctly parsed and accessible via CSSOM.
+- Clearing all entries is possible.
+- Deleting single entries is possible.
+- Multiple rules for the same family are kept separate in CSSOM.
+- New rules can be added.
+css/cssom/CSSKeyframesRule.html:
+- indexed getter, length
+- name, cssRules, appendRule, findRule, deleteRule
+css/cssom/CSSStyleDeclaration-iterator.html:
+- CSSStyleDeclaration should expose Symbol.iterator
+css/cssom/CSSStyleRule-set-selectorText-namespace.html:
+- 'CSSStyleRule: selectorText value: | *.style1  | isMatch: false'
+- 'CSSStyleRule: selectorText value: |*|*.style1  | isMatch: true'
+- 'CSSStyleRule: selectorText value: |.style1| isMatch: false'
+- 'CSSStyleRule: selectorText value: |p| isMatch: false'
+- 'CSSStyleRule: selectorText value: |svg|*.style1  | isMatch: true'
+css/cssom/CSSStyleRule-set-selectorText.html:
+- 'CSSStyleRule: Invalid CSS selector: ::gibberish'
+- 'CSSStyleRule: Invalid CSS selector: :gibberish'
+- 'CSSStyleRule: selectorText value: |  #container | isMatch: true'
+- 'CSSStyleRule: selectorText value: |#container  | isMatch: true'
+- 'CSSStyleRule: selectorText value: |#container| isMatch: true'
+- 'CSSStyleRule: selectorText value: |*:not(:active)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |*| isMatch: true'
+- 'CSSStyleRule: selectorText value: |*|*| isMatch: true'
+- 'CSSStyleRule: selectorText value: |*|a| isMatch: false'
+- 'CSSStyleRule: selectorText value: |*|div| isMatch: true'
+- 'CSSStyleRule: selectorText value: |.style1| isMatch: true'
+- 'CSSStyleRule: selectorText value: |:after| isMatch: false'
+- 'CSSStyleRule: selectorText value: |:before| isMatch: false'
+- 'CSSStyleRule: selectorText value: |:first-letter| isMatch: false'
+- 'CSSStyleRule: selectorText value: |:first-line| isMatch: false'
+- 'CSSStyleRule: selectorText value: |:lang(zh)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |:lang(zh-CN)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |:not(:active)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[*|lang]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang*="-"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang*="h-"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang="zh-CN"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang^="z"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[language]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang|="zh"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[lang|="zh-CN"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[segment$="3"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[segment$="43"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[segment~="42"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[segment~="43"]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |[|lang]| isMatch: true'
+- 'CSSStyleRule: selectorText value: |div.style1| isMatch: true'
+- 'CSSStyleRule: selectorText value: |div:not(#non-existing-id)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |div:not(:active)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |div[lang="zh-CN"]:not(:focus)| isMatch: true'
+- 'CSSStyleRule: selectorText value: |div| isMatch: true'
+- 'CSSStyleRule: selectorText value: |p + div| isMatch: true'
+- 'CSSStyleRule: selectorText value: |p ~ div| isMatch: true'
+- 'CSSStyleRule: selectorText value: |span  div  | isMatch: true'
+- 'CSSStyleRule: selectorText value: |span > div| isMatch: true'
+- 'CSSStyleRule: selectorText value: |span div| isMatch: true'
+css/cssom/CSSStyleSheet-constructable-baseURL.html:
+- Constructing sheet with invalid base URL throws a NotAllowedError
+css/cssom/CSSStyleSheet-constructable-cssRules.html:
+- cssRules doesn't change on replace / replaceSync
+css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
+- Shouldn't crash / assert when inserting a stylesheet after there are disabled constructable
+  sheets
+css/cssom/CSSStyleSheet-constructable-duplicate.html:
+- Appending duplicate stylesheets yields the correct cascade position in the Document
+- Appending duplicate stylesheets yields the correct cascade position in the ShadowRoot
+- Duplicate stylesheets have the right cascade position in the Document
+- Duplicate stylesheets have the right cascade position in the ShadowRoot
+css/cssom/CSSStyleSheet-constructable-invalidation.html:
+- mutating constructed CSSStyleSheet applied to root invalidates styles
+- mutating constructed CSSStyleSheet applied to shadowdom invalidates styles
+- mutating dependent constructed CSSStyleSheet applied to shadowdom invalidates styles
+css/cssom/CSSStyleSheet-constructable-replace-cssRules.html:
+- 'cssRules tests (sync: false)'
+- 'cssRules tests (sync: true)'
+css/cssom/CSSStyleSheet-constructable-replace-on-regular-sheet.html:
+- CSSStyleSheet.replace returns a rejected promise for non-constructed sheets
+- CSSStyleSheet.replace returns a rejected promise for non-constructed sheets that
+  have no associated document
+- CSSStyleSheet.replaceSync throws NotAllowedError for non-constructed sheets
+css/cssom/CSSStyleSheet-constructable.html:
+- Adopted sheets are ordered after non-adopted sheets in the document
+- Adopted sheets are ordered after non-adopted sheets in the shadow root
+- Adopting a shadow host will empty adoptedStyleSheets if adopting to a different
+  document
+- Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a
+  different document
+- Attaching a shadow root that already has adopted stylesheets work
+- CSSStyleSheet.replace allows, but ignores, import rule inside
+- CSSStyleSheet.replace ignores @import rule but still loads other rules
+- CSSStyleSheet.replaceSync correctly updates the style of its adopters synchronously
+- CSSStyleSheet.replaceSync should not trigger any loads from @import rules
+- Changes to constructed stylesheets through CSSOM is reflected
+- Constructed style sheets can be applied on document
+- Constructed style sheets can be applied on shadow root
+- Constructed stylesheet can be used and modified in multiple TreeScopes
+- Re-attaching shadow host with adopted stylesheets work
+- Stylesheet constructed on iframe cannot be used in the main Document
+- Stylesheets constructed on the main Document cannot be used in iframes
+css/cssom/CSSStyleSheet-template-adoption.html:
+- adoptedStyleSheets won't be cleared when adopting into/from <template>s
+css/cssom/HTMLLinkElement-disabled-001.html:
+- "<link disabled> prevents the stylesheet from being in document.styleSheets (from
+  parser)"
+- HTMLLinkElement.disabled reflects the <link disabled> attribute, and behaves consistently
+css/cssom/HTMLLinkElement-disabled-002.html:
+- HTMLLinkElement.disabled reflects the <link disabled> attribute, and behaves consistently,
+  when the sheet is an alternate
+css/cssom/HTMLLinkElement-disabled-003.html:
+- HTMLLinkElement.disabled's explicitly enabled state persists when disconnected and
+  connected again
+css/cssom/HTMLLinkElement-disabled-004.html:
+- HTMLLinkElement.disabled's explicitly enabled state doesn't persist on clones
+css/cssom/HTMLLinkElement-disabled-005.html:
+- HTMLLinkElement.disabled's explicitly enabled state persists regardless of rel
+css/cssom/HTMLLinkElement-disabled-006.html:
+- HTMLLinkElement.disabled setter does nothing if the attribute isn't present already.
+css/cssom/HTMLLinkElement-disabled-007.html:
+- HTMLLinkElement.disabled setter sets the explicitly enabled state if toggled back
+  and forth.
+css/cssom/HTMLLinkElement-load-event.html:
+- Link element load event doesn't block the parser.
+css/cssom/HTMLStyleElement-load-event.html:
+- style elements fire load events properly
+css/cssom/MediaList.html:
+- CSSOM - MediaList interface
+css/cssom/MediaList2.xhtml:
+- MediaList getter
+- MediaList.item
+- MediaList.length
+- MediaList.mediaText
+css/cssom/MutationObserver-style.html:
+- Updating style property with the same value does not trigger an observation callback
+css/cssom/adoptedstylesheets-modify-array-and-sheet.html:
+- Add the two sheets. Text should be red.
+- Flip the two sheet. Still red.
+- Modify the color declaration. Should now be green.
+css/cssom/adoptedstylesheets-observablearray.html:
+- document.adoptedStyleSheets should allow mutation in-place
+- shadowRoot.adoptedStyleSheets should allow mutation in-place
+css/cssom/at-namespace.html:
+- 'CSS Test: @namespace in CSSOM is not severely broken'
+css/cssom/base-uri.html:
+- KeyframeEffect constructor
+- KeyframeEffect.setKeyframes
+- setProperty
+css/cssom/computed-style-001.html:
+- inherited_property_values
+- property_values
+- read_only
+- relative_property_values
+css/cssom/computed-style-002.html:
+- Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
+css/cssom/computed-style-003.html:
+- Check that a percent width in an iframe is the resolved width when the iframe is
+  displayed.
+css/cssom/computed-style-004.html:
+- Check that the initial width is 100px.
+- Check that the resolved width of the inner div is affected by changing the width
+  of outer iframe.
+css/cssom/computed-style-005.html:
+- absolute_computed_left_and_right
+- absolute_computed_margins
+- relative_computed_left_and_right
+- relative_computed_margins
+css/cssom/computed-style-set-property.html:
+- Computed style parent (should be null)
+- Exception thrown when trying to change a computed style alias via property
+- Exception thrown when trying to change a computed style alias via setProperty
+- Exception thrown when trying to change a computed style declaration via property
+- Exception thrown when trying to change a computed style declaration via setProperty
+css/cssom/css-style-attr-decl-block.html:
+- Changes to CSS declaration block after a base URL change
+- Changes to CSS declaration block should reflect on style attribute
+- Removing non-existing property or setting invalid value on CSS declaration block
+  shouldn't queue mutation record
+css/cssom/css-style-declaration-modifications.html:
+- Calling CSSStyleDeclaration#setProperty
+- Setting CSSStyleDeclaration#cssText
+css/cssom/css-style-reparse.html:
+- style.innerHTML modification
+- style.textContent modification
+css/cssom/cssimportrule-parent.html:
+- "@import stylesheet is properly unlinked from parent after removal"
+css/cssom/cssimportrule-sheet-identity.html:
+- CSSImportRule has different sheets even if referencing the same URL
+css/cssom/cssimportrule.html:
+- Value of CSSImportRule supportsText attribute
+- Values of CSSImportRule attributes
+- Values of CSSRule attributes
+css/cssom/cssom-fontfacerule-constructors.html:
+- "@font-face declarations are instances of CSSFontFaceRule"
+- The style attribute must return a CSSFontFaceDescriptors block
+css/cssom/cssom-fontfacerule.html:
+- CSSStyleDeclaration values are represented within CSSFontFaceRule
+css/cssom/cssom-getPropertyValue-common-checks.html:
+- All properties can serialize 'initial'
+css/cssom/cssom-pagerule.html:
+- Set cssText to named page with pseudo pages of :first, :left, :right, :first in
+  order.
+- Set cssText to named page with two :first pseudo page
+- Set selectorText to named page with pseudo pages of :first, :left, :right, :first
+  in order.
+- Set selectorText to named page with two :first pseudo page
+css/cssom/cssstyledeclaration-all-shorthand.html:
+- getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property
+- getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property
+  via insertRule
+- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
+  'margin'
+- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
+  'margin' via insertRule
+- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
+  'margin' via setProperty
+- getPropertyValue('all') returns empty string when property overridden after 'all'
+- getPropertyValue('all') returns empty string when property overridden after 'all'
+  via insertRule
+- getPropertyValue('all') returns empty string when property overridden after 'all'
+  via setProperty
+- getPropertyValue('all') returns empty string when single property overridden after
+  'all' via insertRule
+- getPropertyValue('all') returns empty string when single property overriden
+- getPropertyValue('all') returns empty string when single property overriden via
+  setProperty
+- getPropertyValue('all') returns empty string with shorthand 'margin'
+- getPropertyValue('all') returns empty string with shorthand 'margin' via insertRule
+- getPropertyValue('all') returns empty string with shorthand 'margin' via setProperty
+- getPropertyValue('all') returns later 'all' value when it overrides earlier 'all'
+  and properties
+- getPropertyValue('all') returns later 'all' value when it overrides earlier 'all'
+  and properties via insertRule
+- getPropertyValue('margin') returns all's value when 'all' after 'margin-top'
+- getPropertyValue('margin') returns all's value when 'all' is redeclared after margin
+  longhands
+- getPropertyValue('margin') returns all's value when all of 'margin's longhands are
+  overridden by 'all'
+- getPropertyValue('margin') returns empty string when some of 'margin's longhands
+  are overridden by 'all'
+- getPropertyValue('margin') returns serialized string when longhands are after 'all'
+- removeProperty('all') removes all declarations affected by 'all'
+- setProperty('all') overrides existing properties and earlier 'all'
+- setProperty('all') sets all property values
+css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
+- "'all' shorthand with 'width' and 'height'"
+- "'all' shorthand with 'width', 'height' and custom properties"
+- "'all' shorthand with all longhands"
+css/cssom/cssstyledeclaration-csstext-important.html:
+- padding-left should be taken from the !important property
+css/cssom/cssstyledeclaration-csstext.html:
+- Shorthands _are_ serialized if there are no other properties with different logical
+  groups in between
+- Shorthands aren't serialized if there are other properties with different logical
+  groups in between
+- cssText on computed style declaration returns the empty string
+- invalid property does not appear
+- overwriting with invalid value
+- uppercase property
+css/cssom/cssstyledeclaration-mutability.html:
+- StyleSheet's CSSStyleDeclaration is mutable
+- getComputedStyle's CSSStyleDeclaration is not mutable
+css/cssom/cssstyledeclaration-mutationrecord-002.html:
+- CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
+  invalid values
+css/cssom/cssstyledeclaration-mutationrecord-003.html:
+- CSSStyleDeclaration.removeProperty doesn't queue a mutation record when not actually
+  removed, invoked from setPropertyValue
+css/cssom/cssstyledeclaration-mutationrecord-004.html:
+- CSSStyleDeclaration.removeProperty doesn't queue a mutation record when not actually
+  removed
+css/cssom/cssstyledeclaration-mutationrecord-005.html:
+- CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
+  invalid values
+css/cssom/cssstyledeclaration-nested.html:
+- CSSNestedDeclarationBlock cssom interactions
+css/cssom/cssstyledeclaration-properties.html:
+- 'CSS Test: CSSStyleDeclaration properties are defined as WebIDL attributes, not
+  using getOwnPropertyNames()'
+css/cssom/cssstyledeclaration-registered-custom-properties.html:
+- Only relevant custom properties are included
+- Registered custom properties are included in CSSComputedStyleDeclaration
+css/cssom/cssstyledeclaration-removeProperty-all.html:
+- CSSStyleDeclaration.removeProperty("all")
+css/cssom/cssstyledeclaration-setter-attr.html:
+- Setting an invalid property via the declaration setter doesn't create a declaration
+- Setting an invalid value via the declaration setter doesn't create a declaration
+css/cssom/cssstyledeclaration-setter-declarations.html:
+- longhand property setter should update only the decoarations being set
+- setProperty with shorthand should update only the declarations being set
+css/cssom/cssstyledeclaration-setter-logical.html:
+- newly set declaration should be after all declarations in the same logical property
+  group but have different logical kind
+css/cssom/flex-serialization.html:
+- Multiple values flex with CSS-wide and two non-CSS-wide-keyword values should serialize
+  correctly.
+- Multiple values flex with CSS-wide keyword should serialize correctly.
+- Multiple values flex with CSS-wide keywords and non-CSS-wide value should serialize
+  correctly.
+- Single value flex with non-CSS-wide value should serialize correctly.
+css/cssom/font-family-serialization-001.html:
+- Serialization of <generic-family>
+- Serialization of prefixed -webkit-<generic-family>
+- Serialization of quoted "<generic-family>"
+css/cssom/font-shorthand-serialization.html:
+- The font shorthand should be serialized just like any other shorthand.
+css/cssom/font-variant-shorthand-serialization.html:
+- CSS-wide keyword in one longhand
+- CSS-wide keyword in shorthand
+- 'font-variant-ligatures: none serialization with non-default value for another longhand'
+- 'font-variant: none serialization'
+- 'font-variant: normal serialization'
+- 'font-variant: normal with non-default longhands'
+- 'font: menu serialization'
+css/cssom/getComputedStyle-detached-subtree.html:
+- getComputedStyle returns no style for descendant outside the flat tree
+- getComputedStyle returns no style for detached element
+- 'getComputedStyle returns no style for element in non-rendered iframe (display:
+  none)'
+- 'getComputedStyle returns no style for element in non-rendered iframe (display:
+  none) from iframe''s window'
+- getComputedStyle returns no style for element outside the flat tree
+- getComputedStyle returns no style for shadow tree outside of flattened tree
+css/cssom/getComputedStyle-logical-enumeration.html:
+- Logical properties in enumeration of computed style
+css/cssom/getComputedStyle-resolved-colors.html:
+- The resolved value for 'background-color' is the used value
+- The resolved value for 'border-block-end-color' is the used value
+- The resolved value for 'border-block-start-color' is the used value
+- The resolved value for 'border-bottom-color' is the used value
+- The resolved value for 'border-inline-end-color' is the used value
+- The resolved value for 'border-inline-start-color' is the used value
+- The resolved value for 'border-left-color' is the used value
+- The resolved value for 'border-right-color' is the used value
+- The resolved value for 'border-top-color' is the used value
+- The resolved value for 'box-shadow' is the used value
+- The resolved value for 'caret-color' is the used value
+- The resolved value for 'color' is the used value
+- The resolved value for 'outline-color' is the used value
+css/cssom/inline-style-001.html:
+- shorthand_properties
+css/cssom/invalid-pseudo-elements.html:
+- 'CSSOM: Test that rules with invalid pseudo elements are not found'
+css/cssom/link-element-stylesheet-title.html:
+- StyleSheet.title
+css/cssom/medialist-appendmedium-parse-single-and-dedup.html:
+- appendMedium with a comma-separated list is a no-op
+- appendMedium with a comma-separated list leaves an existing list unchanged
+css/cssom/medialist-deletemedium-parse-and-remove-all.html:
+- deleteMedium matches a query that differs only in whitespace
+css/cssom/medialist-interfaces-001.html:
+- mediatest_medialist_serialize_comma
+- mediatest_medialist_serialize_element
+- mediatest_medialist_serialize_empty
+- mediatest_medialist_serialize_order
+css/cssom/medialist-interfaces-002.html:
+- deleteMedium_called_without_argument
+css/cssom/overflow-serialization.html:
+- Overflow-x/y longhands on element with different keywords should serialize correctly.
+- Overflow-x/y longhands on element with same CSS-wide keyword should serialize correctly.
+- Overflow-x/y longhands on element with same non-CSS-wide keyword should serialize
+  correctly.
+- Overflow-x/y longhands with different keywords should serialize correctly.
+- Overflow-x/y longhands with same CSS-wide keyword should serialize correctly.
+- Overflow-x/y longhands with same non-CSS-wide keyword should serialize correctly.
+css/cssom/page-descriptors.html:
+- CSSPageDescriptors properties tests
+css/cssom/preferred-stylesheet-order.html:
+- Preferred stylesheet where insertion order is reversed tree order
+css/cssom/preferred-stylesheet-reversed-order.html:
+- Preferred stylesheet where insertion order is tree order
+css/cssom/resolved-border-width.html:
+- checkbox
+- radio
+css/cssom/rule-restrictions.html:
+- "@keyframe"
+- "@page"
+css/cssom/selectorSerialize.html:
+- ":nth-child serialization produces canonical form"
+- escaped character (\) in element name with any namespace without default
+- escaped character as code point in attribute name
+- single pseudo (simple) selector ":nth-last-of-type" which accepts arguments in the
+  sequence of simple selectors that is not a universal selector
+- single pseudo (simple) selector "nth-child" which accepts arguments in the sequence
+  of simple selectors that is not a universal selector
+- single pseudo (simple) selector "nth-last-child" which accepts arguments in the
+  sequence of simple selectors that is not a universal selector
+- single pseudo (simple) selector "nth-of-child" which accepts arguments in the sequence
+  of simple selectors that is not a universal selector
+css/cssom/selectorText-modification-restyle-002.html:
+- Check initial color.
+- 'Check that color changes correctly after shadow stylesheet selector and #container
+  class is changed.'
+css/cssom/serialization-CSSDeclaration-with-important.html:
+- Inline style declaration with whitespace between '!' and 'important'.
+- Style set dynamically via cssText with whitespace between '!' and 'important'.
+css/cssom/serialize-custom-props.html:
+- z-index can take a 12-digit integer
+- z-index can take a 25-digit integer
+- z-index can take a 4-digit integer
+- z-index can take a 6-digit integer
+- z-index can take a 8-digit integer
+css/cssom/serialize-media-rule.html:
+- empty media query list
+- features - character case normalization
+- features - no lexicographical sorting
+- features - preservation of overspecified features
+- many rules
+- media query list
+- one rule
+- type - inclusion of negated all
+- type - no features
+- type - no features - character case normalization
+- type - no features - negation
+- type - omission of all
+css/cssom/serialize-namespaced-type-selectors.html:
+- Type selector with any namespace
+- Type selector with any namespace followed by attribute selector
+- Type selector with any namespace followed by class
+- Type selector with any namespace followed by id
+- Type selector with any namespace followed by pseudo class
+- Type selector with any namespace followed by pseudo element
+- Type selector with namespace equal to default namespace
+- Type selector with namespace equal to default namespace followed by attribute selector
+- Type selector with namespace equal to default namespace followed by class
+- Type selector with namespace equal to default namespace followed by id
+- Type selector with namespace equal to default namespace followed by pseudo class
+- Type selector with namespace equal to default namespace followed by pseudo element
+- Universal selector followed by attribute selector
+- Universal selector followed by class
+- Universal selector followed by id
+- Universal selector followed by pseudo class
+- Universal selector followed by pseudo element
+- Universal selector in any namespace
+- Universal selector in any namespace followed by attribute selector
+- Universal selector in any namespace followed by class
+- Universal selector in any namespace followed by id
+- Universal selector in any namespace followed by pseudo class
+- Universal selector in any namespace followed by pseudo element
+- Universal selector with namespace equal to default namespace
+- Universal selector with namespace equal to default namespace followed by attribute
+  selector
+- Universal selector with namespace equal to default namespace followed by class
+- Universal selector with namespace equal to default namespace followed by id
+- Universal selector with namespace equal to default namespace followed by pseudo
+  class
+- Universal selector with namespace equal to default namespace followed by pseudo
+  element
+css/cssom/serialize-values.html:
+- 'background-image: url(http://localhost/)'
+- 'background-position: -.1em -.1em'
+- 'background-position: -.1em -.5%'
+- 'background-position: -.1em -0px'
+- 'background-position: -.1em -1px'
+- 'background-position: -.1em -5%'
+- 'background-position: -.1em .1em'
+- 'background-position: -.1em .5%'
+- 'background-position: -.1em 0px'
+- 'background-position: -.1em 1px'
+- 'background-position: -.1em 5%'
+- 'background-position: -.1em bottom'
+- 'background-position: -.1em center'
+- 'background-position: -.1em top'
+- 'background-position: -.5% -.1em'
+- 'background-position: -.5% -.5%'
+- 'background-position: -.5% -0px'
+- 'background-position: -.5% -1px'
+- 'background-position: -.5% -5%'
+- 'background-position: -.5% .1em'
+- 'background-position: -.5% .5%'
+- 'background-position: -.5% 0px'
+- 'background-position: -.5% 1px'
+- 'background-position: -.5% 5%'
+- 'background-position: -.5% bottom'
+- 'background-position: -.5% center'
+- 'background-position: -.5% top'
+- 'background-position: -0px -.1em'
+- 'background-position: -0px -.5%'
+- 'background-position: -0px -0px'
+- 'background-position: -0px -1px'
+- 'background-position: -0px -5%'
+- 'background-position: -0px .1em'
+- 'background-position: -0px .5%'
+- 'background-position: -0px 0px'
+- 'background-position: -0px 1px'
+- 'background-position: -0px 5%'
+- 'background-position: -0px bottom'
+- 'background-position: -0px center'
+- 'background-position: -0px top'
+- 'background-position: -1px -.1em'
+- 'background-position: -1px -.5%'
+- 'background-position: -1px -0px'
+- 'background-position: -1px .1em'
+- 'background-position: -1px .5%'
+- 'background-position: -5% -.1em'
+- 'background-position: -5% -.5%'
+- 'background-position: -5% -0px'
+- 'background-position: -5% .1em'
+- 'background-position: -5% .5%'
+- 'background-position: .1em -.1em'
+- 'background-position: .1em -.5%'
+- 'background-position: .1em -0px'
+- 'background-position: .1em -1px'
+- 'background-position: .1em -5%'
+- 'background-position: .1em .1em'
+- 'background-position: .1em .5%'
+- 'background-position: .1em 0px'
+- 'background-position: .1em 1px'
+- 'background-position: .1em 5%'
+- 'background-position: .1em bottom'
+- 'background-position: .1em center'
+- 'background-position: .1em top'
+- 'background-position: .5% -.1em'
+- 'background-position: .5% -.5%'
+- 'background-position: .5% -0px'
+- 'background-position: .5% -1px'
+- 'background-position: .5% -5%'
+- 'background-position: .5% .1em'
+- 'background-position: .5% .5%'
+- 'background-position: .5% 0px'
+- 'background-position: .5% 1px'
+- 'background-position: .5% 5%'
+- 'background-position: .5% bottom'
+- 'background-position: .5% center'
+- 'background-position: .5% top'
+- 'background-position: 0px -.1em'
+- 'background-position: 0px -.5%'
+- 'background-position: 0px -0px'
+- 'background-position: 0px .1em'
+- 'background-position: 0px .5%'
+- 'background-position: 1px -.1em'
+- 'background-position: 1px -.5%'
+- 'background-position: 1px -0px'
+- 'background-position: 1px .1em'
+- 'background-position: 1px .5%'
+- 'background-position: 5% -.1em'
+- 'background-position: 5% -.5%'
+- 'background-position: 5% -0px'
+- 'background-position: 5% .1em'
+- 'background-position: 5% .5%'
+- 'background-position: center -.1em'
+- 'background-position: center -.5%'
+- 'background-position: center -0px'
+- 'background-position: center .1em'
+- 'background-position: center .5%'
+- 'background-position: left -.1em'
+- 'background-position: left -.5%'
+- 'background-position: left -0px'
+- 'background-position: left .1em'
+- 'background-position: left .5%'
+- 'background-position: right -.1em'
+- 'background-position: right -.5%'
+- 'background-position: right -0px'
+- 'background-position: right .1em'
+- 'background-position: right .5%'
+- 'baseline-shift: .1em'
+- 'baseline-shift: .5%'
+- 'border-bottom-width: .1em'
+- 'border-left-width: .1em'
+- 'border-right-width: .1em'
+- 'border-spacing: .1em'
+- 'border-top-width: .1em'
+- 'bottom: .1em'
+- 'bottom: .5%'
+- 'content: ''string'''
+- 'content: counter(par-num, decimal)'
+- 'content: url(http://localhost/)'
+- 'font-family: ''Lucida Grande'''
+- 'font-size: .1em'
+- 'font-size: .5%'
+- 'height: .1em'
+- 'height: .5%'
+- 'left: .1em'
+- 'left: .5%'
+- 'letter-spacing: .1em'
+- 'line-height: -0'
+- 'line-height: .1em'
+- 'line-height: .5%'
+- 'list-style-image: url(http://localhost/)'
+- 'margin-bottom: .1em'
+- 'margin-bottom: .5%'
+- 'margin-left: .1em'
+- 'margin-left: .5%'
+- 'margin-right: .1em'
+- 'margin-right: .5%'
+- 'margin-top: .1em'
+- 'margin-top: .5%'
+- 'max-height: .1em'
+- 'max-height: .5%'
+- 'max-width: .1em'
+- 'max-width: .5%'
+- 'min-height: .1em'
+- 'min-height: .5%'
+- 'min-width: .1em'
+- 'min-width: .5%'
+- 'outline-width: .1em'
+- 'padding-bottom: .1em'
+- 'padding-bottom: .5%'
+- 'padding-left: .1em'
+- 'padding-left: .5%'
+- 'padding-right: .1em'
+- 'padding-right: .5%'
+- 'padding-top: .1em'
+- 'padding-top: .5%'
+- 'right: .1em'
+- 'right: .5%'
+- 'text-indent: .1em'
+- 'text-indent: .5%'
+- 'top: .1em'
+- 'top: .5%'
+- 'width: .1em'
+- 'width: .5%'
+- 'word-spacing: .1em'
+css/cssom/set-selector-text-attachment.html:
+- Modifying property value invalidates style, even after selectorText mutation
+css/cssom/setproperty-null-undefined.html:
+- Verify that setting a CSS property to undefined has no effect.
+css/cssom/shorthand-serialization.html:
+- Shorthand serialization after setting
+- Shorthand serialization with 'initial' value, one longhand with important flag.
+- Shorthand serialization with just longhands.
+css/cssom/shorthand-values.html:
+- 'The serialization of -webkit-line-clamp: none; should be canonical.'
+- 'The serialization of border-top: 1px; border-right: 1px; border-bottom: 1px; border-left:
+  1px; border-image: none; should be canonical.'
+- 'The serialization of border-top: 1px; border-right: 1px; border-bottom: 1px; border-left:
+  1px; should be canonical.'
+- 'The serialization of border-top: 1px; border-right: 2px; border-bottom: 3px; border-left:
+  4px; should be canonical.'
+- 'The serialization of border: 1px; border-top-color: red; should be canonical.'
+- 'The serialization of border: 1px; border-top: 1px !important; should be canonical.'
+- 'The serialization of border: 1px; border-top: 1px; should be canonical.'
+- 'The serialization of border: 1px; border-top: 2px; should be canonical.'
+- 'The serialization of border: solid; border-style: dotted should be canonical.'
+- 'The serialization of list-style-type: circle; list-style-position: inside; list-style-image:
+  none; should be canonical.'
+- 'The serialization of margin-top: 1px; margin-right: 2px; margin-bottom: 3px; margin-left:
+  4px; should be canonical.'
+- 'The serialization of outline-width: 2px; outline-style: dotted; outline-color:
+  blue; should be canonical.'
+- 'The serialization of overflow-x: scroll; overflow-y: hidden; should be canonical.'
+- 'The serialization of overflow-x: scroll; overflow-y: scroll; should be canonical.'
+- 'The serialization of padding-top: 1px; padding-right: 2px; padding-bottom: 3px;
+  padding-left: 4px; should be canonical.'
+css/cssom/style-sheet-interfaces-001.html:
+- CSSStyleSheet_properties
+- StyleSheet_properties
+- StyleSheet_property_values
+- disabled attribute getter/setter
+css/cssom/stylesheet-cross-origin-redirect-quirks.sub.html:
+- Cross-origin redirect to same-origin with wrong MIME type
+- Cross-origin stylesheet with wrong MIME type
+- Same-origin redirect to cross-origin redirect back to same-origin with wrong MIME
+  type
+- Same-origin redirect to cross-origin with wrong MIME type
+css/cssom/stylesheet-same-origin.sub.html:
+- Origin-clean check in copied cross-origin CSSOM Stylesheets
+- Origin-clean check in cross-origin CSSOM Stylesheets
+- Origin-clean check in cross-origin CSSOM Stylesheets (redirect from cross-origin
+  to same-origin)
+- Origin-clean check in cross-origin CSSOM Stylesheets (redirect from same-origin
+  to cross-origin)
+- Origin-clean check in loading error CSSOM Stylesheets
+css/cssom/stylesheet-title.html:
+- StyleSheet.title
+css/cssom/ttwf-cssom-doc-ext-load-count.html:
+- stylesheet.css should be unloaded and styleSheets.length === 0
+css/cssom/ttwf-cssom-doc-ext-load-tree-order.html:
+- styleSheets item 0 title must be aaa
+- styleSheets item 0 title must be alpha
+- styleSheets item 0 title must be kilo
+- styleSheets item 0 title must be zebra
+- styleSheets item 1 title must be zebra
+css/cssom/variable-names.html:
+- custom property '--0'
+- custom property '--\'
+- custom property '--a;b'
+- custom property '--ab'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
 fetch/api/abort/cache.https.any.js:
