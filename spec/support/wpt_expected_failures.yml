@@ -209,8 +209,6 @@ css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
 - "'all' shorthand with 'width' and 'height'"
 - "'all' shorthand with 'width', 'height' and custom properties"
 - "'all' shorthand with all longhands"
-css/cssom/cssstyledeclaration-csstext-important.html:
-- padding-left should be taken from the !important property
 css/cssom/cssstyledeclaration-csstext.html:
 - Shorthands _are_ serialized if there are no other properties with different logical
   groups in between
