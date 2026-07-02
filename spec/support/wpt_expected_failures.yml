@@ -38,49 +38,17 @@ css/cssom/CSSStyleRule-set-selectorText-namespace.html:
 css/cssom/CSSStyleRule-set-selectorText.html:
 - 'CSSStyleRule: Invalid CSS selector: ::gibberish'
 - 'CSSStyleRule: Invalid CSS selector: :gibberish'
-- 'CSSStyleRule: selectorText value: |  #container | isMatch: true'
-- 'CSSStyleRule: selectorText value: |#container  | isMatch: true'
-- 'CSSStyleRule: selectorText value: |#container| isMatch: true'
 - 'CSSStyleRule: selectorText value: |*:not(:active)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |*| isMatch: true'
 - 'CSSStyleRule: selectorText value: |*|*| isMatch: true'
 - 'CSSStyleRule: selectorText value: |*|a| isMatch: false'
 - 'CSSStyleRule: selectorText value: |*|div| isMatch: true'
-- 'CSSStyleRule: selectorText value: |.style1| isMatch: true'
 - 'CSSStyleRule: selectorText value: |:after| isMatch: false'
 - 'CSSStyleRule: selectorText value: |:before| isMatch: false'
 - 'CSSStyleRule: selectorText value: |:first-letter| isMatch: false'
 - 'CSSStyleRule: selectorText value: |:first-line| isMatch: false'
-- 'CSSStyleRule: selectorText value: |:lang(zh)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |:lang(zh-CN)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |:not(:active)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[*|lang]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang*="-"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang*="h-"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang="zh-CN"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang^="z"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[language]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang|="zh"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[lang|="zh-CN"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[segment$="3"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[segment$="43"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[segment~="42"]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |[segment~="43"]| isMatch: true'
 - 'CSSStyleRule: selectorText value: |[|lang]| isMatch: true'
-- 'CSSStyleRule: selectorText value: |div.style1| isMatch: true'
-- 'CSSStyleRule: selectorText value: |div:not(#non-existing-id)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |div:not(:active)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |div[lang="zh-CN"]:not(:focus)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |div| isMatch: true'
-- 'CSSStyleRule: selectorText value: |p + div| isMatch: true'
-- 'CSSStyleRule: selectorText value: |p ~ div| isMatch: true'
-- 'CSSStyleRule: selectorText value: |span  div  | isMatch: true'
-- 'CSSStyleRule: selectorText value: |span > div| isMatch: true'
-- 'CSSStyleRule: selectorText value: |span div| isMatch: true'
 css/cssom/CSSStyleSheet-constructable-baseURL.html:
 - Constructing sheet with invalid base URL throws a NotAllowedError
-css/cssom/CSSStyleSheet-constructable-cssRules.html:
-- cssRules doesn't change on replace / replaceSync
 css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
 - Shouldn't crash / assert when inserting a stylesheet after there are disabled constructable
   sheets
@@ -109,10 +77,8 @@ css/cssom/CSSStyleSheet-constructable.html:
 - CSSStyleSheet.replace allows, but ignores, import rule inside
 - CSSStyleSheet.replace ignores @import rule but still loads other rules
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
-- Changes to constructed stylesheets through CSSOM is reflected
 - Constructed style sheets can be applied on document
 - Constructed style sheets can be applied on shadow root
-- Constructed stylesheet can be used and modified in multiple TreeScopes
 - Re-attaching shadow host with adopted stylesheets work
 - Stylesheet constructed on iframe cannot be used in the main Document
 - Stylesheets constructed on the main Document cannot be used in iframes
@@ -145,10 +111,6 @@ css/cssom/MediaList.html:
 - CSSOM - MediaList interface
 css/cssom/MutationObserver-style.html:
 - Updating style property with the same value does not trigger an observation callback
-css/cssom/adoptedstylesheets-modify-array-and-sheet.html:
-- Add the two sheets. Text should be red.
-- Flip the two sheet. Still red.
-- Modify the color declaration. Should now be green.
 css/cssom/adoptedstylesheets-observablearray.html:
 - document.adoptedStyleSheets should allow mutation in-place
 - shadowRoot.adoptedStyleSheets should allow mutation in-place
@@ -411,8 +373,6 @@ css/cssom/serialize-namespaced-type-selectors.html:
 css/cssom/serialize-values.html:
 - 'content: counter(par-num, decimal)'
 - 'font-family: ''Lucida Grande'''
-css/cssom/set-selector-text-attachment.html:
-- Modifying property value invalidates style, even after selectorText mutation
 css/cssom/setproperty-null-undefined.html:
 - Verify that setting a CSS property to undefined has no effect.
 css/cssom/shorthand-values.html:
