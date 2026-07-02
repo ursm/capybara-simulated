@@ -290,6 +290,151 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(res['after']).to all(eq(0))         # cleared
   end
 
+  it 'fills a triangle path (nonzero winding) via moveTo/lineTo/fill' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(5, 5).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(5, 0);
+      ctx.lineTo(0, 5);
+      ctx.closePath();
+      ctx.fill();
+      const d = ctx.getImageData(0, 0, 5, 5);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 5 + x] }
+    # Triangle (0,0)-(5,0)-(0,5): interior is x+y < 5 (pixel centres are x+0.5,y+0.5).
+    expect(at.call(0, 0)).to eq([255, 0, 0, 255])   # centre (0.5,0.5) inside
+    expect(at.call(1, 1)).to eq([255, 0, 0, 255])   # centre (1.5,1.5) inside
+    expect(at.call(3, 3)).to eq([0, 0, 0, 0])        # centre (3.5,3.5) → x+y=7 outside
+    expect(at.call(4, 4)).to eq([0, 0, 0, 0])        # far corner outside
+  end
+
+  it 'fill(evenodd) leaves a hole where two nested rects overlap' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(6, 6).getContext('2d');
+      ctx.fillStyle = '#0000ff';
+      ctx.beginPath();
+      ctx.rect(0, 0, 6, 6);      // outer
+      ctx.rect(2, 2, 2, 2);      // inner — becomes a hole under even-odd
+      ctx.fill('evenodd');
+      const d = ctx.getImageData(0, 0, 6, 6);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 6 + x] }
+    expect(at.call(0, 0)).to eq([0, 0, 255, 255])   # outer ring painted
+    expect(at.call(3, 3)).to eq([0, 0, 0, 0])        # inner rect is a hole
+    expect(at.call(2, 2)).to eq([0, 0, 0, 0])        # hole
+  end
+
+  it 'fill(nonzero) fills nested same-wound rects solid (no hole)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(6, 6).getContext('2d');
+      ctx.fillStyle = '#0000ff';
+      ctx.beginPath();
+      ctx.rect(0, 0, 6, 6);
+      ctx.rect(2, 2, 2, 2);
+      ctx.fill();                // default nonzero → both rects wind the same way
+      const d = ctx.getImageData(0, 0, 6, 6);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 6 + x] }
+    expect(at.call(3, 3)).to eq([0, 0, 255, 255])   # no hole under nonzero
+  end
+
+  it 'strokes a path outline once even where segments overlap (translucent)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(1, 1);
+      ctx.lineTo(9, 1);          // horizontal segment near the top
+      ctx.stroke();
+      const d = ctx.getImageData(0, 0, 10, 10);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    # A 2px-wide stroke centred on y=1 covers rows 0..1; alpha 0.5 over transparent
+    # → ~128. Corners must not double-composite to a darker value.
+    on_line = px.select {|p| p[3] > 0 }
+    expect(on_line).not_to be_empty
+    expect(on_line.map {|p| p[3] }.uniq).to eq([128])   # single, uniform coverage
+  end
+
+  it 'fills an arc (circle) covering the centre and clearing the corners' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.arc(10, 10, 8, 0, Math.PI * 2);
+      ctx.fill();
+      const d = ctx.getImageData(0, 0, 20, 20);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 20 + x] }
+    expect(at.call(10, 10)).to eq([255, 0, 0, 255])   # centre inside the disc
+    expect(at.call(10, 3)).to  eq([255, 0, 0, 255])   # near the top edge (r=8)
+    expect(at.call(0, 0)).to   eq([0, 0, 0, 0])         # corner outside the disc
+    expect(at.call(19, 19)).to eq([0, 0, 0, 0])         # corner outside
+  end
+
+  it 'beginPath clears the current point (no stray segment from a stale path)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(6, 6).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      // First path in a far corner, then discard it.
+      ctx.beginPath();
+      ctx.moveTo(5, 5);
+      ctx.lineTo(6, 6);
+      ctx.beginPath();                     // resets — the (5,5) point must not linger
+      // A curve with NO moveTo: seeds at its first control point (1,1), not (5,5).
+      ctx.bezierCurveTo(1, 1, 3, 1, 3, 3);
+      ctx.lineTo(1, 3);
+      ctx.closePath();
+      ctx.fill();
+      const d = ctx.getImageData(0, 0, 6, 6);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 6 + x] }
+    expect(at.call(2, 2)).to eq([255, 0, 0, 255])   # inside the new shape (seeded at 1,1)
+    expect(at.call(5, 5)).to eq([0, 0, 0, 0])        # far corner untouched — no stale geometry
+  end
+
+  it 'exposes lineCap/lineJoin/miterLimit and setLineDash without throwing' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ctx.lineCap = 'round'; ctx.lineJoin = 'bevel'; ctx.miterLimit = 4;
+      ctx.setLineDash([4, 2]);
+      JSON.stringify({ cap: ctx.lineCap, join: ctx.lineJoin, miter: ctx.miterLimit, dash: ctx.getLineDash() });
+    JS
+    res = JSON.parse(out)
+    expect(res['cap']).to eq('round')
+    expect(res['join']).to eq('bevel')
+    expect(res['miter']).to eq(4)
+    expect(res['dash']).to eq([4, 2])
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
