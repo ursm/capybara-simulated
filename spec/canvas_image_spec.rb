@@ -96,6 +96,200 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(parsed['sample'][4..7]).to eq([0, 255, 0, 255])
   end
 
+  it 'fillRect paints an exact solid-colour block, respecting fillStyle' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = new OffscreenCanvas(3, 3);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(1, 1, 2, 2);
+      const d = ctx.getImageData(0, 0, 3, 3);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    # A 2×2 red block anchored at (1,1); the rest transparent.
+    expect(px[0]).to eq([0, 0, 0, 0])          # (0,0) untouched
+    expect(px[4]).to eq([255, 0, 0, 255])      # (1,1) red
+    expect(px[5]).to eq([255, 0, 0, 255])      # (2,1) red
+    expect(px[8]).to eq([255, 0, 0, 255])      # (2,2) red
+    expect(px[3]).to eq([0, 0, 0, 0])          # (0,1) untouched
+  end
+
+  it 'serializes fillStyle / strokeStyle and ignores invalid assignments' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      const seen = {};
+      seen.def = ctx.fillStyle;                 // default black
+      ctx.fillStyle = 'red';        seen.named  = ctx.fillStyle;
+      ctx.fillStyle = 'rgba(0,128,255,0.5)'; seen.rgba = ctx.fillStyle;
+      ctx.fillStyle = 'not-a-color'; seen.kept  = ctx.fillStyle; // unchanged
+      ctx.strokeStyle = '#00FF00';  seen.stroke = ctx.strokeStyle;
+      JSON.stringify(seen);
+    JS
+    seen = JSON.parse(out)
+    expect(seen['def']).to eq('#000000')
+    expect(seen['named']).to eq('#ff0000')
+    expect(seen['rgba']).to eq('rgba(0, 128, 255, 0.5)')
+    expect(seen['kept']).to eq('rgba(0, 128, 255, 0.5)') # invalid ignored
+    expect(seen['stroke']).to eq('#00ff00')
+  end
+
+  it 'clearRect erases a region back to transparent black' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(2, 2).getContext('2d');
+      ctx.fillStyle = '#0000ff';
+      ctx.fillRect(0, 0, 2, 2);
+      ctx.clearRect(0, 0, 1, 2);        // wipe the left column
+      const d = ctx.getImageData(0, 0, 2, 2);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px[0]).to eq([0, 0, 0, 0])          # cleared
+    expect(px[1]).to eq([0, 0, 255, 255])      # still blue
+    expect(px[2]).to eq([0, 0, 0, 0])          # cleared
+    expect(px[3]).to eq([0, 0, 255, 255])      # still blue
+  end
+
+  it 'composites a translucent fill over an opaque one via globalAlpha' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, 1, 1);            // opaque black base
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(0, 0, 1, 1);            // 50% white over black
+      const d = ctx.getImageData(0, 0, 1, 1);
+      JSON.stringify(Array.from(d.data));
+    JS
+    r, g, b, a = JSON.parse(out)
+    expect(a).to eq(255)
+    # 0.5*255 over 0 → ~128 (rounding within the clamped store).
+    expect(r).to be_within(1).of(128)
+    expect(g).to eq(r)
+    expect(b).to eq(r)
+  end
+
+  it 'applies the current transform (translate + scale) to fillRect' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.translate(1, 1);
+      ctx.scale(2, 2);
+      ctx.fillRect(0, 0, 1, 1);            // → device rect (1,1)-(3,3)
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px[0]).to  eq([0, 0, 0, 0])         # (0,0) outside
+    expect(px[5]).to  eq([255, 0, 0, 255])     # (1,1) inside 2×2 block
+    expect(px[10]).to eq([255, 0, 0, 255])     # (2,2) inside
+    expect(px[15]).to eq([0, 0, 0, 0])         # (3,3) outside
+  end
+
+  it 'strokeRect paints a border frame leaving the interior untouched' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.strokeStyle = '#00ff00';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, 2, 2);          // frame centred on the 1..3 box
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    # lineWidth 2 straddling edges of (1,1)-(3,3) covers the whole 0..3 ring;
+    # with a 2px border on a 2×2 rect there is no untouched interior, so the
+    # four corners must be painted and the buffer fully green.
+    expect(px[0]).to  eq([0, 255, 0, 255])     # corner painted
+    expect(px[5]).to  eq([0, 255, 0, 255])     # inner edge painted
+    expect(px.count {|p| p == [0, 255, 0, 255] }).to eq(16)
+  end
+
+  it 'normalizes negative width/height in fillRect and strokeRect' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(3, 3, -2, -2);          // → a 2×2 block at (1,1)
+      ctx.strokeStyle = '#00ff00';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(4, 4, -4, -4);        // → 1px frame around the full 0..4 box
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px[5]).to  eq([255, 0, 0, 255])     # (1,1) inside the negative-dim fill
+    expect(px[10]).to eq([255, 0, 0, 255])     # (2,2) inside
+    expect(px[0]).to  eq([0, 255, 0, 255])     # (0,0) corner of the negative-dim stroke
+    expect(px[3]).to  eq([0, 255, 0, 255])     # (3,0) top edge stroked
+  end
+
+  it 'treats non-finite geometry / transform arguments as no-ops (spec)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(2, 2).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(0, 0, Infinity, 2);     // ignored — must NOT flood the canvas
+      ctx.fillRect(0, 0, NaN, 2);          // ignored
+      ctx.setTransform(NaN, 0, 0, 1, 0, 0);// ignored — CTM stays identity
+      ctx.fillRect(0, 0, 1, 1);            // still draws (matrix not poisoned)
+      const d = ctx.getImageData(0, 0, 2, 2);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px[0]).to eq([255, 0, 0, 255])      # the one valid fill landed
+    expect(px[1]).to eq([0, 0, 0, 0])          # Infinity fill did not flood
+    expect(px[2]).to eq([0, 0, 0, 0])
+    expect(px[3]).to eq([0, 0, 0, 0])
+  end
+
+  it 'coerces string geometry arguments to numbers (WebIDL doubles)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(3, 3).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect('1', '1', '2', '2');    // strings → 1,1,2,2 (not concatenated)
+      const d = ctx.getImageData(0, 0, 3, 3);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px[4]).to eq([255, 0, 0, 255])      # (1,1) filled
+    expect(px[8]).to eq([255, 0, 0, 255])      # (2,2) filled
+    expect(px[0]).to eq([0, 0, 0, 0])          # (0,0) untouched
+  end
+
+  it 'resets the bitmap when canvas width is reassigned (clear idiom)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas');
+      c.width = 2; c.height = 2;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#0000ff';
+      ctx.fillRect(0, 0, 2, 2);
+      const before = ctx.getImageData(0, 0, 2, 2).data[0 + 2]; // blue channel, painted
+      c.width = c.width;                    // reset to transparent black
+      const after = Array.from(ctx.getImageData(0, 0, 2, 2).data);
+      JSON.stringify({ before, after });
+    JS
+    res = JSON.parse(out)
+    expect(res['before']).to eq(255)           # was blue
+    expect(res['after']).to all(eq(0))         # cleared
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
