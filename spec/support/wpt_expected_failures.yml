@@ -352,17 +352,8 @@ css/cssom/rule-restrictions.html:
 - "@keyframe"
 - "@page"
 css/cssom/selectorSerialize.html:
-- ":nth-child serialization produces canonical form"
 - escaped character (\) in element name with any namespace without default
 - escaped character as code point in attribute name
-- single pseudo (simple) selector ":nth-last-of-type" which accepts arguments in the
-  sequence of simple selectors that is not a universal selector
-- single pseudo (simple) selector "nth-child" which accepts arguments in the sequence
-  of simple selectors that is not a universal selector
-- single pseudo (simple) selector "nth-last-child" which accepts arguments in the
-  sequence of simple selectors that is not a universal selector
-- single pseudo (simple) selector "nth-of-child" which accepts arguments in the sequence
-  of simple selectors that is not a universal selector
 css/cssom/selectorText-modification-restyle-002.html:
 - Check initial color.
 - 'Check that color changes correctly after shadow stylesheet selector and #container
