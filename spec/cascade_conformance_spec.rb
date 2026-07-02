@@ -235,3 +235,66 @@ RSpec.describe 'CSS cascade visibility conformance' do
     end
   end
 end
+
+# A style change made through the CSSOM / DOM at RUNTIME must feed the cascade, so
+# Capybara's visibility reflects it after the change settles — the paths real apps
+# use for dynamic styling (a theme switcher mutating a live `<style>`, a Lit-style
+# `document.adoptedStyleSheets` assignment, appending a fresh `<style>`).
+RSpec.describe 'dynamic CSSOM visibility propagation' do
+  let(:app) {
+    Rack::Builder.new {
+      run lambda {|env|
+        html = '<!doctype html><html><head><style id="s"></style></head>' \
+               '<body><p class="foo" id="t">hi</p></body></html>'
+        [200, {'content-type' => 'text/html'}, [html]]
+      }
+    }
+  }
+
+  let(:session) { Capybara::Session.new(:simulated, app) }
+
+  def visible_after(session, script)
+    session.visit('/')
+    session.execute_script(script)
+    session.find('#t', visible: :all).visible?
+  end
+
+  it 'applies a fresh <style> appended at runtime' do
+    expect(visible_after(session, "const e = document.createElement('style'); e.textContent = '.foo { display: none }'; document.head.appendChild(e)")).to be false
+  end
+
+  it 'applies textContent set on an existing connected <style>' do
+    expect(visible_after(session, "document.getElementById('s').textContent = '.foo { display: none }'")).to be false
+  end
+
+  it 'applies document.adoptedStyleSheets' do
+    expect(visible_after(session, "const c = new CSSStyleSheet(); c.replaceSync('.foo { display: none }'); document.adoptedStyleSheets = [c]")).to be false
+  end
+
+  it 're-shows when the injected rule is later removed' do
+    session.visit('/')
+    session.execute_script("document.getElementById('s').textContent = '.foo { display: none }'")
+    expect(session.find('#t', visible: :all).visible?).to be false
+    session.execute_script("document.getElementById('s').textContent = ''")
+    expect(session.find('#t').visible?).to be true
+  end
+
+  # A constructed sheet already adopted into a shadow root, then mutated at runtime
+  # (Lit component re-theming): the shadow scope must recompute and see the new rules.
+  it 'applies a runtime CSSOM mutation to a shadow-root-adopted sheet' do
+    session.visit('/')
+    session.execute_script(<<~JS)
+      const host = document.createElement('div');
+      host.id = 'host';
+      document.body.appendChild(host);
+      const sr = host.attachShadow({mode: 'open'});
+      sr.innerHTML = '<p class="foo" id="st">shadow</p>';
+      const sheet = new CSSStyleSheet();
+      sr.adoptedStyleSheets = [sheet];
+      window.__sheet = sheet;
+    JS
+    session.execute_script("window.__sheet.replaceSync('.foo { display: none }')")
+    display = session.evaluate_script("getComputedStyle(document.getElementById('host').shadowRoot.getElementById('st')).display")
+    expect(display).to eq('none')
+  end
+end
