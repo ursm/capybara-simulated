@@ -406,12 +406,6 @@ fetch/api/abort/cache.https.any.js:
 - Signals are not stored in the cache API, even if they're already aborted
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
-fetch/api/abort/request.any.js:
-- Calling arrayBuffer() on an aborted consumed nonempty request
-- Calling blob() on an aborted consumed nonempty request
-- Calling formData() on an aborted consumed nonempty request
-- Calling json() on an aborted consumed nonempty request
-- Calling text() on an aborted consumed nonempty request
 fetch/api/abort/serviceworker-intercepted.https.html:
 - Abort reason serialization happens on abort
 - Already aborted request does not land in service worker
