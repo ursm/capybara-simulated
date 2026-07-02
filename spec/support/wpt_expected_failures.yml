@@ -389,14 +389,6 @@ fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
-fetch/api/response/response-form-data.html:
-- Validate buggy form data - boundary
-- Validate buggy form data - cr1
-- Validate buggy form data - cr2
-- Validate buggy form data - cr3
-- Validate buggy form data - cr_
-- Validate buggy form data - dashes
-- Validate buggy form data - empty
 fetch/api/response/response-from-stream.any.js:
 - Constructing a Response with a stream on which getReader() is called
 - Constructing a Response with a stream on which read() and releaseLock() are called
