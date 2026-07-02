@@ -695,9 +695,6 @@ fetch/api/abort/serviceworker-intercepted.https.html:
 - response.formData() rejects if already aborted
 - response.json() rejects if already aborted
 - response.text() rejects if already aborted
-fetch/api/basic/accept-header.any.js:
-- Request through fetch should have 'accept' header with value '*/*'
-- Request through fetch should have a 'accept-language' header
 fetch/api/basic/block-mime-as-script.html:
 - Should fail loading empty script with audio/aiff MIME type
 - Should fail loading empty script with audio/midi MIME type
@@ -742,8 +739,6 @@ fetch/api/basic/keepalive.any.js:
 - simple keepalive test for web workers
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
-fetch/api/basic/request-head.any.js:
-- Fetch with HEAD with body
 fetch/api/basic/request-headers-case.any.js:
 - Multiple headers with the same name, different case (THIS-IS-A-TEST first)
 - Multiple headers with the same name, different case (THIS-is-A-test first)
@@ -764,10 +759,6 @@ fetch/api/basic/request-upload.h2.any.js:
   not retry.
 - ReadbleStream should be closed on signal.abort
 - Streaming upload should fail on a 401 response
-fetch/api/basic/response-url.sub.any.js:
-- Testing response url getter with http://web-platform.test:8000#ada
-- Testing response url getter with http://web-platform.test:8000/#
-- Testing response url getter with http://web-platform.test:8000/#ada
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
