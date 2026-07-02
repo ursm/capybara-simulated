@@ -763,11 +763,6 @@ fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
 fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
-fetch/api/cors/cors-cookies.any.js:
-- 'Include mode: 1 cookie'
-- 'Include mode: local cookies are not sent with remote request'
-- 'Include mode: remote cookies are not sent with local request'
-- 'Include mode: remote cookies are not sent with other remote request'
 fetch/api/cors/cors-keepalive.any.js:
 - "[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid
   CORS]; setting up"
@@ -869,12 +864,6 @@ fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
 fetch/api/credentials/authentication-redirection.any.js:
 - getAuthorizationHeaderValue - cross origin redirection
-fetch/api/credentials/cookies.any.js:
-- 'Include mode: 1 cookie'
-- 'Include mode: 2 cookies'
-- 'Omit mode: no cookie is stored'
-- 'Same-origin mode: 1 cookie'
-- 'Same-origin mode: 2 cookies'
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - fetch() with all valid values

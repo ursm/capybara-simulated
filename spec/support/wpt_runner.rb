@@ -489,14 +489,29 @@ module WptRunner
           end
         end
         # wptserve `?pipe=` response transforms: support the two the corpus uses on a
-        # static file — `header(name,value)` (set a response header; the CORS tests inject
-        # Access-Control-Allow-Origin this way) and `status(code)`. Other pipe functions
-        # (trickle / gzip / slice / …) are ignored. Pipe functions are `|`-separated but a
-        # plain `header(a,b)header(c,d)` run also occurs, so scan every `fn(args)`.
+        # static file — `header(name,value[,append])` (set a response header; the CORS
+        # tests inject Access-Control-Allow-Origin this way) and `status(code)`. Other pipe
+        # functions (trickle / gzip / slice / …) are ignored. Pipe functions are
+        # `|`-separated but a plain `header(a,b)header(c,d)` run also occurs, so scan every
+        # `fn(args)`.
         status_code = 200
         req.GET['pipe'].to_s.scan(/(\w+)\(([^)]*)\)/) do |fn, args|
           case fn
-          when 'header' then name, _, val = args.partition(','); resp_headers[name.strip.downcase] = val.strip unless name.strip.empty?
+          when 'header'
+            name, _, rest = args.partition(',')
+            name = name.strip.downcase
+            next if name.empty?
+            if name == 'set-cookie'
+              # wptserve `header(name, value, append)`: a trailing `,True`/`,False` is the
+              # APPEND flag, NOT part of the value. Set-Cookie is the only corpus header
+              # that appends (a response carries several cookies) — accumulate them as an
+              # Array (merge_set_cookie already handles a multi-value Set-Cookie) so a
+              # second cookie doesn't clobber the first (cors-cookies / credentials/cookies).
+              rest = rest[0...rest.rindex(',')] if rest =~ /,\s*(?:True|False)\s*\z/
+              resp_headers[name] = Array(resp_headers[name]) + [rest.strip]
+            else
+              resp_headers[name] = rest.strip
+            end
           when 'status' then status_code = args.to_i if args.to_i.positive?
           end
         end

@@ -1021,7 +1021,8 @@ module Capybara
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
-        env['HTTP_COOKIE']     = document_cookie unless @cookies.empty?
+        ck = cookie_header_for(env_cookie_host(env))
+        env['HTTP_COOKIE']     = ck              unless ck.empty?
         env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
         status, headers, body = @app.call(env)
         return unless status.to_i == 200
@@ -2569,7 +2570,7 @@ module Capybara
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: referer)
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
-        merge_set_cookie(headers)
+        merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
           resp_body.close if resp_body.respond_to?(:close)
@@ -2908,12 +2909,10 @@ module Capybara
           'Cache-Control: no-store',
           'Connection: keep-alive'
         ]
-        # Forward the host-cookie jar so the streaming server can
-        # authenticate the user the same way the browser would. The
-        # jar is a flat name=value map (no per-host scoping); reuse
-        # the canonical `document_cookie` serialiser the Rack path
-        # uses, so we don't drift if its format changes.
-        cookies = document_cookie
+        # Forward the streaming host's cookie jar so the server can
+        # authenticate the user the same way the browser would — scoped to
+        # the EventSource target's host, like every other request.
+        cookies = cookie_header_for(cookie_host(uri))
         lines << "Cookie: #{cookies}" unless cookies.empty?
         socket.write(lines.join("\r\n") << "\r\n\r\n")
         socket.flush
@@ -4493,7 +4492,9 @@ module Capybara
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
-          merge_set_cookie(resp_headers)
+          # Fetch credentials mode "omit" ignores credentials the response sends back too —
+          # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
+          merge_set_cookie(resp_headers, target) unless credentials == 'omit'
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
@@ -5143,7 +5144,7 @@ module Capybara
         env = Rack::MockRequest.env_for(url, method: 'GET')
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
-        merge_set_cookie(headers)
+        merge_set_cookie(headers, url)
         return if download_response?(headers)
         html = read_rack_body(body)
         reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: entry[:form_state])
@@ -5236,7 +5237,7 @@ module Capybara
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
-        merge_set_cookie(headers)
+        merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
           resp_body.close if resp_body.respond_to?(:close)
@@ -5361,24 +5362,60 @@ module Capybara
       def history_length
         [@history.size, 1].max
       end
-      # `document.cookie` is TEXT; jar entries parsed out of Rack's Set-Cookie
-      # headers can carry the BINARY tag, which would make the joined string
-      # cross into JS as a Uint8Array (`document.cookie.match is not a
-      # function`). Cookies are ASCII per RFC 6265.
+      # The host a cookie is scoped to for `url`. RFC 6265 cookies are keyed by host
+      # (not scheme/port), so cross-host requests never see each other's cookies while
+      # a same-origin flow behaves exactly like a single jar. nil when the URL carries
+      # no host (about:blank / data: / a relative current_url before the first navigate).
+      def cookie_host(url)
+        h = safe_uri(url.to_s)&.host
+        h && !h.empty? ? h.downcase : nil
+      end
+
+      # The host cookies attach to for a request built into `env` — the target server
+      # (SERVER_NAME / HTTP_HOST), NOT the current document, so a cross-origin fetch sends
+      # the TARGET's cookies rather than leaking the document's (cors-cookies). Strips the
+      # port while preserving an IPv6 bracket-literal (`[::1]`) so the key matches what
+      # `cookie_host` derives from the URL via `URI#host`.
+      def env_cookie_host(env)
+        h = (env['HTTP_HOST'] || env['SERVER_NAME']).to_s
+        h = h.start_with?('[') ? h[/\A\[[^\]]*\]/].to_s : h.split(':', 2).first
+        h && !h.empty? ? h.downcase : nil
+      end
+
+      # The `Cookie` request-header value for a request to `host`: that host's jar,
+      # serialized `name=value; …`. (Domain-attribute subdomain sharing isn't modelled —
+      # the app suites are single-host; cross-host ISOLATION is what matters here.)
+      #
+      # TEXT, not binary: jar entries parsed out of Rack's Set-Cookie headers can carry the
+      # BINARY tag, which would make the joined string cross into JS as a Uint8Array
+      # (`document.cookie.match is not a function`). Cookies are ASCII per RFC 6265.
+      def cookie_header_for(host)
+        jar = host && @cookies[host]
+        return '' if jar.nil? || jar.empty?
+        RuntimeShared.utf8_text(jar.map {|k, v| "#{k}=#{v}" }.join('; '))
+      end
+
+      # `document.cookie` reads/writes the CURRENT document's host jar.
+      def document_cookie_host
+        cookie_host(current_browsing_context_url) || cookie_host(@default_host)
+      end
+
       def document_cookie
-        RuntimeShared.utf8_text(@cookies.map {|k, v| "#{k}=#{v}" }.join('; '))
+        cookie_header_for(document_cookie_host)
       end
       def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s)
         return if s.nil? || s.empty?
+        host = document_cookie_host or return
         name, rest = s.split('=', 2)
         return if name.nil? || name.empty?
         parts = (rest || '').split(';').map(&:strip)
         value = parts.shift.to_s
+        jar = (@cookies[host] ||= {})
         if cookie_deletion?(parts)
-          @cookies.delete(name.strip)
+          jar.delete(name.strip)
         else
-          @cookies[name.strip] = value
+          jar[name.strip] = value
         end
       end
 
@@ -5463,7 +5500,7 @@ module Capybara
         env = Rack::MockRequest.env_for(url, method: 'GET')
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
-        merge_set_cookie(headers)
+        merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_against_current(loc))
           body.close if body.respond_to?(:close)
@@ -5484,7 +5521,7 @@ module Capybara
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
-        merge_set_cookie(headers)
+        merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
           resp_body.close if resp_body.respond_to?(:close)
@@ -5601,7 +5638,7 @@ module Capybara
           env = Rack::MockRequest.env_for(url, method: 'GET')
           apply_default_request_env(env, referer: referer)
           status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
-          merge_set_cookie(headers)
+          merge_set_cookie(headers, url)
           if (loc = redirect_location(status, headers))
             next_url = resolve_against_current(loc)
             # Per RFC 7231: if the original request URL had a fragment
@@ -5829,8 +5866,15 @@ module Capybara
         # server can negotiate — HTML-only routes still pick html,
         # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
-        env['HTTP_REFERER'] = referer         unless referer.nil? || referer.empty?
-        env['HTTP_COOKIE']  = document_cookie unless @cookies.empty?
+        env['HTTP_REFERER'] = referer unless referer.nil? || referer.empty?
+        # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
+        # request's host — so a cross-origin request carries the right jar or none.
+        ck = cookie_header_for(env_cookie_host(env))
+        if ck.empty?
+          env.delete('HTTP_COOKIE')
+        else
+          env['HTTP_COOKIE'] = ck
+        end
       end
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
@@ -5915,9 +5959,14 @@ module Capybara
         nil
       end
 
-      def merge_set_cookie(headers)
+      # Store a response's Set-Cookie headers under the RESPONDING host's jar (`url` is
+      # the hop that produced `headers`). A cross-origin hop therefore writes its own
+      # host's jar, never the document's (cors-cookies isolation).
+      def merge_set_cookie(headers, url)
         sc = headers['set-cookie'] || headers['Set-Cookie']
         return if sc.nil? || sc.empty?
+        host = cookie_host(url) || document_cookie_host or return
+        jar  = (@cookies[host] ||= {})
         # Rack 2 returns multiple Set-Cookie headers as a single
         # newline-separated string; Rack 3 returns an Array. Treat both
         # uniformly — splitting first means the second cookie in a
@@ -5930,9 +5979,9 @@ module Capybara
           name, value = pair.split('=', 2)
           next if name.nil? || name.empty?
           if cookie_deletion?(parts)
-            @cookies.delete(name.strip)
+            jar.delete(name.strip)
           else
-            @cookies[name.strip] = value.to_s.strip
+            jar[name.strip] = value.to_s.strip
           end
         }
       end
