@@ -768,13 +768,6 @@ fetch/api/cors/cors-cookies.any.js:
 - 'Include mode: local cookies are not sent with remote request'
 - 'Include mode: remote cookies are not sent with local request'
 - 'Include mode: remote cookies are not sent with other remote request'
-fetch/api/cors/cors-expose-star.sub.any.js:
-- "* for credentialed fetches only matches literally"
-fetch/api/cors/cors-filtering.sub.any.js:
-- CORS filter on Set-Cookie header, header is forbidden
-- CORS filter on Set-Cookie header, header is forbidden(credentials = include)
-- CORS filter on Set-Cookie2 header, header is forbidden
-- CORS filter on Set-Cookie2 header, header is forbidden(credentials = include)
 fetch/api/cors/cors-keepalive.any.js:
 - "[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid
   CORS]; setting up"
@@ -856,16 +849,6 @@ fetch/api/cors/cors-keepalive.any.js:
   [no-cors mode, server forbid CORS]; setting up"
 - "[keepalive] Same domain different protocol different port POST request in unload
   [no-cors mode]; setting up"
-fetch/api/cors/cors-preflight-not-cors-safelisted.any.js:
-- "Need CORS-preflight for accept-language/\x01 header"
-- Need CORS-preflight for accept-language/@ header
-- Need CORS-preflight for accept/" header
-- Need CORS-preflight for accept/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
-  header
-- "Need CORS-preflight for content-language/\x01 header"
-- Need CORS-preflight for content-language/@ header
-- Need CORS-preflight for content-type/text/plain; long=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901
-  header
 fetch/api/cors/cors-preflight-redirect.any.js:
 - Redirection 301 after preflight failed
 - Redirection 302 after preflight failed
@@ -1087,8 +1070,6 @@ xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/allow-lists-starting-with-comma.htm:
 - Allow lists starting with a comma should be parsed correctly
-xhr/cors-expose-star.sub.any.js:
-- "* for credentialed fetches only matches literally"
 xhr/event-error.sub.any.js:
 - error while reading body should report zeros for loaded and total
 xhr/event-readystatechange-loaded.any.js:

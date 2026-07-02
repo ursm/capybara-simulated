@@ -4498,7 +4498,11 @@ module Capybara
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
             @@asset_cache.refresh(cache_entry, resp_headers)
-            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
+            # The cache stores the RAW response headers, so a cross-origin cached entry must
+            # be re-filtered through the CORS exposed-header set on the way back to script —
+            # a 304 revalidation must not leak headers the original cross-origin fetch hid.
+            cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
+            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected)
           end
           # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
@@ -4601,7 +4605,7 @@ module Capybara
           # -Headers (`*` = all). content-type stays safelisted, so response decoding is
           # unaffected. (Filtered for script exposure only — trace / set-cookie / cache see
           # the full set.) The CORS check itself already ran above (incl. on 3xx hops).
-          exposed_headers = cross_origin ? cors_exposed_headers(resp_headers) : resp_headers
+          exposed_headers = cross_origin ? cors_exposed_headers(resp_headers, with_credentials) : resp_headers
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           # A no-store request must not write the cache (RFC 9111 §5.2.1.5); a request carrying
           # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
@@ -6026,19 +6030,49 @@ module Capybara
       # preflight whose Access-Control-Allow-Methods / -Headers carries a malformed value.
       HTTP_TOKEN = /\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/.freeze
       CORS_SAFELISTED_CTYPES  = %w[application/x-www-form-urlencoded multipart/form-data text/plain].freeze
+      # Fetch "CORS-unsafe request-header byte" — a byte in a header value that forces a
+      # safelisted-name header out of the safelisted set (so a preflight becomes necessary):
+      # a control byte other than HT (0x09), DEL, or one of the delimiters "(),:<>?@[\]{}.
+      CORS_UNSAFE_VALUE_BYTE  = /[\x00-\x08\x0a-\x1f\x7f"():<>?@\[\\\]{}]/n.freeze
+      # accept-language / content-language values are further restricted: only digits,
+      # ASCII letters, space, and `*,-.;=` keep them safelisted.
+      CORS_LANGUAGE_VALUE     = /\A[0-9A-Za-z *,\-.;=]*\z/n.freeze
 
-      # The sorted, lowercased author header names that are NOT CORS-safelisted (a
-      # non-safe Content-Type counts). These are echoed in Access-Control-Request-Headers
-      # for the preflight and must be covered by Access-Control-Allow-Headers.
+      # Fetch "CORS-safelisted request-header": a (name, value) whose value keeps the
+      # request "simple" (no preflight). All four names cap the value at 128 bytes; each
+      # then constrains which bytes the value may contain (a `"` in Accept, a control byte
+      # in Content-Language, an over-long text/plain Content-Type all force a preflight —
+      # cors-preflight-not-cors-safelisted).
+      def cors_safelisted_request_header?(name, value)
+        v = value.to_s.b
+        return false if v.bytesize > 128
+        case name
+        when 'accept'
+          !v.match?(CORS_UNSAFE_VALUE_BYTE)
+        when 'accept-language', 'content-language'
+          v.match?(CORS_LANGUAGE_VALUE)
+        when 'content-type'
+          return false if v.match?(CORS_UNSAFE_VALUE_BYTE)
+          essence = v.split(';', 2).first.to_s.strip.downcase
+          CORS_SAFELISTED_CTYPES.include?(essence)
+        else
+          false
+        end
+      end
+
+      # The sorted, lowercased author header names that are NOT CORS-safelisted. A
+      # safelisted NAME still counts as unsafe when its VALUE fails the safelisting (an
+      # unsafe byte / over-128-byte length / non-safelisted Content-Type essence). These
+      # are echoed in Access-Control-Request-Headers for the preflight and must be covered
+      # by Access-Control-Allow-Headers.
       def cors_unsafe_headers(headers)
         (headers || {}).filter_map {|k, v|
           name = k.to_s.downcase
           next if name.start_with?('x-csim') || name == 'content-length'
-          if name == 'content-type'
-            essence = v.to_s.split(';', 2).first.to_s.strip.downcase
-            CORS_SAFELISTED_CTYPES.include?(essence) ? nil : name
+          if CORS_SAFELISTED_HEADERS.include?(name)
+            cors_safelisted_request_header?(name, v) ? nil : name
           else
-            CORS_SAFELISTED_HEADERS.include?(name) ? nil : name
+            name
           end
         }.uniq.sort
       end
@@ -6186,19 +6220,22 @@ module Capybara
 
       # The response headers a cross-origin "cors" response exposes to getResponseHeader /
       # getAllResponseHeaders: the CORS-safelisted set plus any named in Access-Control
-      # -Expose-Headers (`*` exposes all — only valid without credentials, which these
-      # cases don't use).
-      def cors_exposed_headers(headers)
+      # -Expose-Headers. `*` exposes every header, but ONLY for a non-credentialed response;
+      # with credentials the wildcard loses its meaning and matches a header literally named
+      # `*` (cors-expose-star "only matches literally").
+      def cors_exposed_headers(headers, credentialed = false)
         # set-cookie / set-cookie2 are forbidden response-header names — NEVER exposed to
-        # script, even under `Access-Control-Expose-Headers: *`. x-csim-status-text is our
-        # internal reason-phrase sentinel (response_hash lifts it into statusText, which
-        # IS exposed cross-origin, then strips it from the script-visible map), so it must
-        # survive the filter.
+        # script, even when explicitly named in Access-Control-Expose-Headers or covered by
+        # `*` (cors-filtering "header is forbidden"). x-csim-status-text is our internal
+        # reason-phrase sentinel (response_hash lifts it into statusText, which IS exposed
+        # cross-origin, then strips it from the script-visible map), so it must survive.
         forbidden = %w[set-cookie set-cookie2]
         expose    = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
-        return headers.reject {|k, _| forbidden.include?(k.to_s.downcase) } if expose.include?('*')
+        if !credentialed && expose.include?('*')
+          return headers.reject {|k, _| forbidden.include?(k.to_s.downcase) }
+        end
         allowed = CORS_SAFELISTED_RESPONSE_HEADERS + expose + ['x-csim-status-text']
-        headers.select {|k, _| allowed.include?(k.to_s.downcase) }
+        headers.select {|k, _| allowed.include?(k.to_s.downcase) && !forbidden.include?(k.to_s.downcase) }
       end
 
       # Case-insensitive response-header lookup + comma-list split for the CORS checks.
