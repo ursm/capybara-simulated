@@ -702,13 +702,6 @@ fetch/api/response/response-headers-guard.any.js:
 - Ensure response headers are immutable
 fetch/api/response/response-static-json.any.js:
 - Check static json() throws when data is not encodable
-fetch/api/response/response-stream-bad-chunk.any.js:
-- ReadableStream with non-Uint8Array chunk passed to Response.arrayBuffer() causes
-  TypeError
-- ReadableStream with non-Uint8Array chunk passed to Response.blob() causes TypeError
-- ReadableStream with non-Uint8Array chunk passed to Response.bytes() causes TypeError
-- ReadableStream with non-Uint8Array chunk passed to Response.json() causes TypeError
-- ReadableStream with non-Uint8Array chunk passed to Response.text() causes TypeError
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.
