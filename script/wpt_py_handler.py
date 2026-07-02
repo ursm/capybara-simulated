@@ -533,18 +533,31 @@ def _dechunk(body):
 
 def register_wptserve_stub():
     """Vendored handlers commonly do `from wptserve.utils import isomorphic_decode
-    / isomorphic_encode`. We aren't wptserve; register a minimal `wptserve.utils`
-    so those imports resolve (latin-1 byte<->codepoint round-trips, as wptserve)."""
+    / isomorphic_encode` or `from wptserve.handlers import json_handler`. We aren't
+    wptserve; register minimal `wptserve.utils` / `wptserve.handlers` so those imports
+    resolve (latin-1 byte<->codepoint round-trips + the JSON-response decorator)."""
     import types
     if 'wptserve.utils' in sys.modules:
         return
     utils = types.ModuleType('wptserve.utils')
     utils.isomorphic_decode = lambda s: s.decode('latin-1') if isinstance(s, (bytes, bytearray)) else s
     utils.isomorphic_encode = lambda s: s.encode('latin-1') if isinstance(s, str) else s
+    # wptserve's @json_handler: run the handler, JSON-serialize its return value, and answer
+    # as application/json (stash-take.py and many others use it).
+    handlers = types.ModuleType('wptserve.handlers')
+    def json_handler(func):
+        def handler(request, response):
+            rv = func(request, response)
+            response.headers.set(b'Content-Type', b'application/json')
+            return json.dumps(rv)
+        return handler
+    handlers.json_handler = json_handler
     pkg = types.ModuleType('wptserve')
     pkg.utils = utils
+    pkg.handlers = handlers
     sys.modules['wptserve'] = pkg
     sys.modules['wptserve.utils'] = utils
+    sys.modules['wptserve.handlers'] = handlers
 
 
 def main():

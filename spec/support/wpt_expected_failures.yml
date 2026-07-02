@@ -21,22 +21,7 @@ dom/nodes/ParentNode-querySelector-All-xht.xht:
 fetch/api/abort/cache.https.any.js:
 - Signals are not stored in the cache API
 - Signals are not stored in the cache API, even if they're already aborted
-fetch/api/abort/general.any.js:
-- Already aborted signal does not make request
-- Clone aborts with original controller
-- Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
-- Fetch aborted & connection closed when aborted after calling response.blob()
-- Fetch aborted & connection closed when aborted after calling response.bytes()
-- Fetch aborted & connection closed when aborted after calling response.formData()
-- Fetch aborted & connection closed when aborted after calling response.json()
-- Fetch aborted & connection closed when aborted after calling response.text()
-- Readable stream synchronously cancels with AbortError if aborted before reading
-- Stream errors once aborted, after reading. Underlying connection closed.
-- Stream errors once aborted. Underlying connection closed.
-- Underlying connection is closed when aborting after receiving response
-- Underlying connection is closed when aborting after receiving response - no-cors
 fetch/api/abort/keepalive.html:
-- aborting a detached keepalive fetch should not do anything
 - aborting a keepalive fetch should work
 fetch/api/abort/request.any.js:
 - Calling arrayBuffer() on an aborted consumed nonempty request
@@ -97,10 +82,8 @@ fetch/api/basic/integrity.sub.any.js:
 - 'Multiple integrities: invalid stronger than valid'
 - SHA-* integrity for opaque response
 fetch/api/basic/keepalive.any.js:
-- "[keepalive] simple GET request on 'load' [no payload]"
 - "[keepalive] simple GET request on 'pagehide' [no payload]"
 - "[keepalive] simple GET request on 'unload' [no payload]"
-- "[keepalive] simple POST request on 'load' [no payload]"
 - "[keepalive] simple POST request on 'pagehide' [no payload]"
 - "[keepalive] simple POST request on 'unload' [no payload]"
 - simple keepalive test for web workers
@@ -282,6 +265,8 @@ fetch/api/redirect/redirect-keepalive.any.js:
 - "[keepalive][new window][unload] cross-origin redirect + preflight"
 - "[keepalive][new window][unload] same-origin redirect"
 - "[keepalive][new window][unload] same-origin redirect + preflight"
+fetch/api/redirect/redirect-keepalive.https.any.js:
+- "[keepalive][iframe][load] mixed content redirect"
 fetch/api/redirect/redirect-origin.any.js:
 - "[POST] Redirect 307 Same origin to same origin"
 - "[POST] Redirect 308 Same origin to same origin"

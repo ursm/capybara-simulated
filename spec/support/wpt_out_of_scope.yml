@@ -5237,6 +5237,42 @@ encoding/textdecoder-mistakes.any.js:
   reason: iso-2022-jp legacy escape-state decoder + streaming not modeled.
 - name: 'stream: shift_jis'
   reason: shift_jis legacy multibyte decoder + streaming not modeled.
+fetch/api/abort/general.any.js:
+- name: Fetch aborted & connection closed when aborted after calling response.arrayBuffer()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Fetch aborted & connection closed when aborted after calling response.blob()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Fetch aborted & connection closed when aborted after calling response.bytes()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Fetch aborted & connection closed when aborted after calling response.formData()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Fetch aborted & connection closed when aborted after calling response.json()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Fetch aborted & connection closed when aborted after calling response.text()
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: Stream errors once aborted, after reading. Underlying connection closed.
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: Stream errors once aborted. Underlying connection closed.
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: Underlying connection is closed when aborting after receiving response
+  reason: Needs SERVER-SIDE detection of the client closing the connection on abort
+    (the test aborts a fetch, then reads a stash the server writes when the connection
+    drops). Our in-process fetch is a synchronous Rack call with no persistent connection
+    to close, so the server can never observe the disconnect. Real connection lifecycle
+    not modeled (rule 1).
+- name: Underlying connection is closed when aborting after receiving response - no-cors
+  reason: Server-side connection-close detection on abort; no persistent connection
+    in the in-process Rack model (rule 1).
 fetch/api/body/textstream.any.js:
 - name: Request.textStream() basic functionality
   reason: 'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal
