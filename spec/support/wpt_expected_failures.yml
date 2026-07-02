@@ -844,12 +844,6 @@ fetch/api/cors/cors-keepalive.any.js:
   [no-cors mode, server forbid CORS]; setting up"
 - "[keepalive] Same domain different protocol different port POST request in unload
   [no-cors mode]; setting up"
-fetch/api/cors/cors-preflight-redirect.any.js:
-- Redirection 301 after preflight failed
-- Redirection 302 after preflight failed
-- Redirection 303 after preflight failed
-- Redirection 307 after preflight failed
-- Redirection 308 after preflight failed
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
