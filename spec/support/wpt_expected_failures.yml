@@ -312,19 +312,6 @@ css/cssom/serialize-custom-props.html:
 - z-index can take a 4-digit integer
 - z-index can take a 6-digit integer
 - z-index can take a 8-digit integer
-css/cssom/serialize-media-rule.html:
-- empty media query list
-- features - character case normalization
-- features - no lexicographical sorting
-- features - preservation of overspecified features
-- many rules
-- media query list
-- one rule
-- type - inclusion of negated all
-- type - no features
-- type - no features - character case normalization
-- type - no features - negation
-- type - omission of all
 css/cssom/serialize-namespaced-type-selectors.html:
 - Type selector with any namespace
 - Type selector with any namespace followed by attribute selector
