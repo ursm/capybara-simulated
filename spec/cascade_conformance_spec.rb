@@ -267,6 +267,20 @@ RSpec.describe 'dynamic CSSOM visibility propagation' do
     expect(visible_after(session, "document.getElementById('s').textContent = '.foo { display: none }'")).to be false
   end
 
+  it 'applies styleElement.sheet.insertRule (CSS-in-JS speedy path)' do
+    expect(visible_after(session, "document.getElementById('s').sheet.insertRule('.foo { display: none }', 0)")).to be false
+  end
+
+  it 'discards CSSOM insertRule edits when the <style> text is replaced' do
+    session.visit('/')
+    session.execute_script("document.getElementById('s').sheet.insertRule('.foo { display: none }', 0)")
+    expect(session.find('#t', visible: :all).visible?).to be false
+    # Replacing the element text rebuilds the sheet (browser behaviour), dropping the
+    # inserted rule → the element is visible again.
+    session.execute_script("document.getElementById('s').textContent = '.foo { color: red }'")
+    expect(session.find('#t').visible?).to be true
+  end
+
   it 'applies document.adoptedStyleSheets' do
     expect(visible_after(session, "const c = new CSSStyleSheet(); c.replaceSync('.foo { display: none }'); document.adoptedStyleSheets = [c]")).to be false
   end

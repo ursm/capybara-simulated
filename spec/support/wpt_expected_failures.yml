@@ -108,10 +108,8 @@ css/cssom/CSSStyleSheet-constructable.html:
   document
 - Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a
   different document
-- Attaching a shadow root that already has adopted stylesheets work
 - CSSStyleSheet.replace allows, but ignores, import rule inside
 - CSSStyleSheet.replace ignores @import rule but still loads other rules
-- CSSStyleSheet.replaceSync correctly updates the style of its adopters synchronously
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Changes to constructed stylesheets through CSSOM is reflected
 - Constructed style sheets can be applied on document
