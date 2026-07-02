@@ -763,10 +763,6 @@ fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
 fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
-fetch/api/basic/url-parsing.sub.html:
-- Request's referrer uses the UTF-8 URL parser
-- Request's referrer uses the UTF-8 URL parser
-- Request's referrer uses the UTF-8 URL parser
 fetch/api/cors/cors-cookies.any.js:
 - 'Include mode: 1 cookie'
 - 'Include mode: local cookies are not sent with remote request'
@@ -979,8 +975,6 @@ fetch/api/request/multi-globals/construct-in-detached-frame.window.js:
 - creating a request from another request in a detached realm should work
 fetch/api/request/multi-globals/url-parsing.html:
 - should parse the URL relative to the current settings object
-fetch/api/request/request-clone.sub.html:
-- Check cloning a request
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
 fetch/api/request/request-disturbed.any.js:
@@ -988,14 +982,6 @@ fetch/api/request/request-disturbed.any.js:
 - Input request used for creating new request became disturbed even if body is not
   used
 - Request construction failure should not set "bodyUsed"
-fetch/api/request/request-init-001.sub.html:
-- Check referrer init value of /relative/ressource and associated getter
-- Check referrer init value of http://test.url and associated getter
-fetch/api/request/request-init-003.sub.html:
-- Check request values when initialized from Request
-fetch/api/request/request-init-priority.any.js:
-- fetch() with an invalid priority returns a rejected promise with a TypeError
-- new Request() throws a TypeError if any of RequestInit's members' values are invalid
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should not be allowed if the Quota is used up.
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
