@@ -16,11 +16,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-css/cssom/CSS-namespace-object-class-string.html:
-- "@@toStringTag exists on the namespace object with the appropriate descriptor"
-- Object.prototype.toString applied after deleting @@toStringTag
-- Object.prototype.toString applied after modifying the namespace object's @@toStringTag
-- Object.prototype.toString applied to the namespace object
 css/cssom/CSSFontFeatureValuesRule.html:
 - CSSFontFeatureValuesMap entries are settable to sequences of numbers.
 - CSSFontFeatureValuesMap entries are settable to single values.
@@ -31,7 +26,6 @@ css/cssom/CSSFontFeatureValuesRule.html:
 - Multiple rules for the same family are kept separate in CSSOM.
 - New rules can be added.
 css/cssom/CSSKeyframesRule.html:
-- indexed getter, length
 - name, cssRules, appendRule, findRule, deleteRule
 css/cssom/CSSStyleDeclaration-iterator.html:
 - CSSStyleDeclaration should expose Symbol.iterator
@@ -153,11 +147,6 @@ css/cssom/HTMLStyleElement-load-event.html:
 - style elements fire load events properly
 css/cssom/MediaList.html:
 - CSSOM - MediaList interface
-css/cssom/MediaList2.xhtml:
-- MediaList getter
-- MediaList.item
-- MediaList.length
-- MediaList.mediaText
 css/cssom/MutationObserver-style.html:
 - Updating style property with the same value does not trigger an observation callback
 css/cssom/adoptedstylesheets-modify-array-and-sheet.html:
@@ -176,7 +165,6 @@ css/cssom/base-uri.html:
 css/cssom/computed-style-001.html:
 - inherited_property_values
 - property_values
-- read_only
 - relative_property_values
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
@@ -194,13 +182,8 @@ css/cssom/computed-style-005.html:
 - relative_computed_margins
 css/cssom/computed-style-set-property.html:
 - Computed style parent (should be null)
-- Exception thrown when trying to change a computed style alias via property
-- Exception thrown when trying to change a computed style alias via setProperty
-- Exception thrown when trying to change a computed style declaration via property
-- Exception thrown when trying to change a computed style declaration via setProperty
 css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
-- Changes to CSS declaration block should reflect on style attribute
 - Removing non-existing property or setting invalid value on CSS declaration block
   shouldn't queue mutation record
 css/cssom/css-style-declaration-modifications.html:
@@ -218,7 +201,6 @@ css/cssom/cssimportrule.html:
 - Values of CSSImportRule attributes
 - Values of CSSRule attributes
 css/cssom/cssom-fontfacerule-constructors.html:
-- "@font-face declarations are instances of CSSFontFaceRule"
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssom-fontfacerule.html:
 - CSSStyleDeclaration values are represented within CSSFontFaceRule
@@ -280,13 +262,11 @@ css/cssom/cssstyledeclaration-csstext.html:
   groups in between
 - Shorthands aren't serialized if there are other properties with different logical
   groups in between
-- cssText on computed style declaration returns the empty string
 - invalid property does not appear
 - overwriting with invalid value
 - uppercase property
 css/cssom/cssstyledeclaration-mutability.html:
 - StyleSheet's CSSStyleDeclaration is mutable
-- getComputedStyle's CSSStyleDeclaration is not mutable
 css/cssom/cssstyledeclaration-mutationrecord-002.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
@@ -370,18 +350,6 @@ css/cssom/invalid-pseudo-elements.html:
 - 'CSSOM: Test that rules with invalid pseudo elements are not found'
 css/cssom/link-element-stylesheet-title.html:
 - StyleSheet.title
-css/cssom/medialist-appendmedium-parse-single-and-dedup.html:
-- appendMedium with a comma-separated list is a no-op
-- appendMedium with a comma-separated list leaves an existing list unchanged
-css/cssom/medialist-deletemedium-parse-and-remove-all.html:
-- deleteMedium matches a query that differs only in whitespace
-css/cssom/medialist-interfaces-001.html:
-- mediatest_medialist_serialize_comma
-- mediatest_medialist_serialize_element
-- mediatest_medialist_serialize_empty
-- mediatest_medialist_serialize_order
-css/cssom/medialist-interfaces-002.html:
-- deleteMedium_called_without_argument
 css/cssom/overflow-serialization.html:
 - Overflow-x/y longhands on element with different keywords should serialize correctly.
 - Overflow-x/y longhands on element with same CSS-wide keyword should serialize correctly.

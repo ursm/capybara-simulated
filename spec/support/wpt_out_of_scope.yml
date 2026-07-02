@@ -4239,10 +4239,6 @@ css/cssom/getComputedStyle-pseudo.html:
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
-- name: CSSStyleDeclaration is immutable
-  reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
-    requires generating and laying out those boxes; layout deliberately unmodeled
-    (rule 1).
 - name: 'Dynamically change to display: contents on pseudo-elements'
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
