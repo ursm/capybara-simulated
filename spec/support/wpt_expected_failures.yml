@@ -91,8 +91,6 @@ css/cssom/CSSStyleSheet-constructable-duplicate.html:
 - Duplicate stylesheets have the right cascade position in the ShadowRoot
 css/cssom/CSSStyleSheet-constructable-invalidation.html:
 - mutating constructed CSSStyleSheet applied to root invalidates styles
-- mutating constructed CSSStyleSheet applied to shadowdom invalidates styles
-- mutating dependent constructed CSSStyleSheet applied to shadowdom invalidates styles
 css/cssom/CSSStyleSheet-constructable-replace-cssRules.html:
 - 'cssRules tests (sync: false)'
 - 'cssRules tests (sync: true)'
