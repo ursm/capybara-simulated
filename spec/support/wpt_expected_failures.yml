@@ -958,8 +958,6 @@ html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_crossorigin.su
 - Can't get pixels of canvas with non-CORS enabled cross origin image drawn
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_svg_image_1.html:
 - Load a 100x100 image to a SVG image and draw it to a 100x100 canvas.
-html/canvas/element/manual/drawing-paths-to-the-canvas/canvas_complexshapes_ispointInpath_001.htm:
-- isPointInPath unaffected by transformation matrix
 html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_001.html:
 - drawFocusIfNeeded draws a focus ring.
 html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_004.html:
@@ -2057,42 +2055,18 @@ html/canvas/element/path-objects/2d.path.arc.shape.4.html:
 - arc() from 0 to -pi/2 draws stuff in the right quadrant
 html/canvas/element/path-objects/2d.path.arcTo.negative.html:
 - arcTo() with negative radius throws an exception
-html/canvas/element/path-objects/2d.path.arcTo.scale.html:
-- arcTo scales the curve, not just the control points
-html/canvas/element/path-objects/2d.path.arcTo.transformation.html:
-- arcTo joins up to the last subpath point correctly
 html/canvas/element/path-objects/2d.path.ellipse.basics.html:
 - Verify canvas throws error when drawing ellipse with negative radii.
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/path-objects/2d.path.isPointInPath.edge.html:
 - isPointInPath() counts points on the path as being inside
-html/canvas/element/path-objects/2d.path.isPointInPath.transform.1.html:
-- isPointInPath() handles transformations correctly
-html/canvas/element/path-objects/2d.path.isPointInPath.transform.3.html:
-- isPointInPath() handles transformations correctly
-html/canvas/element/path-objects/2d.path.isPointInPath.transform.4.html:
-- isPointInPath() handles transformations correctly
 html/canvas/element/path-objects/2d.path.isPointInStroke.scaleddashes.html:
 - isPointInStroke() should return correct results on dashed paths at high scale factors
-html/canvas/element/path-objects/2d.path.isPointInpath.invalid.html:
-- Verify isPointInPath throws exceptions with invalid inputs.
 html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
 - roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:
 - 'Canvas test: 2d.path.roundrect.winding'
-html/canvas/element/path-objects/2d.path.stroke.scale1.html:
-- Stroke line widths are scaled by the current transformation matrix
-html/canvas/element/path-objects/2d.path.stroke.scale2.html:
-- Stroke line widths are scaled by the current transformation matrix
-html/canvas/element/path-objects/2d.path.stroke.skew.html:
-- Strokes lines are skewed by the current transformation matrix
-html/canvas/element/path-objects/2d.path.transformation.basic.html:
-- 'Canvas test: 2d.path.transformation.basic'
-html/canvas/element/path-objects/2d.path.transformation.changing.html:
-- Transformations are applied while building paths, not when drawing
-html/canvas/element/path-objects/2d.path.transformation.multiple.html:
-- Transformations are applied while building paths, not when drawing
 html/canvas/element/reset/2d.reset.state.transformation_matrix.html:
 - check that the state is reset
 html/canvas/element/shadows/2d.shadow.alpha.2.html:

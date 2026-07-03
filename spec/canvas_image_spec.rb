@@ -1662,6 +1662,46 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['rgbaEof']).to eq([0, 255, 0, 255])
   end
 
+  it 'bakes the transform into path points at add-time, not at fill-time' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas'); c.width = 100; c.height = 50;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 100, 50);
+      ctx.fillStyle = '#0f0';
+      // Build a rect while the transform shifts, then change the transform before
+      // filling — the already-added points must keep their add-time positions.
+      ctx.translate(-100, 0);
+      ctx.rect(100, 0, 100, 50);   // baked to (0,0)-(100,50)
+      ctx.translate(0, -100);      // must NOT move the rect
+      ctx.fill();
+      const mid = Array.from(ctx.getImageData(50, 25, 1, 1).data);
+      // isPointInPath uses canvas coords (transform-independent) against the baked path.
+      JSON.stringify({ mid, in: ctx.isPointInPath(50, 25), out: ctx.isPointInPath(150, 25) });
+    JS
+    r = JSON.parse(out)
+    expect(r['mid']).to eq([0, 255, 0, 255])   # rect stayed at (0,0)-(100,50)
+    expect(r['in']).to be true
+    expect(r['out']).to be false
+  end
+
+  it 'scales the stroke pen by the transform in effect at stroke time' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas'); c.width = 100; c.height = 50;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 100, 50);
+      ctx.beginPath(); ctx.rect(25, 12.5, 50, 25);   // built at identity
+      ctx.scale(50, 25);                             // pen scales, path points do not
+      ctx.strokeStyle = '#0f0'; ctx.stroke();
+      // The thick (50x25) pen fills the canvas green.
+      JSON.stringify(Array.from(ctx.getImageData(50, 25, 1, 1).data));
+    JS
+    expect(JSON.parse(out)).to eq([0, 255, 0, 255])
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
