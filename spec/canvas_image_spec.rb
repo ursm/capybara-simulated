@@ -1451,6 +1451,64 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['reloaded']['w']).to eq(4)      # re-assigning the same src reloads
   end
 
+  it 'validates line-style IDL setters (ignoring out-of-range values)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = new OffscreenCanvas(10, 10).getContext('2d');
+      const r = {};
+      c.lineWidth = 4;   c.lineWidth = 0; c.lineWidth = -2; c.lineWidth = Infinity; r.width = c.lineWidth;
+      c.lineWidth = '2.5'; r.widthStr = c.lineWidth;
+      c.lineCap = 'round'; c.lineCap = 'ROUND'; c.lineCap = 'bogus'; r.cap = c.lineCap;
+      c.lineJoin = 'bevel'; c.lineJoin = ''; r.join = c.lineJoin;
+      c.miterLimit = 3; c.miterLimit = 0; c.miterLimit = -1; r.miter = c.miterLimit;
+      JSON.stringify(r);
+    JS
+    r = JSON.parse(out)
+    expect(r['width']).to eq(4)      # 0 / negative / Infinity all ignored
+    expect(r['widthStr']).to eq(2.5) # numeric string coerced
+    expect(r['cap']).to eq('round')  # 'ROUND' / 'bogus' ignored
+    expect(r['join']).to eq('bevel') # '' ignored
+    expect(r['miter']).to eq(3)      # 0 / negative ignored
+  end
+
+  it 'renders a rounded line join (round bulge past the miter corner)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      const mk = (join) => {
+        const c = new OffscreenCanvas(60, 60).getContext('2d');
+        c.lineWidth = 20; c.strokeStyle = '#f00'; c.lineJoin = join;
+        c.beginPath(); c.moveTo(10, 20); c.lineTo(40, 20); c.lineTo(40, 50); c.stroke();
+        return c;
+      };
+      // Outer corner pixel at (48,12): a miter fills it; a round join does not
+      // (it is >10px from the vertex (40,20): dist = sqrt(8^2+8^2) = 11.3).
+      JSON.stringify({ miter: px(mk('miter'), 48, 12), round: px(mk('round'), 48, 12) });
+    JS
+    r = JSON.parse(out)
+    expect(r['miter']).to eq([255, 0, 0, 255])  # miter reaches the square corner
+    expect(r['round']).to eq([0, 0, 0, 0])       # round join is clipped to the radius
+  end
+
+  it 'fills a full circle from an anticlockwise arc(0, 2*PI, true)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(40, 40).getContext('2d');
+      ctx.fillStyle = '#f00';
+      ctx.beginPath(); ctx.moveTo(20, 20); ctx.arc(20, 20, 10, 0, 2 * Math.PI, true); ctx.fill();
+      JSON.stringify({
+        center: Array.from(ctx.getImageData(20, 20, 1, 1).data),
+        outside: Array.from(ctx.getImageData(20, 35, 1, 1).data)
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['center']).to eq([255, 0, 0, 255])  # full disc, not an empty zero-sweep arc
+    expect(r['outside']).to eq([0, 0, 0, 0])
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

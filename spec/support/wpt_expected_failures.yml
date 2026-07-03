@@ -917,8 +917,6 @@ html/canvas/element/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html:
 - fillRect draws shadows
 html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.shadow.html:
 - strokeRect draws shadows
-html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.zero.4.html:
-- strokeRect of Nx0 pixels draws a closed line with no caps
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - CSSHSL works as color input
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
@@ -998,41 +996,6 @@ html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colormix.html:
 - color-mix works as color input
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.relativecolor.html:
 - Relative color works as color input
-html/canvas/element/line-styles/2d.line.cap.invalid.html:
-- Setting lineCap to invalid values is ignored
-html/canvas/element/line-styles/2d.line.cap.open.html:
-- Line caps are drawn at the corners of an unclosed rectangle
-html/canvas/element/line-styles/2d.line.cap.round.html:
-- lineCap 'round' is rendered correctly
-html/canvas/element/line-styles/2d.line.cap.square.html:
-- lineCap 'square' is rendered correctly
-html/canvas/element/line-styles/2d.line.join.bevel.html:
-- lineJoin 'bevel' is rendered correctly
-html/canvas/element/line-styles/2d.line.join.closed.html:
-- Line joins are drawn at the corner of a closed rectangle
-html/canvas/element/line-styles/2d.line.join.invalid.html:
-- Setting lineJoin to invalid values is ignored
-html/canvas/element/line-styles/2d.line.join.miter.html:
-- lineJoin 'miter' is rendered correctly
-html/canvas/element/line-styles/2d.line.join.parallel.html:
-- Line joins are drawn at 180-degree joins
-html/canvas/element/line-styles/2d.line.miter.acute.html:
-- Miter joins are drawn correctly with acute angles
-html/canvas/element/line-styles/2d.line.miter.invalid.html:
-- Setting miterLimit to invalid values is ignored
-html/canvas/element/line-styles/2d.line.miter.lineedge.html:
-- Miter joins are not drawn when the miter limit is exceeded at the corners of a zero-height
-  rectangle
-html/canvas/element/line-styles/2d.line.miter.obtuse.html:
-- Miter joins are drawn correctly with obtuse angles
-html/canvas/element/line-styles/2d.line.miter.valid.html:
-- Setting miterLimit to valid values works
-html/canvas/element/line-styles/2d.line.miter.within.html:
-- Miter joins are drawn when the miter limit is not quite exceeded
-html/canvas/element/line-styles/2d.line.width.invalid.html:
-- Setting lineWidth to invalid values is ignored
-html/canvas/element/line-styles/2d.line.width.valid.html:
-- Setting lineWidth to valid values works
 html/canvas/element/manual/context-attributes/getContextAttributes.html:
 - 'Test context creation attributes colorType: float16'
 - 'Test context creation attributes colorType: unorm8'
@@ -2161,14 +2124,8 @@ html/canvas/element/path-objects/2d.path.arcTo.negative.html:
 - arcTo() with negative radius throws an exception
 html/canvas/element/path-objects/2d.path.arcTo.scale.html:
 - arcTo scales the curve, not just the control points
-html/canvas/element/path-objects/2d.path.arcTo.shape.curve2.html:
-- arcTo() curves in the right kind of shape
 html/canvas/element/path-objects/2d.path.arcTo.transformation.html:
 - arcTo joins up to the last subpath point correctly
-html/canvas/element/path-objects/2d.path.bezierCurveTo.scaled.html:
-- 'Canvas test: 2d.path.bezierCurveTo.scaled'
-html/canvas/element/path-objects/2d.path.bezierCurveTo.shape.html:
-- 'Canvas test: 2d.path.bezierCurveTo.shape'
 html/canvas/element/path-objects/2d.path.ellipse.basics.html:
 - Verify canvas throws error when drawing ellipse with negative radii.
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
@@ -2185,16 +2142,6 @@ html/canvas/element/path-objects/2d.path.isPointInStroke.scaleddashes.html:
 - isPointInStroke() should return correct results on dashed paths at high scale factors
 html/canvas/element/path-objects/2d.path.isPointInpath.invalid.html:
 - Verify isPointInPath throws exceptions with invalid inputs.
-html/canvas/element/path-objects/2d.path.open.arc.html:
-- line caps should be drawn on open arcs
-html/canvas/element/path-objects/2d.path.rect.closed.html:
-- 'Canvas test: 2d.path.rect.closed'
-html/canvas/element/path-objects/2d.path.rect.end.2.html:
-- 'Canvas test: 2d.path.rect.end.2'
-html/canvas/element/path-objects/2d.path.roundrect.closed.html:
-- 'Canvas test: 2d.path.roundrect.closed'
-html/canvas/element/path-objects/2d.path.roundrect.end.2.html:
-- 'Canvas test: 2d.path.roundrect.end.2'
 html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
 - roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:
