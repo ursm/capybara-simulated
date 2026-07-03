@@ -1067,6 +1067,29 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['onlyBlue']).to eq([0, 0, 255, 255])     # blue where red didn't reach
   end
 
+  it 'composites the whole-canvas operators (copy / source-in / destination-in), clearing uncovered' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      function run(op) {
+        const c = new OffscreenCanvas(10, 10).getContext('2d');
+        c.fillStyle = '#0000ff'; c.fillRect(0, 0, 10, 10);   // destination = blue everywhere
+        c.globalCompositeOperation = op;
+        c.fillStyle = '#ff0000'; c.fillRect(0, 0, 5, 10);     // source = red left half
+        return { left: px(c, 2, 2), right: px(c, 7, 2) };
+      }
+      JSON.stringify({ copy: run('copy'), sin: run('source-in'), din: run('destination-in') });
+    JS
+    r = JSON.parse(out)
+    expect(r['copy']['left']).to eq([255, 0, 0, 255])   # copy → source
+    expect(r['copy']['right']).to eq([0, 0, 0, 0])       # uncovered CLEARED
+    expect(r['sin']['left']).to eq([255, 0, 0, 255])    # source shown where dest exists
+    expect(r['sin']['right']).to eq([0, 0, 0, 0])
+    expect(r['din']['left']).to eq([0, 0, 255, 255])    # dest kept where source exists
+    expect(r['din']['right']).to eq([0, 0, 0, 0])
+  end
+
   it 'ignores an unknown globalCompositeOperation (keeps the previous)' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

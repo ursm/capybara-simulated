@@ -848,39 +848,8 @@ html/canvas/element/compositing/2d.composite.operation.clear.html:
 - 'Canvas test: 2d.composite.operation.clear'
 html/canvas/element/compositing/2d.composite.solid.clear.html:
 - 'Canvas test: 2d.composite.solid.clear'
-html/canvas/element/compositing/2d.composite.solid.destination-atop.html:
-- 'Canvas test: 2d.composite.solid.destination-atop'
-html/canvas/element/compositing/2d.composite.solid.destination-in.html:
-- 'Canvas test: 2d.composite.solid.destination-in'
-html/canvas/element/compositing/2d.composite.solid.source-out.html:
-- 'Canvas test: 2d.composite.solid.source-out'
 html/canvas/element/compositing/2d.composite.transparent.clear.html:
 - 'Canvas test: 2d.composite.transparent.clear'
-html/canvas/element/compositing/2d.composite.transparent.copy.html:
-- 'Canvas test: 2d.composite.transparent.copy'
-html/canvas/element/compositing/2d.composite.transparent.destination-atop.html:
-- 'Canvas test: 2d.composite.transparent.destination-atop'
-html/canvas/element/compositing/2d.composite.transparent.destination-in.html:
-- 'Canvas test: 2d.composite.transparent.destination-in'
-html/canvas/element/compositing/2d.composite.transparent.source-in.html:
-- 'Canvas test: 2d.composite.transparent.source-in'
-html/canvas/element/compositing/2d.composite.transparent.source-out.html:
-- 'Canvas test: 2d.composite.transparent.source-out'
-html/canvas/element/compositing/2d.composite.uncovered.fill.copy.html:
-- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.fill.destination-atop.html:
-- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.fill.destination-in.html:
-- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.fill.source-in.html:
-- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.fill.source-out.html:
-- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
-  leave the pixels unchanged.
 html/canvas/element/compositing/2d.composite.uncovered.image.copy.html:
 - drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
   not leave the pixels unchanged.
@@ -992,8 +961,6 @@ html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.h
 - drawImage with zero-sized source rectangle from image draws nothing without exception
 html/canvas/element/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html:
 - fillRect draws shadows
-html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.globalcomposite.html:
-- strokeRect is not affected by globalCompositeOperation
 html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.shadow.html:
 - strokeRect draws shadows
 html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.zero.4.html:
@@ -3055,12 +3022,6 @@ html/canvas/element/shadows/2d.shadow.composite.1.html:
 - Shadows are drawn using globalCompositeOperation
 html/canvas/element/shadows/2d.shadow.composite.2.html:
 - Shadows are drawn using globalCompositeOperation
-html/canvas/element/shadows/2d.shadow.enable.blur.html:
-- Shadows are drawn if shadowBlur is set
-html/canvas/element/shadows/2d.shadow.enable.x.html:
-- Shadows are drawn if shadowOffsetX is set
-html/canvas/element/shadows/2d.shadow.enable.y.html:
-- Shadows are drawn if shadowOffsetY is set
 html/canvas/element/shadows/2d.shadow.gradient.alpha.html:
 - Shadows are drawn correctly for partially-transparent gradient fills
 html/canvas/element/shadows/2d.shadow.gradient.basic.html:
