@@ -80,8 +80,10 @@ const TREES = [
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
 // resolve at serve time, but the runner does NOT scan them for test files.
 // `html/canvas/resources` holds canvas-tests.js — the `_addTest` / `_assertPixel`
-// harness every generated canvas test pulls in by absolute path.
-const SUPPORT_TREES = ['common', 'html/canvas/resources'];
+// harness every generated canvas test pulls in by absolute path. `images` holds
+// the shared PNG/SVG fixtures (`/images/green.png`, …) that canvas drawImage /
+// createPattern / <img>-decode tests fetch by absolute path.
+const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images'];
 // Individual support files (outside the vendored trees) that tests include via
 // `<script src>`. Kept across re-vendoring so local includes resolve.
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument

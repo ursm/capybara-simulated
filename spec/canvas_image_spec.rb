@@ -1306,6 +1306,151 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['isPat']).to be true
   end
 
+  it 'decodes an <img> resource on src assignment (naturalWidth/complete + load event + drawImage)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const img = document.createElement('img');
+      const events = [];
+      img.addEventListener('load',  () => events.push('load'));
+      img.addEventListener('error', () => events.push('error'));
+      img.src = '/test.png';
+      // Decode is synchronous, so the metrics are populated immediately; the
+      // event is async, so it hasn't fired within this same script.
+      const c = document.createElement('canvas'); c.width = 4; c.height = 3;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      JSON.stringify({
+        naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+        width: img.width, height: img.height, complete: img.complete,
+        pxRed: Array.from(ctx.getImageData(0, 0, 1, 1).data),
+        pxGreen: Array.from(ctx.getImageData(1, 0, 1, 1).data),
+        events
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['naturalWidth']).to eq(4)
+    expect(r['naturalHeight']).to eq(3)
+    expect(r['width']).to eq(4)      # width/height default to the intrinsic size
+    expect(r['height']).to eq(3)
+    expect(r['complete']).to be true
+    expect(r['pxRed']).to eq([255, 0, 0, 255])
+    expect(r['pxGreen']).to eq([0, 255, 0, 255])
+    expect(r['events']).to eq([])    # load is deferred to a microtask
+  end
+
+  it 'fires load asynchronously and error for a broken <img>' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_async_script(<<~JS)
+      const cb = arguments[arguments.length - 1];
+      (async () => {
+        const ok = await new Promise((res) => {
+          const img = new Image();
+          img.onload = () => res({ w: img.naturalWidth, complete: img.complete });
+          img.src = '/test.png';
+        });
+        const bad = await new Promise((res) => {
+          const img = new Image();
+          img.onerror = () => res({ w: img.naturalWidth, complete: img.complete });
+          img.src = '/missing.png';
+        });
+        cb(JSON.stringify({ ok, bad }));
+      })();
+    JS
+    r = JSON.parse(out)
+    expect(r['ok']['w']).to eq(4)
+    expect(r['ok']['complete']).to be true
+    expect(r['bad']['w']).to eq(0)     # broken image has no intrinsic size
+    expect(r['bad']['complete']).to be true
+  end
+
+  it 'decodes a parsed <img src> so it is ready for drawImage after load' do
+    parse_app = Rack::Builder.new {
+      png = Base64.decode64(
+        'iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAYAAAC09K7GAAAACXBIWXMAAAPoAAAD6AG1e1JrA' \
+        'AAAI0lEQVQImSWKwREAAAiCGJ3NrQw/ckogDSksUbdVf/BenpgBvkUa6QrxoaEAAAAASUVORK5CYII='
+      )
+      run lambda {|env|
+        case Rack::Request.new(env).path_info
+        when '/'         then [200, {'content-type' => 'text/html'}, ['<html><body><img id="i" src="/test.png"><canvas id="c" width="4" height="3"></canvas></body></html>']]
+        when '/test.png' then [200, {'content-type' => 'image/png'}, [png]]
+        else                  [404, {'content-type' => 'text/plain'}, ['nope']]
+        end
+      }
+    }.to_app
+    session = Capybara::Session.new(:simulated, parse_app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const img = document.getElementById('i');
+      const ctx = document.getElementById('c').getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      JSON.stringify({
+        naturalWidth: img.naturalWidth, complete: img.complete,
+        pxBlue: Array.from(ctx.getImageData(2, 0, 1, 1).data)
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['naturalWidth']).to eq(4)
+    expect(r['complete']).to be true
+    expect(r['pxBlue']).to eq([0, 0, 255, 255])
+  end
+
+  it 'decodes a data: URL <img> (no fetch) and draws it' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    data_url = 'data:image/png;base64,' + Base64.strict_encode64(png_bytes)
+    out = session.evaluate_script(<<~JS)
+      const img = new Image();
+      img.src = #{data_url.inspect};
+      const c = document.createElement('canvas'); c.width = 4; c.height = 3;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      JSON.stringify({
+        w: img.naturalWidth, h: img.naturalHeight, complete: img.complete,
+        pxRed: Array.from(ctx.getImageData(0, 0, 1, 1).data)
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['w']).to eq(4)
+    expect(r['h']).to eq(3)
+    expect(r['complete']).to be true
+    expect(r['pxRed']).to eq([255, 0, 0, 255])
+  end
+
+  it 'does not load images parsed into a DOMParser document (inert, no browsing context)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const doc = new DOMParser().parseFromString('<img src="/test.png">', 'text/html');
+      const img = doc.querySelector('img');
+      JSON.stringify({ naturalWidth: img.naturalWidth, complete: img.complete });
+    JS
+    r = JSON.parse(out)
+    expect(r['naturalWidth']).to eq(0)   # DOMParser docs never fetch resources
+    expect(r['complete']).to be false
+  end
+
+  it 'resets natural size and re-arms loading when src is cleared' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const img = new Image();
+      img.src = '/test.png';
+      const loaded = { w: img.naturalWidth };
+      img.removeAttribute('src');
+      const cleared = { w: img.naturalWidth, complete: img.complete };
+      img.src = '/test.png';   // same src again — must re-decode, not be swallowed
+      const reloaded = { w: img.naturalWidth };
+      JSON.stringify({ loaded, cleared, reloaded });
+    JS
+    r = JSON.parse(out)
+    expect(r['loaded']['w']).to eq(4)
+    expect(r['cleared']['w']).to eq(0)       # cleared src resets intrinsic size
+    expect(r['cleared']['complete']).to be true
+    expect(r['reloaded']['w']).to eq(4)      # re-assigning the same src reloads
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

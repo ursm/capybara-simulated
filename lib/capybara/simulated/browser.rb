@@ -2739,6 +2739,18 @@ module Capybara
       @@asset_src_lock = Mutex.new
       ASSET_SRC_MAX    = 4096
 
+      # Decoded-image cache: resolved-URL => {'width'=>, 'height'=>, 'bytes'=> packed
+      # RGBA String}. Decoding an image (libvips) is the expensive step, so — like the
+      # V8 bytecode cache and the script/stylesheet source cache above — we keep the
+      # decoded pixels and reuse them for every `<img>` sharing a src, across elements
+      # AND visits. Same content-stability assumption as `@@asset_src` (a URL's bytes
+      # are stable within a process; content-hashed / data: URLs that dominate satisfy
+      # it); size-capped so an app cycling through many distinct images can't grow it
+      # without bound.
+      @@image_cache      = {}
+      @@image_cache_lock = Mutex.new
+      IMAGE_CACHE_MAX    = 512
+
       # Body of an external durably-cacheable asset (classic script or stylesheet),
       # served from the cross-visit cache when still fresh, else fetched (which
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
@@ -3690,29 +3702,99 @@ module Capybara
       # 8900×8900 frames Discourse uploads exercise. Optional
       # `max_w`/`max_h` lets the caller pre-shrink for cheap OCR-style
       # "downscale before pixel-touch" flows.
+      # Load an image resource for an `<img>` (or a pattern/drawImage source):
+      # resolve the URL against the current document, fetch the bytes, and decode
+      # them to an RGBA buffer via libvips. Returns `{width, height, refId}` (the
+      # raw pixels ride the transfer registry, like decode_image) or nil when the
+      # fetch or decode fails (a broken image → the `<img>` fires `error`).
+      # Fetch + decode an `<img>` resource to an RGBA bitmap for the drawImage /
+      # createPattern surface, memoized by resolved URL (see `@@image_cache`). Returns
+      # {'width','height','refId'} — a FRESH transfer stash per call, since
+      # `fetchTransfer` consumes the registry entry — or nil when the resource can't be
+      # fetched or decoded (the caller fires `error`). A scheme with no host-side reader
+      # yet (blob:, whose bytes live in the VM) returns {'unsupported' => true} so the
+      # caller stays inert rather than reporting a spuriously-broken image.
+      def load_image(url)
+        key = resolve_against_current(url.to_s)
+        return nil unless key.is_a?(String)
+        entry = cached_image(key)
+        return {'unsupported' => true} if entry == :unsupported
+        return nil unless entry
+        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
+      end
+
+      # A decoded-image cache entry for `key`, decoding + caching on a miss.
+      # :unsupported for a scheme we can't fetch host-side; nil on fetch/decode failure.
+      private def cached_image(key)
+        cached = @@image_cache_lock.synchronize { @@image_cache[key] }
+        return cached if cached
+        bytes = image_source_bytes(key)
+        return bytes if bytes == :unsupported
+        return nil unless bytes
+        entry = decode_or_nil(bytes) or return nil
+        @@image_cache_lock.synchronize do
+          @@image_cache.clear if @@image_cache.size >= IMAGE_CACHE_MAX
+          @@image_cache[key] = entry
+        end
+        entry
+      end
+
+      # Raw (encoded) bytes for an image URL: `data:` decoded inline, http(s) via a
+      # binary-safe fetch (the raw bytes ride `body_b64`; the text body would mangle
+      # non-ASCII image bytes). :unsupported for a scheme with no host-side reader,
+      # nil for a missing / failed / empty resource.
+      private def image_source_bytes(key)
+        if key.start_with?('data:')
+          bytes = decode_data_url_body(key)
+          bytes.empty? ? nil : bytes
+        elsif key.match?(%r{\Ahttps?://}i)
+          result = rack_fetch('GET', key, '', {}, 'follow')
+          return nil unless result && result['status'].to_i < 400
+          bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
+          bytes.empty? ? nil : bytes
+        else
+          :unsupported
+        end
+      end
+
+      # Decode a base64-encoded image (createImageBitmap's blob path), optionally
+      # downscaled to fit within (max_w, max_h) via its resize options.
       def decode_image(b64_bytes, max_w = nil, max_h = nil)
-        host_image_op('decode_image') {
-          require 'vips' unless defined?(Vips)
-          bytes = Base64.decode64(b64_bytes.to_s)
-          # `access: :sequential` keeps libvips from applying the
-          # source's ICC profile mid-stream (changes RGBA values by ±2
-          # vs raw decode). `colourspace('srgb')` is the same ICC
-          # transform Chrome's createImageBitmap runs, but rounding
-          # differs by a few ulp; only convert when libvips reports
-          # a non-sRGB interpretation, otherwise trust the bytes.
-          img   = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
-          img   = img.colourspace('srgb') unless img.interpretation == :srgb || img.interpretation == :rgb
-          img   = img.bandjoin(255) if img.bands < 4
-          if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
-             (img.width > max_w.to_i || img.height > max_h.to_i)
-            shrink_x = img.width.to_f  / max_w.to_i
-            shrink_y = img.height.to_f / max_h.to_i
-            shrink  = [shrink_x, shrink_y].max
-            img     = img.resize(1.0 / shrink) if shrink > 1
-          end
-          raw = img.write_to_memory
-          {'width' => img.width, 'height' => img.height, 'refId' => transfer_buffer_stash(raw)}
-        }
+        entry = decode_or_nil(Base64.decode64(b64_bytes.to_s), max_w, max_h) or return nil
+        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
+      end
+
+      # Decode an encoded image (PNG/JPEG/GIF/WEBP/SVG/…) to a packed RGBA bitmap via
+      # libvips, optionally downscaled to fit within (max_w, max_h). `access:
+      # :sequential` keeps libvips from applying the source ICC profile mid-stream (it
+      # shifts RGBA by ±2 vs a raw decode); `colourspace('srgb')` is the same transform
+      # Chrome's createImageBitmap runs, applied only when libvips reports a non-sRGB
+      # space so already-sRGB bytes are trusted verbatim. Returns {'width','height','bytes'}.
+      private def decode_rgba(bytes, max_w = nil, max_h = nil)
+        require 'vips' unless defined?(Vips)
+        img = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
+        img = img.colourspace('srgb') unless img.interpretation == :srgb || img.interpretation == :rgb
+        img = img.bandjoin(255) if img.bands < 4
+        if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
+           (img.width > max_w.to_i || img.height > max_h.to_i)
+          shrink = [img.width.to_f / max_w.to_i, img.height.to_f / max_h.to_i].max
+          img    = img.resize(1.0 / shrink) if shrink > 1
+        end
+        {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory}
+      end
+
+      # `decode_rgba` guarded: an undecodable body is a normal "broken image" outcome
+      # (the caller fires `error` / rejects the ImageBitmap promise), so a Vips::Error
+      # is a quiet nil, not stderr noise. Genuine host faults (missing libvips, OOM)
+      # still warn via `host_image_op`.
+      private def decode_or_nil(bytes, max_w = nil, max_h = nil)
+        require 'vips' unless defined?(Vips)
+        decode_rgba(bytes, max_w, max_h)
+      rescue Vips::Error
+        nil
+      rescue LoadError, StandardError => e
+        warn "[capybara-simulated] image decode failed: #{e.class}: #{e.message[0, 200]}"
+        nil
       end
 
       private def host_image_op(name)
