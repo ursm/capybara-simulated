@@ -24,7 +24,6 @@ Document:
   - convertPointFromNode
   - convertQuadFromNode
   - convertRectFromNode
-  - fonts
   - fragmentDirective
   - fullscreen
   - fullscreenEnabled

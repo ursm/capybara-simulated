@@ -274,6 +274,11 @@ css/cssom/getComputedStyle-detached-subtree.html:
   none) from iframe''s window'
 - getComputedStyle returns no style for element outside the flat tree
 - getComputedStyle returns no style for shadow tree outside of flattened tree
+css/cssom/getComputedStyle-insets-relpos-inline.html:
+- OOF with left auto right fixed in relpos inline container
+- OOF with left auto right fixed in relpos inline container with mixed directions
+- OOF with left fixed right auto in relpos inline container
+- OOF with left fixed right auto in relpos inline container with mixed directions
 css/cssom/getComputedStyle-logical-enumeration.html:
 - Logical properties in enumeration of computed style
 css/cssom/getComputedStyle-resolved-colors.html:
