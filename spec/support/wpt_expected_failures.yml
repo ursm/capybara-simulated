@@ -736,79 +736,18 @@ html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
 - Calling getContext with invalid arguments.
 html/canvas/element/compositing/2d.composite.canvas.clear.html:
 - 'Canvas test: 2d.composite.canvas.clear'
-html/canvas/element/compositing/2d.composite.canvas.destination-atop.html:
-- 'Canvas test: 2d.composite.canvas.destination-atop'
-html/canvas/element/compositing/2d.composite.canvas.destination-in.html:
-- 'Canvas test: 2d.composite.canvas.destination-in'
-html/canvas/element/compositing/2d.composite.canvas.destination-out.html:
-- 'Canvas test: 2d.composite.canvas.destination-out'
-html/canvas/element/compositing/2d.composite.canvas.destination-over.html:
-- 'Canvas test: 2d.composite.canvas.destination-over'
-html/canvas/element/compositing/2d.composite.canvas.lighter.html:
-- 'Canvas test: 2d.composite.canvas.lighter'
-html/canvas/element/compositing/2d.composite.canvas.source-atop.html:
-- 'Canvas test: 2d.composite.canvas.source-atop'
-html/canvas/element/compositing/2d.composite.canvas.source-in.html:
-- 'Canvas test: 2d.composite.canvas.source-in'
-html/canvas/element/compositing/2d.composite.canvas.source-out.html:
-- 'Canvas test: 2d.composite.canvas.source-out'
-html/canvas/element/compositing/2d.composite.canvas.source-over.html:
-- 'Canvas test: 2d.composite.canvas.source-over'
-html/canvas/element/compositing/2d.composite.canvas.xor.html:
-- 'Canvas test: 2d.composite.canvas.xor'
-html/canvas/element/compositing/2d.composite.globalAlpha.canvas.html:
-- 'Canvas test: 2d.composite.globalAlpha.canvas'
-html/canvas/element/compositing/2d.composite.globalAlpha.canvascopy.html:
-- 'Canvas test: 2d.composite.globalAlpha.canvascopy'
-html/canvas/element/compositing/2d.composite.globalAlpha.image.html:
-- 'Canvas test: 2d.composite.globalAlpha.image'
 html/canvas/element/compositing/2d.composite.globalAlpha.invalid.html:
 - 'Canvas test: 2d.composite.globalAlpha.invalid'
 html/canvas/element/compositing/2d.composite.globalAlpha.range.html:
 - 'Canvas test: 2d.composite.globalAlpha.range'
 html/canvas/element/compositing/2d.composite.image.clear.html:
 - 'Canvas test: 2d.composite.image.clear'
-html/canvas/element/compositing/2d.composite.image.destination-atop.html:
-- 'Canvas test: 2d.composite.image.destination-atop'
-html/canvas/element/compositing/2d.composite.image.destination-in.html:
-- 'Canvas test: 2d.composite.image.destination-in'
-html/canvas/element/compositing/2d.composite.image.destination-out.html:
-- 'Canvas test: 2d.composite.image.destination-out'
-html/canvas/element/compositing/2d.composite.image.destination-over.html:
-- 'Canvas test: 2d.composite.image.destination-over'
-html/canvas/element/compositing/2d.composite.image.lighter.html:
-- 'Canvas test: 2d.composite.image.lighter'
-html/canvas/element/compositing/2d.composite.image.source-atop.html:
-- 'Canvas test: 2d.composite.image.source-atop'
-html/canvas/element/compositing/2d.composite.image.source-in.html:
-- 'Canvas test: 2d.composite.image.source-in'
-html/canvas/element/compositing/2d.composite.image.source-out.html:
-- 'Canvas test: 2d.composite.image.source-out'
-html/canvas/element/compositing/2d.composite.image.source-over.html:
-- 'Canvas test: 2d.composite.image.source-over'
-html/canvas/element/compositing/2d.composite.image.xor.html:
-- 'Canvas test: 2d.composite.image.xor'
 html/canvas/element/compositing/2d.composite.operation.clear.html:
 - 'Canvas test: 2d.composite.operation.clear'
 html/canvas/element/compositing/2d.composite.solid.clear.html:
 - 'Canvas test: 2d.composite.solid.clear'
 html/canvas/element/compositing/2d.composite.transparent.clear.html:
 - 'Canvas test: 2d.composite.transparent.clear'
-html/canvas/element/compositing/2d.composite.uncovered.image.copy.html:
-- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
-  not leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.image.destination-atop.html:
-- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
-  not leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.image.destination-in.html:
-- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
-  not leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.image.source-in.html:
-- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
-  not leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.image.source-out.html:
-- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
-  not leave the pixels unchanged.
 html/canvas/element/compositing/2d.composite.uncovered.nocontext.copy.html:
 - drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
   leave the pixels unchanged.
@@ -826,42 +765,19 @@ html/canvas/element/compositing/2d.composite.uncovered.nocontext.source-out.html
   leave the pixels unchanged.
 html/canvas/element/conformance-requirements/2d.conformance.requirements.missingargs.html:
 - Missing arguments cause TypeError
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.alpha.html:
-- 'Canvas test: 2d.drawImage.alpha'
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.broken.html:
 - 'Canvas test: 2d.drawImage.broken'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.clip.html:
-- 'Canvas test: 2d.drawImage.clip'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.composite.html:
-- 'Canvas test: 2d.drawImage.composite'
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.detachedcanvas.html:
 - drawImage with detached OffscreenCanvas as the source should throw exception
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedest.html:
-- Negative destination width/height represents the correct rectangle
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
 - 'Canvas test: 2d.drawImage.nonexistent'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonfinite.html:
-- drawImage() with Infinity/NaN is ignored
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nowrap.html:
-- Stretched images do not get pixels wrapping around the edges
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.null.html:
-- 'Canvas test: 2d.drawImage.null'
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.self.2.html:
 - 'Canvas test: 2d.drawImage.self.2'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.transform.html:
-- 'Canvas test: 2d.drawImage.transform'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.html:
-- Incorrect image types in drawImage do not match any defined overloads, so WebIDL
-  throws a TypeError
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.paragraph.html:
 - Incorrect image types in drawImage do not match any defined overloads, so WebIDL
   throws a TypeError
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerocanvas.html:
-- drawImage with zero-sized canvas as the source shoud throw exception
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.html:
-- drawImage with zero-sized source rectangle draws nothing without exception
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
 - drawImage with zero-sized source rectangle from image draws nothing without exception
 html/canvas/element/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html:
@@ -936,22 +852,8 @@ html/canvas/element/manual/context-attributes/getContextAttributes.html:
 - 'Test context creation attributes colorType: unorm8'
 - Test default context creation attributes
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 50,50 should be blue.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 50,99 should be blue.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 55,55 should be black.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 55,94 should be black.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 94,55 should be black.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 94,94 should be black.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 99,50 should be blue.'
-- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
-  dh = -50 --- Pixel 99,99 should be blue.'
+- 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
+  125, dh = 125 --- Pixel 82,82 should be blue.'
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_crossorigin.sub.html:
 - Can't get pixels of canvas with CORS enabled cross origin image drawn from non-CORS
   element
@@ -988,10 +890,6 @@ html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html
 html/canvas/element/manual/image-smoothing/imagesmoothing.html:
 - Test that image smoothing is actually on by default and just the attribute value.
 - Test that image smoothing works when imageSmoothingEnabled is set to true
-- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) still works
-  after repaints.
-- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
-  drawImage().
 html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
 - canvas-ImageBitmap-close
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:

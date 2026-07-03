@@ -1726,6 +1726,64 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['nonfinite']).to eq('no-throw')
   end
 
+  it 'drawImage honors the transform, globalAlpha, and compositing operator' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      const mkSrc = () => { const c = new OffscreenCanvas(10, 10); const x = c.getContext('2d');
+        x.fillStyle = '#f00'; x.fillRect(0, 0, 10, 10); return c; };
+      // translate: the image lands at the translated position, not the origin.
+      const a = new OffscreenCanvas(40, 40).getContext('2d');
+      a.translate(20, 20); a.drawImage(mkSrc(), 0, 0);
+      // globalAlpha: half-opacity red over green -> blended.
+      const b = new OffscreenCanvas(10, 10).getContext('2d');
+      b.fillStyle = '#0f0'; b.fillRect(0, 0, 10, 10);
+      b.globalAlpha = 0.5; b.drawImage(mkSrc(), 0, 0);
+      // destination-over: the image goes UNDER existing content.
+      const c = new OffscreenCanvas(10, 10).getContext('2d');
+      c.fillStyle = '#0f0'; c.fillRect(0, 0, 10, 10);
+      c.globalCompositeOperation = 'destination-over'; c.drawImage(mkSrc(), 0, 0);
+      JSON.stringify({
+        atOrigin: px(a, 5, 5),        // empty (image translated away)
+        translated: px(a, 25, 25),    // red at the translated spot
+        blended: px(b, 5, 5),         // ~half red over green
+        destOver: px(c, 5, 5)         // stays green (image drawn under)
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['atOrigin']).to eq([0, 0, 0, 0])
+    expect(r['translated']).to eq([255, 0, 0, 255])
+    expect(r['blended'][0]).to be_between(120, 135)   # red channel ~half
+    expect(r['blended'][1]).to be_between(120, 135)   # green channel ~half
+    expect(r['destOver']).to eq([0, 255, 0, 255])
+  end
+
+  it 'drawImage validates its arguments (TypeError / no-op / zero-canvas)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.createElement('canvas').getContext('2d');
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
+      const good = new OffscreenCanvas(10, 10);
+      JSON.stringify({
+        nullSrc:  err(() => ctx.drawImage(null, 0, 0)),                 // TypeError
+        strSrc:   err(() => ctx.drawImage('x', 0, 0)),                  // TypeError
+        nonfinite: err(() => ctx.drawImage(good, Infinity, 0)),        // no-op (no throw)
+        zeroSrc:  err(() => ctx.drawImage(good, 0, 0, 0, 5, 0, 0, 10, 10)), // no-op
+        zeroCanvas: err(() => ctx.drawImage(new OffscreenCanvas(0, 0), 0, 0)), // InvalidStateError
+        blankCanvas: err(() => ctx.drawImage(document.createElement('canvas'), 0, 0)) // no-op
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['nullSrc']).to eq('TypeError')
+    expect(r['strSrc']).to eq('TypeError')
+    expect(r['nonfinite']).to eq('no-throw')
+    expect(r['zeroSrc']).to eq('no-throw')
+    expect(r['zeroCanvas']).to eq('InvalidStateError')
+    expect(r['blankCanvas']).to eq('no-throw')
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
