@@ -738,8 +738,6 @@ html/canvas/element/2d.conformance.requirements.missingargs.html:
 - Missing arguments cause TypeError
 html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
 - Calling getContext with invalid arguments.
-html/canvas/element/canvas-host/2d.canvas.host.initial.reset.pattern.html:
-- Resetting the canvas state does not invalidate any existing patterns
 html/canvas/element/canvas-host/2d.canvas.host.readonly.html:
 - Canvas objects are readonly
 html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.decimal.html:
@@ -814,8 +812,6 @@ html/canvas/element/compositing/2d.composite.globalAlpha.canvas.html:
 - 'Canvas test: 2d.composite.globalAlpha.canvas'
 html/canvas/element/compositing/2d.composite.globalAlpha.canvascopy.html:
 - 'Canvas test: 2d.composite.globalAlpha.canvascopy'
-html/canvas/element/compositing/2d.composite.globalAlpha.canvaspattern.html:
-- 'Canvas test: 2d.composite.globalAlpha.canvaspattern'
 html/canvas/element/compositing/2d.composite.globalAlpha.image.html:
 - 'Canvas test: 2d.composite.globalAlpha.image'
 html/canvas/element/compositing/2d.composite.globalAlpha.imagepattern.html:
@@ -1045,20 +1041,12 @@ html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
 - Relative color works as CanvasGradient color input
 html/canvas/element/fill-and-stroke-styles/2d.pattern.animated.gif.html:
 - createPattern() of an animated GIF draws the first frame
-html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.canvas.html:
-- 'Canvas test: 2d.pattern.basic.canvas'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.image.html:
 - 'Canvas test: 2d.pattern.basic.image'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.nocontext.html:
-- 'Canvas test: 2d.pattern.basic.nocontext'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.type.html:
 - 'Canvas test: 2d.pattern.basic.type'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.zerocanvas.html:
-- 'Canvas test: 2d.pattern.basic.zerocanvas'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.crosscanvas.html:
 - 'Canvas test: 2d.pattern.crosscanvas'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.broken.html:
-- 'Canvas test: 2d.pattern.image.broken'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.emptysrc.html:
 - 'Canvas test: 2d.pattern.image.incomplete.emptysrc'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.immediate.html:
@@ -1071,18 +1059,14 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.removedsr
 - 'Canvas test: 2d.pattern.image.incomplete.removedsrc'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading.html:
 - 'Canvas test: 2d.pattern.image.nonexistent-but-loading'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent.html:
-- 'Canvas test: 2d.pattern.image.nonexistent'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nosrc.html:
 - 'Canvas test: 2d.pattern.image.nosrc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.string.html:
+- 'Canvas test: 2d.pattern.image.string'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zeroheight.html:
 - 'Canvas test: 2d.pattern.image.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zerowidth.html:
 - 'Canvas test: 2d.pattern.image.zerowidth'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.canvas1.html:
-- 'Canvas test: 2d.pattern.modify.canvas1'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.canvas2.html:
-- 'Canvas test: 2d.pattern.modify.canvas2'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.image1.html:
 - 'Canvas test: 2d.pattern.modify.image1'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.image2.html:
@@ -1099,8 +1083,6 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside.htm
 - 'Canvas test: 2d.pattern.paint.norepeat.outside'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside_arc.html:
 - 'Canvas test: 2d.pattern.paint.norepeat.outside_arc'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.orientation.canvas.html:
-- Canvas patterns do not get flipped when painted
 html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.orientation.image.html:
 - Image patterns do not get flipped when painted
 html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.basic.html:
@@ -1125,30 +1107,16 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeaty.coord1.html:
 - 'Canvas test: 2d.pattern.paint.repeaty.coord1'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeaty.outside.html:
 - 'Canvas test: 2d.pattern.paint.repeaty.outside'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.case.html:
-- 'Canvas test: 2d.pattern.repeat.case'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.empty.html:
 - 'Canvas test: 2d.pattern.repeat.empty'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.null.html:
-- 'Canvas test: 2d.pattern.repeat.null'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.nullsuffix.html:
-- 'Canvas test: 2d.pattern.repeat.nullsuffix'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.undefined.html:
 - 'Canvas test: 2d.pattern.repeat.undefined'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.unrecognised.html:
-- 'Canvas test: 2d.pattern.repeat.unrecognised'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.unrecognisednull.html:
-- 'Canvas test: 2d.pattern.repeat.unrecognisednull'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.nonexistent.html:
-- 'Canvas test: 2d.pattern.svgimage.nonexistent'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
 - 'Canvas test: 2d.pattern.svgimage.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
 - 'Canvas test: 2d.pattern.svgimage.zerowidth'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.identity.html:
 - 'Canvas test: 2d.pattern.transform.identity'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.infinity.html:
-- 'Canvas test: 2d.pattern.transform.infinity'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.invalid.html:
 - 'Canvas test: 2d.pattern.transform.invalid'
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.html:
@@ -1360,12 +1328,6 @@ html/canvas/element/manual/image-smoothing/imagesmoothing.html:
   after repaints.
 - Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
   drawImage().
-- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
-  fill() and createPattern().
-- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
-  fillRect and createPattern().
-- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
-  stroke() and createPattern().
 html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
 - canvas-ImageBitmap-close
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
@@ -2838,8 +2800,6 @@ html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage.https.h
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-pattern-canvas.html:
 - Source display-p3, destination srgb, color 187,0,0,204
 - Source display-p3, destination srgb, color 187,0,0,255
-- Source display-p3, destination srgb, color 255,0,0,204
-- Source display-p3, destination srgb, color 255,0,0,255
 - Source srgb, destination display-p3, color 187,0,0,204
 - Source srgb, destination display-p3, color 187,0,0,255
 - Source srgb, destination display-p3, color 255,0,0,204

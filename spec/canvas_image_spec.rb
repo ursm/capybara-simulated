@@ -1248,6 +1248,41 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['ok']).to eq(64)   # 4×4×4 — normal getImageData unaffected
   end
 
+  it 'createPattern tiles an image source (repeat / no-repeat) and validates args' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      // A 2×2 tile: top-left red, rest transparent.
+      const tile = new OffscreenCanvas(2, 2); const t = tile.getContext('2d');
+      t.fillStyle = '#ff0000'; t.fillRect(0, 0, 1, 1);
+      // repeat: red repeats every 2px.
+      const c = new OffscreenCanvas(4, 4).getContext('2d');
+      const p = c.createPattern(tile, 'repeat');
+      c.fillStyle = p; c.fillRect(0, 0, 4, 4);
+      // no-repeat: only the single tile shows.
+      const c2 = new OffscreenCanvas(4, 4).getContext('2d');
+      c2.fillStyle = c2.createPattern(tile, 'no-repeat'); c2.fillRect(0, 0, 4, 4);
+      const errs = {};
+      try { c.createPattern(null, 'repeat'); } catch (e) { errs.null = e.constructor.name; }
+      try { c.createPattern(tile, 'bogus'); } catch (e) { errs.rep = e.name; }
+      JSON.stringify({
+        repRed: px(c, 0, 0), repGap: px(c, 1, 0), repTile2: px(c, 2, 0),
+        nrRed: px(c2, 0, 0), nrGap: px(c2, 2, 0),
+        errs, isPat: p instanceof CanvasPattern
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['repRed']).to eq([255, 0, 0, 255])    # tile origin
+    expect(r['repGap']).to eq([0, 0, 0, 0])         # transparent tile cell
+    expect(r['repTile2']).to eq([255, 0, 0, 255])   # next tile repeats
+    expect(r['nrRed']).to eq([255, 0, 0, 255])
+    expect(r['nrGap']).to eq([0, 0, 0, 0])          # no-repeat: nothing past one tile
+    expect(r['errs']['null']).to eq('TypeError')
+    expect(r['errs']['rep']).to eq('SyntaxError')
+    expect(r['isPat']).to be true
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
