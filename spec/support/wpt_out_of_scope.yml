@@ -11105,6 +11105,33 @@ html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-seque
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/wide-gamut-canvas/imagedata-no-color-settings-crash.html:
+- name: Putting a float-32 ImageData with no color settings on a context 2D should
+    not crash.
+  reason: Float-32 / uint-16 ImageData is a high-bit-depth pixel buffer in the wide-gamut
+    / HDR colour subsystem we deliberately do not model (rule 1); the proposed createImageData(bufferSource,
+    …) float form has no library/app use.
+- name: Putting a uint-16 ImageData with no color settings on a context 2D should
+    not crash.
+  reason: Float-32 / uint-16 ImageData is a high-bit-depth pixel buffer in the wide-gamut
+    / HDR colour subsystem we deliberately do not model (rule 1); the proposed createImageData(bufferSource,
+    …) float form has no library/app use.
+html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16.html:
+- name: Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap
+  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
+    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
+    we deliberately do not model (rule 1); no library or app uses it.
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.pixelFormat.html:
+- name: Testing ImageData constructor pixelFormat behaviors
+  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
+    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
+    we deliberately do not model (rule 1); no library or app uses it.
+html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
+- name: putImageData() puts 16-bit floating point image data from getImageData() onto
+    the canvas
+  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
+    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
+    we deliberately do not model (rule 1); no library or app uses it.
 html/canvas/element/text/2d.text.measure.fillTextCluster-options.tentative.html:
 - name: Test that fillTextCluster() correctly applies the options passed as a dictionary.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

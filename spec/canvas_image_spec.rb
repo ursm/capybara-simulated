@@ -1256,10 +1256,11 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       session.evaluate_script(<<~JS)
         const ctx = new OffscreenCanvas(10, 10).getContext('2d');
         const errs = {};
-        // A ~2^31-pixel region can't be backed — real browsers throw TypeError
-        // rather than aborting the process on the huge allocation.
-        try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.get = e.constructor.name; }
-        try { new ImageData(2147483647, 10); } catch (e) { errs.ctor = e.constructor.name; }
+        // A ~2^31-pixel region can't be backed. Rather than aborting the process on
+        // the huge allocation, getImageData throws TypeError and the ImageData
+        // constructor throws IndexSizeError (matching real browsers / WPT).
+        try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.get = e.name; }
+        try { new ImageData(2147483647, 10); } catch (e) { errs.ctor = e.name; }
         // A normal region still works.
         const ok = ctx.getImageData(0, 0, 4, 4).data.length;
         JSON.stringify({ errs, ok });
@@ -1267,7 +1268,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     end
     r = JSON.parse(out)
     expect(r['errs']['get']).to eq('TypeError')
-    expect(r['errs']['ctor']).to eq('TypeError')
+    expect(r['errs']['ctor']).to eq('IndexSizeError')
     expect(r['ok']).to eq(64)   # 4×4×4 — normal getImageData unaffected
   end
 
@@ -1548,6 +1549,74 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     r = JSON.parse(out)
     expect(r['same']).to be true
     expect(r['notReplaced']).to be true
+  end
+
+  it 'validates the ImageData constructor and exposes readonly members' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name || e.constructor.name; } };
+      const d = new ImageData(2, 3);
+      d.width = 99; d.height = 99;                 // readonly: no-op
+      JSON.stringify({
+        width: d.width, height: d.height, len: d.data.length,
+        colorSpace: d.colorSpace, pixelFormat: d.pixelFormat,
+        readonly: (d.width === 2 && d.height === 3),
+        missingHeight: err(() => new ImageData(10)),                          // TypeError
+        zero:         err(() => new ImageData(0, 10)),                        // IndexSizeError
+        badArray:     err(() => new ImageData(new Uint8Array(8), 1, 2)),      // TypeError
+        badLen:       err(() => new ImageData(new Uint8ClampedArray(27), 2)), // InvalidStateError
+        mismatch:     err(() => new ImageData(new Uint8ClampedArray(4), 1, 2)), // IndexSizeError
+        fromData:     (() => { const i = new ImageData(new Uint8ClampedArray(28), 7); return [i.width, i.height]; })()
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['width']).to eq(2)
+    expect(r['height']).to eq(3)
+    expect(r['len']).to eq(24)
+    expect(r['colorSpace']).to eq('srgb')
+    expect(r['pixelFormat']).to eq('rgba-unorm8')
+    expect(r['readonly']).to be true
+    expect(r['missingHeight']).to eq('TypeError')
+    expect(r['zero']).to eq('IndexSizeError')
+    expect(r['badArray']).to eq('TypeError')
+    expect(r['badLen']).to eq('InvalidStateError')
+    expect(r['mismatch']).to eq('IndexSizeError')
+    expect(r['fromData']).to eq([7, 1])
+  end
+
+  it 'validates createImageData / getImageData / putImageData arguments' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas'); c.width = 20; c.height = 20;
+      const ctx = c.getContext('2d');
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name || e.constructor.name; } };
+      const id = ctx.createImageData(10, 20);
+      JSON.stringify({
+        negMagnitude: [ctx.createImageData(-10, 20).width, ctx.createImageData(-10, 20).height], // abs
+        doubleTrunc:  ctx.createImageData(10.9, 10.1).width,                    // -> 10
+        createZero:   err(() => ctx.createImageData(10, 0)),                    // IndexSizeError
+        createInf:    err(() => ctx.createImageData(Infinity, 10)),             // TypeError
+        createNull:   err(() => ctx.createImageData(null)),                     // TypeError
+        getZero:      err(() => ctx.getImageData(1, 1, 0, 10)),                 // IndexSizeError
+        getNaN:       err(() => ctx.getImageData(NaN, 1, 10, 10)),              // TypeError
+        putInf:       err(() => ctx.putImageData(id, Infinity, 10)),            // TypeError
+        putWrongType: err(() => ctx.putImageData('cheese', 0, 0)),             // TypeError
+        wrongThis:    err(() => CanvasRenderingContext2D.prototype.createImageData.call(null, 1, 1))
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['negMagnitude']).to eq([10, 20])
+    expect(r['doubleTrunc']).to eq(10)
+    expect(r['createZero']).to eq('IndexSizeError')
+    expect(r['createInf']).to eq('TypeError')
+    expect(r['createNull']).to eq('TypeError')
+    expect(r['getZero']).to eq('IndexSizeError')
+    expect(r['getNaN']).to eq('TypeError')
+    expect(r['putInf']).to eq('TypeError')
+    expect(r['putWrongType']).to eq('TypeError')
+    expect(r['wrongThis']).to eq('TypeError')
   end
 
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
