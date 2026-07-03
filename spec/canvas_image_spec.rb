@@ -1702,6 +1702,30 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(JSON.parse(out)).to eq([0, 255, 0, 255])
   end
 
+  it 'throws IndexSizeError for a negative arc / arcTo / ellipse radius' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.createElement('canvas').getContext('2d');
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
+      JSON.stringify({
+        arc:      err(() => ctx.arc(0, 0, -1, 0, 1, false)),
+        arcTo:    err(() => ctx.arcTo(0, 0, 10, 10, -5)),
+        ellipse:  err(() => ctx.ellipse(0, 0, -2, 5, 0, 0, 1, false)),
+        arcOk:    err(() => ctx.arc(0, 0, 5, 0, 1, false)),          // positive: fine
+        ellipseZero: err(() => ctx.ellipse(0, 0, 0, 5, 0, 0, 1)),    // zero radius: fine
+        nonfinite: err(() => ctx.arc(0, 0, Infinity, 0, 1))          // non-finite: silent no-op
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['arc']).to eq('IndexSizeError')
+    expect(r['arcTo']).to eq('IndexSizeError')
+    expect(r['ellipse']).to eq('IndexSizeError')
+    expect(r['arcOk']).to eq('no-throw')
+    expect(r['ellipseZero']).to eq('no-throw')
+    expect(r['nonfinite']).to eq('no-throw')
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
