@@ -1088,6 +1088,67 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['whereShadowWouldBe']).to eq([0, 0, 255, 255]) # still blue — no shadow cast
   end
 
+  it 'shadowColor parses, serialises, and resolves currentColor' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    session.execute_script("document.body.innerHTML = '<canvas id=cc width=10 height=10 style=\"color:#0f0\"></canvas>'")
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.getElementById('cc').getContext('2d');
+      ctx.shadowColor = 'lime';
+      const named = ctx.shadowColor;
+      ctx.shadowColor = 'RGBA(0,255, 0,0)';
+      const rgba = ctx.shadowColor;
+      ctx.shadowColor = '#00ff00';
+      ctx.shadowColor = 'bogus';               // invalid → ignored
+      const kept = ctx.shadowColor;
+      ctx.shadowColor = 'currentColor';        // resolves to the canvas' computed color
+      const current = ctx.shadowColor;
+      JSON.stringify({ named, rgba, kept, current });
+    JS
+    r = JSON.parse(out)
+    expect(r['named']).to eq('#00ff00')
+    expect(r['rgba']).to eq('rgba(0, 255, 0, 0)')
+    expect(r['kept']).to eq('#00ff00')
+    expect(r['current']).to eq('#00ff00')
+  end
+
+  it 'casts a shadow from an off-canvas shape and weights it by source alpha' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(100, 50).getContext('2d');
+      ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 100, 50);      // red backdrop
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';                     // 50%-alpha source
+      ctx.shadowColor = '#00f';                                 // opaque blue shadow
+      ctx.shadowOffsetY = 50;
+      ctx.fillRect(0, -50, 100, 50);                            // drawn ABOVE the canvas
+      const d = ctx.getImageData(50, 25, 1, 1).data;
+      JSON.stringify(Array.from(d));
+    JS
+    r = JSON.parse(out)
+    # off-canvas shape still casts (offset lands on-canvas); a 50%-alpha source
+    # casts a 50% shadow → blue at 0.5 over red ≈ (127, 0, 127)
+    expect(r[0]).to be_within(2).of(127)
+    expect(r[1]).to eq(0)
+    expect(r[2]).to be_within(2).of(127)
+  end
+
+  it 'composites the shadow with the current operator (xor)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(100, 50).getContext('2d');
+      ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 100, 50);
+      ctx.globalCompositeOperation = 'xor';
+      ctx.shadowColor = '#f00'; ctx.shadowOffsetX = 100;
+      ctx.fillStyle = '#0f0'; ctx.fillRect(-100, 0, 200, 50);
+      const d = ctx.getImageData(50, 25, 1, 1).data;
+      JSON.stringify(Array.from(d));
+    JS
+    r = JSON.parse(out)
+    expect(r).to eq([0, 255, 0, 255])   # green survives the xor of red-shadow over red-bg
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

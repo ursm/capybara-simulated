@@ -780,10 +780,6 @@ html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.paragrap
   throws a TypeError
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
 - drawImage with zero-sized source rectangle from image draws nothing without exception
-html/canvas/element/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html:
-- fillRect draws shadows
-html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.shadow.html:
-- strokeRect draws shadows
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - CSSHSL works as color input
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
@@ -796,12 +792,6 @@ html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.currentcolor.ht
 - color-mix works as color input with currentcolor
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.html:
 - color-mix works as color input
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.basic.html:
-- currentColor is computed from the canvas element
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.changed.html:
-- currentColor is computed when the attribute is set, not when it is painted
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.removed.html:
-- currentColor is solid black when the canvas element is not in a document
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.currentcolor.html:
 - Relative color works as color input with currentcolor
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.html:
@@ -863,8 +853,6 @@ html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_004.htm
 html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_005.html:
 - drawFocusIfNeeded does draw a focus ring if the element is in focus and the user
   activated a particular focus ring.
-html/canvas/element/manual/fill-and-stroke-styles/2d.fillStyle.parse.current.notrendered.html:
-- currentColor is computed from the canvas element even when element is not rendered
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-canvas-cross-origin-taint.https.sub.html:
 - Tainting check for a tainted canvas in canvas pattern
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-image-cross-origin-taint.https.sub.html:
@@ -1216,8 +1204,6 @@ html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.
 - ImageBitmap from file with EXIF rotation, loaded via <img> not in DOM, imageOrientation
   = none
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
-- shadowBlur Gaussian pixel values for large blur
-- shadowBlur Gaussian pixel values for no blur
 - shadowBlur Gaussian pixel values for small blur
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
 - Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
@@ -1948,68 +1934,6 @@ html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
 - roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:
 - 'Canvas test: 2d.path.roundrect.winding'
-html/canvas/element/shadows/2d.shadow.alpha.2.html:
-- Shadow color alpha components are used
-html/canvas/element/shadows/2d.shadow.alpha.3.html:
-- Shadows are affected by globalAlpha
-html/canvas/element/shadows/2d.shadow.alpha.4.html:
-- Shadows with alpha components are correctly affected by globalAlpha
-html/canvas/element/shadows/2d.shadow.alpha.5.html:
-- Shadows of shapes with alpha components are drawn correctly
-html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.basic.html:
-- currentColor is computed from the canvas element
-html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.changed.html:
-- currentColor is computed when the attribute is set, not when it is painted
-html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.removed.html:
-- currentColor is solid black when the canvas element is not in a document
-html/canvas/element/shadows/2d.shadow.attributes.shadowColor.invalid.html:
-- 'Canvas test: 2d.shadow.attributes.shadowColor.invalid'
-html/canvas/element/shadows/2d.shadow.attributes.shadowColor.valid.html:
-- 'Canvas test: 2d.shadow.attributes.shadowColor.valid'
-html/canvas/element/shadows/2d.shadow.canvas.alpha.html:
-- Shadows are drawn correctly for partially-transparent canvases
-html/canvas/element/shadows/2d.shadow.canvas.basic.html:
-- Shadows are drawn for canvases
-html/canvas/element/shadows/2d.shadow.canvas.transparent.2.html:
-- Shadows are not drawn for transparent parts of canvases
-html/canvas/element/shadows/2d.shadow.clip.3.html:
-- Shadows of clipped shapes are still drawn within the clipping region
-html/canvas/element/shadows/2d.shadow.composite.1.html:
-- Shadows are drawn using globalCompositeOperation
-html/canvas/element/shadows/2d.shadow.composite.2.html:
-- Shadows are drawn using globalCompositeOperation
-html/canvas/element/shadows/2d.shadow.gradient.alpha.html:
-- Shadows are drawn correctly for partially-transparent gradient fills
-html/canvas/element/shadows/2d.shadow.gradient.basic.html:
-- Shadows are drawn for gradient fills
-html/canvas/element/shadows/2d.shadow.gradient.transparent.2.html:
-- Shadows are not drawn for transparent parts of gradient fills
-html/canvas/element/shadows/2d.shadow.image.alpha.html:
-- Shadows are drawn correctly for partially-transparent images
-html/canvas/element/shadows/2d.shadow.image.basic.html:
-- Shadows are drawn for images
-html/canvas/element/shadows/2d.shadow.image.scale.html:
-- Shadows are drawn correctly for scaled images
-html/canvas/element/shadows/2d.shadow.image.transparent.2.html:
-- Shadows are not drawn for transparent parts of images
-html/canvas/element/shadows/2d.shadow.outside.html:
-- Shadows of shapes outside the visible area can be offset onto the visible area
-html/canvas/element/shadows/2d.shadow.pattern.alpha.html:
-- Shadows are drawn correctly for partially-transparent fill patterns
-html/canvas/element/shadows/2d.shadow.pattern.basic.html:
-- Shadows are drawn for fill patterns
-html/canvas/element/shadows/2d.shadow.pattern.transparent.2.html:
-- Shadows are not drawn for transparent parts of fill patterns
-html/canvas/element/shadows/2d.shadow.stroke.basic.html:
-- Shadows are drawn for strokes
-html/canvas/element/shadows/2d.shadow.stroke.cap.2.html:
-- Shadows are drawn for stroke caps
-html/canvas/element/shadows/2d.shadow.stroke.join.2.html:
-- Shadows are drawn for stroke joins
-html/canvas/element/shadows/2d.shadow.transform.1.html:
-- Shadows take account of transformations
-html/canvas/element/shadows/2d.shadow.transform.2.html:
-- Shadow offsets are not affected by transformations
 html/canvas/element/text/2d.text.align.invalid.html:
 - 'Canvas test: 2d.text.align.invalid'
 html/canvas/element/text/2d.text.baseline.invalid.html:
