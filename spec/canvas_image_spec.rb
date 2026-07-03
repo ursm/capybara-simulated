@@ -861,6 +861,71 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['offStroke']).to be false
   end
 
+  it 'DOMMatrix composes transforms, inverts, and serialises' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ident = new DOMMatrix();
+      const scaled = new DOMMatrix().scale(2, 3);
+      const rot = new DOMMatrix().rotate(90);                 // degrees
+      const inv = new DOMMatrix([2, 0, 0, 4, 10, 20]).inverse();
+      const pt = new DOMMatrix().translate(3, 4).transformPoint({x: 1, y: 1});
+      const multi = new DOMMatrix().rotate(90, 90, 0).transformPoint({x: 1, y: 0, z: 0});
+      let stringifyThrew = null;
+      try { new DOMMatrix([0, 0, 0, 0, 0, 0]).inverse().toString(); } catch (e) { stringifyThrew = e.name; }
+      JSON.stringify({
+        identity: ident.isIdentity && ident.is2D,
+        f32: Array.from(scaled.toFloat32Array()),
+        rot: [rot.a, rot.b, rot.c, rot.d].map(Math.round),
+        inv: [inv.a, inv.d, inv.e, inv.f],
+        pt: [pt.x, pt.y],
+        multiRot: [multi.x, multi.y, multi.z].map(Math.round),   // Rz·Ry·Rx compose order
+        str: new DOMMatrix('matrix(1, 2, 3, 4, 5, 6)').toString(),
+        seq16NotFlat: new DOMMatrix([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).is2D,
+        scale3dIs3D: new DOMMatrix().scale3d(2).is2D,
+        infiniteOk: !isFinite(new DOMMatrix([Infinity, 0, 0, 1, 0, 0]).a),
+        stringifyThrew
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['identity']).to be true
+    expect(r['f32']).to eq([2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+    expect(r['rot']).to eq([0, 1, -1, 0])                    # rotate 90°: a≈0, b=1, c=-1, d≈0
+    expect(r['inv']).to eq([0.5, 0.25, -5, -5])
+    expect(r['pt']).to eq([4, 5])
+    expect(r['multiRot']).to eq([0, 0, -1])                  # matches Chromium/Firefox axis order
+    expect(r['str']).to eq('matrix(1, 2, 3, 4, 5, 6)')
+    expect(r['seq16NotFlat']).to be false                    # a 16-element ctor is 3D even when flat
+    expect(r['scale3dIs3D']).to be false
+    expect(r['infiniteOk']).to be true                       # unrestricted double: Infinity kept, not rejected
+    expect(r['stringifyThrew']).to eq('InvalidStateError')   # non-finite serialisation throws
+  end
+
+  it 'ctx.getTransform reflects the CTM and setTransform accepts a DOMMatrix' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx.scale(2, 3); ctx.translate(4, 5);
+      const m = ctx.getTransform();
+      ctx.setTransform(new DOMMatrix([1, 0, 0, 1, 7, 9]));   // matrix overload
+      const after = ctx.getTransform();
+      ctx.setTransform();                                    // no args → reset to identity
+      const reset = ctx.getTransform().isIdentity;
+      JSON.stringify({
+        reflected: [m.a, m.d, m.e, m.f],                     // scale then translate
+        isMatrix: m instanceof DOMMatrix,
+        set: [after.a, after.e, after.f],
+        reset
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['reflected']).to eq([2, 3, 8, 15])              # e = 2*4, f = 3*5
+    expect(r['isMatrix']).to be true
+    expect(r['set']).to eq([1, 7, 9])
+    expect(r['reset']).to be true
+  end
+
   it 'createConicGradient sweeps colour around the centre' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

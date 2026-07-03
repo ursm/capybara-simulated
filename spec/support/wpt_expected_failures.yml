@@ -835,10 +835,6 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
 - 'Canvas test: 2d.pattern.svgimage.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
 - 'Canvas test: 2d.pattern.svgimage.zerowidth'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.identity.html:
-- 'Canvas test: 2d.pattern.transform.identity'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.invalid.html:
-- 'Canvas test: 2d.pattern.transform.invalid'
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.html:
 - ctx.strokeStyle works with color objects
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.transparency.html:
@@ -1223,8 +1219,6 @@ html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
 - shadowBlur Gaussian pixel values for large blur
 - shadowBlur Gaussian pixel values for no blur
 - shadowBlur Gaussian pixel values for small blur
-html/canvas/element/manual/transformations/2d.transformation.getTransform.html:
-- This test ensures that getTransform works correctly.
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
 - Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
@@ -1954,8 +1948,6 @@ html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
 - roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:
 - 'Canvas test: 2d.path.roundrect.winding'
-html/canvas/element/reset/2d.reset.state.transformation_matrix.html:
-- check that the state is reset
 html/canvas/element/shadows/2d.shadow.alpha.2.html:
 - Shadow color alpha components are used
 html/canvas/element/shadows/2d.shadow.alpha.3.html:
