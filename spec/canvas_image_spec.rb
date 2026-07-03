@@ -232,8 +232,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     px = JSON.parse(out).each_slice(4).to_a
     expect(px[5]).to  eq([255, 0, 0, 255])     # (1,1) inside the negative-dim fill
     expect(px[10]).to eq([255, 0, 0, 255])     # (2,2) inside
-    expect(px[0]).to  eq([0, 255, 0, 255])     # (0,0) corner of the negative-dim stroke
-    expect(px[3]).to  eq([0, 255, 0, 255])     # (3,0) top edge stroked
+    # The 1px stroke straddles the box edge, so corner/edge pixels are AA-partial;
+    # assert they're painted green rather than a specific alpha.
+    expect(px[0][1]).to eq(255); expect(px[0][3]).to be > 0   # (0,0) corner stroked
+    expect(px[3][1]).to eq(255); expect(px[3][3]).to be > 0   # (3,0) top edge stroked
   end
 
   it 'treats non-finite geometry / transform arguments as no-ops (spec)' do
@@ -416,7 +418,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     JS
     px = JSON.parse(out).each_slice(4).to_a
     at = ->(x, y) { px[y * 6 + x] }
-    expect(at.call(2, 2)).to eq([255, 0, 0, 255])   # inside the new shape (seeded at 1,1)
+    # Inside the new shape (seeded at its first control point 1,1); (2,2) sits near
+    # the curved edge, so it's AA-partial — assert red and substantially covered.
+    expect(at.call(2, 2)[0]).to eq(255)
+    expect(at.call(2, 2)[3]).to be > 128
     expect(at.call(5, 5)).to eq([0, 0, 0, 0])        # far corner untouched — no stale geometry
   end
 
@@ -1190,6 +1195,35 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     r = JSON.parse(out)
     expect(r['doubled']).to be true
     expect(r['scaledInside']).to be true  # {m11:2,m22:2} scaled the 2×2 square to cover (3,3)
+  end
+
+  it 'anti-aliases a fractional edge (partial coverage) while keeping integer edges exact' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      // Axis-aligned box with a fractional left edge at x=0.5.
+      const box = new OffscreenCanvas(4, 2).getContext('2d');
+      box.fillStyle = '#ff0000';
+      box.fillRect(0.5, 0, 2, 2);           // left edge halves column 0
+      const bd = box.getImageData(0, 0, 4, 2).data;
+      // A rotated (non-axis-aligned) triangle produces AA on its diagonal.
+      const tri = new OffscreenCanvas(8, 8).getContext('2d');
+      tri.fillStyle = '#000000';
+      tri.beginPath(); tri.moveTo(0, 0); tri.lineTo(8, 0); tri.lineTo(0, 8); tri.closePath(); tri.fill();
+      const td = tri.getImageData(0, 0, 8, 8).data;
+      // Count how many pixels have a partial (non-0, non-255) alpha → AA present.
+      let partial = 0;
+      for (let k = 3; k < td.length; k += 4) if (td[k] > 0 && td[k] < 255) partial++;
+      JSON.stringify({
+        edgeAlpha: bd[0 * 4 + 3],     // column 0: ~half-covered
+        insideAlpha: bd[1 * 4 + 3],   // column 1: fully covered
+        partial
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['edgeAlpha']).to be_between(100, 160)   # ~0.5 coverage on the fractional edge
+    expect(r['insideAlpha']).to eq(255)              # integer-aligned interior stays exact
+    expect(r['partial']).to be > 3                   # the diagonal is anti-aliased
   end
 
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
