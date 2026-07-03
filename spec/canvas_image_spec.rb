@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require 'base64'
+require 'timeout'
 
 # Coverage for the pixel-buffer stack: ImageData, OffscreenCanvas,
 # CanvasRenderingContext2D's drawImage / getImageData / putImageData
@@ -913,6 +914,106 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['kerning']).to eq('none')
     expect(r['attrs']).to be true
     expect(r['lost']).to be false
+  end
+
+  it 'casts an offset drop shadow under a filled shape' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(30, 30).getContext('2d');
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+      ctx.shadowOffsetX = 8; ctx.shadowOffsetY = 8;
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(2, 2, 8, 8);           // shape at (2,2)-(10,10); shadow at (10,10)-(18,18)
+      const d = ctx.getImageData(0, 0, 30, 30).data;
+      const at = (x, y) => Array.from(d.slice((y * 30 + x) * 4, (y * 30 + x) * 4 + 4));
+      JSON.stringify({ shape: at(5, 5), shadow: at(14, 14), empty: at(25, 25) });
+    JS
+    r = JSON.parse(out)
+    expect(r['shape']).to eq([255, 0, 0, 255])   # the actual red shape
+    expect(r['shadow']).to eq([0, 0, 0, 204])    # offset shadow at 0.8 alpha (0.8×255)
+    expect(r['empty']).to eq([0, 0, 0, 0])
+  end
+
+  it 'shadowBlur spreads the shadow beyond the shape bounds' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      function count(blur) {
+        const ctx = new OffscreenCanvas(40, 40).getContext('2d');
+        ctx.shadowColor = '#000000'; ctx.shadowBlur = blur;
+        ctx.fillStyle = '#ff0000'; ctx.fillRect(15, 15, 10, 10);
+        const d = ctx.getImageData(0, 0, 40, 40).data;
+        let n = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) n++;
+        return n;
+      }
+      JSON.stringify({ sharp: count(0), blurred: count(6) });
+    JS
+    r = JSON.parse(out)
+    expect(r['sharp']).to eq(100)                # 10×10, no spread (offset 0, blur 0 → no shadow)
+    expect(r['blurred']).to be > 150             # blur spreads well past the 100-px square
+  end
+
+  it 'clearRect casts no shadow' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(30, 30).getContext('2d');
+      ctx.fillStyle = '#0000ff'; ctx.fillRect(0, 0, 30, 30);
+      ctx.shadowColor = '#000000'; ctx.shadowOffsetX = 8; ctx.shadowOffsetY = 8;
+      ctx.clearRect(2, 2, 8, 8);          // clear a hole — must NOT cast a shadow
+      const d = ctx.getImageData(0, 0, 30, 30).data;
+      const at = (x, y) => Array.from(d.slice((y * 30 + x) * 4, (y * 30 + x) * 4 + 4));
+      JSON.stringify({ hole: at(5, 5), whereShadowWouldBe: at(14, 14) });
+    JS
+    r = JSON.parse(out)
+    expect(r['hole']).to eq([0, 0, 0, 0])                  # cleared
+    expect(r['whereShadowWouldBe']).to eq([0, 0, 255, 255]) # still blue — no shadow cast
+  end
+
+  it 'fillText casts a shadow' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      function paintedCount(shadow) {
+        const ctx = new OffscreenCanvas(120, 40).getContext('2d');
+        ctx.font = '20px sans-serif'; ctx.fillStyle = '#ff0000';
+        if (shadow) { ctx.shadowColor = '#000000'; ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3; }
+        ctx.fillText('Hi', 5, 25);
+        const d = ctx.getImageData(0, 0, 120, 40).data;
+        let n = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) n++;
+        return n;
+      }
+      JSON.stringify({ plain: paintedCount(false), shadowed: paintedCount(true) });
+    JS
+    r = JSON.parse(out)
+    expect(r['shadowed']).to be > r['plain']     # shadow adds painted pixels
+  end
+
+  it 'ignores negative / non-finite shadow values (no hang, no wipe)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = Timeout.timeout(15) do
+      session.evaluate_script(<<~JS)
+        const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+        ctx.fillStyle = '#0000ff'; ctx.fillRect(0, 0, 20, 20);   // blue base
+        ctx.shadowColor = '#000000'; ctx.shadowBlur = 5;
+        ctx.shadowBlur = Infinity;                                // ignored (would hang)
+        const afterInf = ctx.shadowBlur;
+        ctx.shadowBlur = NaN; ctx.shadowBlur = -3;                // ignored (would wipe / invalid)
+        const afterBad = ctx.shadowBlur;
+        ctx.shadowOffsetX = NaN;                                  // ignored (offsets keep prior)
+        const offX = ctx.shadowOffsetX;
+        ctx.fillStyle = '#ff0000'; ctx.fillRect(4, 4, 4, 4);      // draws with the valid blur=5
+        const corner = Array.from(ctx.getImageData(18, 1, 1, 1).data);  // still blue → not wiped
+        JSON.stringify({ afterInf, afterBad, offX, corner });
+      JS
+    end
+    r = JSON.parse(out)
+    expect(r['afterInf']).to eq(5)           # Infinity ignored, prior kept
+    expect(r['afterBad']).to eq(5)           # NaN and negative ignored
+    expect(r['offX']).to eq(0)               # NaN offset ignored
+    expect(r['corner']).to eq([0, 0, 255, 255])   # canvas not wiped
   end
 
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
