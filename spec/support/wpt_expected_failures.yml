@@ -1219,9 +1219,6 @@ html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.
   = none
 - ImageBitmap from file with EXIF rotation, loaded via <img> not in DOM, imageOrientation
   = none
-html/canvas/element/manual/line-styles/setLineDash.html:
-- Invalid arguments to setLineDash()
-- setLineDash
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
 - shadowBlur Gaussian pixel values for large blur
 - shadowBlur Gaussian pixel values for no blur
@@ -1953,8 +1950,6 @@ html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/path-objects/2d.path.isPointInPath.edge.html:
 - isPointInPath() counts points on the path as being inside
-html/canvas/element/path-objects/2d.path.isPointInStroke.scaleddashes.html:
-- isPointInStroke() should return correct results on dashed paths at high scale factors
 html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
 - roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:

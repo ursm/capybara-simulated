@@ -441,6 +441,53 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(res['dash']).to eq([4, 2])
   end
 
+  it 'setLineDash duplicates an odd-length list and ignores invalid entries' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ctx.setLineDash([1, 2, 3]);            // odd → concatenated with itself
+      const odd = ctx.getLineDash();
+      ctx.setLineDash(['4', '2']);           // string-coerced
+      const strs = ctx.getLineDash();
+      ctx.setLineDash([1, -2]);              // negative → ignored, keeps prior list
+      const neg = ctx.getLineDash();
+      ctx.setLineDash([1, NaN]);             // non-finite → ignored
+      const nan = ctx.getLineDash();
+      JSON.stringify({ odd, strs, neg, nan });
+    JS
+    res = JSON.parse(out)
+    expect(res['odd']).to eq([1, 2, 3, 1, 2, 3])
+    expect(res['strs']).to eq([4, 2])
+    expect(res['neg']).to eq([4, 2])
+    expect(res['nan']).to eq([4, 2])
+  end
+
+  it 'renders a dashed stroke and hit-tests it with butt caps' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(40, 3).getContext('2d');
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath(); ctx.moveTo(0, 1.5); ctx.lineTo(40, 1.5); ctx.stroke();
+      const at = (x) => ctx.getImageData(x, 1, 1, 1).data[3];   // alpha under the line
+      JSON.stringify({
+        on1: at(5), off: at(15), on2: at(25),      // dash on / gap / dash on
+        hitOn: ctx.isPointInStroke(5, 1.5),         // inside a dash
+        hitOff: ctx.isPointInStroke(15, 1.5),       // inside a gap → false
+        hitPast: ctx.isPointInStroke(10.5, 1.5)     // just past a butt cap → false
+      });
+    JS
+    res = JSON.parse(out)
+    expect(res['on1']).to be > 0
+    expect(res['off']).to eq(0)
+    expect(res['on2']).to be > 0
+    expect(res['hitOn']).to be(true)
+    expect(res['hitOff']).to be(false)
+    expect(res['hitPast']).to be(false)
+  end
+
   it 'fills a rect with a horizontal linear gradient (endpoint colours + midpoint)' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
