@@ -739,50 +739,14 @@ html/canvas/element/2d.conformance.requirements.missingargs.html:
 - Missing arguments cause TypeError
 html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
 - Calling getContext with invalid arguments.
-html/canvas/element/compositing/2d.composite.canvas.clear.html:
-- 'Canvas test: 2d.composite.canvas.clear'
-html/canvas/element/compositing/2d.composite.globalAlpha.invalid.html:
-- 'Canvas test: 2d.composite.globalAlpha.invalid'
-html/canvas/element/compositing/2d.composite.globalAlpha.range.html:
-- 'Canvas test: 2d.composite.globalAlpha.range'
-html/canvas/element/compositing/2d.composite.image.clear.html:
-- 'Canvas test: 2d.composite.image.clear'
-html/canvas/element/compositing/2d.composite.operation.clear.html:
-- 'Canvas test: 2d.composite.operation.clear'
-html/canvas/element/compositing/2d.composite.solid.clear.html:
-- 'Canvas test: 2d.composite.solid.clear'
-html/canvas/element/compositing/2d.composite.transparent.clear.html:
-- 'Canvas test: 2d.composite.transparent.clear'
-html/canvas/element/compositing/2d.composite.uncovered.nocontext.copy.html:
-- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.nocontext.destination-atop.html:
-- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.nocontext.destination-in.html:
-- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.nocontext.source-in.html:
-- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
-  leave the pixels unchanged.
-html/canvas/element/compositing/2d.composite.uncovered.nocontext.source-out.html:
-- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
-  leave the pixels unchanged.
 html/canvas/element/conformance-requirements/2d.conformance.requirements.missingargs.html:
 - Missing arguments cause TypeError
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.broken.html:
-- 'Canvas test: 2d.drawImage.broken'
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.detachedcanvas.html:
 - drawImage with detached OffscreenCanvas as the source should throw exception
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
 - 'Canvas test: 2d.drawImage.nonexistent'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.self.2.html:
-- 'Canvas test: 2d.drawImage.self.2'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.paragraph.html:
-- Incorrect image types in drawImage do not match any defined overloads, so WebIDL
-  throws a TypeError
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
 - drawImage with zero-sized source rectangle from image draws nothing without exception
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:

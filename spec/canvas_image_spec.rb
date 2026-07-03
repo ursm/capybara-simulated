@@ -1193,6 +1193,55 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['emDescent']).to eq(10)
   end
 
+  it 'validates globalAlpha and supports the clear operator + whole-canvas ops' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      ctx.globalAlpha = 0.5;
+      ctx.globalAlpha = 1.1; ctx.globalAlpha = -0.1; ctx.globalAlpha = Infinity; ctx.globalAlpha = NaN;
+      const ga = ctx.globalAlpha;                       // all ignored → stays 0.5
+      ctx.globalAlpha = 1;
+      // 'clear' wipes only the source-COVERED region to transparent; the uncovered
+      // destination is left intact (unlike copy / source-in).
+      ctx.fillStyle = '#0ff'; ctx.fillRect(0, 0, 10, 10);
+      ctx.globalCompositeOperation = 'clear'; ctx.fillRect(0, 0, 4, 4);
+      const cleared   = ctx.getImageData(1, 1, 1, 1).data[3];   // inside the cleared rect
+      const untouched = ctx.getImageData(8, 8, 1, 1).data[3];   // outside → still opaque
+      // A blank canvas source under 'source-in' clears the destination it isn't covering.
+      const ctx2 = new OffscreenCanvas(10, 10).getContext('2d');
+      ctx2.fillStyle = '#f00'; ctx2.fillRect(0, 0, 10, 10);
+      ctx2.globalCompositeOperation = 'source-in';
+      ctx2.drawImage(new OffscreenCanvas(10, 10), 0, 0);   // blank source → all transparent
+      const wiped = ctx2.getImageData(5, 5, 1, 1).data[3];
+      JSON.stringify({ ga, cleared, untouched, wiped });
+    JS
+    r = JSON.parse(out)
+    expect(r['ga']).to eq(0.5)
+    expect(r['cleared']).to eq(0)
+    expect(r['untouched']).to eq(255)   # 'clear' does NOT wipe the whole canvas
+    expect(r['wiped']).to eq(0)
+  end
+
+  it 'drawImage: TypeError for a non-image, self-copy snapshots, blank/undrawn draws transparent' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 2).getContext('2d');
+      let threw = null;
+      try { ctx.drawImage({}, 0, 0); } catch (e) { threw = e.name; }
+      // self-copy: shift the canvas onto itself by one row, reading original pixels.
+      ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 4, 1);
+      ctx.fillStyle = '#0f0'; ctx.fillRect(0, 1, 4, 1);
+      ctx.drawImage(ctx.canvas, 0, -1);                 // row 1 (green) copied up to row 0
+      const top = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+      JSON.stringify({ threw, top });
+    JS
+    r = JSON.parse(out)
+    expect(r['threw']).to eq('TypeError')
+    expect(r['top']).to eq([0, 255, 0, 255])            # green from the self-copy, not corrupted
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
