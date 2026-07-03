@@ -382,6 +382,10 @@ module Capybara
         @transfer_buffer_lock = Mutex.new
         @transfer_buffers     = {}
         @transfer_buffer_seq  = 0
+        # Per-font ascent/descent probe cache for canvas text (render_text is
+        # worker-reachable via OffscreenCanvas, like decode_image).
+        @font_vmetrics_lock   = Mutex.new
+        @font_vmetrics        = {}
         # Zero-copy postMessage transfer tokens (rusty_racer >= 0.1.6
         # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
         # crosses isolates by token (no byte copy), its source detached. A token
@@ -3716,6 +3720,70 @@ module Capybara
       rescue LoadError, StandardError => e
         warn "[capybara-simulated] #{name} failed: #{e.class}: #{e.message[0, 200]}"
         nil
+      end
+
+      # Render a line of text to a coverage mask via libvips (pango / fontconfig),
+      # backing the canvas `fillText` / `measureText` surface with real system-font
+      # glyphs and metrics — no bundled font, so any installed family works. `font`
+      # is a pango font string ("Sans Bold 16"); at dpi 72 the point size equals CSS
+      # px. Returns `{width, height, xoffset, yoffset, ascent, descent[, refId]}`:
+      # the image is cropped to the INK box, and (xoffset, yoffset) locate that box
+      # within the logical layout, so the JS side can place the alphabetic baseline.
+      # `measure_only` skips rasterizing the mask (the lazy image already knows its
+      # dimensions) — the cheap path for `measureText`.
+      def render_text(text, font, measure_only = false)
+        host_image_op('render_text') {
+          require 'vips' unless defined?(Vips)
+          pango = font.to_s.empty? ? 'Sans 10' : font.to_s
+          asc, desc = font_vmetrics(pango)
+          str = text.to_s
+          return {'width' => 0, 'height' => 0, 'xoffset' => 0, 'yoffset' => 0, 'ascent' => asc, 'descent' => desc} if str.empty?
+
+          # `Vips::Image.text` parses Pango markup — canvas text is always literal,
+          # so escape the markup metacharacters (an unescaped `&`/`<` would raise,
+          # silently dropping the text; `<b>…` would wrongly render as bold).
+          markup = str.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
+          # Render the whole line at its natural width; the caller condenses it
+          # horizontally to honor canvas maxWidth (pango `width:` would word-WRAP,
+          # which the canvas text algorithm never does).
+          img = Vips::Image.text(markup, font: pango, dpi: 72)
+          res = {
+            'width'   => img.width,
+            'height'  => img.height,
+            'xoffset' => img.get('xoffset'),
+            'yoffset' => img.get('yoffset'),
+            'ascent'  => asc,
+            'descent' => desc
+          }
+          unless measure_only
+            img = img.cast('uchar') unless img.format == :uchar
+            res['refId'] = transfer_buffer_stash(img.write_to_memory)
+          end
+          res
+        }
+      end
+
+      # Ascent (baseline offset from the logical top) and descent for a pango font,
+      # probed once and cached. A no-descender cap/ascender string's ink bottom is
+      # the baseline (ascent); a descender string's ink bottom minus that is the
+      # descent. dpi 72 keeps units in CSS px.
+      private def font_vmetrics(pango)
+        cached = @font_vmetrics_lock.synchronize { @font_vmetrics[pango] }
+        return cached if cached
+
+        asc = begin
+          r = Vips::Image.text('Mbdfhklt', font: pango, dpi: 72)
+          r.get('yoffset') + r.height
+        rescue StandardError
+          10
+        end
+        desc = begin
+          r = Vips::Image.text('gjpqy', font: pango, dpi: 72)
+          [(r.get('yoffset') + r.height) - asc, 0].max
+        rescue StandardError
+          (asc * 0.25).round
+        end
+        @font_vmetrics_lock.synchronize { @font_vmetrics[pango] ||= [asc, desc] }
       end
 
       def reset_workers

@@ -584,6 +584,172 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(px.all? {|p| p == [255, 0, 0, 255] }).to be true   # state reset → full red fill
   end
 
+  it 'measureText returns real font metrics that scale with size and length' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      ctx.font = '10px sans-serif';
+      const a = ctx.measureText('Hello');
+      ctx.font = '20px sans-serif';
+      const b = ctx.measureText('Hello');
+      const c = ctx.measureText('Hello World');
+      JSON.stringify({
+        aw: a.width, bw: b.width, cw: c.width,
+        hasMetrics: typeof b.fontBoundingBoxAscent === 'number' && b.fontBoundingBoxAscent > 0,
+        emptyW: ctx.measureText('').width
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['aw']).to be > 0
+    expect(r['bw']).to be > r['aw']          # 20px wider than 10px
+    expect(r['cw']).to be > r['bw']          # longer string wider
+    expect(r['hasMetrics']).to be true
+    expect(r['emptyW']).to eq(0)
+  end
+
+  it 'fillText rasterizes real glyphs at the baseline anchor' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = new OffscreenCanvas(120, 40);
+      const ctx = c.getContext('2d');
+      ctx.font = '20px sans-serif';
+      ctx.fillStyle = '#000000';
+      ctx.fillText('Hi', 5, 25);            // alphabetic baseline at y=25
+      const d = ctx.getImageData(0, 0, 120, 40).data;
+      let painted = 0, minx = 999, maxx = 0, maxy = 0;
+      for (let y = 0; y < 40; y++) for (let x = 0; x < 120; x++) {
+        if (d[(y * 120 + x) * 4 + 3] > 0) { painted++; if (x < minx) minx = x; if (x > maxx) maxx = x; if (y > maxy) maxy = y; }
+      }
+      JSON.stringify({ painted, minx, maxx, maxy });
+    JS
+    r = JSON.parse(out)
+    expect(r['painted']).to be > 20          # real glyph coverage, not blank
+    expect(r['minx']).to be >= 4             # starts near the x=5 anchor
+    expect(r['minx']).to be < 15
+    expect(r['maxy']).to be <= 26            # ink sits above/at the baseline (no descender)
+  end
+
+  it 'fillText honors textAlign (right shifts the run left of the anchor)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      function run(align) {
+        const ctx = new OffscreenCanvas(120, 40).getContext('2d');
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = align;
+        ctx.fillText('Hi', 60, 25);
+        const d = ctx.getImageData(0, 0, 120, 40).data;
+        let minx = 999, maxx = 0;
+        for (let y = 0; y < 40; y++) for (let x = 0; x < 120; x++)
+          if (d[(y * 120 + x) * 4 + 3] > 0) { if (x < minx) minx = x; if (x > maxx) maxx = x; }
+        return { minx, maxx };
+      }
+      JSON.stringify({ left: run('left'), right: run('right') });
+    JS
+    r = JSON.parse(out)
+    expect(r['left']['minx']).to be >= 59    # left-aligned: run starts at anchor x=60
+    expect(r['right']['maxx']).to be <= 61   # right-aligned: run ends at anchor x=60
+    expect(r['right']['minx']).to be < r['left']['minx']  # right-aligned run is left of the anchor
+  end
+
+  it 'fillText is masked by clip()' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(120, 40).getContext('2d');
+      ctx.font = '20px sans-serif';
+      ctx.fillStyle = '#000000';
+      ctx.beginPath(); ctx.rect(0, 0, 20, 40); ctx.clip();  // only left 20px visible
+      ctx.fillText('Hello World', 5, 25);
+      const d = ctx.getImageData(0, 0, 120, 40).data;
+      let maxx = 0;
+      for (let y = 0; y < 40; y++) for (let x = 0; x < 120; x++)
+        if (d[(y * 120 + x) * 4 + 3] > 0 && x > maxx) maxx = x;
+      JSON.stringify({ maxx });
+    JS
+    expect(JSON.parse(out)['maxx']).to be < 20   # nothing painted past the clip
+  end
+
+  it 'renders text with markup metacharacters literally (no Pango markup)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(160, 40).getContext('2d');
+      ctx.font = '20px sans-serif';
+      ctx.fillStyle = '#000000';
+      ctx.fillText('A < B & C', 5, 25);     // '<' and '&' would break Pango markup
+      const d = ctx.getImageData(0, 0, 160, 40).data;
+      let painted = 0;
+      for (let k = 3; k < d.length; k += 4) if (d[k] > 0) painted++;
+      // measureText must also survive the metacharacters (non-zero width).
+      JSON.stringify({ painted, w: ctx.measureText('A < B & C').width });
+    JS
+    r = JSON.parse(out)
+    expect(r['painted']).to be > 20          # rendered, not silently dropped
+    expect(r['w']).to be > 0
+  end
+
+  it 'maxWidth condenses the line horizontally onto one row (no wrap)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = new OffscreenCanvas(200, 40);
+      const ctx = c.getContext('2d');
+      ctx.font = '20px sans-serif';
+      ctx.fillStyle = '#000000';
+      const natural = ctx.measureText('Wide Text Here').width;
+      ctx.fillText('Wide Text Here', 0, 25, 40);   // squeeze into 40px
+      const d = ctx.getImageData(0, 0, 200, 40).data;
+      let maxx = 0, maxy = 0;
+      for (let y = 0; y < 40; y++) for (let x = 0; x < 200; x++)
+        if (d[(y * 200 + x) * 4 + 3] > 0) { if (x > maxx) maxx = x; if (y > maxy) maxy = y; }
+      JSON.stringify({ natural, maxx, maxy });
+    JS
+    r = JSON.parse(out)
+    expect(r['natural']).to be > 40          # naturally wider than the cap
+    expect(r['maxx']).to be <= 41            # condensed to ~40px wide, not wrapped
+    expect(r['maxy']).to be <= 30            # single row (no wrap spilling down)
+  end
+
+  it 'resolves em/rem font sizes against computed font-size (not a fixed 16px)' do
+    app_fs = Rack::Builder.new {
+      run lambda {|env|
+        [200, {'content-type' => 'text/html'},
+         ['<html style="font-size:40px"><body><canvas id="c" style="font-size:30px"></canvas></body></html>']]
+      }
+    }.to_app
+    Capybara.app = app_fs
+    session = Capybara::Session.new(:simulated, app_fs)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.getElementById('c').getContext('2d');
+      ctx.font = '1em sans-serif';    // → 30px (canvas element font-size)
+      const em = ctx.measureText('MM').width;
+      ctx.font = '30px sans-serif';   // reference: same size
+      const px = ctx.measureText('MM').width;
+      ctx.font = '1rem sans-serif';   // → 40px (root font-size)
+      const rem = ctx.measureText('MM').width;
+      JSON.stringify({ em, px, rem });
+    JS
+    r = JSON.parse(out)
+    expect(r['em']).to eq(r['px'])           # 1em == the element's 30px font-size
+    expect(r['rem']).to be > r['em']         # 1rem (40px root) is larger
+  end
+
+  it 'keeps a named family when the size unit is not px' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      ctx.font = 'bold 12pt monospace';   // pt unit + explicit family
+      // A monospace 12pt run must have a non-zero, plausible width (family not lost).
+      JSON.stringify({ w: ctx.measureText('abcd').width });
+    JS
+    expect(JSON.parse(out)['w']).to be > 0
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
