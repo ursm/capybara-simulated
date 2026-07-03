@@ -122,7 +122,6 @@ css/cssom/base-uri.html:
 - setProperty
 css/cssom/computed-style-001.html:
 - inherited_property_values
-- property_values
 - relative_property_values
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
@@ -217,8 +216,6 @@ css/cssom/cssstyledeclaration-csstext.html:
 - invalid property does not appear
 - overwriting with invalid value
 - uppercase property
-css/cssom/cssstyledeclaration-mutability.html:
-- StyleSheet's CSSStyleDeclaration is mutable
 css/cssom/cssstyledeclaration-mutationrecord-002.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
@@ -737,52 +734,6 @@ html/canvas/element/2d.conformance.requirements.missingargs.html:
 - Missing arguments cause TypeError
 html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
 - Calling getContext with invalid arguments.
-html/canvas/element/canvas-host/2d.canvas.host.readonly.html:
-- Canvas objects are readonly
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.decimal.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.em.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.exp.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.hex.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.octal.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.percent.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.plus.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.space.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.trailingjunk.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.whitespace.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.zero.html:
-- Parsing of non-negative integers
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.decimal.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.em.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.exp.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.hex.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.octal.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.percent.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.plus.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.space.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.trailingjunk.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.whitespace.html:
-- Parsing of non-negative integers in setAttribute
-html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.zero.html:
-- Parsing of non-negative integers in setAttribute
 html/canvas/element/compositing/2d.composite.canvas.clear.html:
 - 'Canvas test: 2d.composite.canvas.clear'
 html/canvas/element/compositing/2d.composite.canvas.destination-atop.html:

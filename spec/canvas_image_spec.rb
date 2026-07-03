@@ -1509,6 +1509,47 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['outside']).to eq([0, 0, 0, 0])
   end
 
+  it 'maps the canvas width/height attributes to computed CSS width/height' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const parse = (attr) => {
+        const c = document.createElement('canvas');
+        if (attr != null) c.setAttribute('width', attr);
+        document.body.appendChild(c);
+        return { w: c.width, css: getComputedStyle(c).getPropertyValue('width') };
+      };
+      JSON.stringify({
+        deflt: parse(null),        // no attribute -> default 300
+        dec:   parse('100.999'),   // parsed as a non-negative integer
+        zero:  parse('0'),
+        hex:   parse('0x100'),     // stops at 'x'
+        pct:   parse('100%')       // stops at '%'
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['deflt']).to eq('w' => 300, 'css' => '300px')  # default canvas size is a presentational hint
+    expect(r['dec']).to  eq('w' => 100, 'css' => '100px')
+    expect(r['zero']).to eq('w' => 0,   'css' => '0px')
+    expect(r['hex']).to  eq('w' => 0,   'css' => '0px')
+    expect(r['pct']).to  eq('w' => 100, 'css' => '100px')
+  end
+
+  it 'exposes context.canvas as a readonly attribute' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas');
+      const ctx = c.getContext('2d');
+      const other = document.createElement('canvas');
+      ctx.canvas = other;   // no-op: readonly
+      JSON.stringify({ same: ctx.canvas === c, notReplaced: ctx.canvas !== other });
+    JS
+    r = JSON.parse(out)
+    expect(r['same']).to be true
+    expect(r['notReplaced']).to be true
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

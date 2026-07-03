@@ -4175,18 +4175,8 @@ css/cssom/getComputedStyle-pseudo-checkmark.html:
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
-- name: Resolution of width is correct when pseudo-element argument is ignored (due
-    to no colon)
-  reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
-    requires generating and laying out those boxes; layout deliberately unmodeled
-    (rule 1).
 css/cssom/getComputedStyle-pseudo-picker-icon.html:
 - name: Resolution of width is correct for pseudo-element (due to double-colon)
-  reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
-    requires generating and laying out those boxes; layout deliberately unmodeled
-    (rule 1).
-- name: Resolution of width is correct when pseudo-element argument is ignored (due
-    to no colon)
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
@@ -4257,11 +4247,6 @@ css/cssom/getComputedStyle-pseudo.html:
     (rule 1).
 - name: 'Resolution of width is correct for ::before and ::after pseudo-elements of
     display: contents elements'
-  reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
-    requires generating and laying out those boxes; layout deliberately unmodeled
-    (rule 1).
-- name: Resolution of width is correct when pseudo-element argument is ignored (due
-    to no colon)
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
