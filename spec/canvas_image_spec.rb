@@ -435,6 +435,155 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(res['dash']).to eq([4, 2])
   end
 
+  it 'fills a rect with a horizontal linear gradient (endpoint colours + midpoint)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 1).getContext('2d');
+      const g = ctx.createLinearGradient(0, 0, 4, 0);   // left→right
+      g.addColorStop(0, '#ff0000');
+      g.addColorStop(1, '#0000ff');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 4, 1);
+      const d = ctx.getImageData(0, 0, 4, 1);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    # Pixel centres at x=0.5,1.5,2.5,3.5 → t=0.125,0.375,0.625,0.875 of red→blue.
+    expect(px[0][0]).to be > 200          # left: mostly red
+    expect(px[0][2]).to be < 60
+    expect(px[3][2]).to be > 200          # right: mostly blue
+    expect(px[3][0]).to be < 60
+    expect(px[1][0]).to be > px[2][0]     # red decreases left→right
+    expect(px[1][2]).to be < px[2][2]     # blue increases left→right
+    expect(px.all? {|p| p[3] == 255 }).to be true
+  end
+
+  it 'fillStyle round-trips a gradient object and reads it back' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      const g = ctx.createLinearGradient(0, 0, 1, 0);
+      ctx.fillStyle = g;
+      JSON.stringify({ isSame: ctx.fillStyle === g, tag: Object.prototype.toString.call(ctx.fillStyle) });
+    JS
+    res = JSON.parse(out)
+    expect(res['isSame']).to be true
+    expect(res['tag']).to eq('[object CanvasGradient]')
+  end
+
+  it 'addColorStop throws on an out-of-range offset or invalid colour' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const g = new OffscreenCanvas(1, 1).getContext('2d').createLinearGradient(0, 0, 1, 0);
+      const errs = {};
+      try { g.addColorStop(2, 'red'); } catch (e) { errs.offset = e.name; }
+      try { g.addColorStop(0.5, 'not-a-color'); } catch (e) { errs.color = e.name; }
+      JSON.stringify(errs);
+    JS
+    errs = JSON.parse(out)
+    expect(errs['offset']).to eq('IndexSizeError')
+    expect(errs['color']).to eq('SyntaxError')
+  end
+
+  it 'radial gradient fills the inner disc with the start colour' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      const g = ctx.createRadialGradient(10, 10, 0, 10, 10, 10);
+      g.addColorStop(0, '#ff0000');
+      g.addColorStop(1, '#00ff00');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 20, 20);
+      const d = ctx.getImageData(0, 0, 20, 20);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 20 + x] }
+    centre = at.call(10, 10)
+    edge   = at.call(10, 1)      # near radius 9 from centre → mostly green
+    expect(centre[0]).to be > 200   # centre red-dominant
+    expect(centre[1]).to be < 80
+    expect(edge[1]).to be > edge[0] # outer ring green-dominant
+  end
+
+  it 'clip() masks subsequent fills to the clip region' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.beginPath();
+      ctx.rect(1, 1, 2, 2);        // clip to the centre 2×2
+      ctx.clip();
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(0, 0, 4, 4);    // paint the whole canvas — only the clip shows
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    at = ->(x, y) { px[y * 4 + x] }
+    expect(at.call(1, 1)).to eq([255, 0, 0, 255])   # inside clip
+    expect(at.call(2, 2)).to eq([255, 0, 0, 255])   # inside clip
+    expect(at.call(0, 0)).to eq([0, 0, 0, 0])        # outside clip — untouched
+    expect(at.call(3, 3)).to eq([0, 0, 0, 0])        # outside clip
+  end
+
+  it 'restore() lifts a clip set after save()' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, 1, 1); ctx.clip();
+      ctx.restore();                // clip lifted
+      ctx.fillStyle = '#0000ff';
+      ctx.fillRect(0, 0, 4, 4);     // now fills the whole canvas
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px.all? {|p| p == [0, 0, 255, 255] }).to be true   # clip lifted → full fill
+  end
+
+  it 'throws TypeError for non-finite gradient coordinates' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      const errs = {};
+      try { ctx.createLinearGradient(0, 0, Infinity, 0); } catch (e) { errs.linear = e.name; }
+      try { ctx.createRadialGradient(NaN, 0, 1, 0, 0, 2); } catch (e) { errs.radial = e.name; }
+      try { ctx.createRadialGradient(0, 0, -1, 0, 0, 2); } catch (e) { errs.neg = e.name; }
+      JSON.stringify(errs);
+    JS
+    errs = JSON.parse(out)
+    expect(errs['linear']).to eq('TypeError')
+    expect(errs['radial']).to eq('TypeError')
+    expect(errs['neg']).to eq('IndexSizeError')
+  end
+
+  it 'resizing a canvas resets the context state (transform + clip)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const c = document.createElement('canvas');
+      c.width = 4; c.height = 4;
+      const ctx = c.getContext('2d');
+      ctx.translate(2, 2);
+      ctx.beginPath(); ctx.rect(-2, -2, 1, 1); ctx.clip();
+      c.width = 4;                          // resize → resets transform + clip
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(0, 0, 4, 4);             // identity transform, no clip → whole canvas
+      const d = ctx.getImageData(0, 0, 4, 4);
+      JSON.stringify(Array.from(d.data));
+    JS
+    px = JSON.parse(out).each_slice(4).to_a
+    expect(px.all? {|p| p == [255, 0, 0, 255] }).to be true   # state reset → full red fill
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
