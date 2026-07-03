@@ -1016,6 +1016,67 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['corner']).to eq([0, 0, 255, 255])   # canvas not wiped
   end
 
+  it 'composites with destination-out (erasing), lighter (additive), and multiply' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      // destination-out: the new shape erases the existing pixels it covers.
+      const e = new OffscreenCanvas(10, 10).getContext('2d');
+      e.fillStyle = '#0000ff'; e.fillRect(0, 0, 10, 10);
+      e.globalCompositeOperation = 'destination-out';
+      e.fillStyle = '#000000'; e.fillRect(0, 0, 5, 10);
+      // lighter: red + green = yellow (additive).
+      const l = new OffscreenCanvas(10, 10).getContext('2d');
+      l.fillStyle = '#ff0000'; l.fillRect(0, 0, 10, 10);
+      l.globalCompositeOperation = 'lighter';
+      l.fillStyle = '#00ff00'; l.fillRect(0, 0, 10, 10);
+      // multiply blend.
+      const m = new OffscreenCanvas(10, 10).getContext('2d');
+      m.fillStyle = '#ff8080'; m.fillRect(0, 0, 10, 10);
+      m.globalCompositeOperation = 'multiply';
+      m.fillStyle = '#8080ff'; m.fillRect(0, 0, 10, 10);
+      JSON.stringify({ erased: px(e, 2, 2), kept: px(e, 7, 2), lit: px(l, 5, 5), mul: px(m, 5, 5) });
+    JS
+    r = JSON.parse(out)
+    expect(r['erased']).to eq([0, 0, 0, 0])          # covered pixels erased
+    expect(r['kept']).to eq([0, 0, 255, 255])        # uncovered pixels kept
+    expect(r['lit']).to eq([255, 255, 0, 255])       # red + green
+    expect(r['mul']).to eq([128, 64, 128, 255])      # 255·128/255, 128·128/255, 128·255/255
+  end
+
+  it 'composites source-atop (source shows only over existing pixels)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      const ctx = new OffscreenCanvas(20, 10).getContext('2d');
+      ctx.fillStyle = '#0000ff'; ctx.fillRect(0, 0, 10, 10);   // blue backdrop, left half only
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = '#ff0000'; ctx.fillRect(5, 0, 10, 10);   // red spanning (5..15)
+      JSON.stringify({ overBlue: px(ctx, 7, 5), overEmpty: px(ctx, 12, 5), onlyBlue: px(ctx, 2, 5) });
+    JS
+    r = JSON.parse(out)
+    expect(r['overBlue']).to eq([255, 0, 0, 255])    # red shows atop the blue
+    expect(r['overEmpty']).to eq([0, 0, 0, 0])        # red over empty → nothing (no backdrop)
+    expect(r['onlyBlue']).to eq([0, 0, 255, 255])     # blue where red didn't reach
+  end
+
+  it 'ignores an unknown globalCompositeOperation (keeps the previous)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      const def = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalCompositeOperation = 'bogus';        // invalid → ignored
+      JSON.stringify({ def, after: ctx.globalCompositeOperation });
+    JS
+    r = JSON.parse(out)
+    expect(r['def']).to eq('source-over')
+    expect(r['after']).to eq('multiply')
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
