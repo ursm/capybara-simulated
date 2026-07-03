@@ -292,6 +292,20 @@ module Capybara
         @active_handle = nil
         @blob_partitions_lock.synchronize { @blob_partitions.clear }
       end
+
+      # Full teardown of the whole driver: aux windows AND the primary browser's
+      # V8 isolate. `reset_windows!` deliberately keeps the primary alive (the
+      # per-test reset path rebuilds only its page); this is for permanently
+      # DROPPING a session. A caller that nils its session without this leaks the
+      # primary isolate — with its heap, canvas pixel buffers, and worker threads —
+      # into V8Runtime's process-wide `@@live` until at_exit. The WPT runner recycles
+      # the cross-origin session per `.sub.`/`.https.` file, so that leak is ~one
+      # isolate per cross-origin file (hundreds over the suite); disposing here
+      # incrementally is what reset_windows! already does for aux windows.
+      def dispose
+        reset_windows!
+        @browser.dispose rescue nil
+      end
       def go_back              = current_browser.go_back
       def go_forward           = current_browser.go_forward
       def reset_history!       = current_browser.reset_history!

@@ -696,7 +696,7 @@ module WptRunner
     # www.example.com, so isolate them behind a fresh session on each side.
     https   = base.include?('.https.')
     cross   = sub || https
-    @session = nil if cross
+    drop_session! if cross
     s = session
     # Full per-file reset — what Capybara runs between tests, which this long-lived
     # WPT session bypasses (it memoizes ONE session for the whole suite). It gives each
@@ -804,17 +804,23 @@ module WptRunner
   rescue StandardError => e
     # A file that errored may have left the shared session in a bad state;
     # rebuild it so the next file (and the result) doesn't depend on run order.
-    @session = nil
+    drop_session!
     {completed: false, error: e.message}
   ensure
     # Drop the cross-origin session so the next (default-origin) file starts fresh
-    # on www.example.com — see the `cross` isolation note above. Dispose its aux
-    # windows first: a dropped session is never reset_windows!'d by the next file,
-    # so otherwise its aux-window isolates + threads leak to at_exit.
-    if cross && @session
-      @session.driver.reset_windows! rescue nil
-      @session = nil
-    end
+    # on www.example.com — see the `cross` isolation note above. `drop_session!`
+    # fully disposes it (aux windows AND the primary isolate): a dropped session is
+    # never reset_windows!'d by the next file, so otherwise its isolates + threads
+    # leak to at_exit — one primary V8 isolate per cross-origin file, hundreds over
+    # the suite, which on canvas's pixel-buffer-heavy isolates is GBs of RSS.
+    drop_session! if cross
+  end
+
+  # Drop the memoized session, fully disposing its driver first (aux windows +
+  # primary V8 isolate) so nothing leaks into V8Runtime's process-wide `@@live`.
+  def drop_session!
+    (@session.driver.dispose rescue nil) if @session
+    @session = nil
   end
 
   # The behavioural-conformance allowlist is split across two files: the in-scope
