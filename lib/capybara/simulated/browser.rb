@@ -2751,6 +2751,15 @@ module Capybara
       @@image_cache_lock = Mutex.new
       IMAGE_CACHE_MAX    = 512
 
+      # Cross-visit cache of @font-face font files, resolved-url → on-disk path (or nil
+      # when the fetch failed). The bytes are written to a process-lifetime temp file so
+      # pango/fontconfig (via `Vips::Image.text fontfile:`) can read them by path. Font
+      # URLs are content-stable app assets, so caching across the per-visit VM rebuild
+      # avoids re-fetching CanvasTest.ttf & friends on every visit.
+      @@font_file_cache      = {}
+      @@font_file_lock       = Mutex.new
+      @@font_files           = []   # pins the Tempfiles for the PROCESS (the cache is cross-visit)
+
       # Body of an external durably-cacheable asset (classic script or stylesheet),
       # served from the cross-visit cache when still fresh, else fetched (which
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
@@ -3813,13 +3822,16 @@ module Capybara
       # within the logical layout, so the JS side can place the alphabetic baseline.
       # `measure_only` skips rasterizing the mask (the lazy image already knows its
       # dimensions) — the cheap path for `measureText`.
-      def render_text(text, font, measure_only = false)
+      def render_text(text, font, measure_only = false, font_url = nil)
         host_image_op('render_text') {
           require 'vips' unless defined?(Vips)
           pango = font.to_s.empty? ? 'Sans 10' : font.to_s
-          asc, desc = font_vmetrics(pango)
-          str = text.to_s
-          return {'width' => 0, 'height' => 0, 'xoffset' => 0, 'yoffset' => 0, 'ascent' => asc, 'descent' => desc} if str.empty?
+          fontfile = font_url && !font_url.to_s.empty? ? font_file_for(font_url) : nil
+          asc, desc = font_vmetrics(pango, fontfile)
+          # NUL takes up no space and would abort the pango render; drop it so a lone
+          # "\0" measures/draws as empty rather than falling back to a fabricated width.
+          str = text.to_s.delete("\u0000")
+          return {'width' => 0, 'advance' => 0, 'height' => 0, 'xoffset' => 0, 'yoffset' => 0, 'ascent' => asc, 'descent' => desc} if str.empty?
 
           # `Vips::Image.text` parses Pango markup — canvas text is always literal,
           # so escape the markup metacharacters (an unescaped `&`/`<` would raise,
@@ -3827,15 +3839,27 @@ module Capybara
           markup = str.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
           # Render the whole line at its natural width; the caller condenses it
           # horizontally to honor canvas maxWidth (pango `width:` would word-WRAP,
-          # which the canvas text algorithm never does).
-          img = Vips::Image.text(markup, font: pango, dpi: 72)
+          # which the canvas text algorithm never does). An @font-face family loads its
+          # own font via `fontfile:` so pango resolves it (vips needs fontconfig support).
+          img = text_image(markup, pango, fontfile)
+          # `width` is the INK width (vips crops to it); `advance` is the pen movement
+          # (`measureText().width`), which a downloaded font's hmtx gives exactly and
+          # which falls back to the ink width for a system font we can't parse — or for a
+          # string whose codepoints the (BMP) cmap doesn't map yet still renders ink
+          # (astral / symbol-cmap), where a computed 0 advance would be wrong.
+          adv = fontfile && font_advance_px(pango, fontfile, str)
+          advance = adv && adv > 0 ? adv : img.width
+          em_asc, em_desc = fontfile ? font_em_vmetrics(pango, fontfile) : nil
           res = {
-            'width'   => img.width,
-            'height'  => img.height,
-            'xoffset' => img.get('xoffset'),
-            'yoffset' => img.get('yoffset'),
-            'ascent'  => asc,
-            'descent' => desc
+            'width'    => img.width,
+            'advance'  => advance,
+            'height'   => img.height,
+            'xoffset'  => img.get('xoffset'),
+            'yoffset'  => img.get('yoffset'),
+            'ascent'   => asc,
+            'descent'  => desc,
+            'emAscent'  => em_asc || asc,
+            'emDescent' => em_desc || desc
           }
           unless measure_only
             img = img.cast('uchar') unless img.format == :uchar
@@ -3845,27 +3869,228 @@ module Capybara
         }
       end
 
+      # `Vips::Image.text` with the optional `fontfile:` (an @font-face's downloaded
+      # font), which pango loads so it can resolve that family. Passing a nil fontfile
+      # would raise, so branch — a system-font family resolves through fontconfig.
+      private def text_image(markup, pango, fontfile)
+        if fontfile
+          Vips::Image.text(markup, font: pango, fontfile: fontfile, dpi: 72)
+        else
+          Vips::Image.text(markup, font: pango, dpi: 72)
+        end
+      end
+
       # Ascent (baseline offset from the logical top) and descent for a pango font,
       # probed once and cached. A no-descender cap/ascender string's ink bottom is
       # the baseline (ascent); a descender string's ink bottom minus that is the
-      # descent. dpi 72 keeps units in CSS px.
-      private def font_vmetrics(pango)
-        cached = @font_vmetrics_lock.synchronize { @font_vmetrics[pango] }
+      # descent. dpi 72 keeps units in CSS px. `fontfile` (an @font-face font) is part
+      # of the cache key so a downloaded family's metrics don't collide with a system one.
+      private def font_vmetrics(pango, fontfile = nil)
+        key = fontfile ? "#{pango}\0#{fontfile}" : pango
+        cached = @font_vmetrics_lock.synchronize { @font_vmetrics[key] }
         return cached if cached
 
-        asc = begin
-          r = Vips::Image.text('Mbdfhklt', font: pango, dpi: 72)
-          r.get('yoffset') + r.height
-        rescue StandardError
-          10
+        # A downloaded @font-face carries its own typographic metrics, and pango lays
+        # it out on those, so the baseline (ascent) comes from the font's OS/2 typo
+        # ascender/descender scaled to the pixel size — the ink-string heuristic below
+        # is only a fallback for the ambient system font, whose file we don't have.
+        asc, desc = font_typo_vmetrics(pango, fontfile) if fontfile
+        unless asc
+          asc = begin
+            r = text_image('Mbdfhklt', pango, fontfile)
+            r.get('yoffset') + r.height
+          rescue StandardError
+            10
+          end
+          desc = begin
+            r = text_image('gjpqy', pango, fontfile)
+            [(r.get('yoffset') + r.height) - asc, 0].max
+          rescue StandardError
+            (asc * 0.25).round
+          end
         end
-        desc = begin
-          r = Vips::Image.text('gjpqy', font: pango, dpi: 72)
-          [(r.get('yoffset') + r.height) - asc, 0].max
-        rescue StandardError
-          (asc * 0.25).round
+        @font_vmetrics_lock.synchronize { @font_vmetrics[key] ||= [asc, desc] }
+      end
+
+      # [ascent, descent] in px from a font file's OS/2 typographic metrics scaled to
+      # the pango string's point size (dpi 72 → px), or nil if it can't be read. This is
+      # the FONT bounding box / baseline value (fontBoundingBoxAscent), typo-ascender
+      # over unitsPerEm.
+      private def font_typo_vmetrics(pango, fontfile)
+        m = font_typo_units(fontfile) or return nil
+        upm, ta, td = m
+        size = font_size_of(pango)
+        [(ta * size / upm).round, [(-td * size / upm).round, 0].max]
+      end
+
+      # [emHeightAscent, emHeightDescent] in px: the em square (= font size) split by the
+      # baseline at the typo ascender:descender ratio — NOT normalized by unitsPerEm, so a
+      # font whose ascender+descender ≠ em still fills the em (e.g. descent-0 → all ascent).
+      private def font_em_vmetrics(pango, fontfile)
+        m = font_typo_units(fontfile) or return nil
+        _upm, ta, td = m
+        span = ta + (-td)
+        return nil unless span.positive?
+        size = font_size_of(pango)
+        ea = size * ta / span.to_f
+        [ea.round, (size - ea).round]
+      end
+
+      # The point size in a pango font string ("CanvasTest 40" → 40); 10 as a fallback.
+      # The size is a whitespace-separated trailing token, so a family that itself ends
+      # in a digit ("B612") without a size isn't misread as one.
+      private def font_size_of(pango)
+        size = pango.to_s[/\s(\d+(?:\.\d+)?)\s*\z/, 1].to_f
+        size.positive? ? size : 10.0
+      end
+
+      # [unitsPerEm, sTypoAscender, sTypoDescender] from a TrueType/OpenType file's
+      # `head` + `OS/2` tables, or nil.
+      private def font_typo_units(fontfile)
+        g = font_glyph_data(fontfile) or return nil
+        [g[:upm], g[:typo_asc], g[:typo_desc]]
+      end
+
+      # The advance width (pen movement) of `text` in the font, in px at the pango
+      # string's size — the value `measureText().width` reports. vips crops to ink, so
+      # the advance (which includes side bearings) comes from the font's own hmtx table.
+      # nil if the font can't be parsed.
+      private def font_advance_px(pango, fontfile, text)
+        g = font_glyph_data(fontfile) or return nil
+        size = font_size_of(pango)
+        units = text.to_s.each_char.sum do |ch|
+          gid = g[:cmap][ch.ord]
+          next 0 unless gid   # a codepoint the font doesn't map (null, control) advances nothing
+          g[:advances][gid] || g[:advances].last || 0
         end
-        @font_vmetrics_lock.synchronize { @font_vmetrics[pango] ||= [asc, desc] }
+        units * size / g[:upm]
+      end
+
+      # Parse the glyph tables a canvas text metric needs out of a TrueType/OpenType
+      # file, memoized per path: unitsPerEm + typo metrics (head / OS/2), the per-glyph
+      # advance widths (hmtx), and a Unicode → glyph-id map (cmap format 4). nil when a
+      # required table is missing or malformed.
+      private def font_glyph_data(fontfile)
+        (@font_glyph ||= {})
+        return @font_glyph[fontfile] if @font_glyph.key?(fontfile)
+        @font_glyph[fontfile] = parse_font_glyph_data(fontfile)
+      end
+
+      private def parse_font_glyph_data(fontfile)
+        data = File.binread(fontfile)
+        n = data[4, 2].unpack1('n')
+        tabs = {}
+        12.step(12 + (n - 1) * 16, 16) { |o| tabs[data[o, 4]] = data[o + 8, 4].unpack1('N') }
+        head = tabs['head']; os2 = tabs['OS/2']; hhea = tabs['hhea']; hmtx = tabs['hmtx']; cmap = tabs['cmap']
+        return nil unless head && hhea && hmtx && cmap
+        upm = data[head + 18, 2].unpack1('n')
+        return nil unless upm.positive?
+        num_h = data[hhea + 34, 2].unpack1('n')
+        advances = (0...num_h).map { |i| data[hmtx + i * 4, 2].unpack1('n') }
+        {
+          upm:       upm,
+          typo_asc:  s16(data[(os2 || hhea) + (os2 ? 68 : 4), 2]),
+          typo_desc: s16(data[(os2 || hhea) + (os2 ? 70 : 6), 2]),
+          advances:  advances,
+          # A malformed cmap shouldn't discard the (already-read) upm / advances / typo
+          # metrics, so isolate its parse — an empty map just means advances fall back.
+          cmap:      (parse_cmap4(data, cmap) rescue {}),
+        }
+      rescue StandardError
+        nil
+      end
+
+      # A Unicode → glyph-id map from the first format-4 `cmap` subtable (the standard
+      # BMP Unicode encoding), as {codepoint => glyph}. Empty when none is present.
+      private def parse_cmap4(data, cmap)
+        ntab = data[cmap + 2, 2].unpack1('n')
+        # Prefer a Unicode BMP subtable — (3,1) Windows Unicode or (0,*) Unicode — over a
+        # (3,0) Symbol map (which shadows ASCII into the 0xF000 PUA); fall back to any
+        # format-4 table only if no Unicode one is present.
+        best = nil; best_rank = -1
+        (0...ntab).each do |i|
+          rec = cmap + 4 + i * 8
+          pid = data[rec, 2].unpack1('n'); eid = data[rec + 2, 2].unpack1('n')
+          off = data[rec + 4, 4].unpack1('N')
+          next unless data[cmap + off, 2].unpack1('n') == 4
+          rank = pid == 3 && eid == 1 ? 3 : pid.zero? ? 2 : pid == 3 && eid.zero? ? 0 : 1
+          if rank > best_rank then best_rank = rank; best = cmap + off end
+        end
+        sub = best
+        return {} unless sub
+        segx2 = data[sub + 6, 2].unpack1('n'); segc = segx2 / 2
+        endc  = sub + 14
+        startc = endc + segx2 + 2
+        iddelta = startc + segx2
+        idrange = iddelta + segx2
+        map = {}
+        (0...segc).each do |s|
+          e  = data[endc + s * 2, 2].unpack1('n')
+          st = data[startc + s * 2, 2].unpack1('n')
+          delta = data[iddelta + s * 2, 2].unpack1('n')
+          ro    = data[idrange + s * 2, 2].unpack1('n')
+          (st..e).each do |c|
+            next if c == 0xFFFF
+            gid = if ro.zero?
+                    (c + delta) & 0xFFFF
+                  else
+                    gi = idrange + s * 2 + ro + (c - st) * 2
+                    g = data[gi, 2].unpack1('n')
+                    g.zero? ? 0 : (g + delta) & 0xFFFF
+                  end
+            map[c] = gid if gid != 0
+          end
+        end
+        map
+      end
+
+      # A big-endian signed 16-bit value.
+      private def s16(bytes)
+        v = bytes.unpack1('n')
+        v >= 0x8000 ? v - 0x10000 : v
+      end
+
+      # Resolve an @font-face src URL to an on-disk font file pango can load, fetching
+      # the bytes through the Rack app (binary-safe) once and caching the temp path for
+      # the process. Returns nil when the fetch fails.
+      def font_file_for(url)
+        key = resolve_against_current(url.to_s)
+        return nil unless key.is_a?(String)
+        @@font_file_lock.synchronize { return @@font_file_cache[key] if @@font_file_cache.key?(key) }
+        path = build_font_file(key)
+        @@font_file_lock.synchronize { @@font_file_cache[key] = path }
+        path
+      end
+
+      private def build_font_file(key)
+        bytes = font_source_bytes(key)
+        return nil unless bytes && !bytes.empty?
+        require 'tempfile'
+        # Keep the Tempfile object alive for the process so its file isn't reaped while
+        # fontconfig may still read it; the cache holds the path.
+        file = Tempfile.new(['csim-font', File.extname(key)[0, 5]])
+        file.binmode
+        file.write(bytes)
+        file.flush
+        # Pin the handle for the whole process: the path is cached in the CLASS-level
+        # @@font_file_cache and outlives the per-visit Browser that first built it, so
+        # the Tempfile must not be finalized (and its file unlinked) with that instance.
+        @@font_file_lock.synchronize { @@font_files << file }
+        file.path
+      end
+
+      # Raw font bytes for a URL: `data:` inline, http(s) via a binary-safe Rack fetch
+      # (the raw bytes ride `body_b64`; a text body would mangle the font's non-ASCII).
+      private def font_source_bytes(key)
+        if key.start_with?('data:')
+          bytes = decode_data_url_body(key)
+          bytes.empty? ? nil : bytes
+        elsif key.match?(%r{\Ahttps?://}i)
+          result = rack_fetch('GET', key, '', {}, 'follow')
+          return nil unless result && result['status'].to_i < 400
+          bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
+          bytes.empty? ? nil : bytes
+        end
       end
 
       def reset_workers

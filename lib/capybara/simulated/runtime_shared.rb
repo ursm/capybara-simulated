@@ -122,7 +122,7 @@ module Capybara
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
-        '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2]) },
+        '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3]) },
         '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1], a[2]); nil },
         # WHATWG/UTS46 IDNA for the URL parser's host processing (the JS tr46 stub

@@ -1940,61 +1940,18 @@ html/canvas/element/text/2d.text.baseline.invalid.html:
 - 'Canvas test: 2d.text.baseline.invalid'
 html/canvas/element/text/2d.text.direction.invalid.html:
 - 'Canvas test: 2d.text.direction.invalid'
-html/canvas/element/text/2d.text.draw.align.center.html:
-- textAlign center is the center of the em squares (not the bounding box)
-html/canvas/element/text/2d.text.draw.align.end.ltr.html:
-- textAlign end with ltr is the right edge
 html/canvas/element/text/2d.text.draw.align.end.rtl.html:
 - textAlign end with rtl is the left edge
-html/canvas/element/text/2d.text.draw.align.left.html:
-- textAlign left is the left of the first em square (not the bounding box)
-html/canvas/element/text/2d.text.draw.align.right.html:
-- textAlign right is the right of the last em square (not the bounding box)
-html/canvas/element/text/2d.text.draw.align.start.ltr.html:
-- textAlign start with ltr is the left edge
 html/canvas/element/text/2d.text.draw.align.start.rtl.html:
 - textAlign start with rtl is the right edge
-html/canvas/element/text/2d.text.draw.baseline.alphabetic.html:
-- 'Canvas test: 2d.text.draw.baseline.alphabetic'
-html/canvas/element/text/2d.text.draw.baseline.bottom.html:
-- textBaseline bottom is the bottom of the em square (not the bounding box)
-html/canvas/element/text/2d.text.draw.baseline.hanging.html:
-- 'Canvas test: 2d.text.draw.baseline.hanging'
 html/canvas/element/text/2d.text.draw.baseline.ideographic.html:
 - 'Canvas test: 2d.text.draw.baseline.ideographic'
-html/canvas/element/text/2d.text.draw.baseline.middle.html:
-- textBaseline middle is the middle of the em square (not the bounding box)
-html/canvas/element/text/2d.text.draw.baseline.top.html:
-- textBaseline top is the top of the em square (not the bounding box)
 html/canvas/element/text/2d.text.draw.fill.maxWidth.NaN.html:
 - fillText handles maxWidth correctly
-html/canvas/element/text/2d.text.draw.fill.maxWidth.bound.html:
-- fillText handles maxWidth based on line size, not bounding box size
-html/canvas/element/text/2d.text.draw.fill.maxWidth.fontface.html:
-- fillText works on @font-face fonts
 html/canvas/element/text/2d.text.draw.fill.maxWidth.negative.html:
 - fillText handles maxWidth correctly
 html/canvas/element/text/2d.text.draw.fill.maxWidth.zero.html:
 - fillText handles maxWidth correctly
-html/canvas/element/text/2d.text.draw.fontface.html:
-- 'Canvas test: 2d.text.draw.fontface'
-html/canvas/element/text/2d.text.draw.fontface.notinpage.html:
-- "@font-face fonts should work even if they are not used in the page"
-html/canvas/element/text/2d.text.draw.fontface.repeat.html:
-- Draw with the font immediately, then wait a bit until and draw again. (This crashes
-  some version of WebKit.)
-html/canvas/element/text/2d.text.draw.space.basic.html:
-- U+0020 is rendered the correct size (1em wide)
-html/canvas/element/text/2d.text.draw.space.collapse.end.html:
-- Space characters at the end of a line are NOT collapsed
-html/canvas/element/text/2d.text.draw.space.collapse.nonspace.html:
-- Non-space characters are not converted to U+0020 and collapsed
-html/canvas/element/text/2d.text.draw.space.collapse.other.html:
-- Space characters are converted to U+0020, and are NOT collapsed
-html/canvas/element/text/2d.text.draw.space.collapse.space.html:
-- Space characters are converted to U+0020, and are NOT collapsed
-html/canvas/element/text/2d.text.draw.space.collapse.start.html:
-- Space characters at the start of a line are NOT collapsed
 html/canvas/element/text/2d.text.drawing.style.absolute.spacing.html:
 - Testing letter spacing and word spacing with absolute length
 html/canvas/element/text/2d.text.drawing.style.font-relative.spacing.html:
@@ -2051,40 +2008,16 @@ html/canvas/element/text/2d.text.fontVariantCaps2.html:
 - Testing small caps setting in fontVariant
 html/canvas/element/text/2d.text.lang.default.html:
 - 'Canvas test: 2d.text.lang.default'
-html/canvas/element/text/2d.text.measure.actualBoundingBox.html:
-- Testing actualBoundingBox
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
 - Testing that actualBoundingBox metrics are precise at small font sizes
 html/canvas/element/text/2d.text.measure.actualBoundingBox.whitespace.html:
 - Testing actualBoundingBox with leading/trailing whitespace
 html/canvas/element/text/2d.text.measure.baselines.html:
 - Testing baselines
-html/canvas/element/text/2d.text.measure.emHeights-low-ascent.html:
-- Testing emHeights with reduced ascent metric
-html/canvas/element/text/2d.text.measure.emHeights-zero-descent.html:
-- Testing emHeights with zero descent metric
-html/canvas/element/text/2d.text.measure.emHeights.html:
-- Testing emHeights
-html/canvas/element/text/2d.text.measure.fontBoundingBox-reduced-ascent.html:
-- Testing fontBoundingBox for OffscreenCanvas with reduced ascent metric
-html/canvas/element/text/2d.text.measure.fontBoundingBox-zero-descent.html:
-- Testing fontBoundingBox for OffscreenCanvas with zero descent metric
-html/canvas/element/text/2d.text.measure.fontBoundingBox.ahem.html:
-- Testing fontBoundingBox for font ahem
-html/canvas/element/text/2d.text.measure.fontBoundingBox.html:
-- Testing fontBoundingBox measurements
 html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
-html/canvas/element/text/2d.text.measure.width.basic.html:
-- The width of character is same as font used
-html/canvas/element/text/2d.text.measure.width.empty.html:
-- The empty string has zero width
-html/canvas/element/text/2d.text.measure.width.nullCharacter.html:
-- Null character does not take up space
-html/canvas/element/text/2d.text.measure.width.space.html:
-- Space characters are converted to U+0020 and NOT collapsed
 html/canvas/element/text/parent-style-relative-units.html:
 - Font-size based on canvas element font-size
 - Font-size based on canvas element line-height

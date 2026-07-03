@@ -1149,6 +1149,50 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r).to eq([0, 255, 0, 255])   # green survives the xor of red-shadow over red-bg
   end
 
+  it 'loads an @font-face font for canvas text metrics (advance, ink box, em metrics)' do
+    font     = File.binread(File.expand_path('wpt/fonts/CanvasTest.ttf', __dir__))
+    face_app = Rack::Builder.new {
+      run lambda {|env|
+        if env['PATH_INFO'] == '/fonts/CanvasTest.ttf'
+          [200, {'content-type' => 'font/ttf'}, [font]]
+        else
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <!doctype html><meta charset=utf-8>
+            <style>@font-face { font-family: CanvasTest; src: url("/fonts/CanvasTest.ttf"); }</style>
+            <canvas id=c width=200 height=100></canvas>
+          HTML
+        end
+      }
+    }
+    session = Capybara::Session.new(:simulated, face_app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.getElementById('c').getContext('2d');
+      ctx.font = '50px CanvasTest';
+      const A = ctx.measureText('A'), D = ctx.measureText('D');
+      // em metrics come from the font at 40px (typo asc:desc = 3:1 → 30/10)
+      ctx.font = '40px CanvasTest';
+      const em = ctx.measureText('A');
+      JSON.stringify({
+        ready:      typeof document.fonts.ready.then,   // FontFaceSet present
+        advance:    A.width,                            // 1em advance = 50 (not the 127 ink)
+        aRight:     A.actualBoundingBoxRight,
+        aAscent:    Math.round(A.actualBoundingBoxAscent),
+        dLeft:      Math.round(D.actualBoundingBoxLeft), // D has a ~50 left bearing
+        emAscent:   em.emHeightAscent,
+        emDescent:  em.emHeightDescent
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['ready']).to eq('function')
+    expect(r['advance']).to eq(50)                 # hmtx advance, not the 127px ink width
+    expect(r['aRight']).to be_within(1).of(50)
+    expect(r['aAscent']).to be >= 35
+    expect(r['dLeft']).to be_within(2).of(50)
+    expect(r['emAscent']).to eq(30)
+    expect(r['emDescent']).to eq(10)
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
