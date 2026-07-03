@@ -1619,6 +1619,49 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['wrongThis']).to eq('TypeError')
   end
 
+  it 'createPattern: null for an unusable image, throws for broken / bad repetition' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.createElement('canvas').getContext('2d');
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name || e.constructor.name; } };
+      const nosrc  = new Image();                         // never loaded -> null
+      JSON.stringify({
+        nosrc:      ctx.createPattern(nosrc, 'repeat'),                    // null
+        undef:      err(() => ctx.createPattern(document.createElement('canvas'), undefined)), // SyntaxError
+        bad:        err(() => ctx.createPattern(document.createElement('canvas'), 'nope')),    // SyntaxError
+        str:        err(() => ctx.createPattern('not-an-image', 'repeat')),                    // TypeError
+        emptyRep:   (() => { const c = document.createElement('canvas'); c.width = 2; c.height = 2;
+                             return ctx.createPattern(c, '') instanceof CanvasPattern; })()     // '' -> 'repeat'
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['nosrc']).to be_nil
+    expect(r['undef']).to eq('SyntaxError')
+    expect(r['bad']).to eq('SyntaxError')
+    expect(r['str']).to eq('TypeError')
+    expect(r['emptyRep']).to be true
+  end
+
+  it 'parses colour keywords case-insensitively and auto-closes an unclosed function' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const px = (v) => { const c = document.createElement('canvas'); c.width = 2; c.height = 2;
+        const x = c.getContext('2d'); x.fillStyle = '#f00'; x.fillStyle = v; x.fillRect(0, 0, 2, 2);
+        return Array.from(x.getImageData(0, 0, 1, 1).data); };
+      JSON.stringify({
+        transparent: px('TrAnSpArEnT'),   // case-insensitive keyword
+        rgbEof:      px('rgb(0, 255, 0'),  // auto-closed
+        rgbaEof:     px('rgba(0, 255, 0, 1')
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['transparent']).to eq([0, 0, 0, 0])
+    expect(r['rgbEof']).to eq([0, 255, 0, 255])
+    expect(r['rgbaEof']).to eq([0, 255, 0, 255])
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

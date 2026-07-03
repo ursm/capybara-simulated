@@ -886,12 +886,6 @@ html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.changed.ht
 - currentColor is computed when the attribute is set, not when it is painted
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.removed.html:
 - currentColor is solid black when the canvas element is not in a document
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.rgb-eof.html:
-- 'Canvas test: 2d.fillStyle.parse.rgb-eof'
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.rgba-eof.html:
-- 'Canvas test: 2d.fillStyle.parse.rgba-eof'
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.transparent-2.html:
-- 'Canvas test: 2d.fillStyle.parse.transparent-2'
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.currentcolor.html:
 - Relative color works as color input with currentcolor
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.html:
@@ -909,28 +903,18 @@ html/canvas/element/fill-and-stroke-styles/2d.gradient.object.invalidoffset.html
 - 'Canvas test: 2d.gradient.object.invalidoffset'
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
 - Relative color works as CanvasGradient color input
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.emptysrc.html:
-- 'Canvas test: 2d.pattern.image.incomplete.emptysrc'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.immediate.html:
 - 'Canvas test: 2d.pattern.image.incomplete.immediate'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.nosrc.html:
-- 'Canvas test: 2d.pattern.image.incomplete.nosrc'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.reload.html:
 - 'Canvas test: 2d.pattern.image.incomplete.reload'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.removedsrc.html:
-- 'Canvas test: 2d.pattern.image.incomplete.removedsrc'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading.html:
 - 'Canvas test: 2d.pattern.image.nonexistent-but-loading'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nosrc.html:
 - 'Canvas test: 2d.pattern.image.nosrc'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.string.html:
-- 'Canvas test: 2d.pattern.image.string'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zeroheight.html:
 - 'Canvas test: 2d.pattern.image.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zerowidth.html:
 - 'Canvas test: 2d.pattern.image.zerowidth'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.undefined.html:
-- 'Canvas test: 2d.pattern.repeat.undefined'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
 - 'Canvas test: 2d.pattern.svgimage.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
