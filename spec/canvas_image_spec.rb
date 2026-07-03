@@ -1226,6 +1226,28 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['partial']).to be > 3                   # the diagonal is anti-aliased
   end
 
+  it 'throws (not crashes) on an un-allocatably large getImageData / ImageData' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = Timeout.timeout(15) do
+      session.evaluate_script(<<~JS)
+        const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+        const errs = {};
+        // A ~2^31-pixel region can't be backed — real browsers throw TypeError
+        // rather than aborting the process on the huge allocation.
+        try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.get = e.constructor.name; }
+        try { new ImageData(2147483647, 10); } catch (e) { errs.ctor = e.constructor.name; }
+        // A normal region still works.
+        const ok = ctx.getImageData(0, 0, 4, 4).data.length;
+        JSON.stringify({ errs, ok });
+      JS
+    end
+    r = JSON.parse(out)
+    expect(r['errs']['get']).to eq('TypeError')
+    expect(r['errs']['ctor']).to eq('TypeError')
+    expect(r['ok']).to eq(64)   # 4×4×4 — normal getImageData unaffected
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
