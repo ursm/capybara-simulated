@@ -734,6 +734,2563 @@ fetch/h1-parsing/status-code.window.js:
 - 'HTTP/1.1 99 NOT OK '
 - HTTP/1.1 BLAH (network error)
 - HTTP/1.1 C8 (network error)
+html/canvas/element/2d.conformance.requirements.missingargs.html:
+- Missing arguments cause TypeError
+html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
+- Calling getContext with invalid arguments.
+html/canvas/element/canvas-host/2d.canvas.host.initial.reset.pattern.html:
+- Resetting the canvas state does not invalidate any existing patterns
+html/canvas/element/canvas-host/2d.canvas.host.readonly.html:
+- Canvas objects are readonly
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.decimal.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.em.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.exp.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.hex.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.octal.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.percent.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.plus.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.space.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.trailingjunk.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.whitespace.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.parse.zero.html:
+- Parsing of non-negative integers
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.decimal.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.em.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.exp.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.hex.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.octal.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.percent.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.plus.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.space.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.trailingjunk.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.whitespace.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/canvas-host/2d.canvas.host.size.attributes.setAttribute.zero.html:
+- Parsing of non-negative integers in setAttribute
+html/canvas/element/compositing/2d.composite.canvas.clear.html:
+- 'Canvas test: 2d.composite.canvas.clear'
+html/canvas/element/compositing/2d.composite.canvas.copy.html:
+- 'Canvas test: 2d.composite.canvas.copy'
+html/canvas/element/compositing/2d.composite.canvas.destination-atop.html:
+- 'Canvas test: 2d.composite.canvas.destination-atop'
+html/canvas/element/compositing/2d.composite.canvas.destination-in.html:
+- 'Canvas test: 2d.composite.canvas.destination-in'
+html/canvas/element/compositing/2d.composite.canvas.destination-out.html:
+- 'Canvas test: 2d.composite.canvas.destination-out'
+html/canvas/element/compositing/2d.composite.canvas.destination-over.html:
+- 'Canvas test: 2d.composite.canvas.destination-over'
+html/canvas/element/compositing/2d.composite.canvas.lighter.html:
+- 'Canvas test: 2d.composite.canvas.lighter'
+html/canvas/element/compositing/2d.composite.canvas.source-atop.html:
+- 'Canvas test: 2d.composite.canvas.source-atop'
+html/canvas/element/compositing/2d.composite.canvas.source-in.html:
+- 'Canvas test: 2d.composite.canvas.source-in'
+html/canvas/element/compositing/2d.composite.canvas.source-out.html:
+- 'Canvas test: 2d.composite.canvas.source-out'
+html/canvas/element/compositing/2d.composite.canvas.source-over.html:
+- 'Canvas test: 2d.composite.canvas.source-over'
+html/canvas/element/compositing/2d.composite.canvas.xor.html:
+- 'Canvas test: 2d.composite.canvas.xor'
+html/canvas/element/compositing/2d.composite.globalAlpha.canvas.html:
+- 'Canvas test: 2d.composite.globalAlpha.canvas'
+html/canvas/element/compositing/2d.composite.globalAlpha.canvascopy.html:
+- 'Canvas test: 2d.composite.globalAlpha.canvascopy'
+html/canvas/element/compositing/2d.composite.globalAlpha.canvaspattern.html:
+- 'Canvas test: 2d.composite.globalAlpha.canvaspattern'
+html/canvas/element/compositing/2d.composite.globalAlpha.image.html:
+- 'Canvas test: 2d.composite.globalAlpha.image'
+html/canvas/element/compositing/2d.composite.globalAlpha.imagepattern.html:
+- 'Canvas test: 2d.composite.globalAlpha.imagepattern'
+html/canvas/element/compositing/2d.composite.globalAlpha.invalid.html:
+- 'Canvas test: 2d.composite.globalAlpha.invalid'
+html/canvas/element/compositing/2d.composite.globalAlpha.range.html:
+- 'Canvas test: 2d.composite.globalAlpha.range'
+html/canvas/element/compositing/2d.composite.image.clear.html:
+- 'Canvas test: 2d.composite.image.clear'
+html/canvas/element/compositing/2d.composite.image.copy.html:
+- 'Canvas test: 2d.composite.image.copy'
+html/canvas/element/compositing/2d.composite.image.destination-atop.html:
+- 'Canvas test: 2d.composite.image.destination-atop'
+html/canvas/element/compositing/2d.composite.image.destination-in.html:
+- 'Canvas test: 2d.composite.image.destination-in'
+html/canvas/element/compositing/2d.composite.image.destination-out.html:
+- 'Canvas test: 2d.composite.image.destination-out'
+html/canvas/element/compositing/2d.composite.image.destination-over.html:
+- 'Canvas test: 2d.composite.image.destination-over'
+html/canvas/element/compositing/2d.composite.image.lighter.html:
+- 'Canvas test: 2d.composite.image.lighter'
+html/canvas/element/compositing/2d.composite.image.source-atop.html:
+- 'Canvas test: 2d.composite.image.source-atop'
+html/canvas/element/compositing/2d.composite.image.source-in.html:
+- 'Canvas test: 2d.composite.image.source-in'
+html/canvas/element/compositing/2d.composite.image.source-out.html:
+- 'Canvas test: 2d.composite.image.source-out'
+html/canvas/element/compositing/2d.composite.image.source-over.html:
+- 'Canvas test: 2d.composite.image.source-over'
+html/canvas/element/compositing/2d.composite.image.xor.html:
+- 'Canvas test: 2d.composite.image.xor'
+html/canvas/element/compositing/2d.composite.operation.clear.html:
+- 'Canvas test: 2d.composite.operation.clear'
+html/canvas/element/compositing/2d.composite.solid.clear.html:
+- 'Canvas test: 2d.composite.solid.clear'
+html/canvas/element/compositing/2d.composite.solid.destination-atop.html:
+- 'Canvas test: 2d.composite.solid.destination-atop'
+html/canvas/element/compositing/2d.composite.solid.destination-in.html:
+- 'Canvas test: 2d.composite.solid.destination-in'
+html/canvas/element/compositing/2d.composite.solid.source-out.html:
+- 'Canvas test: 2d.composite.solid.source-out'
+html/canvas/element/compositing/2d.composite.transparent.clear.html:
+- 'Canvas test: 2d.composite.transparent.clear'
+html/canvas/element/compositing/2d.composite.transparent.copy.html:
+- 'Canvas test: 2d.composite.transparent.copy'
+html/canvas/element/compositing/2d.composite.transparent.destination-atop.html:
+- 'Canvas test: 2d.composite.transparent.destination-atop'
+html/canvas/element/compositing/2d.composite.transparent.destination-in.html:
+- 'Canvas test: 2d.composite.transparent.destination-in'
+html/canvas/element/compositing/2d.composite.transparent.source-in.html:
+- 'Canvas test: 2d.composite.transparent.source-in'
+html/canvas/element/compositing/2d.composite.transparent.source-out.html:
+- 'Canvas test: 2d.composite.transparent.source-out'
+html/canvas/element/compositing/2d.composite.uncovered.fill.copy.html:
+- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.fill.destination-atop.html:
+- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.fill.destination-in.html:
+- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.fill.source-in.html:
+- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.fill.source-out.html:
+- fill() draws pixels not covered by the source object as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.image.copy.html:
+- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.image.destination-atop.html:
+- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.image.destination-in.html:
+- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.image.source-in.html:
+- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.image.source-out.html:
+- drawImage() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.nocontext.copy.html:
+- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.nocontext.destination-atop.html:
+- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.nocontext.destination-in.html:
+- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.nocontext.source-in.html:
+- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.nocontext.source-out.html:
+- drawImage() of a canvas with no context draws pixels as (0,0,0,0), and does not
+  leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.pattern.copy.html:
+- Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.pattern.destination-atop.html:
+- Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.pattern.destination-in.html:
+- Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.pattern.source-in.html:
+- Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/compositing/2d.composite.uncovered.pattern.source-out.html:
+- Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does
+  not leave the pixels unchanged.
+html/canvas/element/conformance-requirements/2d.conformance.requirements.missingargs.html:
+- Missing arguments cause TypeError
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.3arg.html:
+- 'Canvas test: 2d.drawImage.3arg'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.5arg.html:
+- 'Canvas test: 2d.drawImage.5arg'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.9arg.basic.html:
+- 'Canvas test: 2d.drawImage.9arg.basic'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.9arg.destpos.html:
+- 'Canvas test: 2d.drawImage.9arg.destpos'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.9arg.destsize.html:
+- 'Canvas test: 2d.drawImage.9arg.destsize'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.9arg.sourcepos.html:
+- 'Canvas test: 2d.drawImage.9arg.sourcepos'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.9arg.sourcesize.html:
+- 'Canvas test: 2d.drawImage.9arg.sourcesize'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.alpha.html:
+- 'Canvas test: 2d.drawImage.alpha'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.animated.gif.html:
+- drawImage() of an animated GIF draws the first frame
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.broken.html:
+- 'Canvas test: 2d.drawImage.broken'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.clip.html:
+- 'Canvas test: 2d.drawImage.clip'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.composite.html:
+- 'Canvas test: 2d.drawImage.composite'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.detachedcanvas.html:
+- drawImage with detached OffscreenCanvas as the source should throw exception
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.floatsource.html:
+- 'Canvas test: 2d.drawImage.floatsource'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedest.html:
+- Negative destination width/height represents the correct rectangle
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
+- Negative dimensions do not affect the direction of the image
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativesource.html:
+- Negative source width/height represents the correct rectangle
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
+- 'Canvas test: 2d.drawImage.nonexistent'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonfinite.html:
+- drawImage() with Infinity/NaN is ignored
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nowrap.html:
+- Stretched images do not get pixels wrapping around the edges
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.null.html:
+- 'Canvas test: 2d.drawImage.null'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.path.html:
+- 'Canvas test: 2d.drawImage.path'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.self.2.html:
+- 'Canvas test: 2d.drawImage.self.2'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.svg.html:
+- drawImage() of an SVG image
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.transform.html:
+- 'Canvas test: 2d.drawImage.transform'
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.html:
+- Incorrect image types in drawImage do not match any defined overloads, so WebIDL
+  throws a TypeError
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.wrongtype.paragraph.html:
+- Incorrect image types in drawImage do not match any defined overloads, so WebIDL
+  throws a TypeError
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerocanvas.html:
+- drawImage with zero-sized canvas as the source shoud throw exception
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.html:
+- drawImage with zero-sized source rectangle draws nothing without exception
+html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
+- drawImage with zero-sized source rectangle from image draws nothing without exception
+html/canvas/element/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html:
+- fillRect draws shadows
+html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.globalcomposite.html:
+- strokeRect is not affected by globalCompositeOperation
+html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.shadow.html:
+- strokeRect draws shadows
+html/canvas/element/drawing-rectangles-to-the-canvas/2d.strokeRect.zero.4.html:
+- strokeRect of Nx0 pixels draws a closed line with no caps
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
+- CSSHSL works as color input
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
+- CSSRGB works as color input
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.html:
+- ctx.fillStyle works with color objects
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.transparency.html:
+- ctx.fillStyle with color objects has transparency
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.currentcolor.html:
+- color-mix works as color input with currentcolor
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.html:
+- color-mix works as color input
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.basic.html:
+- currentColor is computed from the canvas element
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.changed.html:
+- currentColor is computed when the attribute is set, not when it is painted
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.current.removed.html:
+- currentColor is solid black when the canvas element is not in a document
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.rgb-eof.html:
+- 'Canvas test: 2d.fillStyle.parse.rgb-eof'
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.rgba-eof.html:
+- 'Canvas test: 2d.fillStyle.parse.rgba-eof'
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.parse.transparent-2.html:
+- 'Canvas test: 2d.fillStyle.parse.transparent-2'
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.currentcolor.html:
+- Relative color works as color input with currentcolor
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.html:
+- Relative color works as color input
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.toStringFunctionCallback.html:
+- Passing a function in to ctx.fillStyle or ctx.strokeStyle with a toString callback
+  works as specified
+html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
+- color-mix works as CanvasGradient color input
+html/canvas/element/fill-and-stroke-styles/2d.gradient.conic.invalid.inputs.html:
+- Conic gradient function with invalid inputs
+html/canvas/element/fill-and-stroke-styles/2d.gradient.object.current.html:
+- 'Canvas test: 2d.gradient.object.current'
+html/canvas/element/fill-and-stroke-styles/2d.gradient.object.invalidoffset.html:
+- 'Canvas test: 2d.gradient.object.invalidoffset'
+html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
+- Relative color works as CanvasGradient color input
+html/canvas/element/fill-and-stroke-styles/2d.pattern.animated.gif.html:
+- createPattern() of an animated GIF draws the first frame
+html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.canvas.html:
+- 'Canvas test: 2d.pattern.basic.canvas'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.image.html:
+- 'Canvas test: 2d.pattern.basic.image'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.nocontext.html:
+- 'Canvas test: 2d.pattern.basic.nocontext'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.type.html:
+- 'Canvas test: 2d.pattern.basic.type'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.basic.zerocanvas.html:
+- 'Canvas test: 2d.pattern.basic.zerocanvas'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.crosscanvas.html:
+- 'Canvas test: 2d.pattern.crosscanvas'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.broken.html:
+- 'Canvas test: 2d.pattern.image.broken'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.emptysrc.html:
+- 'Canvas test: 2d.pattern.image.incomplete.emptysrc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.immediate.html:
+- 'Canvas test: 2d.pattern.image.incomplete.immediate'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.nosrc.html:
+- 'Canvas test: 2d.pattern.image.incomplete.nosrc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.reload.html:
+- 'Canvas test: 2d.pattern.image.incomplete.reload'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.removedsrc.html:
+- 'Canvas test: 2d.pattern.image.incomplete.removedsrc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading.html:
+- 'Canvas test: 2d.pattern.image.nonexistent-but-loading'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent.html:
+- 'Canvas test: 2d.pattern.image.nonexistent'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nosrc.html:
+- 'Canvas test: 2d.pattern.image.nosrc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zeroheight.html:
+- 'Canvas test: 2d.pattern.image.zeroheight'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zerowidth.html:
+- 'Canvas test: 2d.pattern.image.zerowidth'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.canvas1.html:
+- 'Canvas test: 2d.pattern.modify.canvas1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.canvas2.html:
+- 'Canvas test: 2d.pattern.modify.canvas2'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.image1.html:
+- 'Canvas test: 2d.pattern.modify.image1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.modify.image2.html:
+- 'Canvas test: 2d.pattern.modify.image2'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.basic.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.basic'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord1.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.coord1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord2.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.coord2'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord3.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.coord3'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.outside'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside_arc.html:
+- 'Canvas test: 2d.pattern.paint.norepeat.outside_arc'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.orientation.canvas.html:
+- Canvas patterns do not get flipped when painted
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.orientation.image.html:
+- Image patterns do not get flipped when painted
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.basic.html:
+- 'Canvas test: 2d.pattern.paint.repeat.basic'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.coord1.html:
+- 'Canvas test: 2d.pattern.paint.repeat.coord1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.coord2.html:
+- 'Canvas test: 2d.pattern.paint.repeat.coord2'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.coord3.html:
+- 'Canvas test: 2d.pattern.paint.repeat.coord3'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeat.outside.html:
+- 'Canvas test: 2d.pattern.paint.repeat.outside'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeatx.basic.html:
+- 'Canvas test: 2d.pattern.paint.repeatx.basic'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeatx.coord1.html:
+- 'Canvas test: 2d.pattern.paint.repeatx.coord1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeatx.outside.html:
+- 'Canvas test: 2d.pattern.paint.repeatx.outside'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeaty.basic.html:
+- 'Canvas test: 2d.pattern.paint.repeaty.basic'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeaty.coord1.html:
+- 'Canvas test: 2d.pattern.paint.repeaty.coord1'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.paint.repeaty.outside.html:
+- 'Canvas test: 2d.pattern.paint.repeaty.outside'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.case.html:
+- 'Canvas test: 2d.pattern.repeat.case'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.empty.html:
+- 'Canvas test: 2d.pattern.repeat.empty'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.null.html:
+- 'Canvas test: 2d.pattern.repeat.null'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.nullsuffix.html:
+- 'Canvas test: 2d.pattern.repeat.nullsuffix'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.undefined.html:
+- 'Canvas test: 2d.pattern.repeat.undefined'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.unrecognised.html:
+- 'Canvas test: 2d.pattern.repeat.unrecognised'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.repeat.unrecognisednull.html:
+- 'Canvas test: 2d.pattern.repeat.unrecognisednull'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.nonexistent.html:
+- 'Canvas test: 2d.pattern.svgimage.nonexistent'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
+- 'Canvas test: 2d.pattern.svgimage.zeroheight'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
+- 'Canvas test: 2d.pattern.svgimage.zerowidth'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.identity.html:
+- 'Canvas test: 2d.pattern.transform.identity'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.infinity.html:
+- 'Canvas test: 2d.pattern.transform.infinity'
+html/canvas/element/fill-and-stroke-styles/2d.pattern.transform.invalid.html:
+- 'Canvas test: 2d.pattern.transform.invalid'
+html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.html:
+- ctx.strokeStyle works with color objects
+html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.transparency.html:
+- ctx.strokeStyle with color objects has transparency
+html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colormix.html:
+- color-mix works as color input
+html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.relativecolor.html:
+- Relative color works as color input
+html/canvas/element/line-styles/2d.line.cap.invalid.html:
+- Setting lineCap to invalid values is ignored
+html/canvas/element/line-styles/2d.line.cap.open.html:
+- Line caps are drawn at the corners of an unclosed rectangle
+html/canvas/element/line-styles/2d.line.cap.round.html:
+- lineCap 'round' is rendered correctly
+html/canvas/element/line-styles/2d.line.cap.square.html:
+- lineCap 'square' is rendered correctly
+html/canvas/element/line-styles/2d.line.join.bevel.html:
+- lineJoin 'bevel' is rendered correctly
+html/canvas/element/line-styles/2d.line.join.closed.html:
+- Line joins are drawn at the corner of a closed rectangle
+html/canvas/element/line-styles/2d.line.join.invalid.html:
+- Setting lineJoin to invalid values is ignored
+html/canvas/element/line-styles/2d.line.join.miter.html:
+- lineJoin 'miter' is rendered correctly
+html/canvas/element/line-styles/2d.line.join.parallel.html:
+- Line joins are drawn at 180-degree joins
+html/canvas/element/line-styles/2d.line.miter.acute.html:
+- Miter joins are drawn correctly with acute angles
+html/canvas/element/line-styles/2d.line.miter.invalid.html:
+- Setting miterLimit to invalid values is ignored
+html/canvas/element/line-styles/2d.line.miter.lineedge.html:
+- Miter joins are not drawn when the miter limit is exceeded at the corners of a zero-height
+  rectangle
+html/canvas/element/line-styles/2d.line.miter.obtuse.html:
+- Miter joins are drawn correctly with obtuse angles
+html/canvas/element/line-styles/2d.line.miter.valid.html:
+- Setting miterLimit to valid values works
+html/canvas/element/line-styles/2d.line.miter.within.html:
+- Miter joins are drawn when the miter limit is not quite exceeded
+html/canvas/element/line-styles/2d.line.width.invalid.html:
+- Setting lineWidth to invalid values is ignored
+html/canvas/element/line-styles/2d.line.width.valid.html:
+- Setting lineWidth to valid values works
+html/canvas/element/manual/context-attributes/getContextAttributes.html:
+- 'Test context creation attributes colorType: float16'
+- 'Test context creation attributes colorType: unorm8'
+- Test default context creation attributes
+html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 50,50 should be blue.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 50,99 should be blue.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 55,55 should be black.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 55,94 should be black.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 94,55 should be black.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 94,94 should be black.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 99,50 should be blue.'
+- 'Test scenario 9: sx = 0, sy = 0, sw = 50, sh = 50, dx = 100, dy = 100, dw = -50,
+  dh = -50 --- Pixel 99,99 should be blue.'
+html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_crossorigin.sub.html:
+- Can get pixels of canvas with CORS enabled cross origin image drawn
+- Can get pixels of canvas with same origin image drawn
+- Can't get pixels of canvas with CORS enabled cross origin image drawn from non-CORS
+  element
+- Can't get pixels of canvas with non-CORS enabled cross origin image drawn
+html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_html_image.html:
+- 'Test scenario 10: sx = 0, sy = 0, sw = 512, sh = 512, dx = 0, dy = 0, dw = 256,
+  dh = 256 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 10: sx = 0, sy = 0, sw = 512, sh = 512, dx = 0, dy = 0, dw = 256,
+  dh = 256 --- Pixel 0,99 should be light purple.'
+- 'Test scenario 10: sx = 0, sy = 0, sw = 512, sh = 512, dx = 0, dy = 0, dw = 256,
+  dh = 256 --- Pixel 99,0 should be light purple.'
+- 'Test scenario 10: sx = 0, sy = 0, sw = 512, sh = 512, dx = 0, dy = 0, dw = 256,
+  dh = 256 --- Pixel 99,99 should be light purple.'
+- 'Test scenario 11: sx = 0, sy = 0, sw = 2048, sh = 2048, dx = 0, dy = 0, dw = 800,
+  dh = 800 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 11: sx = 0, sy = 0, sw = 2048, sh = 2048, dx = 0, dy = 0, dw = 800,
+  dh = 800 --- Pixel 0,99 should be light purple.'
+- 'Test scenario 11: sx = 0, sy = 0, sw = 2048, sh = 2048, dx = 0, dy = 0, dw = 800,
+  dh = 800 --- Pixel 99,0 should be light purple.'
+- 'Test scenario 11: sx = 0, sy = 0, sw = 2048, sh = 2048, dx = 0, dy = 0, dw = 800,
+  dh = 800 --- Pixel 99,99 should be light purple.'
+- 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
+  125, dh = 125 --- Pixel 70,70 should be light purple.'
+- 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
+  125, dh = 125 --- Pixel 70,99 should be light purple.'
+- 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
+  125, dh = 125 --- Pixel 99,70 should be light purple.'
+- 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
+  125, dh = 125 --- Pixel 99,99 should be light purple.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 0,33 should be gray.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 15,31 should be light purple.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 15,63 should be gray.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 16,0 should be gray.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 17,33 should be light purple.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 31,31 should be gray.'
+- 'Test scenario 14: sx = 64, sy = 64, sw = 384, sh = 384, dx = 0, dy = 0, dw = 32,
+  dh = 64 --- Pixel 31,63 should be light purple.'
+- 'Test scenario 1: dx = 0, dy = 0 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 1: dx = 0, dy = 0 --- Pixel 0,99 should be light purple.'
+- 'Test scenario 1: dx = 0, dy = 0 --- Pixel 99,0 should be light purple.'
+- 'Test scenario 1: dx = 0, dy = 0 --- Pixel 99,99 should be light purple.'
+- 'Test scenario 2: dx = 25, dy = 25 --- Pixel 25,25 should be light purple.'
+- 'Test scenario 2: dx = 25, dy = 25 --- Pixel 25,99 should be light purple.'
+- 'Test scenario 2: dx = 25, dy = 25 --- Pixel 99,25 should be light purple.'
+- 'Test scenario 2: dx = 25, dy = 25 --- Pixel 99,99 should be light purple.'
+- 'Test scenario 3: dx = 50, dy = 50, dw = 50, dh = 50 --- Pixel 50,50 should be light
+  purple.'
+- 'Test scenario 3: dx = 50, dy = 50, dw = 50, dh = 50 --- Pixel 50,99 should be gray.'
+- 'Test scenario 3: dx = 50, dy = 50, dw = 50, dh = 50 --- Pixel 99,50 should be gray.'
+- 'Test scenario 3: dx = 50, dy = 50, dw = 50, dh = 50 --- Pixel 99,99 should be light
+  purple.'
+- 'Test scenario 4: dx = 50, dy = 50, dw = 16, dh = 16 --- Pixel 50,50 should be light
+  purple.'
+- 'Test scenario 4: dx = 50, dy = 50, dw = 16, dh = 16 --- Pixel 50,65 should be gray.'
+- 'Test scenario 4: dx = 50, dy = 50, dw = 16, dh = 16 --- Pixel 65,50 should be gray.'
+- 'Test scenario 4: dx = 50, dy = 50, dw = 16, dh = 16 --- Pixel 65,65 should be light
+  purple.'
+- 'Test scenario 5: dx = 50, dy = 50, dw = 64, dh = 32 --- Pixel 50,50 should be light
+  purple.'
+- 'Test scenario 5: dx = 50, dy = 50, dw = 64, dh = 32 --- Pixel 50,81 should be gray.'
+- 'Test scenario 5: dx = 50, dy = 50, dw = 64, dh = 32 --- Pixel 99,50 should be gray.'
+- 'Test scenario 5: dx = 50, dy = 50, dw = 64, dh = 32 --- Pixel 99,81 should be light
+  purple.'
+- 'Test scenario 6: sx = 0, sy = 0, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 6: sx = 0, sy = 0, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 0,31 should be light purple.'
+- 'Test scenario 6: sx = 0, sy = 0, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 31,0 should be light purple.'
+- 'Test scenario 6: sx = 0, sy = 0, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 31,31 should be light purple.'
+- 'Test scenario 7: sx = 0, sy = 0, sw = 32, sh = 32, dx = 32, dy = 32, dw = 32, dh
+  = 32 --- Pixel 32,32 should be light purple.'
+- 'Test scenario 7: sx = 0, sy = 0, sw = 32, sh = 32, dx = 32, dy = 32, dw = 32, dh
+  = 32 --- Pixel 32,63 should be light purple.'
+- 'Test scenario 7: sx = 0, sy = 0, sw = 32, sh = 32, dx = 32, dy = 32, dw = 32, dh
+  = 32 --- Pixel 63,32 should be light purple.'
+- 'Test scenario 7: sx = 0, sy = 0, sw = 32, sh = 32, dx = 32, dy = 32, dw = 32, dh
+  = 32 --- Pixel 63,63 should be light purple.'
+- 'Test scenario 8: sx = 32, sy = 32, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 8: sx = 32, sy = 32, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 0,31 should be light purple.'
+- 'Test scenario 8: sx = 32, sy = 32, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 31,0 should be light purple.'
+- 'Test scenario 8: sx = 32, sy = 32, sw = 32, sh = 32, dx = 0, dy = 0, dw = 32, dh
+  = 32 --- Pixel 31,31 should be light purple.'
+- 'Test scenario 9: sx = 32, sy = 32, sw = 32, sh = 32, dx = 32, dy = 32, dw = -32,
+  dh = -32 --- Pixel 0,0 should be light purple.'
+- 'Test scenario 9: sx = 32, sy = 32, sw = 32, sh = 32, dx = 32, dy = 32, dw = -32,
+  dh = -32 --- Pixel 0,31 should be light purple.'
+- 'Test scenario 9: sx = 32, sy = 32, sw = 32, sh = 32, dx = 32, dy = 32, dw = -32,
+  dh = -32 --- Pixel 31,0 should be light purple.'
+- 'Test scenario 9: sx = 32, sy = 32, sw = 32, sh = 32, dx = 32, dy = 32, dw = -32,
+  dh = -32 --- Pixel 31,31 should be light purple.'
+html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_svg_image_1.html:
+- Load a 100x100 image to a SVG image and draw it to a 100x100 canvas.
+html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_svg_image_with_foreign_object_does_not_taint.html:
+- Canvas should not be tainted after drawing SVG including <foreignObject>
+html/canvas/element/manual/drawing-paths-to-the-canvas/canvas_complexshapes_ispointInpath_001.htm:
+- isPointInPath unaffected by transformation matrix
+html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_001.html:
+- drawFocusIfNeeded draws a focus ring.
+html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_004.html:
+- drawFocusIfNeeded does draw a focus ring if the element is in focus.
+html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_005.html:
+- drawFocusIfNeeded does draw a focus ring if the element is in focus and the user
+  activated a particular focus ring.
+html/canvas/element/manual/fill-and-stroke-styles/2d.fillStyle.parse.current.notrendered.html:
+- currentColor is computed from the canvas element even when element is not rendered
+html/canvas/element/manual/fill-and-stroke-styles/pattern-from-canvas-cross-origin-taint.https.sub.html:
+- Tainting check for a tainted canvas in canvas pattern
+html/canvas/element/manual/fill-and-stroke-styles/pattern-from-image-cross-origin-taint.https.sub.html:
+- Tainting check for cross origin image in canvas pattern
+html/canvas/element/manual/fill-and-stroke-styles/pattern-from-img-cross-origin-taint.https.sub.html:
+- Tainting check for cross origin image in canvas pattern
+html/canvas/element/manual/fill-and-stroke-styles/pattern-from-video-cross-origin-taint.https.sub.html:
+- Tainting check for cross origin video in canvas pattern
+html/canvas/element/manual/filters/svg-diffuse-filter-visited-color-taints.html:
+- Tainting check for visited link in SVG diffuse lighting filter
+html/canvas/element/manual/filters/svg-drop-shadow-filter-visited-color-taints.html:
+- Tainting check for visited link in SVG drop shadowfilter
+html/canvas/element/manual/filters/svg-filter-feImage-cross-origin-taint.https.sub.html:
+- Tainting check for cross origin image in SVG feImage filter
+html/canvas/element/manual/filters/svg-flood-filter-visited-color-taints.html:
+- Tainting check for visited link in SVG flood filter
+html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html:
+- Tainting check for visited link in SVG specular lighting filter
+html/canvas/element/manual/image-smoothing/imagesmoothing.html:
+- Test that image smoothing is actually on by default and just the attribute value.
+- Test that image smoothing works when imageSmoothingEnabled is set to true
+- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) still works
+  after repaints.
+- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
+  drawImage().
+- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
+  fill() and createPattern().
+- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
+  fillRect and createPattern().
+- Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with
+  stroke() and createPattern().
+html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
+- canvas-ImageBitmap-close
+html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
+- createImageBitmap from a Blob with resize option.
+- createImageBitmap from a HTMLCanvasElement with resize option.
+- createImageBitmap from a HTMLImageElement of svg with no specified size with resize
+  option.
+- createImageBitmap from a HTMLImageElement with resize option.
+- createImageBitmap from an ImageBitmap with resize option.
+- createImageBitmap from an ImageData with resize option.
+html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-video-resize.html:
+- createImageBitmap(HTMLVideoElement) with resize option
+html/canvas/element/manual/imagebitmap/createImageBitmap-bounds.html:
+- clip inside using negative width and height
+- clip outside negative
+- clip outside positive
+- simple clip inside
+html/canvas/element/manual/imagebitmap/createImageBitmap-colorSpaceConversion.html:
+- 'createImageBitmap from a Blob, and drawImage on the created ImageBitmap with colorSpaceConversion:
+  none'
+- 'createImageBitmap from a Video, and drawImage on the created ImageBitmap with colorSpaceConversion:
+  none'
+- 'createImageBitmap from a bitmap HTMLImageElement, and drawImage on the created
+  ImageBitmap with colorSpaceConversion: none'
+html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage-closed.html:
+- attempt to draw a closed ImageBitmap to a 2d canvas throws INVALID_STATE_ERR
+html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
+- createImageBitmap from a Blob resized, and drawImage on the created ImageBitmap
+- createImageBitmap from a Blob scaled down, and drawImage on the created ImageBitmap
+- createImageBitmap from a Blob scaled up, and drawImage on the created ImageBitmap
+- createImageBitmap from a Blob with negative sw/sh, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from a Blob, and drawImage on the created ImageBitmap
+- createImageBitmap from a bitmap HTMLImageElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from a bitmap HTMLImageElement scaled down, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a bitmap HTMLImageElement scaled up, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a bitmap HTMLImageElement with negative sw/sh, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from a bitmap HTMLImageElement, and drawImage on the created ImageBitmap
+- createImageBitmap from a bitmap SVGImageElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from a bitmap SVGImageElement scaled down, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a bitmap SVGImageElement scaled up, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a bitmap SVGImageElement with negative sw/sh, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from a bitmap SVGImageElement, and drawImage on the created ImageBitmap
+- createImageBitmap from a vector HTMLImageElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from a vector HTMLImageElement scaled down, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a vector HTMLImageElement scaled up, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a vector HTMLImageElement with negative sw/sh, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from a vector HTMLImageElement, and drawImage on the created ImageBitmap
+- createImageBitmap from a vector SVGImageElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from a vector SVGImageElement scaled down, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a vector SVGImageElement scaled up, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from a vector SVGImageElement with negative sw/sh, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from a vector SVGImageElement, and drawImage on the created ImageBitmap
+- createImageBitmap from an HTMLCanvasElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLCanvasElement scaled down, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLCanvasElement scaled up, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLVideoElement from a data URL resized, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from an HTMLVideoElement from a data URL scaled down, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from an HTMLVideoElement from a data URL scaled up, and drawImage
+  on the created ImageBitmap
+- createImageBitmap from an HTMLVideoElement from a data URL with negative sw/sh,
+  and drawImage on the created ImageBitmap
+- createImageBitmap from an HTMLVideoElement from a data URL, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from an HTMLVideoElement resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLVideoElement scaled down, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLVideoElement scaled up, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an HTMLVideoElement with negative sw/sh, and drawImage on
+  the created ImageBitmap
+- createImageBitmap from an HTMLVideoElement, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageBitmap resized, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageBitmap scaled down, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an ImageBitmap scaled up, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageBitmap with negative sw/sh, and drawImage on the
+  created ImageBitmap
+- createImageBitmap from an ImageBitmap, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageData resized, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageData scaled down, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageData scaled up, and drawImage on the created ImageBitmap
+- createImageBitmap from an ImageData with negative sw/sh, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an ImageData, and drawImage on the created ImageBitmap
+- createImageBitmap from an OffscreenCanvas resized, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an OffscreenCanvas scaled down, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an OffscreenCanvas scaled up, and drawImage on the created
+  ImageBitmap
+- createImageBitmap from an OffscreenCanvas with negative sw/sh, and drawImage on
+  the created ImageBitmap
+- createImageBitmap from an OffscreenCanvas, and drawImage on the created ImageBitmap
+html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation.html:
+- createImageBitmap with EXIF rotation, imageOrientation flipY, and cropping
+- createImageBitmap with EXIF rotation, imageOrientation flipY, and no cropping
+- createImageBitmap with EXIF rotation, imageOrientation flipY, cropping, and nonuniform
+  resize
+- createImageBitmap with EXIF rotation, imageOrientation flipY, cropping, and resize
+- createImageBitmap with EXIF rotation, imageOrientation from-image, and cropping
+- createImageBitmap with EXIF rotation, imageOrientation from-image, and no cropping
+- createImageBitmap with EXIF rotation, imageOrientation from-image, no cropping,
+  and resize
+html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation_none.html:
+- createImageBitmap with Orientation 1
+- createImageBitmap with Orientation 2
+- createImageBitmap with Orientation 3
+- createImageBitmap with Orientation 4
+- createImageBitmap with Orientation 5
+- createImageBitmap with Orientation 6
+- createImageBitmap with Orientation 7
+- createImageBitmap with Orientation 8
+html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
+- 'createImageBitmap from a Blob imageOrientation: "flipY", and drawImage on the created
+  ImageBitmap'
+- 'createImageBitmap from a Blob imageOrientation: "from-image", and drawImage on
+  the created ImageBitmap'
+- 'createImageBitmap from a bitmap HTMLImageElement imageOrientation: "flipY", and
+  drawImage on the created ImageBitmap'
+- 'createImageBitmap from a bitmap HTMLImageElement imageOrientation: "from-image",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from a bitmap SVGImageElement imageOrientation: "flipY", and
+  drawImage on the created ImageBitmap'
+- 'createImageBitmap from a bitmap SVGImageElement imageOrientation: "from-image",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from a vector HTMLImageElement imageOrientation: "flipY", and
+  drawImage on the created ImageBitmap'
+- 'createImageBitmap from a vector HTMLImageElement imageOrientation: "from-image",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from a vector SVGImageElement imageOrientation: "flipY", and
+  drawImage on the created ImageBitmap'
+- 'createImageBitmap from a vector SVGImageElement imageOrientation: "from-image",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from an HTMLCanvasElement imageOrientation: "flipY", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation: "flipY",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation: "from-image",
+  and drawImage on the created ImageBitmap'
+- 'createImageBitmap from an HTMLVideoElement imageOrientation: "flipY", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an HTMLVideoElement imageOrientation: "from-image", and
+  drawImage on the created ImageBitmap'
+- 'createImageBitmap from an ImageBitmap imageOrientation: "flipY", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an ImageBitmap imageOrientation: "from-image", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an ImageData imageOrientation: "flipY", and drawImage on
+  the created ImageBitmap'
+- 'createImageBitmap from an ImageData imageOrientation: "from-image", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an OffscreenCanvas imageOrientation: "flipY", and drawImage
+  on the created ImageBitmap'
+- 'createImageBitmap from an OffscreenCanvas imageOrientation: "from-image", and drawImage
+  on the created ImageBitmap'
+html/canvas/element/manual/imagebitmap/createImageBitmap-in-worker-transfer.html:
+- Transfer ImageBitmap created in worker
+html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
+- createImageBitmap with ArrayBuffer image source.
+- createImageBitmap with CanvasRenderingContext2D image source.
+- createImageBitmap with Uint8Array image source.
+- createImageBitmap with WebGLRenderingContext image source.
+- createImageBitmap with a Blob source and a value between 0 and 1 in resizeHeight
+- createImageBitmap with a Blob source and a value between 0 and 1 in resizeWidth
+- createImageBitmap with a Blob source and a value of 0 in resizeHeight
+- createImageBitmap with a Blob source and a value of 0 int resizeWidth
+- createImageBitmap with a Blob source and oversized (unallocatable) crop region
+- createImageBitmap with a Blob source and sh set to 0
+- createImageBitmap with a Blob source and sw set to 0
+- createImageBitmap with a bitmap HTMLImageElement source and a value between 0 and
+  1 in resizeHeight
+- createImageBitmap with a bitmap HTMLImageElement source and a value between 0 and
+  1 in resizeWidth
+- createImageBitmap with a bitmap HTMLImageElement source and a value of 0 in resizeHeight
+- createImageBitmap with a bitmap HTMLImageElement source and a value of 0 int resizeWidth
+- createImageBitmap with a bitmap HTMLImageElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with a bitmap HTMLImageElement source and sh set to 0
+- createImageBitmap with a bitmap HTMLImageElement source and sw set to 0
+- createImageBitmap with a bitmap SVGImageElement source and a value between 0 and
+  1 in resizeHeight
+- createImageBitmap with a bitmap SVGImageElement source and a value between 0 and
+  1 in resizeWidth
+- createImageBitmap with a bitmap SVGImageElement source and a value of 0 in resizeHeight
+- createImageBitmap with a bitmap SVGImageElement source and a value of 0 int resizeWidth
+- createImageBitmap with a bitmap SVGImageElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with a bitmap SVGImageElement source and sh set to 0
+- createImageBitmap with a bitmap SVGImageElement source and sw set to 0
+- createImageBitmap with a broken image source.
+- createImageBitmap with a closed ImageBitmap.
+- createImageBitmap with a vector HTMLImageElement source and a value between 0 and
+  1 in resizeHeight
+- createImageBitmap with a vector HTMLImageElement source and a value between 0 and
+  1 in resizeWidth
+- createImageBitmap with a vector HTMLImageElement source and a value of 0 in resizeHeight
+- createImageBitmap with a vector HTMLImageElement source and a value of 0 int resizeWidth
+- createImageBitmap with a vector HTMLImageElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with a vector HTMLImageElement source and sh set to 0
+- createImageBitmap with a vector HTMLImageElement source and sw set to 0
+- createImageBitmap with a vector SVGImageElement source and a value between 0 and
+  1 in resizeHeight
+- createImageBitmap with a vector SVGImageElement source and a value between 0 and
+  1 in resizeWidth
+- createImageBitmap with a vector SVGImageElement source and a value of 0 in resizeHeight
+- createImageBitmap with a vector SVGImageElement source and a value of 0 int resizeWidth
+- createImageBitmap with a vector SVGImageElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with a vector SVGImageElement source and sh set to 0
+- createImageBitmap with a vector SVGImageElement source and sw set to 0
+- createImageBitmap with an HTMLCanvasElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with an HTMLCanvasElement source and sh set to 0
+- createImageBitmap with an HTMLCanvasElement source and sw set to 0
+- createImageBitmap with an HTMLVideoElement from a data URL source and a value between
+  0 and 1 in resizeHeight
+- createImageBitmap with an HTMLVideoElement from a data URL source and a value between
+  0 and 1 in resizeWidth
+- createImageBitmap with an HTMLVideoElement from a data URL source and a value of
+  0 in resizeHeight
+- createImageBitmap with an HTMLVideoElement from a data URL source and a value of
+  0 int resizeWidth
+- createImageBitmap with an HTMLVideoElement from a data URL source and oversized
+  (unallocatable) crop region
+- createImageBitmap with an HTMLVideoElement from a data URL source and sh set to
+  0
+- createImageBitmap with an HTMLVideoElement from a data URL source and sw set to
+  0
+- createImageBitmap with an HTMLVideoElement source and a value between 0 and 1 in
+  resizeHeight
+- createImageBitmap with an HTMLVideoElement source and a value between 0 and 1 in
+  resizeWidth
+- createImageBitmap with an HTMLVideoElement source and a value of 0 in resizeHeight
+- createImageBitmap with an HTMLVideoElement source and a value of 0 int resizeWidth
+- createImageBitmap with an HTMLVideoElement source and oversized (unallocatable)
+  crop region
+- createImageBitmap with an HTMLVideoElement source and sh set to 0
+- createImageBitmap with an HTMLVideoElement source and sw set to 0
+- createImageBitmap with an ImageBitmap source and a value between 0 and 1 in resizeHeight
+- createImageBitmap with an ImageBitmap source and a value between 0 and 1 in resizeWidth
+- createImageBitmap with an ImageBitmap source and a value of 0 in resizeHeight
+- createImageBitmap with an ImageBitmap source and a value of 0 int resizeWidth
+- createImageBitmap with an ImageBitmap source and oversized (unallocatable) crop
+  region
+- createImageBitmap with an ImageBitmap source and sh set to 0
+- createImageBitmap with an ImageBitmap source and sw set to 0
+- createImageBitmap with an ImageData source and a value between 0 and 1 in resizeHeight
+- createImageBitmap with an ImageData source and a value between 0 and 1 in resizeWidth
+- createImageBitmap with an ImageData source and a value of 0 in resizeHeight
+- createImageBitmap with an ImageData source and a value of 0 int resizeWidth
+- createImageBitmap with an ImageData source and oversized (unallocatable) crop region
+- createImageBitmap with an ImageData source and sh set to 0
+- createImageBitmap with an ImageData source and sw set to 0
+- createImageBitmap with an OffscreenCanvas source and a value between 0 and 1 in
+  resizeHeight
+- createImageBitmap with an OffscreenCanvas source and a value between 0 and 1 in
+  resizeWidth
+- createImageBitmap with an OffscreenCanvas source and a value of 0 in resizeHeight
+- createImageBitmap with an OffscreenCanvas source and a value of 0 int resizeWidth
+- createImageBitmap with an OffscreenCanvas source and oversized (unallocatable) crop
+  region
+- createImageBitmap with an OffscreenCanvas source and sh set to 0
+- createImageBitmap with an OffscreenCanvas source and sw set to 0
+- createImageBitmap with an available but undecodable image source.
+- createImageBitmap with an available but zero height image source.
+- createImageBitmap with an available but zero width image source.
+- createImageBitmap with an invalid OffscreenCanvas source.
+- createImageBitmap with an oversized canvas source.
+- createImageBitmap with an undecodable blob source.
+- createImageBitmap with empty image source.
+- createImageBitmap with empty video source.
+- createImageBitmap with null image source.
+- createImageBitmap with undefined image source.
+html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
+- 'cross-origin HTMLImageElement: origin unclear 2dContext.drawImage'
+- 'cross-origin HTMLImageElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'cross-origin HTMLImageElement: origin unclear getImageData'
+- 'cross-origin HTMLVideoElement: origin unclear 2dContext.drawImage'
+- 'cross-origin HTMLVideoElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'cross-origin HTMLVideoElement: origin unclear getImageData'
+- 'cross-origin SVGImageElement: origin unclear 2dContext.drawImage'
+- 'cross-origin SVGImageElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'cross-origin SVGImageElement: origin unclear getImageData'
+- 'redirected to cross-origin HTMLVideoElement: origin unclear 2dContext.drawImage'
+- 'redirected to cross-origin HTMLVideoElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'redirected to cross-origin HTMLVideoElement: origin unclear getImageData'
+- 'redirected to same-origin HTMLVideoElement: origin unclear 2dContext.drawImage'
+- 'redirected to same-origin HTMLVideoElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'redirected to same-origin HTMLVideoElement: origin unclear getImageData'
+- 'unclean HTMLCanvasElement: origin unclear 2dContext.drawImage'
+- 'unclean HTMLCanvasElement: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'unclean HTMLCanvasElement: origin unclear getImageData'
+- 'unclean ImageBitmap: origin unclear 2dContext.drawImage'
+- 'unclean ImageBitmap: origin unclear bitmaprenderer.transferFromImageBitmap'
+- 'unclean ImageBitmap: origin unclear getImageData'
+html/canvas/element/manual/imagebitmap/createImageBitmap-serializable.html:
+- Serialize ImageBitmap created from a Blob
+- Serialize ImageBitmap created from a bitmap HTMLImageElement
+- Serialize ImageBitmap created from a bitmap SVGImageElement
+- Serialize ImageBitmap created from a vector HTMLImageElement
+- Serialize ImageBitmap created from a vector SVGImageElement
+- Serialize ImageBitmap created from an HTMLCanvasElement
+- Serialize ImageBitmap created from an HTMLVideoElement
+- Serialize ImageBitmap created from an HTMLVideoElement from a data URL
+- Serialize ImageBitmap created from an ImageBitmap
+- Serialize ImageBitmap created from an ImageData
+- Serialize ImageBitmap created from an OffscreenCanvas
+- Serializing a non-origin-clean ImageBitmap throws.
+html/canvas/element/manual/imagebitmap/createImageBitmap-sizeOverflow.html:
+- createImageBitmap throws an InvalidStateError error with big imageBitmap scaled
+  up in big height
+- createImageBitmap throws an InvalidStateError error with big imageBitmap scaled
+  up in big width
+html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
+- Transfer ImageBitmap created from a Blob
+- Transfer ImageBitmap created from a bitmap HTMLImageElement
+- Transfer ImageBitmap created from a bitmap SVGImageElement
+- Transfer ImageBitmap created from a vector HTMLImageElement
+- Transfer ImageBitmap created from a vector SVGImageElement
+- Transfer ImageBitmap created from an HTMLCanvasElement
+- Transfer ImageBitmap created from an HTMLVideoElement
+- Transfer ImageBitmap created from an HTMLVideoElement from a data URL
+- Transfer ImageBitmap created from an ImageBitmap
+- Transfer ImageBitmap created from an ImageData
+- Transfer ImageBitmap created from an OffscreenCanvas
+- Transferring a non-origin-clean ImageBitmap throws.
+html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.html:
+- ImageBitmap from file with EXIF rotation, duplicated via createImageBitmap
+- ImageBitmap from file with EXIF rotation, duplicated via structuredClone
+- ImageBitmap from file with EXIF rotation, duplicated via worker serialization round-trip
+- ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip
+- ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip,
+  while referenced by a CanvasPattern
+- ImageBitmap from file with EXIF rotation, loaded via <img>
+- ImageBitmap from file with EXIF rotation, loaded via <img> in DOM, imageOrientation
+  = none
+- ImageBitmap from file with EXIF rotation, loaded via <img> not in DOM, imageOrientation
+  = none
+html/canvas/element/manual/line-styles/setLineDash.html:
+- Invalid arguments to setLineDash()
+- setLineDash
+html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
+- shadowBlur Gaussian pixel values for large blur
+- shadowBlur Gaussian pixel values for no blur
+- shadowBlur Gaussian pixel values for small blur
+html/canvas/element/manual/transformations/2d.transformation.getTransform.html:
+- This test ensures that getTransform works correctly.
+html/canvas/element/manual/wide-gamut-canvas/ImageData-fidelity.html:
+- Verify that drawImage->getImageData round trip preserves color values when image
+  metadata has no color space and canvas uses the default color space.
+- Verify that drawImage->getImageData round trip preserves color values when image
+  metadata has no color space and canvas uses the srgb color space.
+- Verify that drawImage->getImageData round trip preserves color values when image
+  metadata has srgb color space and canvas uses the default color space.
+- Verify that drawImage->getImageData round trip preserves color values when image
+  metadata has srgb color space and canvas uses the srgb color space.
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-ImageBitmap.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-ImageData.html:
+- Source display-p3, destination srgb, color 187,0,0,204, cropSource=false
+- Source display-p3, destination srgb, color 187,0,0,204, cropSource=true
+- Source display-p3, destination srgb, color 187,0,0,255, cropSource=false
+- Source display-p3, destination srgb, color 187,0,0,255, cropSource=true
+- Source srgb, destination display-p3, color 187,0,0,204, cropSource=false
+- Source srgb, destination display-p3, color 187,0,0,204, cropSource=true
+- Source srgb, destination display-p3, color 187,0,0,255, cropSource=false
+- Source srgb, destination display-p3, color 187,0,0,255, cropSource=true
+- Source srgb, destination display-p3, color 255,0,0,204, cropSource=false
+- Source srgb, destination display-p3, color 255,0,0,204, cropSource=true
+- Source srgb, destination display-p3, color 255,0,0,255, cropSource=false
+- Source srgb, destination display-p3, color 255,0,0,255, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-canvas.html:
+- Source display-p3, destination srgb, color 187,0,0,204, cropSource=false
+- Source display-p3, destination srgb, color 187,0,0,204, cropSource=true
+- Source display-p3, destination srgb, color 187,0,0,255, cropSource=false
+- Source display-p3, destination srgb, color 187,0,0,255, cropSource=true
+- Source srgb, destination display-p3, color 187,0,0,204, cropSource=false
+- Source srgb, destination display-p3, color 187,0,0,204, cropSource=true
+- Source srgb, destination display-p3, color 187,0,0,255, cropSource=false
+- Source srgb, destination display-p3, color 187,0,0,255, cropSource=true
+- Source srgb, destination display-p3, color 255,0,0,204, cropSource=false
+- Source srgb, destination display-p3, color 255,0,0,204, cropSource=true
+- Source srgb, destination display-p3, color 255,0,0,255, cropSource=false
+- Source srgb, destination display-p3, color 255,0,0,255, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-cloned.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-image.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, cropSource=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-video.html:
+- Rec2020-222000000, Context display-p3, ImageData display-p3, cropSource=false
+- Rec2020-222000000, Context display-p3, ImageData display-p3, cropSource=true
+- Rec2020-222000000, Context display-p3, ImageData srgb, cropSource=false
+- Rec2020-222000000, Context display-p3, ImageData srgb, cropSource=true
+- Rec2020-222000000, Context srgb, ImageData display-p3, cropSource=false
+- Rec2020-222000000, Context srgb, ImageData display-p3, cropSource=true
+- Rec2020-222000000, Context srgb, ImageData srgb, cropSource=false
+- Rec2020-222000000, Context srgb, ImageData srgb, cropSource=true
+- Rec2020-3FF000000, Context display-p3, ImageData display-p3, cropSource=false
+- Rec2020-3FF000000, Context display-p3, ImageData display-p3, cropSource=true
+- Rec2020-3FF000000, Context display-p3, ImageData srgb, cropSource=false
+- Rec2020-3FF000000, Context display-p3, ImageData srgb, cropSource=true
+- Rec2020-3FF000000, Context srgb, ImageData display-p3, cropSource=false
+- Rec2020-3FF000000, Context srgb, ImageData display-p3, cropSource=true
+- Rec2020-3FF000000, Context srgb, ImageData srgb, cropSource=false
+- Rec2020-3FF000000, Context srgb, ImageData srgb, cropSource=true
+- sRGB-BB0000, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-BB0000, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-BB0000, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-BB0000, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-BB0000, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-BB0000, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-BB0000, Context srgb, ImageData srgb, cropSource=false
+- sRGB-BB0000, Context srgb, ImageData srgb, cropSource=true
+- sRGB-FF0100, Context display-p3, ImageData display-p3, cropSource=false
+- sRGB-FF0100, Context display-p3, ImageData display-p3, cropSource=true
+- sRGB-FF0100, Context display-p3, ImageData srgb, cropSource=false
+- sRGB-FF0100, Context display-p3, ImageData srgb, cropSource=true
+- sRGB-FF0100, Context srgb, ImageData display-p3, cropSource=false
+- sRGB-FF0100, Context srgb, ImageData display-p3, cropSource=true
+- sRGB-FF0100, Context srgb, ImageData srgb, cropSource=false
+- sRGB-FF0100, Context srgb, ImageData srgb, cropSource=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-video.html:
+- Rec2020-222000000, Context display-p3, ImageData display-p3, scaleImage=false
+- Rec2020-222000000, Context display-p3, ImageData display-p3, scaleImage=true
+- Rec2020-222000000, Context display-p3, ImageData srgb, scaleImage=false
+- Rec2020-222000000, Context display-p3, ImageData srgb, scaleImage=true
+- Rec2020-222000000, Context srgb, ImageData display-p3, scaleImage=false
+- Rec2020-222000000, Context srgb, ImageData display-p3, scaleImage=true
+- Rec2020-222000000, Context srgb, ImageData srgb, scaleImage=false
+- Rec2020-222000000, Context srgb, ImageData srgb, scaleImage=true
+- Rec2020-3FF000000, Context display-p3, ImageData display-p3, scaleImage=false
+- Rec2020-3FF000000, Context display-p3, ImageData display-p3, scaleImage=true
+- Rec2020-3FF000000, Context display-p3, ImageData srgb, scaleImage=false
+- Rec2020-3FF000000, Context display-p3, ImageData srgb, scaleImage=true
+- Rec2020-3FF000000, Context srgb, ImageData display-p3, scaleImage=false
+- Rec2020-3FF000000, Context srgb, ImageData display-p3, scaleImage=true
+- Rec2020-3FF000000, Context srgb, ImageData srgb, scaleImage=false
+- Rec2020-3FF000000, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BB0000, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BB0000, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BB0000, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BB0000, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BB0000, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BB0000, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BB0000, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BB0000, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FF0100, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FF0100, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FF0100, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FF0100, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FF0100, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FF0100, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FF0100, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FF0100, Context srgb, ImageData srgb, scaleImage=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage.https.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-0.7333-0-0.svg, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-0.7333-0-0.svg, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-0.7333-0-0.svg, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-0.7333-0-0.svg, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-0.7333-0-0.svg, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-0.7333-0-0.svg, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-0.7333-0-0.svg, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-0.7333-0-0.svg, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-1-0-0.svg, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-1-0-0.svg, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-1-0-0.svg, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-1-0-0.svg, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-1-0-0.svg, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-1-0-0.svg, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-1-0-0.svg, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-1-0-0.svg, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, scaleImage=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, scaleImage=true
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, scaleImage=false
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb, scaleImage=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, scaleImage=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3, scaleImage=true
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, scaleImage=false
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb, scaleImage=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, scaleImage=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, scaleImage=true
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, scaleImage=false
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb, scaleImage=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, scaleImage=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3, scaleImage=true
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, scaleImage=false
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BB0000.svg, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BB0000.svg, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BB0000.svg, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BB0000.svg, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BB0000.svg, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BB0000.svg, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BB0000.svg, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BB0000.svg, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FF0000.svg, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FF0000.svg, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FF0000.svg, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FF0000.svg, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FF0000.svg, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FF0000.svg, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FF0000.svg, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FF0000.svg, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb, scaleImage=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3, scaleImage=true
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=false
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb, scaleImage=true
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-pattern-canvas.html:
+- Source display-p3, destination srgb, color 187,0,0,204
+- Source display-p3, destination srgb, color 187,0,0,255
+- Source display-p3, destination srgb, color 255,0,0,204
+- Source display-p3, destination srgb, color 255,0,0,255
+- Source srgb, destination display-p3, color 187,0,0,204
+- Source srgb, destination display-p3, color 187,0,0,255
+- Source srgb, destination display-p3, color 255,0,0,204
+- Source srgb, destination display-p3, color 255,0,0,255
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-pattern-image.html:
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-BB0000CC.png, Context display-p3, ImageData srgb
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData display-p3
+- Adobe-RGB-BB0000CC.png, Context srgb, ImageData srgb
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-BB0000FF.png, Context display-p3, ImageData srgb
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData display-p3
+- Adobe-RGB-BB0000FF.png, Context srgb, ImageData srgb
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3
+- Adobe-RGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3
+- Adobe-RGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData display-p3
+- Adobe-RGB-FF0000CC.png, Context srgb, ImageData srgb
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData display-p3
+- Adobe-RGB-FF0000FF.png, Context srgb, ImageData srgb
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3
+- Adobe-RGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
+- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3
+- Adobe-RGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb
+- Display-P3-BB0000CC.png, Context display-p3, ImageData display-p3
+- Display-P3-BB0000CC.png, Context display-p3, ImageData srgb
+- Display-P3-BB0000CC.png, Context srgb, ImageData display-p3
+- Display-P3-BB0000CC.png, Context srgb, ImageData srgb
+- Display-P3-BB0000FF.png, Context display-p3, ImageData display-p3
+- Display-P3-BB0000FF.png, Context display-p3, ImageData srgb
+- Display-P3-BB0000FF.png, Context srgb, ImageData display-p3
+- Display-P3-BB0000FF.png, Context srgb, ImageData srgb
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3
+- Display-P3-BBBC00000000CCCC.png, Context display-p3, ImageData srgb
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData display-p3
+- Display-P3-BBBC00000000CCCC.png, Context srgb, ImageData srgb
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3
+- Display-P3-BBBC00000000FFFF.png, Context display-p3, ImageData srgb
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData display-p3
+- Display-P3-BBBC00000000FFFF.png, Context srgb, ImageData srgb
+- Display-P3-FF0000CC.png, Context display-p3, ImageData display-p3
+- Display-P3-FF0000CC.png, Context display-p3, ImageData srgb
+- Display-P3-FF0000CC.png, Context srgb, ImageData display-p3
+- Display-P3-FF0000CC.png, Context srgb, ImageData srgb
+- Display-P3-FF0000FF.png, Context display-p3, ImageData display-p3
+- Display-P3-FF0000FF.png, Context display-p3, ImageData srgb
+- Display-P3-FF0000FF.png, Context srgb, ImageData display-p3
+- Display-P3-FF0000FF.png, Context srgb, ImageData srgb
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
+- Display-P3-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData display-p3
+- Display-P3-FFFF00000000CCCC.png, Context srgb, ImageData srgb
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
+- Display-P3-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData display-p3
+- Display-P3-FFFF00000000FFFF.png, Context srgb, ImageData srgb
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3
+- Generic-CMYK-BE000000.jpg, Context display-p3, ImageData srgb
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData display-p3
+- Generic-CMYK-BE000000.jpg, Context srgb, ImageData srgb
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3
+- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData srgb
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData display-p3
+- Generic-CMYK-FF000000.jpg, Context srgb, ImageData srgb
+- sRGB-BB0000CC.png, Context display-p3, ImageData display-p3
+- sRGB-BB0000CC.png, Context display-p3, ImageData srgb
+- sRGB-BB0000CC.png, Context srgb, ImageData display-p3
+- sRGB-BB0000CC.png, Context srgb, ImageData srgb
+- sRGB-BB0000FF.png, Context display-p3, ImageData display-p3
+- sRGB-BB0000FF.png, Context display-p3, ImageData srgb
+- sRGB-BB0000FF.png, Context srgb, ImageData display-p3
+- sRGB-BB0000FF.png, Context srgb, ImageData srgb
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData display-p3
+- sRGB-BBBC00000000CCCC.png, Context display-p3, ImageData srgb
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData display-p3
+- sRGB-BBBC00000000CCCC.png, Context srgb, ImageData srgb
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData display-p3
+- sRGB-BBBC00000000FFFF.png, Context display-p3, ImageData srgb
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData display-p3
+- sRGB-BBBC00000000FFFF.png, Context srgb, ImageData srgb
+- sRGB-FF0000CC.png, Context display-p3, ImageData display-p3
+- sRGB-FF0000CC.png, Context display-p3, ImageData srgb
+- sRGB-FF0000CC.png, Context srgb, ImageData display-p3
+- sRGB-FF0000CC.png, Context srgb, ImageData srgb
+- sRGB-FF0000FF.png, Context display-p3, ImageData display-p3
+- sRGB-FF0000FF.png, Context display-p3, ImageData srgb
+- sRGB-FF0000FF.png, Context srgb, ImageData display-p3
+- sRGB-FF0000FF.png, Context srgb, ImageData srgb
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
+- sRGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData display-p3
+- sRGB-FFFF00000000CCCC.png, Context srgb, ImageData srgb
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
+- sRGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData display-p3
+- sRGB-FFFF00000000FFFF.png, Context srgb, ImageData srgb
+html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-settings.html:
+- Context display-p3, ImageData display-p3
+- Context display-p3, ImageData undefined
+- Context srgb, ImageData display-p3
+- Context undefined, ImageData display-p3
+html/canvas/element/path-objects/2d.path.arc.negative.html:
+- arc() with negative radius throws INDEX_SIZE_ERR
+html/canvas/element/path-objects/2d.path.arc.scale.2.html:
+- Highly scaled arcs are the right shape
+html/canvas/element/path-objects/2d.path.arc.selfintersect.1.html:
+- arc() with lineWidth > 2*radius is drawn sensibly
+html/canvas/element/path-objects/2d.path.arc.selfintersect.2.html:
+- arc() with lineWidth > 2*radius is drawn sensibly
+html/canvas/element/path-objects/2d.path.arc.shape.1.html:
+- arc() from 0 to pi does not draw anything in the wrong half
+html/canvas/element/path-objects/2d.path.arc.shape.3.html:
+- arc() from 0 to -pi/2 does not draw anything in the wrong quadrant
+html/canvas/element/path-objects/2d.path.arc.shape.4.html:
+- arc() from 0 to -pi/2 draws stuff in the right quadrant
+html/canvas/element/path-objects/2d.path.arcTo.negative.html:
+- arcTo() with negative radius throws an exception
+html/canvas/element/path-objects/2d.path.arcTo.scale.html:
+- arcTo scales the curve, not just the control points
+html/canvas/element/path-objects/2d.path.arcTo.shape.curve2.html:
+- arcTo() curves in the right kind of shape
+html/canvas/element/path-objects/2d.path.arcTo.transformation.html:
+- arcTo joins up to the last subpath point correctly
+html/canvas/element/path-objects/2d.path.bezierCurveTo.scaled.html:
+- 'Canvas test: 2d.path.bezierCurveTo.scaled'
+html/canvas/element/path-objects/2d.path.bezierCurveTo.shape.html:
+- 'Canvas test: 2d.path.bezierCurveTo.shape'
+html/canvas/element/path-objects/2d.path.ellipse.basics.html:
+- Verify canvas throws error when drawing ellipse with negative radii.
+html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
+- Verify the winding rule in isPointInPath works for for rect path.
+html/canvas/element/path-objects/2d.path.isPointInPath.edge.html:
+- isPointInPath() counts points on the path as being inside
+html/canvas/element/path-objects/2d.path.isPointInPath.transform.1.html:
+- isPointInPath() handles transformations correctly
+html/canvas/element/path-objects/2d.path.isPointInPath.transform.3.html:
+- isPointInPath() handles transformations correctly
+html/canvas/element/path-objects/2d.path.isPointInPath.transform.4.html:
+- isPointInPath() handles transformations correctly
+html/canvas/element/path-objects/2d.path.isPointInStroke.scaleddashes.html:
+- isPointInStroke() should return correct results on dashed paths at high scale factors
+html/canvas/element/path-objects/2d.path.isPointInpath.invalid.html:
+- Verify isPointInPath throws exceptions with invalid inputs.
+html/canvas/element/path-objects/2d.path.open.arc.html:
+- line caps should be drawn on open arcs
+html/canvas/element/path-objects/2d.path.rect.closed.html:
+- 'Canvas test: 2d.path.rect.closed'
+html/canvas/element/path-objects/2d.path.rect.end.2.html:
+- 'Canvas test: 2d.path.rect.end.2'
+html/canvas/element/path-objects/2d.path.roundrect.closed.html:
+- 'Canvas test: 2d.path.roundrect.closed'
+html/canvas/element/path-objects/2d.path.roundrect.end.2.html:
+- 'Canvas test: 2d.path.roundrect.end.2'
+html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
+- roundRect() with Infinity/NaN is ignored
+html/canvas/element/path-objects/2d.path.roundrect.winding.html:
+- 'Canvas test: 2d.path.roundrect.winding'
+html/canvas/element/path-objects/2d.path.stroke.scale1.html:
+- Stroke line widths are scaled by the current transformation matrix
+html/canvas/element/path-objects/2d.path.stroke.scale2.html:
+- Stroke line widths are scaled by the current transformation matrix
+html/canvas/element/path-objects/2d.path.stroke.skew.html:
+- Strokes lines are skewed by the current transformation matrix
+html/canvas/element/path-objects/2d.path.transformation.basic.html:
+- 'Canvas test: 2d.path.transformation.basic'
+html/canvas/element/path-objects/2d.path.transformation.changing.html:
+- Transformations are applied while building paths, not when drawing
+html/canvas/element/path-objects/2d.path.transformation.multiple.html:
+- Transformations are applied while building paths, not when drawing
+html/canvas/element/pixel-manipulation/2d.imageData.create1.this.html:
+- createImageData(imgdata) should throw when called with the wrong |this|
+html/canvas/element/pixel-manipulation/2d.imageData.create1.zero.html:
+- createImageData(null) throws TypeError
+html/canvas/element/pixel-manipulation/2d.imageData.create2.double.html:
+- createImageData(w, h) double is converted to long
+html/canvas/element/pixel-manipulation/2d.imageData.create2.negative.html:
+- createImageData(sw, sh) takes the absolute magnitude of the size arguments
+html/canvas/element/pixel-manipulation/2d.imageData.create2.nonfinite.html:
+- createImageData() throws TypeError if arguments are not finite
+html/canvas/element/pixel-manipulation/2d.imageData.create2.this.html:
+- createImageData(sw, sh) should throw when called with the wrong |this|
+html/canvas/element/pixel-manipulation/2d.imageData.create2.zero.html:
+- createImageData(sw, sh) throws INDEX_SIZE_ERR if size is zero
+html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16.html:
+- Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap
+html/canvas/element/pixel-manipulation/2d.imageData.get.nonfinite.html:
+- getImageData() throws TypeError if arguments are not finite
+html/canvas/element/pixel-manipulation/2d.imageData.get.zero.html:
+- getImageData() throws INDEX_SIZE_ERR if size is zero
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.array.bounds.html:
+- ImageData has a usable constructor
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.basics.html:
+- Testing different type of ImageData constructor
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.pixelFormat.html:
+- Testing ImageData constructor pixelFormat behaviors
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.size.bounds.html:
+- ImageData has a usable constructor
+html/canvas/element/pixel-manipulation/2d.imageData.object.properties.html:
+- ImageData objects have the right properties
+html/canvas/element/pixel-manipulation/2d.imageData.object.readonly.html:
+- ImageData objects properties are read-only
+html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
+- putImageData() puts 16-bit floating point image data from getImageData() onto the
+  canvas
+html/canvas/element/pixel-manipulation/2d.imageData.put.dirty.negative.html:
+- putImageData() handles negative-sized dirty rectangles correctly
+html/canvas/element/pixel-manipulation/2d.imageData.put.nonfinite.html:
+- putImageData() throws TypeError if arguments are not finite
+html/canvas/element/pixel-manipulation/2d.imageData.put.wrongtype.html:
+- putImageData() does not accept non-ImageData objects
+html/canvas/element/reset/2d.reset.state.transformation_matrix.html:
+- check that the state is reset
+html/canvas/element/shadows/2d.shadow.alpha.2.html:
+- Shadow color alpha components are used
+html/canvas/element/shadows/2d.shadow.alpha.3.html:
+- Shadows are affected by globalAlpha
+html/canvas/element/shadows/2d.shadow.alpha.4.html:
+- Shadows with alpha components are correctly affected by globalAlpha
+html/canvas/element/shadows/2d.shadow.alpha.5.html:
+- Shadows of shapes with alpha components are drawn correctly
+html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.basic.html:
+- currentColor is computed from the canvas element
+html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.changed.html:
+- currentColor is computed when the attribute is set, not when it is painted
+html/canvas/element/shadows/2d.shadow.attributes.shadowColor.current.removed.html:
+- currentColor is solid black when the canvas element is not in a document
+html/canvas/element/shadows/2d.shadow.attributes.shadowColor.invalid.html:
+- 'Canvas test: 2d.shadow.attributes.shadowColor.invalid'
+html/canvas/element/shadows/2d.shadow.attributes.shadowColor.valid.html:
+- 'Canvas test: 2d.shadow.attributes.shadowColor.valid'
+html/canvas/element/shadows/2d.shadow.canvas.alpha.html:
+- Shadows are drawn correctly for partially-transparent canvases
+html/canvas/element/shadows/2d.shadow.canvas.basic.html:
+- Shadows are drawn for canvases
+html/canvas/element/shadows/2d.shadow.canvas.transparent.2.html:
+- Shadows are not drawn for transparent parts of canvases
+html/canvas/element/shadows/2d.shadow.clip.3.html:
+- Shadows of clipped shapes are still drawn within the clipping region
+html/canvas/element/shadows/2d.shadow.composite.1.html:
+- Shadows are drawn using globalCompositeOperation
+html/canvas/element/shadows/2d.shadow.composite.2.html:
+- Shadows are drawn using globalCompositeOperation
+html/canvas/element/shadows/2d.shadow.enable.blur.html:
+- Shadows are drawn if shadowBlur is set
+html/canvas/element/shadows/2d.shadow.enable.x.html:
+- Shadows are drawn if shadowOffsetX is set
+html/canvas/element/shadows/2d.shadow.enable.y.html:
+- Shadows are drawn if shadowOffsetY is set
+html/canvas/element/shadows/2d.shadow.gradient.alpha.html:
+- Shadows are drawn correctly for partially-transparent gradient fills
+html/canvas/element/shadows/2d.shadow.gradient.basic.html:
+- Shadows are drawn for gradient fills
+html/canvas/element/shadows/2d.shadow.gradient.transparent.2.html:
+- Shadows are not drawn for transparent parts of gradient fills
+html/canvas/element/shadows/2d.shadow.image.alpha.html:
+- Shadows are drawn correctly for partially-transparent images
+html/canvas/element/shadows/2d.shadow.image.basic.html:
+- Shadows are drawn for images
+html/canvas/element/shadows/2d.shadow.image.scale.html:
+- Shadows are drawn correctly for scaled images
+html/canvas/element/shadows/2d.shadow.image.transparent.2.html:
+- Shadows are not drawn for transparent parts of images
+html/canvas/element/shadows/2d.shadow.outside.html:
+- Shadows of shapes outside the visible area can be offset onto the visible area
+html/canvas/element/shadows/2d.shadow.pattern.alpha.html:
+- Shadows are drawn correctly for partially-transparent fill patterns
+html/canvas/element/shadows/2d.shadow.pattern.basic.html:
+- Shadows are drawn for fill patterns
+html/canvas/element/shadows/2d.shadow.pattern.transparent.1.html:
+- Shadows are not drawn for transparent fill patterns
+html/canvas/element/shadows/2d.shadow.pattern.transparent.2.html:
+- Shadows are not drawn for transparent parts of fill patterns
+html/canvas/element/shadows/2d.shadow.stroke.basic.html:
+- Shadows are drawn for strokes
+html/canvas/element/shadows/2d.shadow.stroke.cap.2.html:
+- Shadows are drawn for stroke caps
+html/canvas/element/shadows/2d.shadow.stroke.join.2.html:
+- Shadows are drawn for stroke joins
+html/canvas/element/shadows/2d.shadow.transform.1.html:
+- Shadows take account of transformations
+html/canvas/element/shadows/2d.shadow.transform.2.html:
+- Shadow offsets are not affected by transformations
+html/canvas/element/text/2d.text.align.invalid.html:
+- 'Canvas test: 2d.text.align.invalid'
+html/canvas/element/text/2d.text.baseline.invalid.html:
+- 'Canvas test: 2d.text.baseline.invalid'
+html/canvas/element/text/2d.text.direction.invalid.html:
+- 'Canvas test: 2d.text.direction.invalid'
+html/canvas/element/text/2d.text.draw.align.center.html:
+- textAlign center is the center of the em squares (not the bounding box)
+html/canvas/element/text/2d.text.draw.align.end.ltr.html:
+- textAlign end with ltr is the right edge
+html/canvas/element/text/2d.text.draw.align.end.rtl.html:
+- textAlign end with rtl is the left edge
+html/canvas/element/text/2d.text.draw.align.left.html:
+- textAlign left is the left of the first em square (not the bounding box)
+html/canvas/element/text/2d.text.draw.align.right.html:
+- textAlign right is the right of the last em square (not the bounding box)
+html/canvas/element/text/2d.text.draw.align.start.ltr.html:
+- textAlign start with ltr is the left edge
+html/canvas/element/text/2d.text.draw.align.start.rtl.html:
+- textAlign start with rtl is the right edge
+html/canvas/element/text/2d.text.draw.baseline.alphabetic.html:
+- 'Canvas test: 2d.text.draw.baseline.alphabetic'
+html/canvas/element/text/2d.text.draw.baseline.bottom.html:
+- textBaseline bottom is the bottom of the em square (not the bounding box)
+html/canvas/element/text/2d.text.draw.baseline.hanging.html:
+- 'Canvas test: 2d.text.draw.baseline.hanging'
+html/canvas/element/text/2d.text.draw.baseline.ideographic.html:
+- 'Canvas test: 2d.text.draw.baseline.ideographic'
+html/canvas/element/text/2d.text.draw.baseline.middle.html:
+- textBaseline middle is the middle of the em square (not the bounding box)
+html/canvas/element/text/2d.text.draw.baseline.top.html:
+- textBaseline top is the top of the em square (not the bounding box)
+html/canvas/element/text/2d.text.draw.fill.maxWidth.NaN.html:
+- fillText handles maxWidth correctly
+html/canvas/element/text/2d.text.draw.fill.maxWidth.bound.html:
+- fillText handles maxWidth based on line size, not bounding box size
+html/canvas/element/text/2d.text.draw.fill.maxWidth.fontface.html:
+- fillText works on @font-face fonts
+html/canvas/element/text/2d.text.draw.fill.maxWidth.negative.html:
+- fillText handles maxWidth correctly
+html/canvas/element/text/2d.text.draw.fill.maxWidth.zero.html:
+- fillText handles maxWidth correctly
+html/canvas/element/text/2d.text.draw.fontface.html:
+- 'Canvas test: 2d.text.draw.fontface'
+html/canvas/element/text/2d.text.draw.fontface.notinpage.html:
+- "@font-face fonts should work even if they are not used in the page"
+html/canvas/element/text/2d.text.draw.fontface.repeat.html:
+- Draw with the font immediately, then wait a bit until and draw again. (This crashes
+  some version of WebKit.)
+html/canvas/element/text/2d.text.draw.space.basic.html:
+- U+0020 is rendered the correct size (1em wide)
+html/canvas/element/text/2d.text.draw.space.collapse.end.html:
+- Space characters at the end of a line are NOT collapsed
+html/canvas/element/text/2d.text.draw.space.collapse.nonspace.html:
+- Non-space characters are not converted to U+0020 and collapsed
+html/canvas/element/text/2d.text.draw.space.collapse.other.html:
+- Space characters are converted to U+0020, and are NOT collapsed
+html/canvas/element/text/2d.text.draw.space.collapse.space.html:
+- Space characters are converted to U+0020, and are NOT collapsed
+html/canvas/element/text/2d.text.draw.space.collapse.start.html:
+- Space characters at the start of a line are NOT collapsed
+html/canvas/element/text/2d.text.drawing.style.absolute.spacing.html:
+- Testing letter spacing and word spacing with absolute length
+html/canvas/element/text/2d.text.drawing.style.font-relative.spacing.html:
+- Testing letter spacing and word spacing with font-relative length
+html/canvas/element/text/2d.text.drawing.style.fontKerning.html:
+- Testing basic functionalities of fontKerning for canvas
+html/canvas/element/text/2d.text.drawing.style.fontKerning.with.uppercase.html:
+- Testing basic functionalities of fontKerning for canvas
+html/canvas/element/text/2d.text.drawing.style.fontStretch.settings.html:
+- Testing value setting of fontStretch in Canvas
+html/canvas/element/text/2d.text.drawing.style.fontVariant.settings.html:
+- Testing basic functionalities of fontVariant for canvas
+html/canvas/element/text/2d.text.drawing.style.invalid.spacing.html:
+- Testing letter spacing and word spacing with invalid units
+html/canvas/element/text/2d.text.drawing.style.letterSpacing.change.font.html:
+- Set letter spacing and word spacing to font dependent value and verify it works
+  after font change.
+html/canvas/element/text/2d.text.drawing.style.letterSpacing.measure.html:
+- Testing letter spacing with different length units
+html/canvas/element/text/2d.text.drawing.style.measure.direction.html:
+- Measurement should follow text direction
+html/canvas/element/text/2d.text.drawing.style.measure.textAlign.html:
+- Measurement should be related to textAlignment
+html/canvas/element/text/2d.text.drawing.style.nonfinite.spacing.html:
+- Testing letter spacing and word spacing with nonfinite inputs
+html/canvas/element/text/2d.text.drawing.style.textRendering.settings.html:
+- Testing basic functionalities of textRendering in Canvas
+html/canvas/element/text/2d.text.drawing.style.wordSpacing.change.font.html:
+- Set word spacing and word spacing to font dependent value and verify it works after
+  font change.
+html/canvas/element/text/2d.text.drawing.style.wordSpacing.measure.html:
+- Testing word spacing with different length units
+html/canvas/element/text/2d.text.font.parse.basic.html:
+- 'Canvas test: 2d.text.font.parse.basic'
+html/canvas/element/text/2d.text.font.parse.complex.html:
+- 'Canvas test: 2d.text.font.parse.complex'
+html/canvas/element/text/2d.text.font.parse.complex2.html:
+- 'Canvas test: 2d.text.font.parse.complex2'
+html/canvas/element/text/2d.text.font.parse.family.html:
+- 'Canvas test: 2d.text.font.parse.family'
+html/canvas/element/text/2d.text.font.parse.invalid.html:
+- 'Canvas test: 2d.text.font.parse.invalid'
+html/canvas/element/text/2d.text.font.parse.size.percentage.default.html:
+- 'Canvas test: 2d.text.font.parse.size.percentage.default'
+html/canvas/element/text/2d.text.font.parse.size.percentage.html:
+- 'Canvas test: 2d.text.font.parse.size.percentage'
+html/canvas/element/text/2d.text.font.parse.system.html:
+- System fonts must be computed to explicit values
+html/canvas/element/text/2d.text.font.relative_size.html:
+- 'Canvas test: 2d.text.font.relative_size'
+html/canvas/element/text/2d.text.font.weight.html:
+- 'Canvas test: 2d.text.font.weight'
+html/canvas/element/text/2d.text.fontVariantCaps2.html:
+- Testing small caps setting in fontVariant
+html/canvas/element/text/2d.text.lang.default.html:
+- 'Canvas test: 2d.text.lang.default'
+html/canvas/element/text/2d.text.measure.actualBoundingBox.html:
+- Testing actualBoundingBox
+html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
+- Testing that actualBoundingBox metrics are precise at small font sizes
+html/canvas/element/text/2d.text.measure.actualBoundingBox.whitespace.html:
+- Testing actualBoundingBox with leading/trailing whitespace
+html/canvas/element/text/2d.text.measure.baselines.html:
+- Testing baselines
+html/canvas/element/text/2d.text.measure.emHeights-low-ascent.html:
+- Testing emHeights with reduced ascent metric
+html/canvas/element/text/2d.text.measure.emHeights-zero-descent.html:
+- Testing emHeights with zero descent metric
+html/canvas/element/text/2d.text.measure.emHeights.html:
+- Testing emHeights
+html/canvas/element/text/2d.text.measure.fontBoundingBox-reduced-ascent.html:
+- Testing fontBoundingBox for OffscreenCanvas with reduced ascent metric
+html/canvas/element/text/2d.text.measure.fontBoundingBox-zero-descent.html:
+- Testing fontBoundingBox for OffscreenCanvas with zero descent metric
+html/canvas/element/text/2d.text.measure.fontBoundingBox.ahem.html:
+- Testing fontBoundingBox for font ahem
+html/canvas/element/text/2d.text.measure.fontBoundingBox.html:
+- Testing fontBoundingBox measurements
+html/canvas/element/text/2d.text.measure.lang.html:
+- Testing the lang attribute
+html/canvas/element/text/2d.text.measure.lang.inherit.html:
+- Testing the lang attribute
+html/canvas/element/text/2d.text.measure.width.basic.html:
+- The width of character is same as font used
+html/canvas/element/text/2d.text.measure.width.empty.html:
+- The empty string has zero width
+html/canvas/element/text/2d.text.measure.width.nullCharacter.html:
+- Null character does not take up space
+html/canvas/element/text/2d.text.measure.width.space.html:
+- Space characters are converted to U+0020 and NOT collapsed
+html/canvas/element/text/parent-style-relative-units.html:
+- Font-size based on canvas element font-size
+- Font-size based on canvas element line-height
+html/canvas/element/video/2d.video.invalid.html:
+- Verify test doesn't crash with invalid video.
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
 html/semantics/forms/form-submission-0/submission-checks.window.js:

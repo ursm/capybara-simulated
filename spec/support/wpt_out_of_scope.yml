@@ -10407,6 +10407,1228 @@ fetch/h1-parsing/h1-parsing.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/color-type/2d.color.type.u8p3.to.u8srgb.to.u8p3.html:
+- name: test srgb unorm8 canvas storing 8-bit display-p3 data accurately
+  reason: Non-8-bit / non-sRGB canvas colour types (float16, display-p3) — a colour-management
+    / pixel-format subsystem we don't model (rule 1); the u8-sRGB path is covered.
+html/canvas/element/color-type/2d.color.type.u8srgb.to.u8p3.to.u8srgb.html:
+- name: test display-p3 unorm8 canvas not storing 8-bit srgb data accurately
+  reason: Non-8-bit / non-sRGB canvas colour types (float16, display-p3) — a colour-management
+    / pixel-format subsystem we don't model (rule 1); the u8-sRGB path is covered.
+html/canvas/element/filters/2d.filter.canvasFilterObject.blur.exceptions.tentative.html:
+- name: Test exceptions on gaussianBlur filter
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.colorMatrix.tentative.html:
+- name: Test the functionality of ColorMatrix filters
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.convolveMatrix.exceptions.tentative.html:
+- name: Test exceptions on CanvasFilter() convolveMatrix
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.dropShadow.exceptions.tentative.html:
+- name: Test exceptions on CanvasFilter() dropShadow object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.tentative.html:
+- name: Test CanvasFilter() object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.canvasFilterObject.turbulence.inputTypes.tentative.html:
+- name: Test exceptions on CanvasFilter() turbulence object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.colorMatrix.tentative.html:
+- name: Test the functionality of ColorMatrix filters
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.convolveMatrix.exceptions.tentative.html:
+- name: Test exceptions on CanvasFilter() convolveMatrix
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.dropShadow.exceptions.tentative.html:
+- name: Test exceptions on CanvasFilter() dropShadow object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.layers.turbulence.inputTypes.tentative.html:
+- name: Test exceptions on CanvasFilter() turbulence object
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/filters/2d.filter.value.html:
+- name: test if ctx.filter works correctly
+  reason: ctx.filter — CSS/SVG filter rendering (blur, colour-matrix, drop-shadow,
+    …), a filter/rendering-effect subsystem we don't model (rule 1).
+html/canvas/element/layers/2d.layer.beginLayer-options.tentative.html:
+- name: Checks beginLayer works for different option parameter values
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.ctm.getTransform.html:
+- name: Tests getTransform inside layers.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.exceptions-are-no-op.tentative.html:
+- name: Checks that the context state is left unchanged if beginLayer throws.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.invalid-calls.beginLayer-reset-endLayer.html:
+- name: Raises exception on beginLayer() + reset() + endLayer().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.invalid-calls.beginLayer-restore.html:
+- name: Raises exception on beginLayer() + restore().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.invalid-calls.beginLayer-save-endLayer.html:
+- name: Raises exception on beginLayer() + save() + endLayer().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.invalid-calls.endLayer.html:
+- name: Raises exception on lone endLayer calls.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.invalid-calls.save-beginLayer-restore.html:
+- name: Raises exception on save() + beginLayer() + restore().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.invalid-calls.save-endLayer.html:
+- name: Raises exception on save() + endLayer().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.layer-rendering-state-reset-in-layer.html:
+- name: Tests that rendering states are reset in layers and restored after.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.malformed-operations-with-promises.html:
+- name: Throws if createImageBitmap is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+- name: Throws if toBlob is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.malformed-operations.html:
+- name: Throws if createPattern is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+- name: Throws if drawImage is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+- name: Throws if getImageData is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+- name: Throws if putImageData is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+- name: Throws if toDataURL is called while layers are open.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.valid-calls.beginLayer-endLayer.html:
+- name: No exception raised on beginLayer() + endLayer().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.valid-calls.beginLayer-save.html:
+- name: No exception raised on beginLayer() + save().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.valid-calls.beginLayer.html:
+- name: No exception raised on lone beginLayer() calls.
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.valid-calls.save-beginLayer.html:
+- name: No exception raised on save() + beginLayer().
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/manual/draw-element-image/animated-gif-pinned-to-element-image.tentative.html:
+- name: 'Canvas.drawElementImage: animated gif advances and repaints the canvas'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/animated-gif.tentative.html:
+- name: 'Canvas.drawElementImage: animated gif advances and repaints the canvas'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/backdrop-filter-bounds-expansion.tentative.html:
+- name: drawElementImage applies backdrop-filter bounds beyond child drawable bounds
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/captureElementImage.tentative.html:
+- name: ElementImage.close() invalidates the image for drawing
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: captureElementImage should return an object that can be drawn
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: captureElementImage should throw if called on a nested canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: captureElementImage size should be the most recently painted size
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/containment.tentative.html:
+- name: canvas child containment
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-different-canvas.tentative.html:
+- name: Prevent drawing Element into a different canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-detached.tentative.html:
+- name: canvas drawElementImage throws for a detached canvas due to lack of layout
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-different-canvas.tentative.html:
+- name: Prevent drawing ElementImage into a different canvas in a worker thread
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Prevent drawing ElementImage into a different canvas on main thread
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-display-none.tentative.html:
+- name: Canvas drawElementImage() should throw when drawn child is not laid out.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-empty.tentative.html:
+- name: canvas drawElementImage should not throw on empty elements.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-get-image-data.tentative.html:
+- name: canvas drawElementImage readback
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/draw-element-image-returned-matrix.tentative.html:
+- name: Draw transform at the origin should be an identity matrix
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for canvas pixel scale
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for canvas pixel scale, zoom, transform-origin,
+    CTM, and x and y
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for the current transform matrix with rotation
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for the current transform matrix with translation
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for transform-origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for width and height scale
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should account for x and y
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should not be affected by zoom on the canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Draw transform should not include transform on the element
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/drawElementImage-zero-size.tentative.html:
+- name: drawElementImage with zero size does nothing
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/drawing-display-none-fails.tentative.html:
+- name: drawElementImage with display:none element
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/element-image-fractional-size.tentative.html:
+- name: ElementImage width and height should support fractional values
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/error-conditions.tentative.html:
+- name: Tests that error conditions cause exceptions
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/get-element-transform.tentative.html:
+- name: Element transform for identity draw transform should be an identity matrix
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for canvas css pixel scale
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for canvas grid pixel scale
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for canvas pixel scale, transform-origin,
+    and a complex draw transform
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for scale in the input transform
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for transform-origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should account for translation in the input transform
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should not automatically include the current transform matrix,
+    but should pass it through
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should not be affected by zoom on the canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Element transform should not include transform on the element
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: getElementTransform should preserve is2D.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: getElementTransform should throw when called prior to paint.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/elementsFromPoint-no-layoutsubtree.tentative.html:
+- name: Child elements should be excluded from elementsFromPoint
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/elementsFromPoint.tentative.html:
+- name: CSS transform should be used for hit testing
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pointer-events: none and inert should be excluded from elementsFromPoint'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/low-dpi-hit-test.tentative.html:
+- name: multiple targets, should only hit first
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: single target
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: single target and point
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/selection.tentative.html:
+- name: Double-clicking on canvas should be able to modify selection.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/hit-test/z-index.tentative.html:
+- name: elementFromPoint should hit the highest z-index element.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/intersection-observer-visibility.tentative.html:
+- name: Elements under canvas should report intersections, but not visibility
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/layout-canvas-children.tentative.html:
+- name: canvas children have layout
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/layoutsubtree-no-hit-test.tentative.html:
+- name: canvas elementFromPoint
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/moved-nested-layoutsubtree-canvas.tentative.html:
+- name: drawElementImage should throw if a canvas is moved to be nested
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/nested-div-layoutsubtree-canvas.tentative.html:
+- name: drawElementImage should throw if called on a nested canvas in a div
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/nested-layoutsubtree-canvas.tentative.html:
+- name: drawElementImage should throw if called on a nested canvas
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-after-scroll-2.tentative.html:
+- name: onpaint should fire when the drawn element scrolls.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-after-scroll.tentative.html:
+- name: onpaint should fire for scrolls
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-changedElements.tentative.html:
+- name: onpaint event should have a list of changed elements
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-css-animation.tentative.html:
+- name: onpaint should fire for ticking CSS animations
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-fires-post-intersection-observation-steps.tentative.html:
+- name: intersection observations should be calculated before onpaint, but should
+    be delivered after onpaint
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-fires-post-resize-observer.tentative.html:
+- name: onpaint should fire after resize observer
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint-iframe.tentative.html:
+- name: onpaint should fire after iframe changes.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/onpaint.tentative.html:
+- name: onpaint should fire if a canvas child is added or removed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should fire once if a canvas child changes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should fire once if a canvas grandchild changes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should not fire after canvas child transform changes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should not fire after canvas drawing operations
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should respect layoutsubtree attribute mutation
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: onpaint should work with addEventListener
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/backdrop-filter-png-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feimage content via CSS backdrop-filter
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/background-image-in-iframe-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin background images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/background-png-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin background images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/background-svg-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin background images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/border-png-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin border images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/border-svg-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin border images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/box-mask-png-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin mask images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/box-mask-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin mask images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/box-reflect-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin box-reflect images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/embed-image-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin embed element content
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-div-multi-filters-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin filter content via CSS
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-external-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use external cross-origin SVG via CSS
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-feimage-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feimage content via CSS
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-feimage-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feimage using SVG-as-Image via
+    CSS
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-div-ref-svg-mixed-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin SVG filter content via CSS
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-svg-ref-svg-feimage-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feimage content in SVG
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/filtered-svg-ref-svg-feimage-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feimage SVG-as-Image in SVG
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/fragment-mask-png-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin mask images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/fragment-mask-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin mask images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/html-images-cors-allowed.tentative.https.sub.html:
+- name: drawElementImage does draws CORS enabled cross-origin HTML images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/html-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin HTML images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/iframe-sandbox-ignored.tentative.https.sub.html:
+- name: drawElementImage should ignore sandboxed same-origin iframes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/iframes-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin iframes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/nested-tainted-canvas-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw nested tainted canvases
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/object-image-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin object element content
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/picture-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin picture element images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/scrollbar-thumb-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin scrollbar thumb images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/shape-image-png-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin png image for shape-outside
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/shape-image-svg-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin svg image for shape-outside
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/subframe-cross-origin-background-image.tentative.https.sub.html:
+- name: subframe loading background images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/subframe-cross-origin-frame.tentative.https.sub.html:
+- name: subframe loaded cross-origin that itself loads iframes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/subframe-cross-origin-html-images.tentative.https.sub.html:
+- name: subframe that draws HTML images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/svg-images-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin SVG images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/svg-mask-filter.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feImages on filtered SVG text inside
+    masks
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/svg-pattern-cross-origin-image.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin images in SVG patterns
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/svg-pattern-with-feImage-cross-origin-image.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin feImages in SVG patterns
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/svg-use-ignored.tentative.https.sub.html:
+- name: drawElementImage does not use cross-origin SVG use content
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/video-ignored.tentative.https.sub.html:
+- name: drawElementImage does not draw cross-origin images
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/visited-link-color-ignored.tentative.html:
+- name: drawElementImage does not reveal visited link colors
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/visited-link-currentcolor-ignored.tentative.html:
+- name: drawElementImage does not reveal visited link colors through currentColor
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/visited-link-decoration-color-ignored.tentative.html:
+- name: drawElementImage does not reveal visited link colors
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/privacy/visited-link-svg-fill-stroke-color-ignored.tentative.html:
+- name: drawElementImage does not reveal visited link colors
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/requestPaint.tentative.html:
+- name: requestPaint can be called in onpaint
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: requestPaint should cause onpaint to fire without changes
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: requestPaint should cause onpaint to fire without changes, with two canvases
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/draw-element-image/video.tentative.html:
+- name: drawElementImage repaints video frames
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-sequence-conversion.html:
+- name: Test pixels on CanvasFilter() various inputs to tableValues (which is a sequence)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.fillTextCluster-options.tentative.html:
+- name: Test that fillTextCluster() correctly applies the options passed as a dictionary.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.fillTextCluster-range.tentative.html:
+- name: Test that getTextClusters() and fillTextCluster() correctly render different
+    ranges of the input text.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.getActualBoundingBox-exceptions.tentative.html:
+- name: Check that TextMetrics::getActualBoundingBox() throws when using invalid indexes.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.getActualBoundingBox-full-text.tentative.html:
+- name: Test TextMetrics::getActualBoundingBox() for the full length of the string
+    for some edge cases, with direction ltr and directional-override
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox() for the full length of the string
+    for some edge cases, with direction ltr and no-directional-override
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox() for the full length of the string
+    for some edge cases, with direction rtl and directional-override
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox() for the full length of the string
+    for some edge cases, with direction rtl and no-directional-override
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.getActualBoundingBox.tentative.html:
+- name: Test TextMetrics::getActualBoundingBox(), with text align center , and 0px
+    letter spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox(), with text align center , and 10px
+    letter spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox(), with text align left , and 0px letter
+    spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox(), with text align left , and 10px
+    letter spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox(), with text align right , and 0px
+    letter spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Test TextMetrics::getActualBoundingBox(), with text align right , and 10px
+    letter spacing.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.index-from-offset-edge-cases.tentative.html:
+- name: Test the edge cases for getIndexFromOffset, where the point is at the edge
+    of glyph and at the midpoint.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.index-from-offset-edges.tentative.html:
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction ltr and text align center.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction ltr and text align end.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction ltr and text align left.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction ltr and text align right.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction ltr and text align start.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction rtl and text align center.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction rtl and text align end.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction rtl and text align left.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction rtl and text align right.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() gives correct edges when the
+    requested point is outside the range, with direction rtl and text align start.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.index-from-offset.tentative.html:
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align center, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align center, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align center, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align center, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align end, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align end, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align end, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align end, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align left, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align left, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align left, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align left, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align right, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align right, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align right, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align right, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align start, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align start, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align start, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction ltr, text align start, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align center, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align center, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align center, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align center, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align end, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align end, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align end, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align end, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align left, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align left, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align left, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align left, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align right, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align right, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align right, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align right, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align start, 0px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align start, 0px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align start, 10px letter spacing and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where
+    possible, with direction rtl, text align start, 10px letter spacing and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.selection-rects-baselines.tentative.html:
+- name: Check that TextMetrics::getSelectionRects() works correctly with textBaseline.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.selection-rects-exceptions.tentative.html:
+- name: Check that TextMetrics::getSelectionRects() throws when using invalid indexes.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.selection-rects.tentative.html:
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align center, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align center, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align center, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align center, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align left, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align left, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align left, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align left, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align right, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align right, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align right, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction ltr, text align right, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align center, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align center, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align center, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align center, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align left, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align left, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align left, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align left, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align right, 0px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align right, 0px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align right, 10px letter spacing, and directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with
+    direction rtl, text align right, 10px letter spacing, and no-directional-override.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.strokeTextCluster-options.tentative.html:
+- name: Test that strokeTextCluster() correctly applies the options passed as a dictionary.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.strokeTextCluster-range.tentative.html:
+- name: Test that getTextClusters() and strokeTextCluster() correctly render different
+    ranges of the input text.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.text-clusters-exceptions.tentative.html:
+- name: Check that TextMetrics::getTextClusters() throws when using invalid indexes.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.text-clusters-position.tentative.html:
+- name: Test that TextMetrics::getTextClusters() returns clusters that are positioned
+    according to the target align and baseline passed as options.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/text/2d.text.measure.text-clusters-split.tentative.html:
+- name: Test that getTextClusters() splits the input correctly into the minimal clusters,
+    keeping emojis together.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/wide-gamut-canvas/2d.color.space.display-p3-linear.html:
+- name: test getImageData color conversion with a display-p3-linear uint8 canvas
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/canvas/element/wide-gamut-canvas/2d.color.space.p3.fillText.html:
+- name: Test if fillText can be used with a solid display-p3 color
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/canvas/element/wide-gamut-canvas/2d.color.space.p3.fillText.shadow.html:
+- name: Test if fillText can be used with a display-p3 shadow color
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/canvas/element/wide-gamut-canvas/2d.color.space.p3.strokeText.html:
+- name: Test if strokeText can be used with a solid display-p3 color
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/canvas/element/wide-gamut-canvas/2d.color.space.p3.to.p3.html:
+- name: test getImageData with display-p3 and uint8 from display p3 uint8 canvas
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/canvas/element/wide-gamut-canvas/2d.color.space.srgb-linear.html:
+- name: test getImageData color conversion with a srgb-linear uint8 canvas
+  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
+    subsystem we don't model (rule 1); the sRGB path is fully covered.
 html/dom/documents/dom-tree-accessors/nameditem-names.html:
 - name: An embed name does not appears in a document's property names if the embed
     is inside another embed.

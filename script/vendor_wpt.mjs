@@ -66,15 +66,22 @@ const TREES = [
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
   'html/webappapis/structured-clone',  // structuredClone — deep-clone of platform objects, no layout
-  'css/cssom'                          // CSSOM object model — CSSStyleDeclaration / CSSRule / insertRule /
+  'css/cssom',                         // CSSOM object model — CSSStyleDeclaration / CSSRule / insertRule /
                                        // cssRules / style serialization, backed by our css-tree cascade
                                        // engine; the pure-API slice of CSS (css/cssom-view is the
                                        // layout-dependent one and is deliberately NOT vendored)
+  'html/canvas/element'                // 2D canvas context — the in-process software rasterizer (paths /
+                                       // gradients / text via libvips / shadow / compositing / Path2D / AA)
+                                       // measured against the harness tests. Pixel-exact-Chrome-AA / filter
+                                       // / reftest cases earn out; the API + close-enough-pixel slice is in
+                                       // scope. (offscreen/ mirrors this via OffscreenCanvas — added later.)
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
 // resolve at serve time, but the runner does NOT scan them for test files.
-const SUPPORT_TREES = ['common'];
+// `html/canvas/resources` holds canvas-tests.js — the `_addTest` / `_assertPixel`
+// harness every generated canvas test pulls in by absolute path.
+const SUPPORT_TREES = ['common', 'html/canvas/resources'];
 // Individual support files (outside the vendored trees) that tests include via
 // `<script src>`. Kept across re-vendoring so local includes resolve.
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument
