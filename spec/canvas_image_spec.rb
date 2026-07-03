@@ -1077,6 +1077,121 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['after']).to eq('multiply')
   end
 
+  it 'fills / strokes / clips / hit-tests a Path2D built from methods' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+      const p = new Path2D();
+      p.moveTo(0, 0); p.lineTo(10, 0); p.lineTo(0, 10); p.closePath();
+      const c = new OffscreenCanvas(12, 12).getContext('2d');
+      c.fillStyle = '#ff0000'; c.fill(p);
+      const triIn = at(c, 2, 2), triOut = at(c, 8, 8);
+      const hit = c.isPointInPath(p, 2, 2), miss = c.isPointInPath(p, 8, 8);
+      // stroke(path) + clip(path)
+      const box = new Path2D(); box.rect(2, 2, 8, 8);
+      const cc = new OffscreenCanvas(12, 12).getContext('2d');
+      cc.beginPath(); cc.rect(0, 0, 6, 12); cc.clip();     // current-path clip still works
+      cc.fillStyle = '#0000ff'; cc.fill(box);              // fill a Path2D, masked by the clip
+      const clipped = at(cc, 8, 5), visible = at(cc, 4, 5);
+      JSON.stringify({ triIn, triOut, hit, miss, clipped, visible,
+                       isP2D: (new Path2D()) instanceof Path2D });
+    JS
+    r = JSON.parse(out)
+    expect(r['triIn']).to eq(255)
+    expect(r['triOut']).to eq(0)
+    expect(r['hit']).to be true
+    expect(r['miss']).to be false
+    expect(r['clipped']).to eq(0)        # Path2D fill is masked by the current clip
+    expect(r['visible']).to eq(255)
+    expect(r['isP2D']).to be true
+  end
+
+  it 'parses a Path2D from an SVG path string (lines, cubic, arc, relative)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+      // A square via relative h/v/z.
+      const sq = new Path2D('M2 2 h6 v6 h-6 z');
+      const c1 = new OffscreenCanvas(12, 12).getContext('2d'); c1.fillStyle = '#00f'; c1.fill(sq);
+      // A filled disc via two arcs (A command) — big circle centred at (10,10) r=8.
+      const disc = new Path2D('M2 10 A8 8 0 1 0 18 10 A8 8 0 1 0 2 10 Z');
+      const c2 = new OffscreenCanvas(20, 20).getContext('2d'); c2.fillStyle = '#f00'; c2.fill(disc);
+      // A cubic bezier region (closed) fills something.
+      const cv = new Path2D('M2 10 C2 2 18 2 18 10 Z');
+      const c3 = new OffscreenCanvas(20, 20).getContext('2d'); c3.fillStyle = '#0f0'; c3.fill(cv);
+      let curvePainted = 0;
+      const d3 = c3.getImageData(0, 0, 20, 20).data;
+      for (let k = 3; k < d3.length; k += 4) if (d3[k] > 0) curvePainted++;
+      JSON.stringify({
+        sqIn: at(c1, 5, 5), sqOut: at(c1, 10, 10),
+        discCentre: at(c2, 10, 10), discCorner: at(c2, 1, 1),
+        curvePainted
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['sqIn']).to eq(255)
+    expect(r['sqOut']).to eq(0)
+    expect(r['discCentre']).to eq(255)   # inside the arc-built disc
+    expect(r['discCorner']).to eq(0)     # corner outside the disc
+    expect(r['curvePainted']).to be > 20 # the cubic region fills a region
+  end
+
+  it 'does not hang on a malformed SVG path string' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = Timeout.timeout(15) do
+      session.evaluate_script(<<~JS)
+        // A stray number after Z used to make the implicit-command repeat loop forever.
+        const p = new Path2D('M0 0 h4 v4 Z 5 9 8');
+        const ctx = new OffscreenCanvas(6, 6).getContext('2d');
+        ctx.fillStyle = '#ff0000'; ctx.fill(p);
+        JSON.stringify({ inside: ctx.isPointInPath(p, 1, 1) });
+      JS
+    end
+    expect(JSON.parse(out)['inside']).to be true   # the valid prefix still parsed + filled
+  end
+
+  it 'Path2D copy constructor and addPath compose paths' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+      const base = new Path2D('M0 0 h4 v4 h-4 z');
+      // addPath with a translate transform places a copy at (6,6).
+      const composed = new Path2D(base);       // copy constructor → square at origin
+      composed.addPath(base, { a: 1, b: 0, c: 0, d: 1, e: 6, f: 6 });
+      const ctx = new OffscreenCanvas(12, 12).getContext('2d');
+      ctx.fillStyle = '#0f0'; ctx.fill(composed);
+      JSON.stringify({ orig: at(ctx, 1, 1), moved: at(ctx, 7, 7), between: at(ctx, 5, 5) });
+    JS
+    r = JSON.parse(out)
+    expect(r['orig']).to eq(255)         # copied square at origin
+    expect(r['moved']).to eq(255)        # translated square at (6,6)
+    expect(r['between']).to eq(0)        # gap between them
+  end
+
+  it 'addPath handles self-addition and the m11-m42 matrix alias without hanging' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = Timeout.timeout(15) do
+      session.evaluate_script(<<~JS)
+        const p = new Path2D(); p.rect(0, 0, 4, 4);
+        const before = p._path.length;
+        p.addPath(p);                                  // self-addition must not loop
+        // DOMMatrix2DInit alias form {m11,m22} → scale 2×.
+        const q = new Path2D('M0 0 h2 v2 h-2 z');
+        const r = new Path2D(); r.addPath(q, { m11: 2, m22: 2 });
+        const ctx = new OffscreenCanvas(6, 6).getContext('2d'); ctx.fillStyle = '#f00'; ctx.fill(r);
+        JSON.stringify({ doubled: p._path.length === before * 2, scaledInside: ctx.isPointInPath(r, 3, 3) });
+      JS
+    end
+    r = JSON.parse(out)
+    expect(r['doubled']).to be true
+    expect(r['scaledInside']).to be true  # {m11:2,m22:2} scaled the 2×2 square to cover (3,3)
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
