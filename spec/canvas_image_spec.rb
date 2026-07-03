@@ -750,6 +750,171 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(JSON.parse(out)['w']).to be > 0
   end
 
+  it 'roundRect fills a rounded rectangle (corners clipped, interior filled)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, 20, 20, 6);
+      ctx.fill();
+      const d = ctx.getImageData(0, 0, 20, 20).data;
+      const at = (x, y) => d[(y * 20 + x) * 4 + 3];
+      JSON.stringify({ corner: at(0, 0), center: at(10, 10), edgeMid: at(10, 0) });
+    JS
+    r = JSON.parse(out)
+    expect(r['corner']).to eq(0)             # rounded corner is transparent
+    expect(r['center']).to eq(255)           # interior filled
+    expect(r['edgeMid']).to eq(255)          # straight edge midpoint filled
+  end
+
+  it 'roundRect rejects an out-of-range radii list' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      const errs = {};
+      try { ctx.roundRect(0, 0, 10, 10, [1, 2, 3, 4, 5]); } catch (e) { errs.tooMany = e.name; }
+      try { ctx.roundRect(0, 0, 10, 10, -2); } catch (e) { errs.negative = e.name; }
+      JSON.stringify(errs);
+    JS
+    errs = JSON.parse(out)
+    expect(errs['tooMany']).to eq('RangeError')
+    expect(errs['negative']).to eq('RangeError')
+  end
+
+  it 'isPointInPath / isPointInStroke hit-test the current path' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, 0); ctx.lineTo(0, 10); ctx.closePath();
+      const inTri = ctx.isPointInPath(2, 2), outTri = ctx.isPointInPath(8, 8);
+      // even-odd hole
+      ctx.beginPath(); ctx.rect(0, 0, 20, 20); ctx.rect(5, 5, 10, 10);
+      const holeNZ = ctx.isPointInPath(10, 10, 'nonzero'), holeEO = ctx.isPointInPath(10, 10, 'evenodd');
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(0, 5); ctx.lineTo(20, 5);
+      const onStroke = ctx.isPointInStroke(10, 5), offStroke = ctx.isPointInStroke(10, 15);
+      JSON.stringify({ inTri, outTri, holeNZ, holeEO, onStroke, offStroke });
+    JS
+    r = JSON.parse(out)
+    expect(r['inTri']).to be true
+    expect(r['outTri']).to be false
+    expect(r['holeNZ']).to be true          # nonzero: nested same-wound rects are solid
+    expect(r['holeEO']).to be false         # even-odd: inner rect is a hole
+    expect(r['onStroke']).to be true
+    expect(r['offStroke']).to be false
+  end
+
+  it 'createConicGradient sweeps colour around the centre' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      const g = ctx.createConicGradient(0, 10, 10);
+      g.addColorStop(0, '#ff0000');
+      g.addColorStop(1, '#0000ff');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 20, 20);
+      const d = ctx.getImageData(0, 0, 20, 20).data;
+      let painted = 0;
+      for (let k = 3; k < d.length; k += 4) if (d[k] > 0) painted++;
+      JSON.stringify({ painted });
+    JS
+    expect(JSON.parse(out)['painted']).to eq(400)   # whole canvas painted by the sweep
+  end
+
+  it 'reset() clears the bitmap and resets context state' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 4).getContext('2d');
+      ctx.fillStyle = '#ff0000';
+      ctx.translate(2, 2);
+      ctx.fillRect(-2, -2, 4, 4);
+      ctx.reset();
+      const cleared = Array.from(ctx.getImageData(0, 0, 4, 4).data).every(v => v === 0);
+      // state reset: default black + identity transform
+      const defFill = ctx.fillStyle;
+      ctx.fillRect(0, 0, 4, 4);
+      const filled = ctx.getImageData(0, 0, 4, 4).data;
+      JSON.stringify({ cleared, defFill, tl: [filled[0], filled[1], filled[2], filled[3]] });
+    JS
+    r = JSON.parse(out)
+    expect(r['cleared']).to be true
+    expect(r['defFill']).to eq('#000000')
+    expect(r['tl']).to eq([0, 0, 0, 255])   # black at (0,0) → identity transform restored
+  end
+
+  it 'roundRect collapses radii on a zero-dimension rect and no-ops a non-finite radius' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      // Non-finite radius → whole call is a no-op (path stays empty).
+      ctx.beginPath();
+      ctx.roundRect(0, 0, 20, 20, NaN);
+      const emptyAfterNaN = !ctx.isPointInPath(10, 10);
+      // Zero-width rect → radii collapse to 0 (no bulge outside the line).
+      ctx.beginPath();
+      ctx.roundRect(10, 0, 0, 20, 6);
+      const noBulge = !ctx.isPointInPath(4, 10);   // 4px left of the zero-width line
+      JSON.stringify({ emptyAfterNaN, noBulge });
+    JS
+    r = JSON.parse(out)
+    expect(r['emptyAfterNaN']).to be true
+    expect(r['noBulge']).to be true
+  end
+
+  it 'getContextAttributes reflects the options passed to getContext' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const a = new OffscreenCanvas(1, 1).getContext('2d', { alpha: false, willReadFrequently: true });
+      const b = document.createElement('canvas').getContext('2d');   // defaults
+      JSON.stringify({
+        aAlpha: a.getContextAttributes().alpha, aWRF: a.getContextAttributes().willReadFrequently,
+        bAlpha: b.getContextAttributes().alpha, bWRF: b.getContextAttributes().willReadFrequently
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['aAlpha']).to be false
+    expect(r['aWRF']).to be true
+    expect(r['bAlpha']).to be true          # default
+    expect(r['bWRF']).to be false
+  end
+
+  it 'exposes the settings IDL properties (stored + save/restore)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ctx.shadowBlur = 4; ctx.shadowColor = 'red'; ctx.lineDashOffset = 3;
+      ctx.letterSpacing = '2px'; ctx.direction = 'rtl'; ctx.filter = 'blur(2px)';
+      ctx.imageSmoothingQuality = 'high'; ctx.fontKerning = 'none';
+      ctx.save();
+      ctx.shadowBlur = 99; ctx.direction = 'ltr'; ctx.lineDashOffset = 0;
+      ctx.restore();
+      JSON.stringify({
+        blur: ctx.shadowBlur, dir: ctx.direction, dash: ctx.lineDashOffset,
+        ls: ctx.letterSpacing, filter: ctx.filter, quality: ctx.imageSmoothingQuality,
+        kerning: ctx.fontKerning, attrs: ctx.getContextAttributes().alpha, lost: ctx.isContextLost()
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['blur']).to eq(4)               # restore() reverted the save()d change
+    expect(r['dir']).to eq('rtl')
+    expect(r['dash']).to eq(3)
+    expect(r['ls']).to eq('2px')
+    expect(r['filter']).to eq('blur(2px)')
+    expect(r['quality']).to eq('high')
+    expect(r['kerning']).to eq('none')
+    expect(r['attrs']).to be true
+    expect(r['lost']).to be false
+  end
+
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
