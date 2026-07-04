@@ -3861,6 +3861,7 @@ module Capybara
             'emAscent'  => em_asc || asc,
             'emDescent' => em_desc || desc
           }
+          res.merge!(font_base_metrics(pango, fontfile) || {}) if fontfile   # BASE-table baselines, when present
           unless measure_only
             img = img.cast('uchar') unless img.format == :uchar
             res['refId'] = transfer_buffer_stash(img.write_to_memory)
@@ -3995,15 +3996,66 @@ module Capybara
           # A malformed cmap shouldn't discard the (already-read) upm / advances / typo
           # metrics, so isolate its parse — an empty map just means advances fall back.
           cmap:      (parse_cmap4(data, cmap) rescue {}),
+          # Optional horizontal-baseline coordinates ({tag => font units}) from the `BASE`
+          # table — the alphabetic / hanging / ideographic baselines measureText reports.
+          base:      (tabs['BASE'] ? (parse_base_table(data, tabs['BASE']) rescue {}) : {}),
         }
       rescue StandardError
         nil
+      end
+
+      # Horizontal-axis baseline coordinates ({"hang"/"ideo"/"romn"/… => font units},
+      # relative to the script's default baseline) from the first BASE-table script's
+      # BaseValues. Empty when the table is absent or has no coordinates.
+      private def parse_base_table(data, base_off)
+        horiz_rel = data[base_off + 4, 2].unpack1('n')          # horizAxisOffset (0 = none)
+        return {} if horiz_rel.zero?
+        horiz = base_off + horiz_rel
+        tag_list = horiz + data[horiz, 2].unpack1('n')          # baseTagList (rel. to axis)
+        script_list = horiz + data[horiz + 2, 2].unpack1('n')   # baseScriptList (rel. to axis)
+        ntags = data[tag_list, 2].unpack1('n')
+        nscript = data[script_list, 2].unpack1('n')
+        # A count read past a truncated table is nil; `(0...nil)` is an ENDLESS range that
+        # would loop forever (never raising, so the caller's `rescue {}` can't save it).
+        return {} if ntags.nil? || nscript.nil? || nscript.zero?
+        tags = (0...ntags).map { |i| data[tag_list + 2 + i * 4, 4] }
+        # Prefer the DFLT / latn script's baselines; else the first record.
+        recs = (0...nscript).map { |i| o = script_list + 2 + i * 6; [data[o, 4], script_list + data[o + 4, 2].unpack1('n')] }
+        _tag, s_off = recs.find { |t, _| t == 'DFLT' || t == 'latn' } || recs.first
+        bv_rel = data[s_off, 2].unpack1('n')                    # baseValuesOffset (0 = none)
+        return {} if bv_rel.zero?
+        bv = s_off + bv_rel
+        ncoord = data[bv + 2, 2].unpack1('n')
+        out = {}
+        tags.each_with_index do |t, i|
+          break if i >= ncoord
+          co = bv + data[bv + 4 + i * 2, 2].unpack1('n')
+          out[t] = s16(data[co + 2, 2]) if [1, 2, 3].include?(data[co, 2].unpack1('n'))   # BaseCoord formats
+        end
+        out
+      end
+
+      # The alphabetic / hanging / ideographic baselines (px at the pango size) from the
+      # font's BASE table, or nil when the font has none — then the caller heuristically
+      # derives them from the vertical metrics instead.
+      private def font_base_metrics(pango, fontfile)
+        g = font_glyph_data(fontfile) or return nil
+        base = g[:base]
+        return nil if base.nil? || base.empty?
+        scale = font_size_of(pango) / g[:upm].to_f
+        romn = base['romn'] || 0                                # the alphabetic baseline = the reference
+        {
+          'alphabeticBaseline'  => 0.0,
+          'hangingBaseline'     => ((base['hang'] || romn) - romn) * scale,
+          'ideographicBaseline' => ((base['ideo'] || romn) - romn) * scale,
+        }
       end
 
       # A Unicode → glyph-id map from the first format-4 `cmap` subtable (the standard
       # BMP Unicode encoding), as {codepoint => glyph}. Empty when none is present.
       private def parse_cmap4(data, cmap)
         ntab = data[cmap + 2, 2].unpack1('n')
+        return {} if ntab.nil?   # a count read past a truncated table → don't loop `(0...nil)` forever
         # Prefer a Unicode BMP subtable — (3,1) Windows Unicode or (0,*) Unicode — over a
         # (3,0) Symbol map (which shadows ASCII into the 0xF000 PUA); fall back to any
         # format-4 table only if no Unicode one is present.

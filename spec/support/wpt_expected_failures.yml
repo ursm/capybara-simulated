@@ -1836,8 +1836,6 @@ html/canvas/element/path-objects/2d.path.arc.shape.3.html:
 - arc() from 0 to -pi/2 does not draw anything in the wrong quadrant
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
-html/canvas/element/text/2d.text.draw.baseline.ideographic.html:
-- 'Canvas test: 2d.text.draw.baseline.ideographic'
 html/canvas/element/text/2d.text.drawing.style.fontKerning.html:
 - Testing basic functionalities of fontKerning for canvas
 html/canvas/element/text/2d.text.drawing.style.fontKerning.with.uppercase.html:
@@ -1848,8 +1846,6 @@ html/canvas/element/text/2d.text.lang.default.html:
 - 'Canvas test: 2d.text.lang.default'
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
 - Testing that actualBoundingBox metrics are precise at small font sizes
-html/canvas/element/text/2d.text.measure.baselines.html:
-- Testing baselines
 html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:

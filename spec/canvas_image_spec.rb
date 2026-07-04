@@ -1778,6 +1778,42 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     end
   end
 
+  it 'reports BASE-table baselines and positions ideographic-baseline text' do
+    canvas_font = File.binread(File.expand_path('spec/wpt/fonts/CanvasTest.ttf', Dir.pwd))
+    app = Rack::Builder.new {
+      run lambda {|env|
+        if Rack::Request.new(env).path_info.end_with?('.ttf')
+          [200, {'content-type' => 'font/ttf'}, [canvas_font]]
+        else
+          [200, {'content-type' => 'text/html'}, [
+            %q(<!doctype html><style>@font-face{font-family:CanvasTest;src:url('/CanvasTest.ttf')}</style>) +
+            %q(<canvas id=c width=100 height=50></canvas>)
+          ]]
+        end
+      }
+    }.to_app
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.getElementById('c').getContext('2d');
+      ctx.font = '50px CanvasTest';
+      const m = ctx.measureText('A');
+      // Draw CanvasTest 'CC' (opaque em blocks) with the ideographic baseline at y=31.25;
+      // sample a pixel that must be covered when the baseline is placed correctly.
+      ctx.textBaseline = 'ideographic'; ctx.fillStyle = '#00f';
+      ctx.fillText('CC', 0, 31.25);
+      const covered = ctx.getImageData(25, 25, 1, 1).data[3] > 0;
+      JSON.stringify({
+        alpha: m.alphabeticBaseline, hang: m.hangingBaseline, ideo: m.ideographicBaseline, covered,
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['alpha']).to eq(0)         # BASE romn baseline
+    expect(r['hang']).to eq(25)         # 512 units × 50 / 1024
+    expect(r['ideo']).to eq(6.25)       # 128 units × 50 / 1024
+    expect(r['covered']).to eq(true)    # ideographic-baseline text lands where expected
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
