@@ -772,13 +772,6 @@ html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_crossorigin.su
 - Can't get pixels of canvas with non-CORS enabled cross origin image drawn
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_svg_image_1.html:
 - Load a 100x100 image to a SVG image and draw it to a 100x100 canvas.
-html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_001.html:
-- drawFocusIfNeeded draws a focus ring.
-html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_004.html:
-- drawFocusIfNeeded does draw a focus ring if the element is in focus.
-html/canvas/element/manual/drawing-paths-to-the-canvas/drawFocusIfNeeded_005.html:
-- drawFocusIfNeeded does draw a focus ring if the element is in focus and the user
-  activated a particular focus ring.
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-canvas-cross-origin-taint.https.sub.html:
 - Tainting check for a tainted canvas in canvas pattern
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-image-cross-origin-taint.https.sub.html:

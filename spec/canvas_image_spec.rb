@@ -1516,6 +1516,61 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(JSON.parse(out)['pattern']).to eq('null')
   end
 
+  it 'draws a focus ring only when the fallback element is focused (drawFocusIfNeeded)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      document.body.innerHTML =
+        "<canvas id='c' width='100' height='100'><a href='#' id='el'>focus</a></canvas>";
+      const canvas = document.getElementById('c');
+      const el = document.getElementById('el');
+      const ctx = canvas.getContext('2d');
+      const draw = () => {
+        ctx.clearRect(0, 0, 100, 100);
+        ctx.beginPath(); ctx.rect(10, 10, 80, 80);
+        ctx.drawFocusIfNeeded(el);
+        const d = ctx.getImageData(0, 0, 100, 100).data;
+        let painted = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) painted++;
+        return painted;
+      };
+      const blurred = draw();     // el not focused → no ring
+      el.focus();
+      const focused = draw();     // el focused → ring painted
+      // The focus ring is a UA decoration: globalAlpha=0 must not suppress it, and a
+      // whole-canvas operator ('copy') must not let it erase existing canvas content.
+      ctx.globalAlpha = 0;
+      const underAlpha0 = draw();
+      ctx.globalAlpha = 1;
+      // The author's dash pattern must not dash the ring: same painted count as solid.
+      ctx.setLineDash([2, 20]);
+      const underDash = draw();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#00f'; ctx.fillRect(0, 0, 100, 100);
+      ctx.globalCompositeOperation = 'copy';
+      ctx.beginPath(); ctx.rect(10, 10, 80, 80);
+      ctx.drawFocusIfNeeded(el);
+      const bluePreserved = ctx.getImageData(0, 0, 1, 1).data[2];   // corner still blue?
+      const err = (fn) => { try { fn(); return 'none'; } catch (e) { return e.name; } };
+      JSON.stringify({
+        blurred,
+        focused,
+        underAlpha0,
+        underDash,
+        bluePreserved,
+        noArg:   err(() => ctx.drawFocusIfNeeded()),   // WebIDL: element required
+        badArg:  err(() => ctx.drawFocusIfNeeded('nope')),
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['blurred']).to eq(0)          # unfocused → nothing drawn
+    expect(r['focused']).to be > 0         # focused → a ring appears
+    expect(r['underAlpha0']).to be > 0     # globalAlpha=0 does not suppress the ring
+    expect(r['underDash']).to eq(r['focused'])  # author dash does not dash the ring
+    expect(r['bluePreserved']).to eq(255)  # 'copy' op does not erase the canvas
+    expect(r['noArg']).to eq('TypeError')
+    expect(r['badArg']).to eq('TypeError')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
