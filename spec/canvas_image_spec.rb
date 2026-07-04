@@ -1738,6 +1738,26 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['render']).to all(eq('optimizeSpeed'))
   end
 
+  it 'measures the bounding box relative to the text-alignment / direction origin' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(200, 40).getContext('2d');
+      ctx.font = '20px sans-serif';
+      const box = () => { const m = ctx.measureText('hello'); return m.actualBoundingBoxLeft - m.actualBoundingBoxRight; };
+      ctx.textAlign = 'left';   const left  = box();   // origin at left edge → Left < Right (negative)
+      ctx.textAlign = 'right';  const right = box();   // origin at right edge → Left > Right (positive)
+      ctx.textAlign = 'start';  ctx.direction = 'ltr'; const startLtr = box();
+      ctx.direction = 'rtl'; const startRtl = box();   // start with rtl aligns to the right edge
+      JSON.stringify({ left, right, startLtr, startRtl });
+    JS
+    r = JSON.parse(out)
+    expect(r['left']).to be < 0        # left-aligned: box extends right of the origin
+    expect(r['right']).to be > 0       # right-aligned: box extends left of the origin
+    expect(r['startLtr']).to be < 0    # start+ltr == left
+    expect(r['startRtl']).to be > 0    # start+rtl == right
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
