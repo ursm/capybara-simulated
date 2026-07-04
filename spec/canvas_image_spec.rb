@@ -1242,6 +1242,64 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['top']).to eq([0, 255, 0, 255])            # green from the self-copy, not corrupted
   end
 
+  it 'fillStyle accepts colour objects, coerces via toString, and rejects bare hex' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(2, 2).getContext('2d');
+      ctx.fillStyle = {r: 0, g: 1, b: 0, a: 0.5};        // colour object, components in [0,1]
+      ctx.fillRect(0, 0, 2, 2);
+      const obj = Array.from(ctx.getImageData(0, 0, 1, 1).data);
+      ctx.clearRect(0, 0, 2, 2);
+      ctx.fillStyle = {r: 0, g: 1, b: 0, a: -1};         // alpha clamps to 0 → transparent
+      ctx.fillRect(0, 0, 2, 2);
+      const clamped = ctx.getImageData(0, 0, 1, 1).data[3];
+      ctx.fillStyle = '#008000';
+      ctx.fillStyle = { toString: () => '#0000ff' };     // toString → parsed as a colour
+      const viaToString = ctx.fillStyle;
+      ctx.fillStyle = {};                                // "[object Object]" → invalid → kept
+      const keptObj = ctx.fillStyle;
+      ctx.fillStyle = 800000;                            // "800000" (bare hex) → invalid → kept
+      const keptNum = ctx.fillStyle;
+      let threw = null;
+      try { ctx.fillStyle = { toString() { throw new TypeError('x'); } }; } catch (e) { threw = e.name; }
+      JSON.stringify({ obj, clamped, viaToString, keptObj, keptNum, threw });
+    JS
+    r = JSON.parse(out)
+    expect(r['obj']).to eq([0, 255, 0, 128])           # 0.5 alpha over transparent
+    expect(r['clamped']).to eq(0)
+    expect(r['viaToString']).to eq('#0000ff')
+    expect(r['keptObj']).to eq('#0000ff')              # invalid object ignored
+    expect(r['keptNum']).to eq('#0000ff')              # bare-hex number ignored
+    expect(r['threw']).to eq('TypeError')              # a throwing toString propagates
+  end
+
+  it 'gradient addColorStop validates the offset and resolves currentColor to black' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(4, 1).getContext('2d');
+      const g = ctx.createLinearGradient(0, 0, 4, 0);
+      const err = (fn) => { try { fn(); return 'none'; } catch (e) { return e.name; } };
+      const r = {
+        neg: err(() => g.addColorStop(-1, '#000')),      // out of range → IndexSizeError
+        big: err(() => g.addColorStop(2, '#000')),
+        inf: err(() => g.addColorStop(Infinity, '#000')), // non-finite → TypeError
+        nan: err(() => g.addColorStop(NaN, '#000')),
+      };
+      g.addColorStop(0, 'currentColor'); g.addColorStop(1, 'currentColor');   // → black
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 1);
+      r.stop = Array.from(ctx.getImageData(2, 0, 1, 1).data);
+      JSON.stringify(r);
+    JS
+    r = JSON.parse(out)
+    expect(r['neg']).to eq('IndexSizeError')
+    expect(r['big']).to eq('IndexSizeError')
+    expect(r['inf']).to eq('TypeError')
+    expect(r['nan']).to eq('TypeError')
+    expect(r['stop']).to eq([0, 0, 0, 255])            # currentColor stop → opaque black
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

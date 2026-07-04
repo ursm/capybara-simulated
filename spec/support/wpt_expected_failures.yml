@@ -753,10 +753,6 @@ html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - CSSHSL works as color input
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
 - CSSRGB works as color input
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.html:
-- ctx.fillStyle works with color objects
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.transparency.html:
-- ctx.fillStyle with color objects has transparency
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.currentcolor.html:
 - color-mix works as color input with currentcolor
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colormix.html:
@@ -765,17 +761,8 @@ html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.currentcol
 - Relative color works as color input with currentcolor
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.relativecolor.html:
 - Relative color works as color input
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.toStringFunctionCallback.html:
-- Passing a function in to ctx.fillStyle or ctx.strokeStyle with a toString callback
-  works as specified
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
 - color-mix works as CanvasGradient color input
-html/canvas/element/fill-and-stroke-styles/2d.gradient.conic.invalid.inputs.html:
-- Conic gradient function with invalid inputs
-html/canvas/element/fill-and-stroke-styles/2d.gradient.object.current.html:
-- 'Canvas test: 2d.gradient.object.current'
-html/canvas/element/fill-and-stroke-styles/2d.gradient.object.invalidoffset.html:
-- 'Canvas test: 2d.gradient.object.invalidoffset'
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
 - Relative color works as CanvasGradient color input
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.immediate.html:
@@ -794,10 +781,6 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
 - 'Canvas test: 2d.pattern.svgimage.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
 - 'Canvas test: 2d.pattern.svgimage.zerowidth'
-html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.html:
-- ctx.strokeStyle works with color objects
-html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.transparency.html:
-- ctx.strokeStyle with color objects has transparency
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colormix.html:
 - color-mix works as color input
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.relativecolor.html:
