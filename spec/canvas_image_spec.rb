@@ -1300,6 +1300,35 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['stop']).to eq([0, 0, 0, 255])            # currentColor stop → opaque black
   end
 
+  it 'parses CSS Color 4/5 (color(), color-mix, relative colour) and serialises color(srgb …)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    session.execute_script("document.body.innerHTML = '<canvas id=cc width=4 height=4 style=\"color:#f0f\"></canvas>'")
+    out = session.evaluate_script(<<~JS)
+      const ctx = document.getElementById('cc').getContext('2d');
+      const ser = (v) => { ctx.fillStyle = '#000'; ctx.fillStyle = v; return ctx.fillStyle; };
+      JSON.stringify({
+        colorFn:   ser('color(srgb 0.5 0 0.5)'),
+        mix:       ser('color-mix(in srgb, red, blue)'),
+        mixIdent:  ser('color-mix(in srgb, red, color(srgb 1 0 0))'),
+        mixCur:    ser('color-mix(in srgb, black, currentcolor)'),   // currentcolor = #f0f
+        relRgb:    ser('rgb(from red g r b)'),
+        relColor:  ser('color(from color(srgb 0.25 0.5 0.75 / 0.5) srgb r g b / alpha)'),
+        legacyHex: ser('red'),                                       // legacy stays hex
+        badHex:    (ctx.fillStyle = '#0f0', ctx.fillStyle = '800000', ctx.fillStyle)  // bare hex invalid → kept green
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['colorFn']).to eq('color(srgb 0.5 0 0.5)')
+    expect(r['mix']).to eq('color(srgb 0.5 0 0.5)')
+    expect(r['mixIdent']).to eq('color(srgb 1 0 0)')
+    expect(r['mixCur']).to eq('color(srgb 0.5 0 0.5)')              # black + magenta
+    expect(r['relRgb']).to eq('color(srgb 0 1 0)')
+    expect(r['relColor']).to eq('color(srgb 0.25 0.5 0.75 / 0.5)')
+    expect(r['legacyHex']).to eq('#ff0000')
+    expect(r['badHex']).to eq('#00ff00')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
