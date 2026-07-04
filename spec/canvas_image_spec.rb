@@ -1463,6 +1463,59 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(JSON.parse(out)).to eq([0, 255, 0, 255])
   end
 
+  it 'counts points exactly on the fill boundary as inside (isPointInPath)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(30, 30).getContext('2d');
+      ctx.rect(0, 0, 20, 20);
+      const on  = [[0, 0], [10, 0], [20, 0], [20, 10], [20, 20], [10, 20], [0, 20], [0, 10]];
+      const off = [[10, -0.01], [10, 20.01], [-0.01, 10], [20.01, 10]];
+      const onR  = on.map(([x, y]) => ctx.isPointInPath(x, y));
+      const offR = off.map(([x, y]) => ctx.isPointInPath(x, y));
+      // A non-invertible CTM maps the plane to a point → nothing is inside. (beginPath
+      // here replaces the current path — it isn't part of the save/restore state.)
+      ctx.scale(0, 0); ctx.beginPath(); ctx.rect(-10, -10, 20, 20);
+      const degenerate = ctx.isPointInPath(0, 0);
+      JSON.stringify({ on: onR, off: offR, degenerate });
+    JS
+    r = JSON.parse(out)
+    expect(r['on']).to all(eq(true))     # every boundary point is inside
+    expect(r['off']).to all(eq(false))   # a hair outside is not
+    expect(r['degenerate']).to eq(false) # non-invertible CTM → false
+  end
+
+  it 'does not count a point on a zero-area subpath as inside (isPointInPath)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(120, 20).getContext('2d');
+      // A bare line and a repeated point enclose no area → fill paints nothing, so a
+      // point lying on them is NOT inside (the edge-inclusion rule is only for the
+      // boundary of a real filled region).
+      ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(100, 10);
+      const online = ctx.isPointInPath(50, 10);
+      ctx.beginPath(); ctx.moveTo(50, 10); ctx.lineTo(50, 10);
+      const onPoint = ctx.isPointInPath(50, 10);
+      JSON.stringify({ online, onPoint });
+    JS
+    r = JSON.parse(out)
+    expect(r['online']).to eq(false)
+    expect(r['onPoint']).to eq(false)
+  end
+
+  it 'returns null for createPattern from a video with no decoded frame' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      const v = document.createElement('video');   // readyState HAVE_NOTHING → "bad" usability
+      const err = (fn) => { try { return String(fn()); } catch (e) { return e.name; } };
+      JSON.stringify({ pattern: err(() => ctx.createPattern(v, 'repeat')) });
+    JS
+    expect(JSON.parse(out)['pattern']).to eq('null')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
