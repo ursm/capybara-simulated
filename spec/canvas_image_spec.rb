@@ -1390,6 +1390,79 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['okFillRect']).to eq('none')
   end
 
+  it 'reports context creation attributes via getContextAttributes' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const mk = (o) => new OffscreenCanvas(1, 1).getContext('2d', o).getContextAttributes();
+      JSON.stringify({
+        defaults: mk({}),
+        custom:   mk({alpha: false, colorSpace: 'display-p3', colorType: 'float16', willReadFrequently: true}),
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['defaults']).to eq(
+      'alpha'              => true,
+      'desynchronized'     => false,
+      'colorSpace'         => 'srgb',
+      'colorType'          => 'unorm8',
+      'willReadFrequently' => false
+    )
+    expect(r['custom']).to include(
+      'alpha'              => false,
+      'colorSpace'         => 'display-p3',
+      'colorType'          => 'float16',
+      'willReadFrequently' => true
+    )
+  end
+
+  it 'bilinearly interpolates a scaled drawImage only when imageSmoothingEnabled' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      // 2×2 source: (0,0) green, the other three red.
+      const src = new OffscreenCanvas(2, 2).getContext('2d');
+      src.fillStyle = '#f00'; src.fillRect(0, 0, 2, 2);
+      src.fillStyle = '#0f0'; src.fillRect(0, 0, 1, 1);
+      const px = (smooth) => {
+        const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+        ctx.imageSmoothingEnabled = smooth;
+        ctx.scale(10, 10);
+        ctx.drawImage(src.canvas, 0, 0);
+        return [...ctx.getImageData(9, 9, 1, 1).data];   // interior, near the green/red seam
+      };
+      JSON.stringify({ smooth: px(true), nearest: px(false) });
+    JS
+    r = JSON.parse(out)
+    # Smoothing off → nearest-neighbour: device (9,9) maps to source (0,0), pure green.
+    expect(r['nearest']).to eq([0, 255, 0, 255])
+    # Smoothing on → the sample sits near the green/red seam, so red bleeds in: it is
+    # neither pure green nor pure red.
+    expect(r['smooth'][0]).to be > 0        # some red bled in
+    expect(r['smooth'][1]).not_to eq(255)   # not fully green anymore
+    expect(r['smooth'][1]).to be > 0        # but still some green
+    expect(r['smooth'][3]).to eq(255)       # opaque edge stays opaque (clamp-to-edge)
+  end
+
+  it 'does not bleed adjacent atlas cells when smoothing a scaled sub-rect' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      // 2×1 atlas: left cell green, right cell red.
+      const atlas = new OffscreenCanvas(2, 1).getContext('2d');
+      atlas.fillStyle = '#0f0'; atlas.fillRect(0, 0, 1, 1);
+      atlas.fillStyle = '#f00'; atlas.fillRect(1, 0, 1, 1);
+      const ctx = new OffscreenCanvas(10, 1).getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      // Draw ONLY the green cell (source sub-rect 0,0,1,1) magnified 10×.
+      ctx.drawImage(atlas.canvas, 0, 0, 1, 1, 0, 0, 10, 1);
+      JSON.stringify([...ctx.getImageData(9, 0, 1, 1).data]);   // rightmost drawn pixel
+    JS
+    # The neighbouring red cell must not bleed across the sub-rect seam: the whole
+    # magnified cell stays pure green (clamp-to-sub-rect, not clamp-to-image).
+    expect(JSON.parse(out)).to eq([0, 255, 0, 255])
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

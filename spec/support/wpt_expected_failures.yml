@@ -763,10 +763,6 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
 - 'Canvas test: 2d.pattern.svgimage.zeroheight'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
 - 'Canvas test: 2d.pattern.svgimage.zerowidth'
-html/canvas/element/manual/context-attributes/getContextAttributes.html:
-- 'Test context creation attributes colorType: float16'
-- 'Test context creation attributes colorType: unorm8'
-- Test default context creation attributes
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'
@@ -801,9 +797,6 @@ html/canvas/element/manual/filters/svg-flood-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG flood filter
 html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG specular lighting filter
-html/canvas/element/manual/image-smoothing/imagesmoothing.html:
-- Test that image smoothing is actually on by default and just the attribute value.
-- Test that image smoothing works when imageSmoothingEnabled is set to true
 html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
 - canvas-ImageBitmap-close
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
