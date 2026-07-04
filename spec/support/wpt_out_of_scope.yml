@@ -10400,6 +10400,18 @@ html/canvas/element/color-type/2d.color.type.u8srgb.to.u8p3.to.u8srgb.html:
 - name: test display-p3 unorm8 canvas not storing 8-bit srgb data accurately
   reason: Non-8-bit / non-sRGB canvas colour types (float16, display-p3) — a colour-management
     / pixel-format subsystem we don't model (rule 1); the u8-sRGB path is covered.
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
+- name: CSSHSL works as color input
+  reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them
+    (Chromium / Firefox throw on `new CSSHSL` / `new CSSRGB`; MDN has no such interface) —
+    a removed feature, not a driver gap. CSS Color 4/5 color inputs (color() / color-mix /
+    relative colour) ARE supported.
+html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
+- name: CSSRGB works as color input
+  reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them
+    (Chromium / Firefox throw on `new CSSHSL` / `new CSSRGB`; MDN has no such interface) —
+    a removed feature, not a driver gap. CSS Color 4/5 color inputs (color() / color-mix /
+    relative colour) ARE supported.
 html/canvas/element/filters/2d.filter.canvasFilterObject.blur.exceptions.tentative.html:
 - name: Test exceptions on gaussianBlur filter
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

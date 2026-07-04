@@ -749,10 +749,6 @@ html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
 - 'Canvas test: 2d.drawImage.nonexistent'
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
 - drawImage with zero-sized source rectangle from image draws nothing without exception
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
-- CSSHSL works as color input
-html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
-- CSSRGB works as color input
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
 - color-mix works as CanvasGradient color input
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
@@ -1870,8 +1866,6 @@ html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/path-objects/2d.path.isPointInPath.edge.html:
 - isPointInPath() counts points on the path as being inside
-html/canvas/element/path-objects/2d.path.roundrect.nonfinite.html:
-- roundRect() with Infinity/NaN is ignored
 html/canvas/element/path-objects/2d.path.roundrect.winding.html:
 - 'Canvas test: 2d.path.roundrect.winding'
 html/canvas/element/text/2d.text.align.invalid.html:

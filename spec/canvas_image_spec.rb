@@ -1329,6 +1329,25 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['badHex']).to eq('#00ff00')
   end
 
+  it 'roundRect ignores a non-finite radius but throws on a finite negative one' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx.moveTo(0, 0); ctx.lineTo(10, 0);
+      let threwInf = false, threwNaN = false, threwNeg = null;
+      // non-finite radius (incl -Infinity) → no-op, must not throw or disturb the path
+      try { ctx.roundRect(0, 0, 5, 5, [Infinity]); } catch (e) { threwInf = true; }
+      try { ctx.roundRect(0, 0, 5, 5, [-Infinity]); } catch (e) { threwNaN = true; }
+      try { ctx.roundRect(0, 0, 5, 5, [-3]); } catch (e) { threwNeg = e.name; }   // finite negative → throws
+      JSON.stringify({ threwInf, threwNaN, threwNeg });
+    JS
+    r = JSON.parse(out)
+    expect(r['threwInf']).to be false
+    expect(r['threwNaN']).to be false            # -Infinity is non-finite → ignored, not a RangeError
+    expect(r['threwNeg']).to eq('RangeError')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
