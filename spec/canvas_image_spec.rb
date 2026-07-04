@@ -1758,6 +1758,26 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['startRtl']).to be > 0    # start+rtl == right
   end
 
+  it 'normalizes tab/newline/CR/FF to spaces in text (single-line, no wrap)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(300, 80).getContext('2d');
+      ctx.font = '20px sans-serif';
+      const w = (t) => ctx.measureText(t).width;
+      // Each control char measures like a space, and a newline does not wrap to a
+      // second line (which would collapse the horizontal advance).
+      const spaced = w('A B');
+      JSON.stringify({
+        tab: w('A\\tB'), lf: w('A\\nB'), cr: w('A\\rB'), ff: w('A\\fB'), spaced,
+      });
+    JS
+    r = JSON.parse(out)
+    %w[tab lf cr ff].each do |k|
+      expect(r[k]).to be_within(0.5).of(r['spaced']), "#{k} should measure like 'A B'"
+    end
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

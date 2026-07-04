@@ -1848,8 +1848,6 @@ html/canvas/element/text/2d.text.lang.default.html:
 - 'Canvas test: 2d.text.lang.default'
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
 - Testing that actualBoundingBox metrics are precise at small font sizes
-html/canvas/element/text/2d.text.measure.actualBoundingBox.whitespace.html:
-- Testing actualBoundingBox with leading/trailing whitespace
 html/canvas/element/text/2d.text.measure.baselines.html:
 - Testing baselines
 html/canvas/element/text/2d.text.measure.lang.html:
