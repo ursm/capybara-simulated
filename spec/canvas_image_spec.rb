@@ -1717,6 +1717,27 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['em20']).to be_within(0.1).of(220)      # 1em now 20px × 11
   end
 
+  it 'validates fontStretch / fontVariantCaps / textRendering enum values' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      const probe = (prop, good, bads) => {
+        ctx[prop] = good;
+        return bads.map((b) => { ctx[prop] = b; return ctx[prop]; });
+      };
+      JSON.stringify({
+        stretch: probe('fontStretch', 'ultra-expanded', ['Expanded', 'eXtra-expanded', 'abcd']),
+        variant: probe('fontVariantCaps', 'small-caps', ['nORmal', 'small-CAPS', 'abcd']),
+        render:  probe('textRendering', 'optimizeSpeed', ['Auto', 'normal', '', 'abcd']),
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['stretch']).to all(eq('ultra-expanded'))   # invalid ignored, keeps last valid
+    expect(r['variant']).to all(eq('small-caps'))
+    expect(r['render']).to all(eq('optimizeSpeed'))
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

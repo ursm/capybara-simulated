@@ -1846,16 +1846,10 @@ html/canvas/element/text/2d.text.drawing.style.fontKerning.html:
 - Testing basic functionalities of fontKerning for canvas
 html/canvas/element/text/2d.text.drawing.style.fontKerning.with.uppercase.html:
 - Testing basic functionalities of fontKerning for canvas
-html/canvas/element/text/2d.text.drawing.style.fontStretch.settings.html:
-- Testing value setting of fontStretch in Canvas
-html/canvas/element/text/2d.text.drawing.style.fontVariant.settings.html:
-- Testing basic functionalities of fontVariant for canvas
 html/canvas/element/text/2d.text.drawing.style.measure.direction.html:
 - Measurement should follow text direction
 html/canvas/element/text/2d.text.drawing.style.measure.textAlign.html:
 - Measurement should be related to textAlignment
-html/canvas/element/text/2d.text.drawing.style.textRendering.settings.html:
-- Testing basic functionalities of textRendering in Canvas
 html/canvas/element/text/2d.text.fontVariantCaps2.html:
 - Testing small caps setting in fontVariant
 html/canvas/element/text/2d.text.lang.default.html:
