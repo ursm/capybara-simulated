@@ -1836,24 +1836,12 @@ html/canvas/element/path-objects/2d.path.arc.shape.3.html:
 - arc() from 0 to -pi/2 does not draw anything in the wrong quadrant
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
-html/canvas/element/text/2d.text.align.invalid.html:
-- 'Canvas test: 2d.text.align.invalid'
-html/canvas/element/text/2d.text.baseline.invalid.html:
-- 'Canvas test: 2d.text.baseline.invalid'
-html/canvas/element/text/2d.text.direction.invalid.html:
-- 'Canvas test: 2d.text.direction.invalid'
 html/canvas/element/text/2d.text.draw.align.end.rtl.html:
 - textAlign end with rtl is the left edge
 html/canvas/element/text/2d.text.draw.align.start.rtl.html:
 - textAlign start with rtl is the right edge
 html/canvas/element/text/2d.text.draw.baseline.ideographic.html:
 - 'Canvas test: 2d.text.draw.baseline.ideographic'
-html/canvas/element/text/2d.text.draw.fill.maxWidth.NaN.html:
-- fillText handles maxWidth correctly
-html/canvas/element/text/2d.text.draw.fill.maxWidth.negative.html:
-- fillText handles maxWidth correctly
-html/canvas/element/text/2d.text.draw.fill.maxWidth.zero.html:
-- fillText handles maxWidth correctly
 html/canvas/element/text/2d.text.drawing.style.absolute.spacing.html:
 - Testing letter spacing and word spacing with absolute length
 html/canvas/element/text/2d.text.drawing.style.font-relative.spacing.html:
@@ -1866,8 +1854,6 @@ html/canvas/element/text/2d.text.drawing.style.fontStretch.settings.html:
 - Testing value setting of fontStretch in Canvas
 html/canvas/element/text/2d.text.drawing.style.fontVariant.settings.html:
 - Testing basic functionalities of fontVariant for canvas
-html/canvas/element/text/2d.text.drawing.style.invalid.spacing.html:
-- Testing letter spacing and word spacing with invalid units
 html/canvas/element/text/2d.text.drawing.style.letterSpacing.change.font.html:
 - Set letter spacing and word spacing to font dependent value and verify it works
   after font change.
@@ -1877,8 +1863,6 @@ html/canvas/element/text/2d.text.drawing.style.measure.direction.html:
 - Measurement should follow text direction
 html/canvas/element/text/2d.text.drawing.style.measure.textAlign.html:
 - Measurement should be related to textAlignment
-html/canvas/element/text/2d.text.drawing.style.nonfinite.spacing.html:
-- Testing letter spacing and word spacing with nonfinite inputs
 html/canvas/element/text/2d.text.drawing.style.textRendering.settings.html:
 - Testing basic functionalities of textRendering in Canvas
 html/canvas/element/text/2d.text.drawing.style.wordSpacing.change.font.html:

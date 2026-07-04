@@ -1588,6 +1588,54 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(JSON.parse(out)).to all(eq(0))
   end
 
+  it 'ignores invalid text drawing-state values (enums / lengths)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');
+      const probe = (prop, good, bads) => {
+        ctx[prop] = good;
+        return bads.map((b) => { ctx[prop] = b; return ctx[prop]; });
+      };
+      JSON.stringify({
+        align:    probe('textAlign', 'start', ['bogus', 'END', 'end ', 'end\\0']),
+        baseline: probe('textBaseline', 'top', ['bogus', 'MIDDLE', 'middle ', 'middle\\0']),
+        direction: probe('direction', 'ltr', ['LTR', 'rtl ', 'rtl\\0', 'bogus']),
+        letter:   probe('letterSpacing', '0px', ['0s', '1min', '1deg', 'normal', 'initial', NaN, Infinity]),
+        word:     probe('wordSpacing', '0px', ['1pp', 'none', 'inherit', -Infinity]),
+        okLetter: (ctx.letterSpacing = '3px', ctx.letterSpacing),   // a valid length IS accepted
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['align']).to all(eq('start'))
+    expect(r['baseline']).to all(eq('top'))
+    expect(r['direction']).to all(eq('ltr'))
+    expect(r['letter']).to all(eq('0px'))
+    expect(r['word']).to all(eq('0px'))
+    expect(r['okLetter']).to eq('3px')
+  end
+
+  it 'draws nothing when fillText is given a non-positive or NaN maxWidth' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const painted = (maxWidth) => {
+        const ctx = new OffscreenCanvas(120, 40).getContext('2d');
+        ctx.font = '20px sans-serif'; ctx.fillStyle = '#f00';
+        maxWidth === undefined ? ctx.fillText('hello', 5, 25) : ctx.fillText('hello', 5, 25, maxWidth);
+        const d = ctx.getImageData(0, 0, 120, 40).data;
+        let n = 0; for (let k = 3; k < d.length; k += 4) if (d[k] > 0) n++;
+        return n;
+      };
+      JSON.stringify({ zero: painted(0), negative: painted(-1), nan: painted(NaN), omitted: painted(undefined) });
+    JS
+    r = JSON.parse(out)
+    expect(r['zero']).to eq(0)         # maxWidth 0 → nothing drawn
+    expect(r['negative']).to eq(0)     # maxWidth < 0 → nothing drawn
+    expect(r['nan']).to eq(0)          # maxWidth NaN → nothing drawn
+    expect(r['omitted']).to be > 0     # omitted maxWidth → text drawn normally
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
