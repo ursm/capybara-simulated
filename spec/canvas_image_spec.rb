@@ -1688,6 +1688,35 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect((r['weighted'] - r['plain']).abs).to be <= 2 # weighted renders at the same size
   end
 
+  it 'reflects letter/word spacing in measureText width (resolved against the current font)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(400, 60).getContext('2d');
+      ctx.font = '10px sans-serif';
+      const w = (t) => ctx.measureText(t).width;
+      const base = w('Hello World');                 // 11 chars, 1 space
+      ctx.letterSpacing = '3px';
+      const letter3 = w('Hello World') - base;        // +3 × 11
+      ctx.letterSpacing = '0px';
+      ctx.wordSpacing = '5px';
+      const word5 = w('Hello World') - base;          // +5 × 1 space
+      ctx.wordSpacing = '0px';
+      ctx.letterSpacing = '1em';                       // em against the current font size (10px)
+      const em10 = w('Hello World') - base;            // +10 × 11
+      ctx.font = '20px sans-serif';                     // re-resolves the em spacing to 20px
+      const base20 = ctx.measureText('Hello World').width;
+      ctx.letterSpacing = '0px';
+      const em20 = base20 - ctx.measureText('Hello World').width;   // +20 × 11 minus the 0-spacing width
+      JSON.stringify({ letter3, word5, em10, em20 });
+    JS
+    r = JSON.parse(out)
+    expect(r['letter3']).to be_within(0.1).of(33)    # 3px × 11 chars
+    expect(r['word5']).to be_within(0.1).of(5)       # 5px × 1 space
+    expect(r['em10']).to be_within(0.1).of(110)      # 1em(=10px) × 11
+    expect(r['em20']).to be_within(0.1).of(220)      # 1em now 20px × 11
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
