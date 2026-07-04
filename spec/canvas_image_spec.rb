@@ -1571,6 +1571,23 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['badArg']).to eq('TypeError')
   end
 
+  it 'does not let a thick arc stroke overshoot its endpoint into the wrong half' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(100, 50).getContext('2d');
+      ctx.fillStyle = '#0f0'; ctx.fillRect(0, 0, 100, 50);
+      ctx.lineWidth = 50; ctx.strokeStyle = '#f00';
+      // A semicircle over the lower (off-canvas) half: nothing red should reach the
+      // upper half. The end caps at (0,50)/(100,50) must hug the true tangent, not tilt.
+      ctx.beginPath(); ctx.arc(50, 50, 50, 0, Math.PI, false); ctx.stroke();
+      const pts = [[20, 48], [50, 25], [1, 1], [98, 1], [80, 48]];
+      JSON.stringify(pts.map(([x, y]) => ctx.getImageData(x, y, 1, 1).data[0]));   // red channel
+    JS
+    # Every sampled point in the wrong (upper) half stays pure green — no red bleed.
+    expect(JSON.parse(out)).to all(eq(0))
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

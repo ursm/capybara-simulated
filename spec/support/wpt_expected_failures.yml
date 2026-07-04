@@ -1830,18 +1830,10 @@ html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-settings.html:
 - Context display-p3, ImageData undefined
 - Context srgb, ImageData display-p3
 - Context undefined, ImageData display-p3
-html/canvas/element/path-objects/2d.path.arc.scale.2.html:
-- Highly scaled arcs are the right shape
 html/canvas/element/path-objects/2d.path.arc.selfintersect.1.html:
 - arc() with lineWidth > 2*radius is drawn sensibly
-html/canvas/element/path-objects/2d.path.arc.selfintersect.2.html:
-- arc() with lineWidth > 2*radius is drawn sensibly
-html/canvas/element/path-objects/2d.path.arc.shape.1.html:
-- arc() from 0 to pi does not draw anything in the wrong half
 html/canvas/element/path-objects/2d.path.arc.shape.3.html:
 - arc() from 0 to -pi/2 does not draw anything in the wrong quadrant
-html/canvas/element/path-objects/2d.path.arc.shape.4.html:
-- arc() from 0 to -pi/2 draws stuff in the right quadrant
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/text/2d.text.align.invalid.html:
