@@ -735,12 +735,6 @@ fetch/h1-parsing/status-code.window.js:
 - 'HTTP/1.1 99 NOT OK '
 - HTTP/1.1 BLAH (network error)
 - HTTP/1.1 C8 (network error)
-html/canvas/element/2d.conformance.requirements.missingargs.html:
-- Missing arguments cause TypeError
-html/canvas/element/canvas-context/2d.canvas.context.invalid.args.html:
-- Calling getContext with invalid arguments.
-html/canvas/element/conformance-requirements/2d.conformance.requirements.missingargs.html:
-- Missing arguments cause TypeError
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.detachedcanvas.html:
 - drawImage with detached OffscreenCanvas as the source should throw exception
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:

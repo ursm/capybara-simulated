@@ -1359,6 +1359,37 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['cancelled']).to eq(255)            # negative-dim rect reversed the winding → cancelled
   end
 
+  it 'throws TypeError for too few arguments (WebIDL arity)' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    session.execute_script("document.body.innerHTML = '<canvas id=cc width=10 height=10></canvas>'")
+    out = session.evaluate_script(<<~JS)
+      const canvas = document.getElementById('cc');
+      const ctx = canvas.getContext('2d');
+      const g = ctx.createLinearGradient(0, 0, 10, 0);
+      const err = (fn) => { try { fn(); return 'none'; } catch (e) { return e.name; } };
+      JSON.stringify({
+        getContext:  err(() => canvas.getContext()),         // required arg
+        scale:       err(() => ctx.scale(1)),                // needs 2
+        fillRect:    err(() => ctx.fillRect(0, 0, 5)),       // needs 4
+        arc:         err(() => ctx.arc(0, 0, 1, 0)),         // needs 5
+        setTransform3: err(() => ctx.setTransform(1, 0, 0)), // 2–5 args → TypeError
+        setTransform1: err(() => ctx.setTransform(1)),       // 1 non-object → TypeError
+        addColorStop: err(() => g.addColorStop(0)),          // missing color → TypeError (not SyntaxError)
+        drawImage:   err(() => ctx.drawImage(canvas, 0)),    // needs 3
+        // valid calls must NOT throw
+        okReset:     err(() => ctx.setTransform()),          // 0 args → identity reset
+        okFillRect:  err(() => ctx.fillRect(0, 0, 5, 5)),
+      });
+    JS
+    r = JSON.parse(out)
+    %w[getContext scale fillRect arc setTransform3 setTransform1 addColorStop drawImage].each do |m|
+      expect(r[m]).to eq('TypeError'), "#{m} should throw TypeError, got #{r[m]}"
+    end
+    expect(r['okReset']).to eq('none')
+    expect(r['okFillRect']).to eq('none')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
