@@ -1636,6 +1636,58 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['omitted']).to be > 0     # omitted maxWidth → text drawn normally
   end
 
+  it 'canonically serializes the font shorthand and ignores invalid values' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(10, 10).getContext('2d');   // detached ⇒ em/% base 10px
+      const set = (v) => { ctx.font = v; return ctx.font; };
+      const keepAfter = (bad) => { ctx.font = '20px serif'; ctx.font = bad; return ctx.font; };
+      JSON.stringify({
+        plain:    set('20px serif'),
+        caseWs:   set('20PX   SERIF'),
+        reorder:  set('small-caps italic 400 12px/2 Unknown Font, sans-serif'),
+        weight:   set('italic 300 12px serif'),
+        weight400:set('italic 400 12px serif'),
+        em:       set('2em sans-serif'),
+        percent:  set('1000% serif'),
+        invalids: ['', 'bogus', 'inherit', '10px initial', 'var(--x)', '12px'].map(keepAfter),
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['plain']).to eq('20px serif')
+    expect(r['caseWs']).to eq('20px serif')                      # unit + generic family lower-cased, ws collapsed
+    expect(r['reorder']).to eq('italic small-caps 12px Unknown Font, sans-serif')  # reorder, drop 400 + /2 (identifier run stays unquoted)
+    expect(r['weight']).to eq('italic 300 12px serif')
+    expect(r['weight400']).to eq('italic 12px serif')            # default weight dropped
+    expect(r['em']).to eq('20px sans-serif')                     # 2em × 10px
+    expect(r['percent']).to eq('100px serif')                    # 1000% × 10px
+    expect(r['invalids']).to all(eq('20px serif'))              # every invalid keeps the previous
+  end
+
+  it 'renders a numeric-weight font at its size, not the weight value' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const inkHeight = (font) => {
+        const ctx = new OffscreenCanvas(400, 120).getContext('2d');
+        ctx.font = font; ctx.fillStyle = '#000'; ctx.fillText('Mg', 10, 60);
+        const d = ctx.getImageData(0, 0, 400, 120).data;
+        let lo = 999, hi = -1;
+        for (let y = 0; y < 120; y++) for (let x = 0; x < 400; x++) {
+          if (d[(y * 400 + x) * 4 + 3] > 0) { if (y < lo) lo = y; if (y > hi) hi = y; }
+        }
+        return hi - lo;
+      };
+      // The canonical form is '700 16px sans-serif' (weight before size); the renderer
+      // must not mistake the leading '700' for the pixel size.
+      JSON.stringify({ weighted: inkHeight('700 16px sans-serif'), plain: inkHeight('16px sans-serif') });
+    JS
+    r = JSON.parse(out)
+    expect(r['plain']).to be_between(8, 30)             # ~16px text
+    expect((r['weighted'] - r['plain']).abs).to be <= 2 # weighted renders at the same size
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')

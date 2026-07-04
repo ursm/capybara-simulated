@@ -1870,26 +1870,6 @@ html/canvas/element/text/2d.text.drawing.style.wordSpacing.change.font.html:
   font change.
 html/canvas/element/text/2d.text.drawing.style.wordSpacing.measure.html:
 - Testing word spacing with different length units
-html/canvas/element/text/2d.text.font.parse.basic.html:
-- 'Canvas test: 2d.text.font.parse.basic'
-html/canvas/element/text/2d.text.font.parse.complex.html:
-- 'Canvas test: 2d.text.font.parse.complex'
-html/canvas/element/text/2d.text.font.parse.complex2.html:
-- 'Canvas test: 2d.text.font.parse.complex2'
-html/canvas/element/text/2d.text.font.parse.family.html:
-- 'Canvas test: 2d.text.font.parse.family'
-html/canvas/element/text/2d.text.font.parse.invalid.html:
-- 'Canvas test: 2d.text.font.parse.invalid'
-html/canvas/element/text/2d.text.font.parse.size.percentage.default.html:
-- 'Canvas test: 2d.text.font.parse.size.percentage.default'
-html/canvas/element/text/2d.text.font.parse.size.percentage.html:
-- 'Canvas test: 2d.text.font.parse.size.percentage'
-html/canvas/element/text/2d.text.font.parse.system.html:
-- System fonts must be computed to explicit values
-html/canvas/element/text/2d.text.font.relative_size.html:
-- 'Canvas test: 2d.text.font.relative_size'
-html/canvas/element/text/2d.text.font.weight.html:
-- 'Canvas test: 2d.text.font.weight'
 html/canvas/element/text/2d.text.fontVariantCaps2.html:
 - Testing small caps setting in fontVariant
 html/canvas/element/text/2d.text.lang.default.html:
@@ -1905,7 +1885,6 @@ html/canvas/element/text/2d.text.measure.lang.html:
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
 html/canvas/element/text/parent-style-relative-units.html:
-- Font-size based on canvas element font-size
 - Font-size based on canvas element line-height
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
