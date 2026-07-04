@@ -3822,12 +3822,15 @@ module Capybara
       # within the logical layout, so the JS side can place the alphabetic baseline.
       # `measure_only` skips rasterizing the mask (the lazy image already knows its
       # dimensions) — the cheap path for `measureText`.
-      def render_text(text, font, measure_only = false, font_url = nil)
+      def render_text(text, font, measure_only = false, font_url = nil, kerning = nil)
         host_image_op('render_text') {
           require 'vips' unless defined?(Vips)
           pango = font.to_s.empty? ? 'Sans 10' : font.to_s
           fontfile = font_url && !font_url.to_s.empty? ? font_file_for(font_url) : nil
-          asc, desc = font_vmetrics(pango, fontfile)
+          # Ascent/descent are properties of the FONT, not the variant: probe them with a
+          # small-caps-stripped description so the descender probe ('gjpqy') isn't rendered
+          # as (descenderless) small capitals, which would collapse the reported descent.
+          asc, desc = font_vmetrics(pango.sub(/ Small-Caps\b/i, ''), fontfile)
           # NUL takes up no space and would abort the pango render; drop it so a lone
           # "\0" measures/draws as empty rather than falling back to a fabricated width.
           str = text.to_s.delete("\u0000")
@@ -3837,6 +3840,11 @@ module Capybara
           # so escape the markup metacharacters (an unescaped `&`/`<` would raise,
           # silently dropping the text; `<b>…` would wrongly render as bold).
           markup = str.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
+          # `fontKerning = 'none'` disables the OpenType `kern` feature via a Pango markup
+          # span, so a system font's rendered advance widens to the un-kerned width. ('auto'
+          # / 'normal' leave pango's default kerning on.) A downloaded font's advance comes
+          # from hmtx and is unaffected.
+          markup = %(<span font_features="kern=0">#{markup}</span>) if kerning == 'none'
           # Render the whole line at its natural width; the caller condenses it
           # horizontally to honor canvas maxWidth (pango `width:` would word-WRAP,
           # which the canvas text algorithm never does). An @font-face family loads its

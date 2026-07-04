@@ -1814,6 +1814,30 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['covered']).to eq(true)    # ideographic-baseline text lands where expected
   end
 
+  it 'reflects fontKerning and small-caps in measureText width' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(400, 60).getContext('2d');
+      ctx.font = '40px sans-serif';
+      const wKern = ctx.measureText('TAWATAVA').width;
+      ctx.fontKerning = 'none';
+      const wNone = ctx.measureText('TAWATAVA').width;
+      const kernValid = ctx.fontKerning === 'none';
+      ctx.fontKerning = 'BOGUS';                 // invalid → ignored, keeps 'none'
+      const kernIgnored = ctx.fontKerning;
+      // small-caps via the font shorthand changes the measured width vs normal caps.
+      ctx.font = 'small-caps 32px serif'; const wSmall = ctx.measureText('Hello World').width;
+      ctx.font = '32px serif';            const wNorm  = ctx.measureText('Hello World').width;
+      JSON.stringify({ wKern, wNone, kernValid, kernIgnored, wSmall, wNorm });
+    JS
+    r = JSON.parse(out)
+    expect(r['wNone']).to be > r['wKern']    # disabling kerning widens the run
+    expect(r['kernValid']).to eq(true)
+    expect(r['kernIgnored']).to eq('none')   # invalid value ignored
+    expect(r['wSmall']).not_to eq(r['wNorm']) # small-caps differs from normal
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
