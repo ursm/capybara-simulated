@@ -1340,12 +1340,23 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       try { ctx.roundRect(0, 0, 5, 5, [Infinity]); } catch (e) { threwInf = true; }
       try { ctx.roundRect(0, 0, 5, 5, [-Infinity]); } catch (e) { threwNaN = true; }
       try { ctx.roundRect(0, 0, 5, 5, [-3]); } catch (e) { threwNeg = e.name; }   // finite negative → throws
-      JSON.stringify({ threwInf, threwNaN, threwNeg });
+      // Winding: the SAME rect drawn once CW and once via a negative dimension (CCW)
+      // cancels under nonzero winding, leaving the region unfilled.
+      const ctx2 = new OffscreenCanvas(20, 20).getContext('2d');
+      ctx2.fillStyle = '#0f0'; ctx2.fillRect(0, 0, 20, 20);
+      ctx2.beginPath();
+      ctx2.fillStyle = '#f00';
+      ctx2.roundRect(0, 0, 20, 20, [0]);          // CW
+      ctx2.roundRect(0, 20, 20, -20, [0]);        // negative height → same rect, CCW → cancels
+      ctx2.fill();
+      const cancelled = ctx2.getImageData(10, 10, 1, 1).data[1];   // green: fully cancelled
+      JSON.stringify({ threwInf, threwNaN, threwNeg, cancelled });
     JS
     r = JSON.parse(out)
     expect(r['threwInf']).to be false
     expect(r['threwNaN']).to be false            # -Infinity is non-finite → ignored, not a RangeError
     expect(r['threwNeg']).to eq('RangeError')
+    expect(r['cancelled']).to eq(255)            # negative-dim rect reversed the winding → cancelled
   end
 
   it 'fillText casts a shadow' do
