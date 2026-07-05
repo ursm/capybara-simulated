@@ -25,10 +25,6 @@ css/cssom/CSSFontFeatureValuesRule.html:
 - Deleting single entries is possible.
 - Multiple rules for the same family are kept separate in CSSOM.
 - New rules can be added.
-css/cssom/CSSKeyframesRule.html:
-- name, cssRules, appendRule, findRule, deleteRule
-css/cssom/CSSStyleDeclaration-iterator.html:
-- CSSStyleDeclaration should expose Symbol.iterator
 css/cssom/CSSStyleRule-set-selectorText-namespace.html:
 - 'CSSStyleRule: selectorText value: | *.style1  | isMatch: false'
 - 'CSSStyleRule: selectorText value: |*|*.style1  | isMatch: true'
@@ -100,8 +96,6 @@ css/cssom/HTMLLinkElement-load-event.html:
 - Link element load event doesn't block the parser.
 css/cssom/HTMLStyleElement-load-event.html:
 - style elements fire load events properly
-css/cssom/MediaList.html:
-- CSSOM - MediaList interface
 css/cssom/MutationObserver-style.html:
 - Updating style property with the same value does not trigger an observation callback
 css/cssom/adoptedstylesheets-observablearray.html:
