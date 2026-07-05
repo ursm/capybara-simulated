@@ -4163,13 +4163,6 @@ css/cssom/getComputedStyle-layout-dependent-replaced-into-ib-split.html:
   reason: getComputedStyle value depends on box-tree layout (inline-block split /
     replaced-element sizing / subdocument recalc); layout deliberately unmodeled (rule
     1).
-css/cssom/getComputedStyle-line-height.html:
-- name: 'line-height: 1'
-  reason: computed line-height (normal → px) requires font metrics / layout; layout
-    deliberately unmodeled (rule 1).
-- name: 'line-height: 10%'
-  reason: computed line-height (normal → px) requires font metrics / layout; layout
-    deliberately unmodeled (rule 1).
 css/cssom/getComputedStyle-pseudo-checkmark.html:
 - name: Resolution of width is correct for pseudo-element (due to double-colon)
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
