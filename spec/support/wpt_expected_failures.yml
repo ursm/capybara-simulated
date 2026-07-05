@@ -16,15 +16,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-css/cssom/CSSFontFeatureValuesRule.html:
-- CSSFontFeatureValuesMap entries are settable to sequences of numbers.
-- CSSFontFeatureValuesMap entries are settable to single values.
-- CSSFontFeatureValuesRule family is settable and readable.
-- CSSFontFeatureValuesRule is correctly parsed and accessible via CSSOM.
-- Clearing all entries is possible.
-- Deleting single entries is possible.
-- Multiple rules for the same family are kept separate in CSSOM.
-- New rules can be added.
 css/cssom/CSSStyleRule-set-selectorText-namespace.html:
 - 'CSSStyleRule: selectorText value: | *.style1  | isMatch: false'
 - 'CSSStyleRule: selectorText value: |*|*.style1  | isMatch: true'
