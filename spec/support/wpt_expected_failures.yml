@@ -25,10 +25,6 @@ css/cssom/CSSStyleRule-set-selectorText-namespace.html:
 css/cssom/CSSStyleRule-set-selectorText.html:
 - 'CSSStyleRule: Invalid CSS selector: ::gibberish'
 - 'CSSStyleRule: Invalid CSS selector: :gibberish'
-- 'CSSStyleRule: selectorText value: |*:not(:active)| isMatch: true'
-- 'CSSStyleRule: selectorText value: |*|*| isMatch: true'
-- 'CSSStyleRule: selectorText value: |*|a| isMatch: false'
-- 'CSSStyleRule: selectorText value: |*|div| isMatch: true'
 - 'CSSStyleRule: selectorText value: |:after| isMatch: false'
 - 'CSSStyleRule: selectorText value: |:before| isMatch: false'
 - 'CSSStyleRule: selectorText value: |:first-letter| isMatch: false'
@@ -252,7 +248,6 @@ css/cssom/rule-restrictions.html:
 - "@keyframe"
 - "@page"
 css/cssom/selectorSerialize.html:
-- escaped character (\) in element name with any namespace without default
 - escaped character as code point in attribute name
 css/cssom/selectorText-modification-restyle-002.html:
 - Check initial color.
@@ -264,39 +259,6 @@ css/cssom/serialize-custom-props.html:
 - z-index can take a 4-digit integer
 - z-index can take a 6-digit integer
 - z-index can take a 8-digit integer
-css/cssom/serialize-namespaced-type-selectors.html:
-- Type selector with any namespace
-- Type selector with any namespace followed by attribute selector
-- Type selector with any namespace followed by class
-- Type selector with any namespace followed by id
-- Type selector with any namespace followed by pseudo class
-- Type selector with any namespace followed by pseudo element
-- Type selector with namespace equal to default namespace
-- Type selector with namespace equal to default namespace followed by attribute selector
-- Type selector with namespace equal to default namespace followed by class
-- Type selector with namespace equal to default namespace followed by id
-- Type selector with namespace equal to default namespace followed by pseudo class
-- Type selector with namespace equal to default namespace followed by pseudo element
-- Universal selector followed by attribute selector
-- Universal selector followed by class
-- Universal selector followed by id
-- Universal selector followed by pseudo class
-- Universal selector followed by pseudo element
-- Universal selector in any namespace
-- Universal selector in any namespace followed by attribute selector
-- Universal selector in any namespace followed by class
-- Universal selector in any namespace followed by id
-- Universal selector in any namespace followed by pseudo class
-- Universal selector in any namespace followed by pseudo element
-- Universal selector with namespace equal to default namespace
-- Universal selector with namespace equal to default namespace followed by attribute
-  selector
-- Universal selector with namespace equal to default namespace followed by class
-- Universal selector with namespace equal to default namespace followed by id
-- Universal selector with namespace equal to default namespace followed by pseudo
-  class
-- Universal selector with namespace equal to default namespace followed by pseudo
-  element
 css/cssom/serialize-values.html:
 - 'content: counter(par-num, decimal)'
 - 'font-family: ''Lucida Grande'''
