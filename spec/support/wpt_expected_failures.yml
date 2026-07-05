@@ -57,16 +57,9 @@ css/cssom/CSSStyleSheet-constructable-duplicate.html:
 - Appending duplicate stylesheets yields the correct cascade position in the ShadowRoot
 - Duplicate stylesheets have the right cascade position in the Document
 - Duplicate stylesheets have the right cascade position in the ShadowRoot
-css/cssom/CSSStyleSheet-constructable-invalidation.html:
-- mutating constructed CSSStyleSheet applied to root invalidates styles
 css/cssom/CSSStyleSheet-constructable-replace-cssRules.html:
 - 'cssRules tests (sync: false)'
 - 'cssRules tests (sync: true)'
-css/cssom/CSSStyleSheet-constructable-replace-on-regular-sheet.html:
-- CSSStyleSheet.replace returns a rejected promise for non-constructed sheets
-- CSSStyleSheet.replace returns a rejected promise for non-constructed sheets that
-  have no associated document
-- CSSStyleSheet.replaceSync throws NotAllowedError for non-constructed sheets
 css/cssom/CSSStyleSheet-constructable.html:
 - Adopted sheets are ordered after non-adopted sheets in the document
 - Adopted sheets are ordered after non-adopted sheets in the shadow root
@@ -148,12 +141,6 @@ css/cssom/css-style-reparse.html:
 - style.textContent modification
 css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
-css/cssom/cssimportrule-sheet-identity.html:
-- CSSImportRule has different sheets even if referencing the same URL
-css/cssom/cssimportrule.html:
-- Value of CSSImportRule supportsText attribute
-- Values of CSSImportRule attributes
-- Values of CSSRule attributes
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssom-pagerule.html:
@@ -286,8 +273,6 @@ css/cssom/link-element-stylesheet-title.html:
 - StyleSheet.title
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
-css/cssom/preferred-stylesheet-order.html:
-- Preferred stylesheet where insertion order is reversed tree order
 css/cssom/preferred-stylesheet-reversed-order.html:
 - Preferred stylesheet where insertion order is tree order
 css/cssom/resolved-border-width.html:
