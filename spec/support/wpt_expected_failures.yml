@@ -741,8 +741,6 @@ html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
 - 'Canvas test: 2d.drawImage.nonexistent'
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html:
-- drawImage with zero-sized source rectangle from image draws nothing without exception
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
 - color-mix works as CanvasGradient color input
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
@@ -753,16 +751,6 @@ html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.reload.ht
 - 'Canvas test: 2d.pattern.image.incomplete.reload'
 html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading.html:
 - 'Canvas test: 2d.pattern.image.nonexistent-but-loading'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nosrc.html:
-- 'Canvas test: 2d.pattern.image.nosrc'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zeroheight.html:
-- 'Canvas test: 2d.pattern.image.zeroheight'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.zerowidth.html:
-- 'Canvas test: 2d.pattern.image.zerowidth'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zeroheight.html:
-- 'Canvas test: 2d.pattern.svgimage.zeroheight'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.svgimage.zerowidth.html:
-- 'Canvas test: 2d.pattern.svgimage.zerowidth'
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'
@@ -770,8 +758,6 @@ html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_crossorigin.su
 - Can't get pixels of canvas with CORS enabled cross origin image drawn from non-CORS
   element
 - Can't get pixels of canvas with non-CORS enabled cross origin image drawn
-html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_svg_image_1.html:
-- Load a 100x100 image to a SVG image and draw it to a 100x100 canvas.
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-canvas-cross-origin-taint.https.sub.html:
 - Tainting check for a tainted canvas in canvas pattern
 html/canvas/element/manual/fill-and-stroke-styles/pattern-from-image-cross-origin-taint.https.sub.html:
@@ -833,9 +819,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
   created ImageBitmap
 - createImageBitmap from a bitmap SVGImageElement scaled up, and drawImage on the
   created ImageBitmap
-- createImageBitmap from a bitmap SVGImageElement with negative sw/sh, and drawImage
-  on the created ImageBitmap
-- createImageBitmap from a bitmap SVGImageElement, and drawImage on the created ImageBitmap
 - createImageBitmap from a vector HTMLImageElement resized, and drawImage on the created
   ImageBitmap
 - createImageBitmap from a vector HTMLImageElement scaled down, and drawImage on the
@@ -848,9 +831,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
   created ImageBitmap
 - createImageBitmap from a vector SVGImageElement scaled up, and drawImage on the
   created ImageBitmap
-- createImageBitmap from a vector SVGImageElement with negative sw/sh, and drawImage
-  on the created ImageBitmap
-- createImageBitmap from a vector SVGImageElement, and drawImage on the created ImageBitmap
 - createImageBitmap from an HTMLCanvasElement resized, and drawImage on the created
   ImageBitmap
 - createImageBitmap from an HTMLCanvasElement scaled down, and drawImage on the created
@@ -880,24 +860,15 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
 - createImageBitmap from an ImageBitmap scaled down, and drawImage on the created
   ImageBitmap
 - createImageBitmap from an ImageBitmap scaled up, and drawImage on the created ImageBitmap
-- createImageBitmap from an ImageBitmap with negative sw/sh, and drawImage on the
-  created ImageBitmap
-- createImageBitmap from an ImageBitmap, and drawImage on the created ImageBitmap
 - createImageBitmap from an ImageData resized, and drawImage on the created ImageBitmap
 - createImageBitmap from an ImageData scaled down, and drawImage on the created ImageBitmap
 - createImageBitmap from an ImageData scaled up, and drawImage on the created ImageBitmap
-- createImageBitmap from an ImageData with negative sw/sh, and drawImage on the created
-  ImageBitmap
-- createImageBitmap from an ImageData, and drawImage on the created ImageBitmap
 - createImageBitmap from an OffscreenCanvas resized, and drawImage on the created
   ImageBitmap
 - createImageBitmap from an OffscreenCanvas scaled down, and drawImage on the created
   ImageBitmap
 - createImageBitmap from an OffscreenCanvas scaled up, and drawImage on the created
   ImageBitmap
-- createImageBitmap from an OffscreenCanvas with negative sw/sh, and drawImage on
-  the created ImageBitmap
-- createImageBitmap from an OffscreenCanvas, and drawImage on the created ImageBitmap
 html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation.html:
 - createImageBitmap with EXIF rotation, imageOrientation flipY, and cropping
 - createImageBitmap with EXIF rotation, imageOrientation flipY, and no cropping
@@ -917,14 +888,10 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
   drawImage on the created ImageBitmap'
 - 'createImageBitmap from a bitmap SVGImageElement imageOrientation: "flipY", and
   drawImage on the created ImageBitmap'
-- 'createImageBitmap from a bitmap SVGImageElement imageOrientation: "from-image",
-  and drawImage on the created ImageBitmap'
 - 'createImageBitmap from a vector HTMLImageElement imageOrientation: "flipY", and
   drawImage on the created ImageBitmap'
 - 'createImageBitmap from a vector SVGImageElement imageOrientation: "flipY", and
   drawImage on the created ImageBitmap'
-- 'createImageBitmap from a vector SVGImageElement imageOrientation: "from-image",
-  and drawImage on the created ImageBitmap'
 - 'createImageBitmap from an HTMLCanvasElement imageOrientation: "flipY", and drawImage
   on the created ImageBitmap'
 - 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation: "flipY",
@@ -937,40 +904,19 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
   drawImage on the created ImageBitmap'
 - 'createImageBitmap from an ImageBitmap imageOrientation: "flipY", and drawImage
   on the created ImageBitmap'
-- 'createImageBitmap from an ImageBitmap imageOrientation: "from-image", and drawImage
-  on the created ImageBitmap'
 - 'createImageBitmap from an ImageData imageOrientation: "flipY", and drawImage on
   the created ImageBitmap'
-- 'createImageBitmap from an ImageData imageOrientation: "from-image", and drawImage
-  on the created ImageBitmap'
 - 'createImageBitmap from an OffscreenCanvas imageOrientation: "flipY", and drawImage
-  on the created ImageBitmap'
-- 'createImageBitmap from an OffscreenCanvas imageOrientation: "from-image", and drawImage
   on the created ImageBitmap'
 html/canvas/element/manual/imagebitmap/createImageBitmap-in-worker-transfer.html:
 - Transfer ImageBitmap created in worker
 html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
-- createImageBitmap with ArrayBuffer image source.
-- createImageBitmap with CanvasRenderingContext2D image source.
-- createImageBitmap with Uint8Array image source.
-- createImageBitmap with WebGLRenderingContext image source.
-- createImageBitmap with a Blob source and a value between 0 and 1 in resizeHeight
-- createImageBitmap with a Blob source and a value between 0 and 1 in resizeWidth
-- createImageBitmap with a Blob source and a value of 0 in resizeHeight
-- createImageBitmap with a Blob source and a value of 0 int resizeWidth
-- createImageBitmap with a Blob source and oversized (unallocatable) crop region
 - createImageBitmap with a Blob source and sh set to 0
 - createImageBitmap with a Blob source and sw set to 0
 - createImageBitmap with a bitmap HTMLImageElement source and oversized (unallocatable)
   crop region
 - createImageBitmap with a bitmap HTMLImageElement source and sh set to 0
 - createImageBitmap with a bitmap HTMLImageElement source and sw set to 0
-- createImageBitmap with a bitmap SVGImageElement source and a value between 0 and
-  1 in resizeHeight
-- createImageBitmap with a bitmap SVGImageElement source and a value between 0 and
-  1 in resizeWidth
-- createImageBitmap with a bitmap SVGImageElement source and a value of 0 in resizeHeight
-- createImageBitmap with a bitmap SVGImageElement source and a value of 0 int resizeWidth
 - createImageBitmap with a bitmap SVGImageElement source and oversized (unallocatable)
   crop region
 - createImageBitmap with a bitmap SVGImageElement source and sh set to 0
@@ -981,12 +927,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
   crop region
 - createImageBitmap with a vector HTMLImageElement source and sh set to 0
 - createImageBitmap with a vector HTMLImageElement source and sw set to 0
-- createImageBitmap with a vector SVGImageElement source and a value between 0 and
-  1 in resizeHeight
-- createImageBitmap with a vector SVGImageElement source and a value between 0 and
-  1 in resizeWidth
-- createImageBitmap with a vector SVGImageElement source and a value of 0 in resizeHeight
-- createImageBitmap with a vector SVGImageElement source and a value of 0 int resizeWidth
 - createImageBitmap with a vector SVGImageElement source and oversized (unallocatable)
   crop region
 - createImageBitmap with a vector SVGImageElement source and sh set to 0
@@ -1019,27 +959,13 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
   crop region
 - createImageBitmap with an HTMLVideoElement source and sh set to 0
 - createImageBitmap with an HTMLVideoElement source and sw set to 0
-- createImageBitmap with an ImageBitmap source and a value between 0 and 1 in resizeHeight
-- createImageBitmap with an ImageBitmap source and a value between 0 and 1 in resizeWidth
-- createImageBitmap with an ImageBitmap source and a value of 0 in resizeHeight
-- createImageBitmap with an ImageBitmap source and a value of 0 int resizeWidth
 - createImageBitmap with an ImageBitmap source and oversized (unallocatable) crop
   region
 - createImageBitmap with an ImageBitmap source and sh set to 0
 - createImageBitmap with an ImageBitmap source and sw set to 0
-- createImageBitmap with an ImageData source and a value between 0 and 1 in resizeHeight
-- createImageBitmap with an ImageData source and a value between 0 and 1 in resizeWidth
-- createImageBitmap with an ImageData source and a value of 0 in resizeHeight
-- createImageBitmap with an ImageData source and a value of 0 int resizeWidth
 - createImageBitmap with an ImageData source and oversized (unallocatable) crop region
 - createImageBitmap with an ImageData source and sh set to 0
 - createImageBitmap with an ImageData source and sw set to 0
-- createImageBitmap with an OffscreenCanvas source and a value between 0 and 1 in
-  resizeHeight
-- createImageBitmap with an OffscreenCanvas source and a value between 0 and 1 in
-  resizeWidth
-- createImageBitmap with an OffscreenCanvas source and a value of 0 in resizeHeight
-- createImageBitmap with an OffscreenCanvas source and a value of 0 int resizeWidth
 - createImageBitmap with an OffscreenCanvas source and oversized (unallocatable) crop
   region
 - createImageBitmap with an OffscreenCanvas source and sh set to 0
@@ -1049,11 +975,8 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
 - createImageBitmap with an available but zero width image source.
 - createImageBitmap with an invalid OffscreenCanvas source.
 - createImageBitmap with an oversized canvas source.
-- createImageBitmap with an undecodable blob source.
 - createImageBitmap with empty image source.
 - createImageBitmap with empty video source.
-- createImageBitmap with null image source.
-- createImageBitmap with undefined image source.
 html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
 - 'cross-origin HTMLImageElement: origin unclear 2dContext.drawImage'
 - 'cross-origin HTMLImageElement: origin unclear bitmaprenderer.transferFromImageBitmap'

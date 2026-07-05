@@ -2505,8 +2505,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       const ctx = document.createElement('canvas').getContext('2d');
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name || e.constructor.name; } };
       const nosrc  = new Image();                         // never loaded -> null
+      const svgImg = document.createElementNS('http://www.w3.org/2000/svg', 'image'); // unavailable -> null
       JSON.stringify({
         nosrc:      ctx.createPattern(nosrc, 'repeat'),                    // null
+        svgImage:   ctx.createPattern(svgImg, 'repeat'),                   // null (unavailable, not broken)
         undef:      err(() => ctx.createPattern(document.createElement('canvas'), undefined)), // SyntaxError
         bad:        err(() => ctx.createPattern(document.createElement('canvas'), 'nope')),    // SyntaxError
         str:        err(() => ctx.createPattern('not-an-image', 'repeat')),                    // TypeError
@@ -2516,10 +2518,94 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     JS
     r = JSON.parse(out)
     expect(r['nosrc']).to be_nil
+    expect(r['svgImage']).to be_nil
     expect(r['undef']).to eq('SyntaxError')
     expect(r['bad']).to eq('SyntaxError')
     expect(r['str']).to eq('TypeError')
     expect(r['emptyRep']).to be true
+  end
+
+  it 'loads a zero-intrinsic-dimension image as complete + not broken, with no pixels' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    # An SVG with width 0 is a VALID image (rsvg refuses to rasterize a 0-dimension
+    # canvas, but the resource loaded): the <img> is complete, not broken, and reports
+    # a zero-area intrinsic size. createPattern -> null and drawImage -> no-op, never a
+    # broken-image throw.
+    out = session.evaluate_script(<<~JS)
+      const svg = "data:image/svg+xml," + encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='0' height='100'>" +
+        "<rect fill='red' width='100' height='100'/></svg>");
+      const img = new Image();
+      img.src = svg;
+      const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
+      const ctx = document.createElement('canvas').getContext('2d');
+      JSON.stringify({
+        complete:  img.complete,
+        nw:        img.naturalWidth,
+        pattern:   ctx.createPattern(img, 'repeat'),          // null (available-but-empty, not broken)
+        draw:      err(() => ctx.drawImage(img, 0, 0))        // no-op, no throw
+      });
+    JS
+    r = JSON.parse(out)
+    # Observable "loaded, zero-area, NOT broken": complete, zero intrinsic size, and a
+    # null (not throwing) createPattern — a broken image would instead throw here.
+    expect(r['complete']).to be true
+    expect(r['nw']).to eq(0)
+    expect(r['pattern']).to be_nil
+    expect(r['draw']).to eq('no-throw')
+  end
+
+  it 'loads an SVG <image> resource (href / xlink:href) like an <img>' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    # An SVG <image> fetches its href just like an <img> src, so createPattern can tell a
+    # BROKEN href (throw InvalidStateError) from a usable bitmap (a real pattern).
+    out = session.evaluate_script(<<~JS)
+      const mk = (href, ns) => { const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        im.setAttribute(ns ? 'href' : 'xlink:href', href); return im; };
+      const good   = mk("data:image/svg+xml," + encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect fill='red' width='8' height='8'/></svg>"), true);
+      const broken = mk("data:image/png;base64,bm90LWEtcG5n", false);   // undecodable -> broken
+      const ctx = document.createElement('canvas').getContext('2d');
+      const err = (fn) => { try { return fn(); } catch (e) { return e.name; } };
+      JSON.stringify({
+        good:   ctx.createPattern(good, 'repeat') instanceof CanvasPattern,
+        broken: err(() => { ctx.createPattern(broken, 'repeat'); return 'no-throw'; })
+      });
+    JS
+    r = JSON.parse(out)
+    # A usable href yields a real pattern; a broken href throws InvalidStateError
+    # (observably distinguishing loaded from broken).
+    expect(r['good']).to be true
+    expect(r['broken']).to eq('InvalidStateError')
+  end
+
+  it 'reloads an SVG <image> on setAttributeNS(xlink) / removeAttribute and defers empty href to xlink:href' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const XLINK = 'http://www.w3.org/1999/xlink';
+      const url = "data:image/svg+xml," + encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect fill='red' width='8' height='8'/></svg>");
+      const ctx = document.createElement('canvas').getContext('2d');
+      const isPat = (im) => ctx.createPattern(im, 'repeat') instanceof CanvasPattern;
+      const mk = () => document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      // Canonical xlink:href set fetches the resource.
+      const ns = mk(); ns.setAttributeNS(XLINK, 'xlink:href', url);
+      const nsLoaded = isPat(ns);
+      // Removing the sourcing attribute discards the request.
+      ns.removeAttribute('xlink:href');
+      const afterRemove = ctx.createPattern(ns, 'repeat');   // null
+      // An empty href defers to a valid xlink:href rather than blanking.
+      const fb = mk(); fb.setAttribute('href', ''); fb.setAttribute('xlink:href', url);
+      const fallback = isPat(fb);
+      JSON.stringify({ nsLoaded, afterRemove, fallback });
+    JS
+    r = JSON.parse(out)
+    expect(r['nsLoaded']).to be true
+    expect(r['afterRemove']).to be_nil
+    expect(r['fallback']).to be true
   end
 
   it 'parses colour keywords case-insensitively and auto-closes an unclosed function' do
