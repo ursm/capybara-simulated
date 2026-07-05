@@ -137,13 +137,6 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
-css/cssom/cssom-pagerule.html:
-- Set cssText to named page with pseudo pages of :first, :left, :right, :first in
-  order.
-- Set cssText to named page with two :first pseudo page
-- Set selectorText to named page with pseudo pages of :first, :left, :right, :first
-  in order.
-- Set selectorText to named page with two :first pseudo page
 css/cssom/cssstyledeclaration-all-shorthand.html:
 - getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property
 - getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property

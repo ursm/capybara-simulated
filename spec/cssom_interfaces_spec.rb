@@ -14,6 +14,7 @@ RSpec.describe 'CSSOM interface completeness' do
           #a { color: red; font-size: 10px }
           @media screen, print {}
           @keyframes spin {}
+          @page {}
         </style></head><body><div id="a"></div></body></html>
       HTML
     }.to_app
@@ -44,5 +45,25 @@ RSpec.describe 'CSSOM interface completeness' do
     expect(r['iteratedProps']).to eq(['color', 'font-size'])
     expect(r['mediaText']).to eq('speech')
     expect(r['keyframesCss']).to eq('@keyframes"initial"{}')
+  end
+
+  it 'accepts multiple @page pseudo-pages, preserving order and repeats verbatim' do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      const page = document.styleSheets[0].cssRules[3];
+      const set = (v) => { page.selectorText = v; return { sel: page.selectorText, css: page.cssText }; };
+      JSON.stringify({
+        one:  set('named:first'),
+        two:  set('named:first:first'),          // repeat kept
+        four: set('named:first:left:right:first'),
+        bad:  set('named:bogus'),                // invalid pseudo → unchanged
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['one']).to eq('sel' => 'named:first', 'css' => '@page named:first { }')
+    expect(r['two']).to eq('sel' => 'named:first:first', 'css' => '@page named:first:first { }')
+    expect(r['four']).to eq('sel' => 'named:first:left:right:first', 'css' => '@page named:first:left:right:first { }')
+    expect(r['bad']['sel']).to eq('named:first:left:right:first')   # invalid selector left the rule unchanged
   end
 end
