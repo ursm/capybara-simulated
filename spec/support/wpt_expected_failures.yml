@@ -681,14 +681,6 @@ fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
-fetch/api/response/response-from-stream.any.js:
-- Constructing a Response with a stream on which getReader() is called
-- Constructing a Response with a stream on which read() and releaseLock() are called
-- Constructing a Response with a stream on which read() is called
-fetch/api/response/response-headers-guard.any.js:
-- Ensure response headers are immutable
-fetch/api/response/response-static-json.any.js:
-- Check static json() throws when data is not encodable
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.

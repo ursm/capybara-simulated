@@ -24,7 +24,7 @@ RSpec.describe 'Fetch Request semantics' do
   it 'transfers the source body when constructing a Request from a Request' do
     session = Capybara::Session.new(:simulated, app)
     session.visit '/'
-    session.execute_script(<<~JS)
+    session.execute_script <<~JS
       const src = new Request('/x', {method: 'POST', body: "the body"});
       const originalBody = src.body;                     // expose the stream first
       const usedBefore = src.bodyUsed;                   // false
