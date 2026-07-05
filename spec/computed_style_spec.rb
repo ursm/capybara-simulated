@@ -3,11 +3,12 @@
 require 'capybara/simulated'
 require 'rack'
 
-# getComputedStyle resolution for layout-free values: the inherited font longhands
-# (`font-size` / `font-weight` / `font-style` / `line-height` / `font-family` — commonly read
-# by app JS, and which the canvas em/rem/lh path depends on) and the `parentRule` of a
-# computed declaration.
-RSpec.describe 'getComputedStyle font longhands + parentRule' do
+# getComputedStyle resolution for layout-free values commonly read by app JS: the inherited
+# font longhands (`font-size` / `font-weight` / `font-style` / `line-height` / `font-family`,
+# which the canvas em/rem/lh path also depends on), the `visibility` / `opacity` / `text-align`
+# / `cursor` / `pointer-events` values (which a stylesheet rule must reflect, not just inline),
+# and the `parentRule` of a computed declaration.
+RSpec.describe 'getComputedStyle resolved values' do
   # Serve a full HTML document and return a visited session.
   def build_session(html)
     app = Rack::Builder.new {
@@ -107,6 +108,46 @@ RSpec.describe 'getComputedStyle font longhands + parentRule' do
     expect(r['lhnorm']).to eq('normal')
     expect(r['fam']).to eq('Arial, "Helvetica Neue", sans-serif')
     expect(r['lhinh']).to eq('64px')
+  end
+
+  it 'reflects stylesheet-set visibility / opacity / text-align / cursor / pointer-events' do
+    session = build_session(<<~HTML)
+      <!DOCTYPE html><html><head><style>
+        #hidden { visibility: hidden; } #collapse { visibility: collapse; }
+        #half { opacity: 0.5; } #over { opacity: 1.5; } #pctop { opacity: 50%; }
+        #center { text-align: center; } #point { cursor: pointer; } #noev { pointer-events: none; }
+        #vparent { visibility: hidden; }
+      </style></head><body>
+        <div id="hidden"></div><div id="collapse"></div>
+        <div id="half"></div><div id="over"></div><div id="pctop"></div>
+        <div id="center"></div><div id="point"></div><div id="noev"></div>
+        <div id="vparent"><span id="vchild">x</span></div>
+      </body></html>
+    HTML
+    out = session.evaluate_script(<<~JS)
+      const g = (id, p) => getComputedStyle(document.getElementById(id)).getPropertyValue(p);
+      JSON.stringify({
+        hidden:   g('hidden', 'visibility'),        // hidden (from a stylesheet rule)
+        collapse: g('collapse', 'visibility'),      // collapse
+        vchild:   g('vchild', 'visibility'),        // hidden (inherited)
+        half:     g('half', 'opacity'),             // 0.5
+        over:     g('over', 'opacity'),             // 1 (clamped)
+        pctop:    g('pctop', 'opacity'),            // 0.5 (percentage)
+        center:   g('center', 'text-align'),        // center
+        point:    g('point', 'cursor'),             // pointer
+        noev:     g('noev', 'pointer-events'),      // none
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['hidden']).to eq('hidden')
+    expect(r['collapse']).to eq('collapse')
+    expect(r['vchild']).to eq('hidden')
+    expect(r['half']).to eq('0.5')
+    expect(r['over']).to eq('1')
+    expect(r['pctop']).to eq('0.5')
+    expect(r['center']).to eq('center')
+    expect(r['point']).to eq('pointer')
+    expect(r['noev']).to eq('none')
   end
 
   it 'reports a null parentRule and stays read-only for a computed declaration' do
