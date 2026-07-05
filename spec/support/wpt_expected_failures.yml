@@ -53,9 +53,6 @@ css/cssom/CSSStyleSheet-constructable-duplicate.html:
 - Appending duplicate stylesheets yields the correct cascade position in the ShadowRoot
 - Duplicate stylesheets have the right cascade position in the Document
 - Duplicate stylesheets have the right cascade position in the ShadowRoot
-css/cssom/CSSStyleSheet-constructable-replace-cssRules.html:
-- 'cssRules tests (sync: false)'
-- 'cssRules tests (sync: true)'
 css/cssom/CSSStyleSheet-constructable.html:
 - Adopted sheets are ordered after non-adopted sheets in the document
 - Adopted sheets are ordered after non-adopted sheets in the shadow root
@@ -63,8 +60,6 @@ css/cssom/CSSStyleSheet-constructable.html:
   document
 - Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a
   different document
-- CSSStyleSheet.replace allows, but ignores, import rule inside
-- CSSStyleSheet.replace ignores @import rule but still loads other rules
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Constructed style sheets can be applied on document
 - Constructed style sheets can be applied on shadow root
@@ -98,9 +93,6 @@ css/cssom/HTMLStyleElement-load-event.html:
 - style elements fire load events properly
 css/cssom/MutationObserver-style.html:
 - Updating style property with the same value does not trigger an observation callback
-css/cssom/adoptedstylesheets-observablearray.html:
-- document.adoptedStyleSheets should allow mutation in-place
-- shadowRoot.adoptedStyleSheets should allow mutation in-place
 css/cssom/at-namespace.html:
 - 'CSS Test: @namespace in CSSOM is not severely broken'
 css/cssom/base-uri.html:
