@@ -3728,6 +3728,12 @@ module Capybara
         return nil unless key.is_a?(String)
         entry = cached_image(key)
         return {'unsupported' => true} if entry == :unsupported
+        # A valid zero-area image: complete + not broken, but no pixels. rsvg throws
+        # before dimensions can be read, so the intrinsic size collapses to 0×0 (a
+        # browser would keep the non-zero axis, e.g. 0×100 → naturalHeight 100) — a minor
+        # divergence, immaterial to createPattern / drawImage, which both need a
+        # non-zero area.
+        return {'zeroSize' => true, 'width' => 0, 'height' => 0} if entry == :zero_size
         return nil unless entry
         {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
       end
@@ -3740,7 +3746,9 @@ module Capybara
         bytes = image_source_bytes(key)
         return bytes if bytes == :unsupported
         return nil unless bytes
-        entry = decode_or_nil(bytes) or return nil
+        entry = decode_or_nil(bytes)
+        # nil (broken) and :zero_size (valid but zero-area) both carry no bitmap to cache.
+        return entry unless entry.is_a?(Hash)
         @@image_cache_lock.synchronize do
           @@image_cache.clear if @@image_cache.size >= IMAGE_CACHE_MAX
           @@image_cache[key] = entry
@@ -3769,7 +3777,10 @@ module Capybara
       # Decode a base64-encoded image (createImageBitmap's blob path), optionally
       # downscaled to fit within (max_w, max_h) via its resize options.
       def decode_image(b64_bytes, max_w = nil, max_h = nil)
-        entry = decode_or_nil(Base64.decode64(b64_bytes.to_s), max_w, max_h) or return nil
+        entry = decode_or_nil(Base64.decode64(b64_bytes.to_s), max_w, max_h)
+        # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
+        # source is an InvalidStateError), so surface nil for the caller to reject on.
+        return nil unless entry.is_a?(Hash)
         {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
       end
 
@@ -3792,15 +3803,26 @@ module Capybara
         {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory}
       end
 
-      # `decode_rgba` guarded: an undecodable body is a normal "broken image" outcome
-      # (the caller fires `error` / rejects the ImageBitmap promise), so a Vips::Error
-      # is a quiet nil, not stderr noise. Genuine host faults (missing libvips, OOM)
-      # still warn via `host_image_op`.
+      # `decode_rgba` guarded. Outcomes:
+      #   Hash       — a decoded {'width','height','bytes'} bitmap
+      #   :zero_size — a VALID image with a non-positive intrinsic dimension (rsvg refuses
+      #                to rasterize an SVG whose width|height is 0). Browsers still load it,
+      #                reporting a zero-area bitmap, so this is "available but empty"
+      #                (bad usability → createPattern null / drawImage no-op), NOT broken.
+      #   nil        — an undecodable / corrupt body: a normal "broken image" outcome
+      #                (the caller fires `error` / rejects the ImageBitmap promise)
+      # A Vips::Error is a quiet outcome, not stderr noise; genuine host faults (missing
+      # libvips, OOM) still warn via `host_image_op`. The `bad dimensions` signal is the
+      # rsvg loader's own diagnostic for a non-positive canvas (libvips-version-coupled
+      # text; a corrupt raster / malformed SVG raises a different, non-matching message);
+      # it also covers a fully DIMENSIONLESS SVG that a browser would instead render at
+      # the 300×150 CSS default — a bounded, documented divergence, still a net
+      # improvement over the old nil→broken→InvalidStateError.
       private def decode_or_nil(bytes, max_w = nil, max_h = nil)
         require 'vips' unless defined?(Vips)
         decode_rgba(bytes, max_w, max_h)
-      rescue Vips::Error
-        nil
+      rescue Vips::Error => e
+        e.message.include?('bad dimensions') ? :zero_size : nil
       rescue LoadError, StandardError => e
         warn "[capybara-simulated] image decode failed: #{e.class}: #{e.message[0, 200]}"
         nil
