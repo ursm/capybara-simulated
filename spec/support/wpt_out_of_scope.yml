@@ -4214,6 +4214,14 @@ css/cssom/getComputedStyle-pseudo.html:
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled
     (rule 1).
+- name: Item-based blockification of pseudo-elements
+  reason: item-based blockification of a ::before/::after box (its display is blockified
+    because it becomes a flex/grid item) requires generating that pseudo-element box;
+    pseudo-element boxes / layout deliberately unmodeled (rule 1).
+- name: Item-based blockification of nonexistent pseudo-elements
+  reason: item-based blockification of a ::before/::after box (its display is blockified
+    because it becomes a flex/grid item) requires generating that pseudo-element box;
+    pseudo-element boxes / layout deliberately unmodeled (rule 1).
 - name: 'Dynamically change to display: contents on pseudo-elements'
   reason: getComputedStyle of pseudo-element (::before/::marker/::picker/…) boxes
     requires generating and laying out those boxes; layout deliberately unmodeled

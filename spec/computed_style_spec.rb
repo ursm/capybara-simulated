@@ -6,8 +6,9 @@ require 'rack'
 # getComputedStyle resolution for layout-free values commonly read by app JS: the inherited
 # font longhands (`font-size` / `font-weight` / `font-style` / `line-height` / `font-family`,
 # which the canvas em/rem/lh path also depends on), the `visibility` / `opacity` / `text-align`
-# / `cursor` / `pointer-events` values (which a stylesheet rule must reflect, not just inline),
-# and the `parentRule` of a computed declaration.
+# / `cursor` / `pointer-events` values and the `display` (flex/grid/inline-block) + flexbox
+# longhands (which a stylesheet rule must reflect, not just inline), and the `parentRule` of a
+# computed declaration.
 RSpec.describe 'getComputedStyle resolved values' do
   # Serve a full HTML document and return a visited session.
   def build_session(html)
@@ -148,6 +149,60 @@ RSpec.describe 'getComputedStyle resolved values' do
     expect(r['center']).to eq('center')
     expect(r['point']).to eq('pointer')
     expect(r['noev']).to eq('none')
+  end
+
+  it 'reports the author display value (flex/grid/inline-block) and flexbox longhands' do
+    session = build_session(<<~HTML)
+      <!DOCTYPE html><html><body style="display:block"><style>
+        #flex { display: flex; justify-content: center; align-items: stretch;
+                align-content: space-between; flex-direction: column; flex-wrap: wrap; }
+        #grid { display: grid; } #ib { display: inline-block; } #inl { display: inline; }
+        #none { display: none; }
+        #ord { order: 2; } #jcinit { justify-content: initial; }
+      </style>
+        <div id="flex"></div><div id="grid"></div><div id="ib"></div>
+        <div id="inl"></div><div id="none"></div>
+        <div id="unset" style="display: unset"></div>
+        <div id="inherit" style="display: inherit"></div>
+        <div id="ord"></div><div id="jcinit"></div>
+      </body></html>
+    HTML
+    out = session.evaluate_script(<<~JS)
+      const g = (id, p) => getComputedStyle(document.getElementById(id)).getPropertyValue(p);
+      JSON.stringify({
+        flex:    g('flex', 'display'),           // flex (from a stylesheet rule)
+        grid:    g('grid', 'display'),           // grid
+        ib:      g('ib', 'display'),             // inline-block
+        inl:     g('inl', 'display'),            // inline
+        none:    g('none', 'display'),           // none
+        unset:   g('unset', 'display'),          // inline (display's CSS initial)
+        inherit: g('inherit', 'display'),        // block (inherits body)
+        jc:      g('flex', 'justify-content'),   // center
+        ai:      g('flex', 'align-items'),       // stretch
+        ac:      g('flex', 'align-content'),     // space-between
+        fd:      g('flex', 'flex-direction'),    // column
+        fw:      g('flex', 'flex-wrap'),         // wrap
+        asInit:  g('grid', 'align-self'),        // auto (initial)
+        ord:     g('ord', 'order'),              // 2
+        jcinit:  g('jcinit', 'justify-content'), // normal (CSS-wide `initial` resolves)
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['flex']).to eq('flex')
+    expect(r['grid']).to eq('grid')
+    expect(r['ib']).to eq('inline-block')
+    expect(r['inl']).to eq('inline')
+    expect(r['none']).to eq('none')
+    expect(r['unset']).to eq('inline')
+    expect(r['inherit']).to eq('block')
+    expect(r['jc']).to eq('center')
+    expect(r['ai']).to eq('stretch')
+    expect(r['ac']).to eq('space-between')
+    expect(r['fd']).to eq('column')
+    expect(r['fw']).to eq('wrap')
+    expect(r['asInit']).to eq('auto')
+    expect(r['ord']).to eq('2')
+    expect(r['jcinit']).to eq('normal')
   end
 
   it 'reports a null parentRule and stays read-only for a computed declaration' do
