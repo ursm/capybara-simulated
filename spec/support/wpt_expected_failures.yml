@@ -657,17 +657,8 @@ fetch/api/request/destination/fetch-destination.https.html:
 - SVGImageElement fetches with an "image" Request.destination
 - XMLHttpRequest() fetches with an empty string Request.destination
 - fetch() fetches with an empty string Request.destination
-fetch/api/request/multi-globals/construct-in-detached-frame.window.js:
-- creating a request from another request in a detached realm should work
-fetch/api/request/multi-globals/url-parsing.html:
-- should parse the URL relative to the current settings object
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
-fetch/api/request/request-disturbed.any.js:
-- Input request used for creating new request became disturbed
-- Input request used for creating new request became disturbed even if body is not
-  used
-- Request construction failure should not set "bodyUsed"
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should not be allowed if the Quota is used up.
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
