@@ -1836,16 +1836,12 @@ html/canvas/element/path-objects/2d.path.arc.shape.3.html:
 - arc() from 0 to -pi/2 does not draw anything in the wrong quadrant
 html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
-html/canvas/element/text/2d.text.lang.default.html:
-- 'Canvas test: 2d.text.lang.default'
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:
 - Testing that actualBoundingBox metrics are precise at small font sizes
 html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
-html/canvas/element/text/parent-style-relative-units.html:
-- Font-size based on canvas element line-height
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
 html/semantics/forms/form-submission-0/submission-checks.window.js:

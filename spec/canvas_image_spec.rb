@@ -1838,6 +1838,23 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['wSmall']).not_to eq(r['wNorm']) # small-caps differs from normal
   end
 
+  it "defaults ctx.lang to 'inherit' and resolves em/lh font sizes against the canvas element" do
+    session = Capybara::Session.new(:simulated, app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      document.body.innerHTML = "<canvas id='c' width='100' height='50' style='font-size: 30px; line-height: 40px'></canvas>";
+      const ctx = document.getElementById('c').getContext('2d');
+      const lang = ctx.lang;
+      ctx.font = '2em serif';   const em = ctx.font;    // 2 × 30px
+      ctx.font = '2lh/100 serif'; const lh = ctx.font;  // 2 × 40px (line-height); /100 dropped
+      JSON.stringify({ lang, em, lh });
+    JS
+    r = JSON.parse(out)
+    expect(r['lang']).to eq('inherit')
+    expect(r['em']).to eq('60px serif')
+    expect(r['lh']).to eq('80px serif')
+  end
+
   it 'fillText casts a shadow' do
     session = Capybara::Session.new(:simulated, app)
     session.visit('/')
