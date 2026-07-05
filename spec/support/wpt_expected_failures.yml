@@ -121,7 +121,6 @@ css/cssom/base-uri.html:
 - KeyframeEffect.setKeyframes
 - setProperty
 css/cssom/computed-style-001.html:
-- inherited_property_values
 - relative_property_values
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
@@ -137,8 +136,6 @@ css/cssom/computed-style-005.html:
 - absolute_computed_margins
 - relative_computed_left_and_right
 - relative_computed_margins
-css/cssom/computed-style-set-property.html:
-- Computed style parent (should be null)
 css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
 - Removing non-existing property or setting invalid value on CSS declaration block
