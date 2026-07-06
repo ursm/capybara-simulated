@@ -1551,6 +1551,87 @@ input-events/input-events-delete-selection.html:
 - Ctrl+Backspace with non-collapsed selection should report deleteContentBackward
 - Ctrl+Delete with caret should report deleteWordForward
 - Ctrl+Delete with non-collapsed selection should report deleteContentForward
+input-events/input-events-exec-command.html:
+- 'Calling execCommand("backColor", false, #0000FF88) (inputType value)'
+- 'Calling execCommand("backColor", false, #00FF00FF) (inputType value)'
+- 'Calling execCommand("backColor", false, #FF0000) (inputType value)'
+- Calling execCommand("backColor", false, CurrentColor) (inputType value)
+- Calling execCommand("backColor", false, Inherit) (inputType value)
+- Calling execCommand("backColor", false, Initial) (inputType value)
+- Calling execCommand("backColor", false, Invalid-Value) (inputType value)
+- Calling execCommand("backColor", false, Reset) (inputType value)
+- Calling execCommand("backColor", false, orange) (inputType value)
+- Calling execCommand("backColor", false, transparent) (inputType value)
+- Calling execCommand("bold", false, null) (inputType value)
+- Calling execCommand("createLink", false, foo.html) (inputType value)
+- Calling execCommand("createLink", false, https://example.com/) (inputType value)
+- Calling execCommand("cut", false, null) (inputType value)
+- Calling execCommand("fontName", false,   monospace  ) (inputType value)
+- Calling execCommand("fontName", false,  monospace ) (inputType value)
+- Calling execCommand("fontName", false, monospace) (inputType value)
+- 'Calling execCommand("foreColor", false, #0000FF88) (inputType value)'
+- 'Calling execCommand("foreColor", false, #00FF00FF) (inputType value)'
+- 'Calling execCommand("foreColor", false, #FF0000) (inputType value)'
+- Calling execCommand("foreColor", false, CurrentColor) (inputType value)
+- Calling execCommand("foreColor", false, Inherit) (inputType value)
+- Calling execCommand("foreColor", false, Initial) (inputType value)
+- Calling execCommand("foreColor", false, Invalid-Value) (inputType value)
+- Calling execCommand("foreColor", false, Reset) (inputType value)
+- Calling execCommand("foreColor", false, orange) (inputType value)
+- Calling execCommand("foreColor", false, transparent) (inputType value)
+- 'Calling execCommand("hiliteColor", false, #0000FF88) (inputType value)'
+- 'Calling execCommand("hiliteColor", false, #00FF00FF) (inputType value)'
+- 'Calling execCommand("hiliteColor", false, #FF0000) (inputType value)'
+- Calling execCommand("hiliteColor", false, CurrentColor) (inputType value)
+- Calling execCommand("hiliteColor", false, Inherit) (inputType value)
+- Calling execCommand("hiliteColor", false, Initial) (inputType value)
+- Calling execCommand("hiliteColor", false, Invalid-Value) (inputType value)
+- Calling execCommand("hiliteColor", false, Reset) (inputType value)
+- Calling execCommand("hiliteColor", false, orange) (inputType value)
+- Calling execCommand("hiliteColor", false, transparent) (inputType value)
+- Calling execCommand("indent", false, null) (inputType value)
+- Calling execCommand("insertHorizontalRule", false, null) (inputType value)
+- Calling execCommand("insertLineBreak", false, null) (inputType value)
+- Calling execCommand("insertOrderedList", false, null) (inputType value)
+- Calling execCommand("insertParagraph", false, null) (inputType value)
+- Calling execCommand("insertText", false, a) (dataTransfer value)
+- Calling execCommand("insertText", false, a) (shouldn't fire beforeinput)
+- Calling execCommand("insertText", false, bc) (dataTransfer value)
+- Calling execCommand("insertText", false, bc) (shouldn't fire beforeinput)
+- Calling execCommand("insertUnorderedList", false, null) (inputType value)
+- Calling execCommand("italic", false, null) (inputType value)
+- Calling execCommand("justifyCenter", false, null) (inputType value)
+- Calling execCommand("justifyFull", false, null) (inputType value)
+- Calling execCommand("justifyLeft", false, null) (inputType value)
+- Calling execCommand("justifyRight", false, null) (inputType value)
+- Calling execCommand("outdent", false, null) (inputType value)
+- Calling execCommand("paste", false, null) (inputType value)
+- Calling execCommand("removeFormat", false, null) (inputType value)
+- Calling execCommand("strikeThrough", false, null) (inputType value)
+- Calling execCommand("subscript", false, null) (inputType value)
+- Calling execCommand("superscript", false, null) (inputType value)
+- Calling execCommand("underline", false, null) (inputType value)
+- Calling execCommand("unlink", false, null) (inputType value)
+- Set of execCommand("indent") and execCommand("outdent") should keep same DOM tree
+- execCommand("bold") should wrap selected text with <b> element
+- execCommand("createLink") should create a link with absolute URL
+- execCommand("createLink") should create a link with relative URL
+- execCommand("insertOrderedList") should make <ol> and wrap the text with it
+- execCommand("insertUnorderedList") should make <ul> and wrap the text with it
+- execCommand("italic") should wrap selected text with <i> element
+- execCommand("justifyCenter") should wrap the text with <div> element whose text-align
+  is center
+- execCommand("justifyFull") should wrap the text with <div> element whose text-align
+  is justify
+- execCommand("justifyLeft") should wrap the text with <div> element whose text-align
+  is left
+- execCommand("justifyRight") should wrap the text with <div> element whose text-align
+  is right
+- execCommand("removeFormat") should remove the style of current block
+- execCommand("strikeThrough") should wrap selected text with <strike> element
+- execCommand("subscript") should wrap selected text with <sub> element
+- execCommand("superscript") should wrap selected text with <sup> element
+- execCommand("underline") should wrap selected text with <u> element
 input-events/input-events-get-target-ranges.html:
 - Actions other than deletion should have current selection as target ranges.
 - Textarea should have empty target range.
