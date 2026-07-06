@@ -76,6 +76,12 @@ const TREES = [
                                        // hammers. Same-origin surface is in scope (we model MessageChannel
                                        // + Worker + structured-clone); cross-origin / multi-global subtests
                                        // that need the multi-origin subsystem earn out per rule 1.
+  'input-events',                      // beforeinput / input InputEvent contract (inputType / data /
+                                       // getTargetRanges) — the editing surface every rich-text editor
+                                       // (Trix / ActionText / ProseMirror) depends on. The value-editing +
+                                       // spinner-step + paste input-event slices are in scope; the
+                                       // execCommand editing engine + coordinate spinner/drag hit-testing
+                                       // (need an editing / layout engine) earn out per rule 1
   'css/cssom',                         // CSSOM object model — CSSStyleDeclaration / CSSRule / insertRule /
                                        // cssRules / style serialization, backed by our css-tree cascade
                                        // engine; the pure-API slice of CSS (css/cssom-view is the

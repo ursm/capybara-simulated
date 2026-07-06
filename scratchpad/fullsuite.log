@@ -1,0 +1,435 @@
+Run options: exclude {requires: #<Proc:>}
+...............................................................................................................................................................................................**..................................................................................*............................................................................................................................................................................................................................................................................Capybara starting Puma...
+* Version 8.0.1, codename: Into the Arena
+* Min threads: 0, max threads: 4
+* Listening on http://127.0.0.1:32915
+Capybara starting Puma...
+* Version 8.0.1, codename: Into the Arena
+* Min threads: 0, max threads: 4
+* Listening on http://127.0.0.1:41867
+............................................................................................................................................................................................................................................................................................................................................*...............................................................................................................................................................................................................................................................................................................................................................................................................********.........*********************....................*............................................................................................................................................................................................................................................................................................................................................................................................................................................*.....................................................................................................................................***************..........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.....[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+..[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+...............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+
+(process:349835): VIPS-WARNING **: 11:37:32.565: IDAT: incorrect header check
+.........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+...[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+..........[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+..............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................#<Thread:0x00007faa18022910 /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790 run> terminated with exception (report_on_exception is true):
+/home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'IO#read': stream closed in another thread (IOError)
+	from /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'block (2 levels) in Open3.capture2'
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m667[0m, in [35m<module>[0m
+    [31mmain[0m[1;31m()[0m
+    [31m~~~~[0m[1;31m^^[0m
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m660[0m, in [35mmain[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m673[0m, in [35m<module>[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+Exception ignored while flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe
+.#<Thread:0x00007fb3168c9b98 /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790 run> terminated with exception (report_on_exception is true):
+/home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'IO#read': stream closed in another thread (IOError)
+	from /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'block (2 levels) in Open3.capture2'
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m667[0m, in [35m<module>[0m
+    [31mmain[0m[1;31m()[0m
+    [31m~~~~[0m[1;31m^^[0m
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m660[0m, in [35mmain[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m673[0m, in [35m<module>[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+Exception ignored while flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe
+...................................................................................................................................................................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.................#<Thread:0x00007faa18020db8 /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790 run> terminated with exception (report_on_exception is true):
+/home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'IO#read': stream closed in another thread (IOError)
+	from /home/ursm/.local/share/mise/installs/ruby/4.0.5/lib/ruby/4.0.0/open3.rb:790:in 'block (2 levels) in Open3.capture2'
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m667[0m, in [35m<module>[0m
+    [31mmain[0m[1;31m()[0m
+    [31m~~~~[0m[1;31m^^[0m
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m660[0m, in [35mmain[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File [35m"/home/ursm/Code/github.com/ursm/capybara-simulated/script/wpt_py_handler.py"[0m, line [35m673[0m, in [35m<module>[0m
+    [31msys.stdout.flush[0m[1;31m()[0m
+    [31m~~~~~~~~~~~~~~~~[0m[1;31m^^[0m
+[1;35mBrokenPipeError[0m: [35m[Errno 32] Broken pipe[0m
+Exception ignored while flushing sys.stdout:
+BrokenPipeError: [Errno 32] Broken pipe
+...............................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+....................
+
+Pending: (Failures listed here are expected and do not affect your suite's status)
+
+  1) Capybara::Session Simulated #all with obscured filter should not find nodes on top outside the viewport when false
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  2) Capybara::Session Simulated #all with obscured filter should find top nodes outside the viewport when true
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  3) Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  4) Capybara::Session Simulated #has_css? :style option should support Hash
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  5) Capybara::Session Simulated node #obscured? should see non visible elements as obscured
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  6) Capybara::Session Simulated node #obscured? should see non-overlapped elements as not obscured
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  7) Capybara::Session Simulated node #obscured? should see elements only overlapped by descendants as not obscured
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  8) Capybara::Session Simulated node #obscured? should see elements outside the viewport as obscured
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  9) Capybara::Session Simulated node #obscured? should see overlapped elements as obscured
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  10) Capybara::Session Simulated node #obscured? should be boolean
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  11) Capybara::Session Simulated node #obscured? should work in frames
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  12) Capybara::Session Simulated node #obscured? should work in nested iframes
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  13) Capybara::Session Simulated node #drag_to should drag and drop an object
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  14) Capybara::Session Simulated node #drag_to should drag and drop if scrolling is needed
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  15) Capybara::Session Simulated node #drag_to should drag a link
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  16) Capybara::Session Simulated node #drag_to should work with Dragula
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  17) Capybara::Session Simulated node #drag_to should work with jsTree
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  18) Capybara::Session Simulated node #drag_to should simulate a single held down modifier key
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  19) Capybara::Session Simulated node #drag_to should simulate multiple held down modifier keys
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  20) Capybara::Session Simulated node #drag_to should support key aliases
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  21) Capybara::Session Simulated node #drag_to HTML5 should HTML5 drag and drop an object
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  22) Capybara::Session Simulated node #drag_to HTML5 should HTML5 drag and drop an object child
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  23) Capybara::Session Simulated node #drag_to HTML5 should set clientX/Y in dragover events
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  24) Capybara::Session Simulated node #drag_to HTML5 should preserve clientX/Y from last dragover event
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  25) Capybara::Session Simulated node #drag_to HTML5 should not HTML5 drag and drop on a non HTML5 drop element
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  26) Capybara::Session Simulated node #drag_to HTML5 should HTML5 drag and drop when scrolling needed
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  27) Capybara::Session Simulated node #drag_to HTML5 should drag HTML5 default draggable elements
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  28) Capybara::Session Simulated node #drag_to HTML5 should work with SortableJS
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  29) Capybara::Session Simulated node #drag_to HTML5 should drag HTML5 default draggable element child
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  30) Capybara::Session Simulated node #drag_to HTML5 should simulate a single held down modifier key
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  31) Capybara::Session Simulated node #drag_to HTML5 should simulate multiple held down modifier keys
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  32) Capybara::Session Simulated node #drag_to HTML5 should support key aliases
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  33) Capybara::Session Simulated node #drag_to HTML5 should trigger a dragenter event, before the first dragover event
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  34) Capybara::Session Simulated node #click should not retry clicking when wait is disabled
+     # needs elementFromPoint / real layout engine — out of scope
+     # 
+
+  35) document lifecycle events still fires DOMContentLoaded and load alongside readystatechange
+      # window `load` not yet emitted on a top-level visit (DOMContentLoaded@interactive now works)
+      Failure/Error: expect(events).to eq(['DOMContentLoaded@interactive', 'load@complete'])
+
+        expected: ["DOMContentLoaded@interactive", "load@complete"]
+             got: ["DOMContentLoaded@interactive"]
+
+        (compared using ==)
+      # ./spec/lifecycle_events_spec.rb:45:in 'block (2 levels) in <top (required)>'
+      # ./spec/capybara_shared_spec.rb:61:in 'block (3 levels) in <top (required)>'
+      # ./spec/capybara_shared_spec.rb:61:in 'block (2 levels) in <top (required)>'
+
+  36) WPT conformance (dom/) url/IdnaTestV2.any.js (driver crasher — skipped)
+     # IDNA/Unicode-host conformance (~2300 data-driven cases). IDNA IS implemented (uri-idna); ~95% pass. The residual ~74 are uri-idna's UTS46/Unicode-version gap vs the WPT reference data — kept skipped per the data-driven convention.
+     # ./spec/wpt_spec.rb:56
+
+  37) WPT conformance (dom/) url/toascii.window.js (driver crasher — skipped)
+     # Host `domainToASCII`/IDNA conversion (~600 cases). IDNA IS implemented (uri-idna); most pass. The residual ~45 are uri-idna's conformance gap vs the WPT reference (lenient trailing-`=` punycode, bidi edge cases) — see IdnaTestV2.
+     # ./spec/wpt_spec.rb:56
+
+  38) WPT conformance (dom/) encoding/legacy-mb-japanese/ (driver crasher — skipped)
+     # Legacy Japanese multibyte (Shift_JIS/EUC-JP/ISO-2022-JP). Out of scope — needs the WHATWG multibyte decoder state machines + index tables in JS; Ruby Encoding is not WHATWG-conformant (see header). Exhaustive per-code-point tables.
+     # ./spec/wpt_spec.rb:56
+
+  39) WPT conformance (dom/) encoding/legacy-mb-korean/ (driver crasher — skipped)
+     # Legacy Korean multibyte (EUC-KR/windows-949). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  40) WPT conformance (dom/) encoding/legacy-mb-schinese/ (driver crasher — skipped)
+     # Legacy Simplified Chinese (GBK/gb18030). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  41) WPT conformance (dom/) encoding/legacy-mb-tchinese/ (driver crasher — skipped)
+     # Legacy Traditional Chinese (Big5). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  42) WPT conformance (dom/) encoding/single-byte-decoder.window.js (driver crasher — skipped)
+     # Single-byte decoders ARE modeled (the TextDecoder variant passes). The remaining variants need byte-level XHR responseText + iframe document.characterSet/inputEncoding decoding (single-byte-raw.py / text-plain-charset.py CGI) — an unmodeled byte-transport layer, deferred to a comprehensive document-charset effort. ~336 transport-dependent cases, NOT the decoder tables (those work).
+     # ./spec/wpt_spec.rb:56
+
+  43) WPT conformance (dom/) encoding/iso-2022-jp-decoder.any.js (driver crasher — skipped)
+     # ISO-2022-JP stateful decoder. Out of scope — needs the WHATWG decoder state machine; 21/34 subtests probe error-recovery byte accounting Ruby Encoding can't reproduce, and Ruby's Roman-state mapping diverges (see header).
+     # ./spec/wpt_spec.rb:56
+
+  44) WPT conformance (dom/) encoding/iso-2022-jp-encoder.html (driver crasher — skipped)
+     # ISO-2022-JP encoder (form/href submission in a legacy-charset document). Out of scope — needs the WHATWG encoder + the document-charset path, see header.
+     # ./spec/wpt_spec.rb:56
+
+  45) WPT conformance (dom/) encoding/big5-encoder.html (driver crasher — skipped)
+     # Big5 encoder (form/href submission in a legacy-charset document). Out of scope — see iso-2022-jp-encoder above.
+     # ./spec/wpt_spec.rb:56
+
+  46) WPT conformance (dom/) encoding/unsupported-encodings.any.js (driver crasher — skipped)
+     # Flaky AND out of scope. It decodes UTF-7 (not a WHATWG encoding) and UTF-32 (not a WHATWG decode target) via the async XHR `overrideMimeType` charset path (decode_test → XMLHttpRequest), which races the virtual-clock drain: ~4/5 runs the harness never completes (HE), ~1/5 it completes — so it intermittently flips the symmetric gate red. The TextDecoder-constructor side of unsupported labels is already covered green by api-invalid-label.any.js.
+     # ./spec/wpt_spec.rb:56
+
+  47) WPT conformance (dom/) url/failure.html (driver crasher — skipped)
+     # The XHR / sendBeacon / Location / window.open sinks throw synchronously on a malformed URL (most subtests pass). IDNA is now implemented (uri-idna), so many of the former Unicode-host cases now reject correctly; a residual data-driven set remains where uri-idna is more lenient than the WPT reference (accepts hosts the test expects to fail). Large + Unicode-version-tied, so kept skipped per the same data-driven convention as IdnaTestV2 / toascii; the non-IDNA URL-parse- failure behaviour is fully covered (green) by url-constructor.any.js.
+     # ./spec/wpt_spec.rb:56
+
+  48) WPT conformance (dom/) dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html (driver crasher — skipped)
+     # Scroll-on-arrow-key test: its <body onload=runTest()> now runs (window-forwarded handler activation), but runTest awaits a test_driver arrow-key scroll that the driver can't satisfy (no scroll geometry / key-driven scrolling), and the wait never resolves — testharness's own timeout can't fire either, so the harness hangs instead of completing. Out-of-scope layout/input subsystem (CLAUDE.md rule 1); excluded so it doesn't burn force-timeout cycles every run. Sibling scrollend/wheel tests that DO complete are listed in wpt_out_of_scope.yml.
+     # ./spec/wpt_spec.rb:56
+
+  49) WPT conformance (dom/) dom/ranges/tentative/ (driver crasher — skipped)
+     # Tentative WICG Element.createValueRange() (opaque Range over form-control value text). Out of scope — getBoundingClientRect/getClientRects geometry over the control's internal text layout + CSS Custom Highlight API, i.e. a layout / rendering engine we don't model (rule 1); unshipped, no library/app uses it. Several files have non-deterministic layout-dependent failing sets that can't be name-allowlisted, so the whole 18-file subtree is skipped.
+     # ./spec/wpt_spec.rb:56
+
+  50) WPT conformance (dom/) html/semantics/forms/constraints/infinite_backtracking.tentative.html (driver crasher — skipped)
+     # Catastrophic-backtracking pattern regex; V8 runs it synchronously for ~56 s (finite but pathological), uninterruptible by the virtual-clock force-timeout. Skipped to keep the gate fast — see header.
+     # ./spec/wpt_spec.rb:56
+
+Finished in 6 minutes 43 seconds (files took 0.73556 seconds to load)
+5686 examples, 0 failures, 50 pending
+
+EXIT=0

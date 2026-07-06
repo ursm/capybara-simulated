@@ -1537,6 +1537,38 @@ html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Date instance
 - Object instance
 - RegExp instance
+input-events/contenteditable-insertfrompaste-type-inputevent-data.html:
+- Input event data for inputType insertFromPaste should not be set for contenteditable
+input-events/input-events-arrow-key-on-number-input-delete-document.html:
+- Number input should not crash and not fire subsequent events when event handler
+  removes document
+input-events/input-events-cut-paste.html:
+- Event order and data on textarea.
+- Event order and dataTransfer on contenteditable.
+- preventDefault() should prevent DOM modification but allow clipboard updates.
+input-events/input-events-delete-selection.html:
+- Ctrl+Backspace with caret should report deleteWordBackward
+- Ctrl+Backspace with non-collapsed selection should report deleteContentBackward
+- Ctrl+Delete with caret should report deleteWordForward
+- Ctrl+Delete with non-collapsed selection should report deleteContentForward
+input-events/input-events-get-target-ranges.html:
+- Actions other than deletion should have current selection as target ranges.
+- Textarea should have empty target range.
+- getTargetRanges() returns correct range and cleared after dispatch.
+input-events/input-events-typing.html:
+- InputEvents have correct data/order when typing on textarea and contenteditable
+- It triggers beforeinput and input events on typing RETURN
+- It triggers beforeinput and input events on typing Shift+RETURN
+- It triggers beforeinput and input events on typing Undo and Redo key combinations
+  with an existing history
+- It triggers beforeinput and input events on typing Undo and Redo key combinations
+  without an existing history
+input-events/textarea-insertfrompaste-type-inputevent-data-withnewline-atend.html:
+- Input event data for inputType insertFromPaste should be set
+input-events/textarea-insertfrompaste-type-inputevent-data-withnewline-atstart.html:
+- Input event data for inputType insertFromPaste should be set
+input-events/textarea-insertfrompaste-type-inputevent-data.html:
+- Input event data for inputType insertFromPaste should be set
 webmessaging/Channel_postMessage_DataCloneErr.any.js:
 - Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
 webmessaging/Channel_postMessage_clone_port.any.js:

@@ -1,0 +1,302 @@
+Running 3639 WPT files…
+  25/3639
+  50/3639
+  75/3639
+  100/3639
+  125/3639
+  150/3639
+  175/3639
+  200/3639
+  225/3639
+  250/3639
+  275/3639
+  300/3639
+  325/3639
+  350/3639
+  375/3639
+  400/3639
+  425/3639
+  450/3639
+  475/3639
+  500/3639
+  525/3639
+  550/3639
+  575/3639
+  600/3639
+  625/3639
+  650/3639
+  675/3639
+  700/3639
+  725/3639
+  750/3639
+  775/3639
+  800/3639
+  825/3639
+  850/3639
+  875/3639
+  900/3639
+  925/3639
+  950/3639
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+  975/3639
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+  1000/3639
+  1025/3639
+  1050/3639
+  1075/3639
+  1100/3639
+  1125/3639
+  1150/3639
+  1175/3639
+  1200/3639
+  1225/3639
+  1250/3639
+  1275/3639
+  1300/3639
+  1325/3639
+  1350/3639
+  1375/3639
+  1400/3639
+  1425/3639
+  1450/3639
+  1475/3639
+  1500/3639
+  1525/3639
+  1550/3639
+  1575/3639
+  1600/3639
+  1625/3639
+  1650/3639
+  1675/3639
+  1700/3639
+  1725/3639
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+
+(process:157512): VIPS-WARNING **: 09:03:04.883: IDAT: incorrect header check
+  1750/3639
+  1775/3639
+  1800/3639
+  1825/3639
+  1850/3639
+  1875/3639
+  1900/3639
+  1925/3639
+  1950/3639
+  1975/3639
+  2000/3639
+  2025/3639
+  2050/3639
+  2075/3639
+  2100/3639
+  2125/3639
+  2150/3639
+  2175/3639
+  2200/3639
+  2225/3639
+  2250/3639
+  2275/3639
+  2300/3639
+  2325/3639
+  2350/3639
+  2375/3639
+  2400/3639
+  2425/3639
+  2450/3639
+  2475/3639
+  2500/3639
+[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+  2525/3639
+[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+  2550/3639
+  2575/3639
+  2600/3639
+  2625/3639
+  2650/3639
+  2675/3639
+  2700/3639
+  2725/3639
+  2750/3639
+  2775/3639
+  2800/3639
+  2825/3639
+  2850/3639
+  2875/3639
+  2900/3639
+  2925/3639
+  2950/3639
+  2975/3639
+  3000/3639
+  3025/3639
+  3050/3639
+  3075/3639
+  3100/3639
+  3125/3639
+  3150/3639
+  3175/3639
+  3200/3639
+  3225/3639
+  3250/3639
+  3275/3639
+  3300/3639
+  3325/3639
+  3350/3639
+  3375/3639
+  3400/3639
+  3425/3639
+  3450/3639
+  3475/3639
+  3500/3639
+  3525/3639
+  3550/3639
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+  3575/3639
+  3600/3639
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+  3625/3639
+  3639/3639
+
+wrote /home/ursm/Code/github.com/ursm/capybara-simulated/spec/support/wpt_expected_failures.yml
+  and  /home/ursm/Code/github.com/ursm/capybara-simulated/spec/support/wpt_out_of_scope.yml
+  files:          3639
+  completed:      3638
+  harness errors: 1
+  in-scope:       229 files / 1290 subtests
+  out-of-scope:   523 files / 4446 subtests

@@ -561,7 +561,7 @@ module WptRunner
   # CSSOM object model, backed by our css-tree cascade engine — css/cssom-view is
   # the layout-dependent tree and is deliberately not vendored). Keep this list in
   # sync with the vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -572,7 +572,7 @@ module WptRunner
   # virtual-clock timeout catches them) and needs a skip-list before it can be
   # scanned. (.tentative files auto-route to out-of-scope, so a tentative window.js
   # here self-excludes.)
-  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,fetch/api,fetch/data-urls,fetch/h1-parsing}'
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing}'
 
   def test_files
     @test_files ||= begin

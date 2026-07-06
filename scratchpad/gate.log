@@ -1,0 +1,215 @@
+..***************..........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.....[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+..[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch: redirect blocked by redirect=error mode
+...............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+
+(process:170801): VIPS-WARNING **: 09:08:46.814: IDAT: incorrect header check
+.........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+...[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+..........[capybara-simulated] host fn error: RuntimeError: module not found: http://www.example.com/loading/resources/dummy.js?pipe=trickle(d1)
+...........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+................................................[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+.[capybara-simulated] rack_fetch failed: StandardError: [capybara-simulated] fetch exceeded 20 redirects
+....................
+
+Pending: (Failures listed here are expected and do not affect your suite's status)
+
+  1) WPT conformance (dom/) url/IdnaTestV2.any.js (driver crasher — skipped)
+     # IDNA/Unicode-host conformance (~2300 data-driven cases). IDNA IS implemented (uri-idna); ~95% pass. The residual ~74 are uri-idna's UTS46/Unicode-version gap vs the WPT reference data — kept skipped per the data-driven convention.
+     # ./spec/wpt_spec.rb:56
+
+  2) WPT conformance (dom/) url/toascii.window.js (driver crasher — skipped)
+     # Host `domainToASCII`/IDNA conversion (~600 cases). IDNA IS implemented (uri-idna); most pass. The residual ~45 are uri-idna's conformance gap vs the WPT reference (lenient trailing-`=` punycode, bidi edge cases) — see IdnaTestV2.
+     # ./spec/wpt_spec.rb:56
+
+  3) WPT conformance (dom/) encoding/legacy-mb-japanese/ (driver crasher — skipped)
+     # Legacy Japanese multibyte (Shift_JIS/EUC-JP/ISO-2022-JP). Out of scope — needs the WHATWG multibyte decoder state machines + index tables in JS; Ruby Encoding is not WHATWG-conformant (see header). Exhaustive per-code-point tables.
+     # ./spec/wpt_spec.rb:56
+
+  4) WPT conformance (dom/) encoding/legacy-mb-korean/ (driver crasher — skipped)
+     # Legacy Korean multibyte (EUC-KR/windows-949). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  5) WPT conformance (dom/) encoding/legacy-mb-schinese/ (driver crasher — skipped)
+     # Legacy Simplified Chinese (GBK/gb18030). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  6) WPT conformance (dom/) encoding/legacy-mb-tchinese/ (driver crasher — skipped)
+     # Legacy Traditional Chinese (Big5). Out of scope — see above.
+     # ./spec/wpt_spec.rb:56
+
+  7) WPT conformance (dom/) encoding/single-byte-decoder.window.js (driver crasher — skipped)
+     # Single-byte decoders ARE modeled (the TextDecoder variant passes). The remaining variants need byte-level XHR responseText + iframe document.characterSet/inputEncoding decoding (single-byte-raw.py / text-plain-charset.py CGI) — an unmodeled byte-transport layer, deferred to a comprehensive document-charset effort. ~336 transport-dependent cases, NOT the decoder tables (those work).
+     # ./spec/wpt_spec.rb:56
+
+  8) WPT conformance (dom/) encoding/iso-2022-jp-decoder.any.js (driver crasher — skipped)
+     # ISO-2022-JP stateful decoder. Out of scope — needs the WHATWG decoder state machine; 21/34 subtests probe error-recovery byte accounting Ruby Encoding can't reproduce, and Ruby's Roman-state mapping diverges (see header).
+     # ./spec/wpt_spec.rb:56
+
+  9) WPT conformance (dom/) encoding/iso-2022-jp-encoder.html (driver crasher — skipped)
+     # ISO-2022-JP encoder (form/href submission in a legacy-charset document). Out of scope — needs the WHATWG encoder + the document-charset path, see header.
+     # ./spec/wpt_spec.rb:56
+
+  10) WPT conformance (dom/) encoding/big5-encoder.html (driver crasher — skipped)
+     # Big5 encoder (form/href submission in a legacy-charset document). Out of scope — see iso-2022-jp-encoder above.
+     # ./spec/wpt_spec.rb:56
+
+  11) WPT conformance (dom/) encoding/unsupported-encodings.any.js (driver crasher — skipped)
+     # Flaky AND out of scope. It decodes UTF-7 (not a WHATWG encoding) and UTF-32 (not a WHATWG decode target) via the async XHR `overrideMimeType` charset path (decode_test → XMLHttpRequest), which races the virtual-clock drain: ~4/5 runs the harness never completes (HE), ~1/5 it completes — so it intermittently flips the symmetric gate red. The TextDecoder-constructor side of unsupported labels is already covered green by api-invalid-label.any.js.
+     # ./spec/wpt_spec.rb:56
+
+  12) WPT conformance (dom/) url/failure.html (driver crasher — skipped)
+     # The XHR / sendBeacon / Location / window.open sinks throw synchronously on a malformed URL (most subtests pass). IDNA is now implemented (uri-idna), so many of the former Unicode-host cases now reject correctly; a residual data-driven set remains where uri-idna is more lenient than the WPT reference (accepts hosts the test expects to fail). Large + Unicode-version-tied, so kept skipped per the same data-driven convention as IdnaTestV2 / toascii; the non-IDNA URL-parse- failure behaviour is fully covered (green) by url-constructor.any.js.
+     # ./spec/wpt_spec.rb:56
+
+  13) WPT conformance (dom/) dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html (driver crasher — skipped)
+     # Scroll-on-arrow-key test: its <body onload=runTest()> now runs (window-forwarded handler activation), but runTest awaits a test_driver arrow-key scroll that the driver can't satisfy (no scroll geometry / key-driven scrolling), and the wait never resolves — testharness's own timeout can't fire either, so the harness hangs instead of completing. Out-of-scope layout/input subsystem (CLAUDE.md rule 1); excluded so it doesn't burn force-timeout cycles every run. Sibling scrollend/wheel tests that DO complete are listed in wpt_out_of_scope.yml.
+     # ./spec/wpt_spec.rb:56
+
+  14) WPT conformance (dom/) dom/ranges/tentative/ (driver crasher — skipped)
+     # Tentative WICG Element.createValueRange() (opaque Range over form-control value text). Out of scope — getBoundingClientRect/getClientRects geometry over the control's internal text layout + CSS Custom Highlight API, i.e. a layout / rendering engine we don't model (rule 1); unshipped, no library/app uses it. Several files have non-deterministic layout-dependent failing sets that can't be name-allowlisted, so the whole 18-file subtree is skipped.
+     # ./spec/wpt_spec.rb:56
+
+  15) WPT conformance (dom/) html/semantics/forms/constraints/infinite_backtracking.tentative.html (driver crasher — skipped)
+     # Catastrophic-backtracking pattern regex; V8 runs it synchronously for ~56 s (finite but pathological), uninterruptible by the virtual-clock force-timeout. Skipped to keep the gate fast — see header.
+     # ./spec/wpt_spec.rb:56
+
+Finished in 4 minutes 42.5 seconds (files took 0.32452 seconds to load)
+3656 examples, 0 failures, 15 pending
+
+EXIT=0
