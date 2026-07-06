@@ -63,16 +63,16 @@
     return false;
   }
   // Accelerator (Ctrl/Cmd + letter) default action on a keydown that wasn't
-  // preventDefault'd: the clipboard + select-all shortcuts, routed through the
-  // same execCommand implementation the driver exposes, so the observable input
-  // events (deleteByCut / insertFromPaste / …) match a real accelerator.
+  // preventDefault'd: the clipboard + select-all shortcuts. Cut / copy / paste
+  // run the user-gesture clipboard algorithm (the ClipboardEvent → cancelable
+  // beforeinput → mutate → input sequence a real accelerator fires — richer than
+  // scripted execCommand, which fires only input); see __csimClipboardGesture.
   function accelShortcut(letter, target) {
-    var doc = D();
     var k = String(letter).toLowerCase();
-    if (k === 'c') { try { doc.execCommand('copy');  } catch (e) {} }
-    else if (k === 'x') { try { doc.execCommand('cut');   } catch (e) {} }
-    else if (k === 'v') { try { doc.execCommand('paste'); } catch (e) {} }
-    else if (k === 'a') {
+    var clip = k === 'c' ? 'copy' : k === 'x' ? 'cut' : k === 'v' ? 'paste' : null;
+    if (clip) {
+      if (typeof W.__csimClipboardGesture === 'function') W.__csimClipboardGesture(clip, target);
+    } else if (k === 'a') {
       try {
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
             typeof target.select === 'function') {
