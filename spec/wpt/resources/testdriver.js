@@ -84,6 +84,43 @@
       } catch (e) {}
     }
   }
+
+  // Backspace / Delete default action on a non-prevented keydown: fire the
+  // cancelable beforeinput, then (unless canceled) delete and fire input. The
+  // inputType follows the spec: a non-collapsed selection deletes the content
+  // (deleteContent{Backward,Forward}); a caret with a word modifier (Ctrl, or
+  // Alt on Mac) deletes the word (deleteWord{Backward,Forward}).
+  function deleteKeyAction(forward, wordMod, target) {
+    var sel = W.getSelection && W.getSelection();
+    var isTextCtl = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+    // Backspace / Delete only edit (and fire beforeinput / input) in an editable
+    // target; on non-editable content the keydown alone stands.
+    if (!isTextCtl && !(target && target.isContentEditable)) return;
+    var collapsed = isTextCtl ? (target.selectionStart === target.selectionEnd)
+                              : (!sel || sel.isCollapsed);
+    var inputType = (collapsed && wordMod)
+      ? (forward ? 'deleteWordForward' : 'deleteWordBackward')
+      : (forward ? 'deleteContentForward' : 'deleteContentBackward');
+    var IE = W.InputEvent || W.Event;
+    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: null });
+    dispatch(target, bi);
+    if (bi.defaultPrevented) return;
+    try {
+      if (isTextCtl) {
+        var cur = target.value || '', s = target.selectionStart, e = target.selectionEnd;
+        if (s !== e)                        { target.value = cur.slice(0, s) + cur.slice(e);     target.selectionStart = target.selectionEnd = s; }
+        else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); target.selectionStart = target.selectionEnd = s; }
+        else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); target.selectionStart = target.selectionEnd = s - 1; }
+      } else if (sel && sel.rangeCount) {
+        if (!sel.isCollapsed) sel.getRangeAt(0).deleteContents();
+        else if (typeof sel.modify === 'function') {
+          sel.modify('extend', forward ? 'forward' : 'backward', wordMod ? 'word' : 'character');
+          if (sel.rangeCount && !sel.isCollapsed) sel.getRangeAt(0).deleteContents();
+        }
+      }
+    } catch (e) {}
+    dispatch(target, new IE('input', { bubbles: true, cancelable: false, composed: true, inputType: inputType, data: null }));
+  }
   // The default action this driver ties to a trusted key press. Today: Tab moves
   // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
   // Only runs when the keydown wasn't preventDefault'd — matching real browsers.
@@ -289,15 +326,8 @@
               }
             } catch (e) {}
           }
-        } else if (dkn === 'Backspace') {
-          if (!dEv.defaultPrevented) {
-            try {
-              if (t && 'value' in t && typeof t.value === 'string' && t.value.length) {
-                t.value = t.value.slice(0, -1);
-                dispatch(t, new (W.InputEvent || W.Event)('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
-              }
-            } catch (e) {}
-          }
+        } else if (dkn === 'Backspace' || dkn === 'Delete') {
+          if (!dEv.defaultPrevented) deleteKeyAction(dkn === 'Delete', __ctrlHeld || __altHeld || __metaHeld, t);
         } else if (!dmod) {
           keyDefaultAction(dkn, dEv);          // Tab → sequential focus navigation, etc.
         }
