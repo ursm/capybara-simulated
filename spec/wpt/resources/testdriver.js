@@ -76,6 +76,8 @@
       historyKeyAction(__shiftHeld ? 'historyRedo' : 'historyUndo', target);   // Ctrl/Cmd+Z, +Shift = redo
     } else if (k === 'y') {
       historyKeyAction('historyRedo', target);                                 // Ctrl+Y = redo (Windows)
+    } else if (k === 'b') {
+      boldKeyAction(target);                                                    // Ctrl/Cmd+B = bold
     } else if (k === 'a') {
       try {
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
@@ -126,14 +128,25 @@
   // The editing-event envelope every editing key produces: fire the cancelable
   // beforeinput, run `mutate` (unless it was canceled), then fire the
   // non-cancelable input — both carrying the same inputType / data / null
-  // dataTransfer. `mutate` is omitted for undo/redo (no local DOM effect).
-  function editingKeyAction(target, inputType, data, mutate) {
+  // dataTransfer, and the beforeinput its getTargetRanges() StaticRanges.
+  // `mutate` is omitted for undo/redo (no local DOM effect).
+  // Returns true if the edit proceeded, false if a listener canceled beforeinput —
+  // the caller uses this to undo any pre-beforeinput selection change on cancel.
+  function editingKeyAction(target, inputType, data, mutate, targetRanges) {
     var IE = W.InputEvent || W.Event;
-    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: data, dataTransfer: null });
+    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: data, dataTransfer: null, targetRanges: targetRanges || [] });
     dispatch(target, bi);
-    if (bi.defaultPrevented) return;
+    if (bi.defaultPrevented) return false;
     if (mutate) { try { mutate(); } catch (e) {} }
     dispatch(target, new IE('input', { bubbles: true, cancelable: false, composed: true, inputType: inputType, data: data, dataTransfer: null }));
+    return true;
+  }
+  // The current selection as beforeinput getTargetRanges() for a contenteditable
+  // edit that targets the selection (typing, formatBold, and — once extended to
+  // the range it removes — deletion). A text control reports none.
+  function ceTargetRanges(target) {
+    return (target && target.isContentEditable && typeof W.__csimTargetRangesFromSelection === 'function')
+      ? W.__csimTargetRangesFromSelection() : [];
   }
   // Backspace / Delete: delete the selection (deleteContent{Backward,Forward}) or,
   // with a word modifier at a caret (Ctrl, or Alt on Mac), the adjacent word
@@ -147,7 +160,21 @@
     var inputType = (collapsed && wordMod)
       ? (forward ? 'deleteWordForward' : 'deleteWordBackward')
       : (forward ? 'deleteContentForward' : 'deleteContentBackward');
-    editingKeyAction(target, inputType, null, function () {
+    // For a contenteditable, extend a collapsed caret to the range the deletion
+    // will remove BEFORE firing beforeinput, so getTargetRanges() reports that
+    // range (a non-collapsed selection is already it); then delete it. Remember
+    // the original caret so a CANCELED beforeinput can restore it (extending is a
+    // visible selection change that must not survive a preventDefault).
+    var tr = [], caretBeforeExtend = null;
+    if (!isTextCtl && sel && sel.rangeCount) {
+      if (sel.isCollapsed && typeof sel.modify === 'function') {
+        var r0 = sel.getRangeAt(0);
+        caretBeforeExtend = { node: r0.startContainer, offset: r0.startOffset };
+        sel.modify('extend', forward ? 'forward' : 'backward', wordMod ? 'word' : 'character');
+      }
+      tr = ceTargetRanges(target);
+    }
+    var proceeded = editingKeyAction(target, inputType, null, function () {
       if (isTextCtl) {
         var cur = target.value || '', s = caret[0], e = caret[1], pos = s;
         if (s !== e)                        { target.value = cur.slice(0, s) + cur.slice(e);     pos = s; }
@@ -155,14 +182,24 @@
         else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); pos = s - 1; }
         try { target.selectionStart = target.selectionEnd = pos; } catch (_) {}
         if (target._changeBaseline !== undefined) target._editedSinceFocus = true;
-      } else if (sel && sel.rangeCount) {
-        if (!sel.isCollapsed) sel.getRangeAt(0).deleteContents();
-        else if (typeof sel.modify === 'function') {
-          sel.modify('extend', forward ? 'forward' : 'backward', wordMod ? 'word' : 'character');
-          if (sel.rangeCount && !sel.isCollapsed) sel.getRangeAt(0).deleteContents();
-        }
+      } else if (sel && sel.rangeCount && !sel.isCollapsed) {
+        sel.getRangeAt(0).deleteContents();
       }
-    });
+    }, tr);
+    if (!proceeded && caretBeforeExtend && typeof sel.collapse === 'function') {
+      try { sel.collapse(caretBeforeExtend.node, caretBeforeExtend.offset); } catch (e) {}
+    }
+  }
+  // Bold accelerator (Ctrl/Cmd+B) in an editable target: fire the cancelable
+  // beforeinput (formatBold, targeting the selection), then apply bold via
+  // execCommand (which performs the DOM change and fires the trailing input).
+  function boldKeyAction(target) {
+    if (!target || !target.isContentEditable) return;   // formatBold applies only in a contenteditable
+    var IE = W.InputEvent || W.Event;
+    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: 'formatBold', data: null, dataTransfer: null, targetRanges: ceTargetRanges(target) });
+    dispatch(target, bi);
+    if (bi.defaultPrevented) return;
+    try { if (D() && D().execCommand) D().execCommand('bold'); } catch (e) {}
   }
   // Enter: a TEXTAREA inserts a line break, a contenteditable a PARAGRAPH
   // (insertParagraph) or — with Shift — a line break. A single-line <input> runs
@@ -177,7 +214,7 @@
     editingKeyAction(target, inputType, null, function () {
       if (isTextarea) spliceTextCtl(target, '\n');
       else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection('\n');
-    });
+    }, ceTargetRanges(target));
   }
   // Undo / Redo accelerator (Ctrl/Cmd+Z, +Shift = redo, Ctrl+Y): historyUndo /
   // historyRedo. No undo stack is modeled — the events are what rich editors gate
@@ -202,7 +239,7 @@
     editingKeyAction(target, 'insertText', ch, function () {
       if (isTextControlTarget(target)) spliceTextCtl(target, ch);
       else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection(ch);
-    });
+    }, ceTargetRanges(target));
   }
   // The default action this driver ties to a trusted key press. Today: Tab moves
   // focus through the sequential-focus-navigation order (engine in dom-nodes.js).

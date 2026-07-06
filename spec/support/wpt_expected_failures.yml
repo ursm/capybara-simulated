@@ -1541,7 +1541,6 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
 input-events/input-events-get-target-ranges.html:
-- Actions other than deletion should have current selection as target ranges.
 - getTargetRanges() returns correct range and cleared after dispatch.
 webmessaging/Channel_postMessage_DataCloneErr.any.js:
 - Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
