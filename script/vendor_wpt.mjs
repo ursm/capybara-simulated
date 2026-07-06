@@ -117,7 +117,11 @@ const SUPPORT_FILES = [
   'html/resources/common.js',
   'pointerevents/pointerevent_support.js',
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
-  'html/anonymous-iframe/resources/common.js'
+  'html/anonymous-iframe/resources/common.js',
+  // input-events editing tests pull EditorTestUtils (send copy/cut/paste shortcut
+  // keys, set selection from markup) by absolute path from the editing/ tree,
+  // which we don't vendor wholesale; it's self-contained on top of testdriver.
+  'editing/include/editor-test-utils.js'
 ];
 
 const CONCURRENCY = 24;

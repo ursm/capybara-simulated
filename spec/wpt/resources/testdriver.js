@@ -52,12 +52,37 @@
     '': 'ArrowLeft', '': 'ArrowUp', '': 'ArrowRight', '': 'ArrowDown'
   };
   function keyName(ch) { return WD_KEYS[ch] || ch; }
-  var __shiftHeld = false;
+  var __shiftHeld = false, __ctrlHeld = false, __metaHeld = false, __altHeld = false;
   // Track modifier state across a key transition; returns true for a pure
   // modifier key (no text / no further default action).
   function trackModifier(name, down) {
-    if (name === 'Shift') { __shiftHeld = down; return true; }
-    return name === 'Control' || name === 'Alt' || name === 'Meta';
+    if (name === 'Shift')   { __shiftHeld = down; return true; }
+    if (name === 'Control') { __ctrlHeld = down; return true; }
+    if (name === 'Meta')    { __metaHeld = down; return true; }
+    if (name === 'Alt')     { __altHeld  = down; return true; }
+    return false;
+  }
+  // Accelerator (Ctrl/Cmd + letter) default action on a keydown that wasn't
+  // preventDefault'd: the clipboard + select-all shortcuts, routed through the
+  // same execCommand implementation the driver exposes, so the observable input
+  // events (deleteByCut / insertFromPaste / …) match a real accelerator.
+  function accelShortcut(letter, target) {
+    var doc = D();
+    var k = String(letter).toLowerCase();
+    if (k === 'c') { try { doc.execCommand('copy');  } catch (e) {} }
+    else if (k === 'x') { try { doc.execCommand('cut');   } catch (e) {} }
+    else if (k === 'v') { try { doc.execCommand('paste'); } catch (e) {} }
+    else if (k === 'a') {
+      try {
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
+            typeof target.select === 'function') {
+          target.select();
+        } else {
+          var sel = W.getSelection && W.getSelection();
+          if (sel && target) sel.selectAllChildren(target);
+        }
+      } catch (e) {}
+    }
   }
   // The default action this driver ties to a trusted key press. Today: Tab moves
   // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
@@ -239,17 +264,23 @@
         break;
       case 'keyDown': {
         var dkn = keyName(a.key);
-        var dmod = trackModifier(dkn, true);   // sets __shiftHeld before the event/default
+        var dmod = trackModifier(dkn, true);   // updates the held-modifier flags before the event/default
         t = (D() && D().activeElement) || (D() && D().body);
         // WebDriver special keys (arrows, Backspace, Enter, …) are PUA U+E000..F8FF.
         var dcp = String(a.key).codePointAt(0);
         var dspecial = dcp >= 0xE000 && dcp <= 0xF8FF;
-        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld });
+        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld });
         dispatch(t, dEv);
+        // Ctrl/Cmd + printable letter is an accelerator (copy/cut/paste/select-all),
+        // NOT text to type — run its default action instead of inserting the letter.
+        if (!dmod && !dspecial && (__ctrlHeld || __metaHeld)) {
+          if (!dEv.defaultPrevented) accelShortcut(dkn, t);
+          break;
+        }
         if (!dspecial) {
           // Printable key: keypress + insert the char (through the `value` setter,
           // so e.g. a filter combobox re-filters) + `input` — mirrors send_keys.
-          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld }));
+          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
           if (!dEv.defaultPrevented) {
             try {
               if (t && 'value' in t) {
@@ -276,7 +307,7 @@
         var ukn = keyName(a.key);
         trackModifier(ukn, false);
         t = (D() && D().activeElement) || (D() && D().body);
-        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ukn, shiftKey: __shiftHeld }));
+        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ukn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
         break;
       }
       case 'pause':
@@ -286,7 +317,7 @@
   }
 
   function action_sequence(actions) {
-    __shiftHeld = false;   // each action chain starts with no keys depressed
+    __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // each chain starts with no keys depressed
     var state = Object.create(null);
     for (var i = 0; i < actions.length; i++) {
       var a = actions[i];
@@ -371,9 +402,9 @@
       try { W.__csimFocusModality = 'keyboard'; } catch (e) {}   // keyboard-driven → :focus-visible applies
       try { if (element && typeof element.focus === 'function') element.focus(); } catch (e) {}
       var str = String(keys == null ? '' : keys);
-      __shiftHeld = false;   // start fresh; a modifier in `keys` stays held for
-                             // the rest of THIS call (WebDriver sticky), but does
-                             // not leak into a later send_keys / Actions chain
+      __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // start fresh; a modifier in
+                             // `keys` stays held for the rest of THIS call (WebDriver sticky), but
+                             // does not leak into a later send_keys / Actions chain
       for (var i = 0; i < str.length; i++) {
         var ch = str[i];
         var cp = str.codePointAt(i);

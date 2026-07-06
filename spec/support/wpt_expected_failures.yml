@@ -1537,8 +1537,6 @@ html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Date instance
 - Object instance
 - RegExp instance
-input-events/contenteditable-insertfrompaste-type-inputevent-data.html:
-- Input event data for inputType insertFromPaste should not be set for contenteditable
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
@@ -1563,12 +1561,6 @@ input-events/input-events-typing.html:
   with an existing history
 - It triggers beforeinput and input events on typing Undo and Redo key combinations
   without an existing history
-input-events/textarea-insertfrompaste-type-inputevent-data-withnewline-atend.html:
-- Input event data for inputType insertFromPaste should be set
-input-events/textarea-insertfrompaste-type-inputevent-data-withnewline-atstart.html:
-- Input event data for inputType insertFromPaste should be set
-input-events/textarea-insertfrompaste-type-inputevent-data.html:
-- Input event data for inputType insertFromPaste should be set
 webmessaging/Channel_postMessage_DataCloneErr.any.js:
 - Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
 webmessaging/Channel_postMessage_clone_port.any.js:
