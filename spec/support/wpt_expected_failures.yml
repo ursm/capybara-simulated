@@ -1523,9 +1523,6 @@ webmessaging/MessagePort_initial_disabled.any.js:
 webmessaging/Transferred_objects_unusable.sub.htm:
 - 'Test Description: Objects listed in transfer are transferred, not just cloned,
   meaning that they are no longer usable on the sending side.'
-webmessaging/broadcastchannel/basics.any.js:
-- Closing a channel in onmessage prevents already queued tasks from firing onmessage
-  events
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
 webmessaging/broadcastchannel/cross-origin.html:
@@ -1787,8 +1784,6 @@ xhr/timeout-multiple-fetches.html:
 - Redirects should not reset the timer
 xhr/xhr-authorization-redirect.any.js:
 - getAuthorizationHeaderValue - cross origin redirection
-xhr/xmlhttprequest-eventtarget.htm:
-- 'XMLHttpRequest: implements EventTarget'
 xhr/xmlhttprequest-timeout-aborted.html:
 - 'Timeout test: time to abort is 5000, timeout set at 2000'
 xhr/xmlhttprequest-timeout-abortedonmain.html:
