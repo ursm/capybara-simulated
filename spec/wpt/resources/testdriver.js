@@ -72,6 +72,10 @@
     var clip = k === 'c' ? 'copy' : k === 'x' ? 'cut' : k === 'v' ? 'paste' : null;
     if (clip) {
       if (typeof W.__csimClipboardGesture === 'function') W.__csimClipboardGesture(clip, target);
+    } else if (k === 'z') {
+      historyKeyAction(__shiftHeld ? 'historyRedo' : 'historyUndo', target);   // Ctrl/Cmd+Z, +Shift = redo
+    } else if (k === 'y') {
+      historyKeyAction('historyRedo', target);                                 // Ctrl+Y = redo (Windows)
     } else if (k === 'a') {
       try {
         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
@@ -85,32 +89,72 @@
     }
   }
 
-  // Backspace / Delete default action on a non-prevented keydown: fire the
-  // cancelable beforeinput, then (unless canceled) delete and fire input. The
-  // inputType follows the spec: a non-collapsed selection deletes the content
-  // (deleteContent{Backward,Forward}); a caret with a word modifier (Ctrl, or
-  // Alt on Mac) deletes the word (deleteWord{Backward,Forward}).
+  // ---- editing-key default actions (Actions path) -------------------------
+  // A tagName-based text control (INPUT / TEXTAREA), and the broader "editable
+  // target" an editing key may mutate: a contenteditable, or an ENABLED,
+  // NON-readonly text control. A readonly / disabled control or non-editable node
+  // takes the keydown only — no beforeinput / input, no mutation.
+  function isTextControlTarget(target) {
+    return !!(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'));
+  }
+  function isEditableTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    if (isTextControlTarget(target)) return !target.disabled && !target.readOnly;
+    return false;
+  }
+  // The effective [start, end] caret of a text control. A freshly focused control
+  // whose selection was never set reports null internally; the caret then sits at
+  // the END (where typing appends), matching the engine send_keys path — the public
+  // selectionStart getter would instead read 0 and wrongly splice at the front.
+  function ctlCaret(target) {
+    var cur = target.value || '';
+    return [
+      target._selectionStart == null ? cur.length : target._selectionStart,
+      target._selectionEnd   == null ? cur.length : target._selectionEnd
+    ];
+  }
+  // Splice `insert` over a text control's selection, collapse the caret after it,
+  // and mark the control edited so a later blur fires `change` (the engine sets the
+  // same flag on user input; a raw `value=` assignment would leave it unset).
+  function spliceTextCtl(target, insert) {
+    var caret = ctlCaret(target), s = caret[0], e = caret[1], cur = target.value || '';
+    target.value = cur.slice(0, s) + insert + cur.slice(e);
+    try { target.selectionStart = target.selectionEnd = s + insert.length; } catch (_) {}
+    if (target._changeBaseline !== undefined) target._editedSinceFocus = true;
+  }
+  // The editing-event envelope every editing key produces: fire the cancelable
+  // beforeinput, run `mutate` (unless it was canceled), then fire the
+  // non-cancelable input — both carrying the same inputType / data / null
+  // dataTransfer. `mutate` is omitted for undo/redo (no local DOM effect).
+  function editingKeyAction(target, inputType, data, mutate) {
+    var IE = W.InputEvent || W.Event;
+    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: data, dataTransfer: null });
+    dispatch(target, bi);
+    if (bi.defaultPrevented) return;
+    if (mutate) { try { mutate(); } catch (e) {} }
+    dispatch(target, new IE('input', { bubbles: true, cancelable: false, composed: true, inputType: inputType, data: data, dataTransfer: null }));
+  }
+  // Backspace / Delete: delete the selection (deleteContent{Backward,Forward}) or,
+  // with a word modifier at a caret (Ctrl, or Alt on Mac), the adjacent word
+  // (deleteWord{…}). Non-editable / readonly target → the keydown alone stands.
   function deleteKeyAction(forward, wordMod, target) {
+    if (!isEditableTarget(target)) return;
     var sel = W.getSelection && W.getSelection();
-    var isTextCtl = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
-    // Backspace / Delete only edit (and fire beforeinput / input) in an editable
-    // target; on non-editable content the keydown alone stands.
-    if (!isTextCtl && !(target && target.isContentEditable)) return;
-    var collapsed = isTextCtl ? (target.selectionStart === target.selectionEnd)
-                              : (!sel || sel.isCollapsed);
+    var isTextCtl = isTextControlTarget(target);
+    var caret = isTextCtl ? ctlCaret(target) : null;
+    var collapsed = isTextCtl ? (caret[0] === caret[1]) : (!sel || sel.isCollapsed);
     var inputType = (collapsed && wordMod)
       ? (forward ? 'deleteWordForward' : 'deleteWordBackward')
       : (forward ? 'deleteContentForward' : 'deleteContentBackward');
-    var IE = W.InputEvent || W.Event;
-    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: null });
-    dispatch(target, bi);
-    if (bi.defaultPrevented) return;
-    try {
+    editingKeyAction(target, inputType, null, function () {
       if (isTextCtl) {
-        var cur = target.value || '', s = target.selectionStart, e = target.selectionEnd;
-        if (s !== e)                        { target.value = cur.slice(0, s) + cur.slice(e);     target.selectionStart = target.selectionEnd = s; }
-        else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); target.selectionStart = target.selectionEnd = s; }
-        else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); target.selectionStart = target.selectionEnd = s - 1; }
+        var cur = target.value || '', s = caret[0], e = caret[1], pos = s;
+        if (s !== e)                        { target.value = cur.slice(0, s) + cur.slice(e);     pos = s; }
+        else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); pos = s; }
+        else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); pos = s - 1; }
+        try { target.selectionStart = target.selectionEnd = pos; } catch (_) {}
+        if (target._changeBaseline !== undefined) target._editedSinceFocus = true;
       } else if (sel && sel.rangeCount) {
         if (!sel.isCollapsed) sel.getRangeAt(0).deleteContents();
         else if (typeof sel.modify === 'function') {
@@ -118,8 +162,47 @@
           if (sel.rangeCount && !sel.isCollapsed) sel.getRangeAt(0).deleteContents();
         }
       }
-    } catch (e) {}
-    dispatch(target, new IE('input', { bubbles: true, cancelable: false, composed: true, inputType: inputType, data: null }));
+    });
+  }
+  // Enter: a TEXTAREA inserts a line break, a contenteditable a PARAGRAPH
+  // (insertParagraph) or — with Shift — a line break. A single-line <input> runs
+  // implicit form submission instead: no newline, no beforeinput / input. The
+  // event is the contract editors gate on; block-splitting for insertParagraph
+  // isn't modeled (no in-scope test checks the markup).
+  function enterKeyAction(shift, target) {
+    if (!isEditableTarget(target)) return;
+    var isTextarea = target.tagName === 'TEXTAREA';
+    if (!isTextarea && !target.isContentEditable) return;   // single-line <input>: submit, not a newline
+    var inputType = (!isTextarea && !shift) ? 'insertParagraph' : 'insertLineBreak';
+    editingKeyAction(target, inputType, null, function () {
+      if (isTextarea) spliceTextCtl(target, '\n');
+      else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection('\n');
+    });
+  }
+  // Undo / Redo accelerator (Ctrl/Cmd+Z, +Shift = redo, Ctrl+Y): historyUndo /
+  // historyRedo. No undo stack is modeled — the events are what rich editors gate
+  // on, and the spec fires them even when there is nothing to undo.
+  function historyKeyAction(inputType, target) {
+    if (!isEditableTarget(target)) return;
+    editingKeyAction(target, inputType, null, null);
+  }
+  // The character a printable key produces given the held modifiers — Shift
+  // uppercases a letter (Shift+b → 'B'), which the `key` property and the
+  // beforeinput/input `data` both reflect. (Shift+non-letter symbol mapping is
+  // layout-dependent and unmodeled; only letters are adjusted.)
+  function effectiveChar(name) {
+    return (__shiftHeld && /^[a-z]$/.test(name)) ? name.toUpperCase() : name;
+  }
+  // Printable-key default action: keypress (dispatched by the caller) then
+  // beforeinput → splice the char at the caret → input, for a text control or
+  // contenteditable — the same beforeinput→mutate→input shape the engine send_keys
+  // path produces. A non-editable / readonly target gets none of it.
+  function typeCharAction(ch, target) {
+    if (!isEditableTarget(target)) return;
+    editingKeyAction(target, 'insertText', ch, function () {
+      if (isTextControlTarget(target)) spliceTextCtl(target, ch);
+      else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection(ch);
+    });
   }
   // The default action this driver ties to a trusted key press. Today: Tab moves
   // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
@@ -306,28 +389,24 @@
         // WebDriver special keys (arrows, Backspace, Enter, …) are PUA U+E000..F8FF.
         var dcp = String(a.key).codePointAt(0);
         var dspecial = dcp >= 0xE000 && dcp <= 0xF8FF;
-        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld });
+        var dchar = dspecial ? dkn : effectiveChar(dkn);   // Shift uppercases a printable letter
+        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld });
         dispatch(t, dEv);
-        // Ctrl/Cmd + printable letter is an accelerator (copy/cut/paste/select-all),
-        // NOT text to type — run its default action instead of inserting the letter.
+        // Ctrl/Cmd + printable letter is an accelerator (copy/cut/paste/select-all/
+        // undo/redo), NOT text to type — run its default action instead of inserting.
         if (!dmod && !dspecial && (__ctrlHeld || __metaHeld)) {
           if (!dEv.defaultPrevented) accelShortcut(dkn, t);
           break;
         }
         if (!dspecial) {
-          // Printable key: keypress + insert the char (through the `value` setter,
-          // so e.g. a filter combobox re-filters) + `input` — mirrors send_keys.
-          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dkn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
-          if (!dEv.defaultPrevented) {
-            try {
-              if (t && 'value' in t) {
-                t.value = (t.value || '') + a.key;
-                dispatch(t, new (W.InputEvent || W.Event)('input', { bubbles: true, composed: true, data: a.key }));
-              }
-            } catch (e) {}
-          }
+          // Printable key: keypress + beforeinput → splice the char at the caret →
+          // input, for a text control or contenteditable — mirrors send_keys.
+          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
+          if (!dEv.defaultPrevented) typeCharAction(dchar, t);
         } else if (dkn === 'Backspace' || dkn === 'Delete') {
           if (!dEv.defaultPrevented) deleteKeyAction(dkn === 'Delete', __ctrlHeld || __altHeld || __metaHeld, t);
+        } else if (dkn === 'Enter') {
+          if (!dEv.defaultPrevented) enterKeyAction(__shiftHeld, t);
         } else if (!dmod) {
           keyDefaultAction(dkn, dEv);          // Tab → sequential focus navigation, etc.
         }
@@ -335,9 +414,11 @@
       }
       case 'keyUp': {
         var ukn = keyName(a.key);
+        var ucp = String(a.key).codePointAt(0);
+        var uchar = (ucp >= 0xE000 && ucp <= 0xF8FF) ? ukn : effectiveChar(ukn);   // key held: Shift still uppercases
         trackModifier(ukn, false);
         t = (D() && D().activeElement) || (D() && D().body);
-        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: ukn, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
+        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: uchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
         break;
       }
       case 'pause':

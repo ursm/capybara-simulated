@@ -1543,14 +1543,6 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
 input-events/input-events-get-target-ranges.html:
 - Actions other than deletion should have current selection as target ranges.
 - getTargetRanges() returns correct range and cleared after dispatch.
-input-events/input-events-typing.html:
-- InputEvents have correct data/order when typing on textarea and contenteditable
-- It triggers beforeinput and input events on typing RETURN
-- It triggers beforeinput and input events on typing Shift+RETURN
-- It triggers beforeinput and input events on typing Undo and Redo key combinations
-  with an existing history
-- It triggers beforeinput and input events on typing Undo and Redo key combinations
-  without an existing history
 webmessaging/Channel_postMessage_DataCloneErr.any.js:
 - Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
 webmessaging/Channel_postMessage_clone_port.any.js:
