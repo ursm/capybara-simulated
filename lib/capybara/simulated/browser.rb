@@ -4434,7 +4434,9 @@ module Capybara
       # Called from the JS bridge when a `<video>` element's `src` is
       # assigned a `blob:` URL. ffprobe extracts dimensions + duration,
       # ffmpeg extracts the first frame as raw RGBA. JS caches both so
-      # `canvas.drawImage(video, …)` blits like any ImageBitmap.
+      # `canvas.drawImage(video, …)` blits like any ImageBitmap. A `<video src>` that
+      # points at a served file (http / relative) or a `data:` URL resolves its bytes
+      # the same way — see `video_bytes_b64` below.
       def decode_video_frame(b64_bytes)
         host_image_op('decode_video_frame') {
           bytes = Base64.decode64(b64_bytes.to_s)
@@ -4455,6 +4457,22 @@ module Capybara
             result
           end
         }
+      end
+
+      # Fetch a media resource (http / relative URL) and return its bytes base64-encoded,
+      # so a `<video src>` pointing at a served file decodes the same way a blob: / data:
+      # source does. Binary stays Ruby-side; only ASCII base64 crosses into V8. Returns
+      # nil when the fetch fails.
+      def video_bytes_b64(url)
+        result = rack_fetch('GET', url, '', {}, 'follow')
+        return nil unless result && result['status'].to_i < 400
+        # The RAW bytes ride `body_b64` (see response_hash) for any non-ASCII response;
+        # the text `body` field is a UTF-8 re-decode that corrupts binary media. Fall
+        # back to base64-of-body only for a pure-ASCII response (byte-identical there).
+        b64 = result['body_b64']
+        return b64 unless b64.nil? || b64.empty?
+        body = result['body'].to_s
+        body.empty? ? nil : [body].pack('m0')
       end
 
       private def ffprobe_stream(path)

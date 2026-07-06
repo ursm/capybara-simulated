@@ -96,7 +96,12 @@ module WptRunner
     '.jpg'  => 'image/jpeg',
     '.jpeg' => 'image/jpeg',
     '.bmp'  => 'image/bmp',
-    '.webp' => 'image/webp'
+    '.webp' => 'image/webp',
+    '.avif' => 'image/avif',
+    '.mp4'  => 'video/mp4',
+    '.webm' => 'video/webm',
+    '.ogv'  => 'video/ogg',
+    '.ogg'  => 'audio/ogg'   # .ogg is ambiguous; the common meaning is Ogg audio (.ogv is the video ext)
   }.freeze
 
   # Canonical WPT server identity for `.sub.*` template substitution. wptserve
