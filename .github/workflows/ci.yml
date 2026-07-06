@@ -24,10 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # `canvas_image_spec` decodes images through ruby-vips, which
-      # `dlopen`s `libvips.so.42` at runtime — install it before the
-      # spec run.
-      - run: sudo apt-get update && sudo apt-get install -y libvips42t64
+      # `canvas_image_spec` decodes images through ruby-vips, which `dlopen`s
+      # `libvips.so.42` at runtime; the `<video>` / createImageBitmap-from-video
+      # path shells out to `ffprobe` + `ffmpeg` for first-frame decode (the WPT
+      # imagebitmap video subtests need it, else their factory rejects). Install
+      # both before the spec run.
+      - run: sudo apt-get update && sudo apt-get install -y libvips42t64 ffmpeg
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -49,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - run: sudo apt-get update && sudo apt-get install -y libvips42t64
+      - run: sudo apt-get update && sudo apt-get install -y libvips42t64 ffmpeg
 
       - uses: ruby/setup-ruby@v1
         with:
