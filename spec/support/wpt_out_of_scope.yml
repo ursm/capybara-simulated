@@ -17392,6 +17392,11 @@ html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - name: Bounding rect height for textarea must be the same as line-height
   reason: Layout geometry (getBoundingClientRect / offsetWidth / intrinsic size /
     scroll position / popover positioning) — no layout engine.
+html/webappapis/scripting/events/event-handler-onmove-02.tentative.html:
+- name: Window move event
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/webappapis/structured-clone/structured-clone.any.js:
 - name: Growable SharedArrayBuffer
   reason: Needs a GROWABLE SharedArrayBuffer, which this V8 build does not expose

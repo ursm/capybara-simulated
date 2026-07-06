@@ -1,4 +1,4 @@
 bbe4ce211741e3b36f58ccdcffd6a7c1926fde1b
 web-platform-tests/wpt
-trees: dom, domparsing, url, encoding, shadow-dom, FileAPI, html/dom, html/webappapis/timers, html/webappapis/microtask-queuing, html/semantics/forms, xhr, fetch/api, fetch/data-urls, fetch/h1-parsing, html/webappapis/atob, html/webappapis/structured-clone, webmessaging, css/cssom
+trees: dom, domparsing, url, encoding, shadow-dom, FileAPI, html/dom, html/webappapis/timers, html/webappapis/microtask-queuing, html/webappapis/scripting/events, html/semantics/forms, xhr, fetch/api, fetch/data-urls, fetch/h1-parsing, html/webappapis/atob, html/webappapis/structured-clone, webmessaging, css/cssom
 support: common, resources/testharness.js, html/resources/common.js, pointerevents/pointerevent_support.js, html/cross-origin-embedder-policy/credentialless/resources/common.js, html/anonymous-iframe/resources/common.js

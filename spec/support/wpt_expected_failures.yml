@@ -1485,6 +1485,74 @@ html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
+html/webappapis/scripting/events/compile-event-handler-lexical-scopes-form-owner.html:
+- "<img> has a form owner"
+- "<input> has a form owner"
+- form-associated <x-foo> has a form owner
+html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
+- The EventHandler is an element's event handler and has a form owner.
+- The EventHandler is an element's event handler and has no form owner.
+- The EventHandler is not an element's event handler (i.e. Window's event handler)
+  and has no form owner.
+html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
+- The entry settings object while executing the compiled callback via Web IDL's invoke
+  must be that of the node document
+- The incumbent settings object while executing the compiled callback via Web IDL's
+  invoke must be that of the node document
+html/webappapis/scripting/events/compile-event-handler-symbol-unscopables.html:
+- unscopable `document.testVariable` doesn't shadow `window.testVariable`
+html/webappapis/scripting/events/contextmenu-event-manual.htm:
+- contextmenu event generated from user action is MouseEvent
+html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
+- Event handler IDL attribute compilation errors must be fired on the element's document's
+  global
+- Event handler IDL attributes must return a function from the element's document's
+  realm
+html/webappapis/scripting/events/event-handler-non-content-document-idl-attributes.html:
+- body.onreadystatechange is not an event handler content attribute
+- body.onvisibilitychange is not an event handler content attribute
+- div.onreadystatechange is not an event handler content attribute
+- div.onvisibilitychange is not an event handler content attribute
+- frameset.onreadystatechange is not an event handler content attribute
+- frameset.onvisibilitychange is not an event handler content attribute
+html/webappapis/scripting/events/event-handler-processing-algorithm-error/document-synthetic-errorevent.html:
+- Initial values of ErrorEvent members
+- error event is normal (return true does not cancel; one arg) on Document, with a
+  synthetic ErrorEvent
+- error member can be set to undefined
+html/webappapis/scripting/events/event-handler-processing-algorithm-error/frameset-element-synthetic-errorevent.html:
+- error event has the right 5 args on Window, with a synthetic ErrorEvent
+- error event is weird (return true cancels; many args) on Window, with a synthetic
+  ErrorEvent
+html/webappapis/scripting/events/event-handler-sourcetext.html:
+- error event handler not on body
+- error event handler on connected body, reflected to Window
+- error event handler on disconnected body
+- error event handler on disconnected frameset
+- non-error event handler
+html/webappapis/scripting/events/event-handler-spec-example.window.js:
+- Event handler listeners should be registered when they are first set to an object
+  value (object "").
+- Event handler listeners should be registered when they are first set to an object
+  value (object "42").
+- Event handler listeners should be registered when they are first set to an object
+  value (object "[object Object]").
+html/webappapis/scripting/events/eventhandler-cancellation.html:
+- Returning true from [object Window]'s onerror event handler while ErrorEvent is
+  firing should cancel the event
+html/webappapis/scripting/events/messageevent-constructor.https.html:
+- Default event values
+- Passing ServiceWorker for source member
+- Passing null for ports member
+- initMessageEvent operation
+- initMessageEvent operation default parameter values
+- ports attribute should be a FrozenArray
+html/webappapis/scripting/events/onerroreventhandler.html:
+- onerror + !ErrorEvent + Window
+- onerror + Document
+- onerror + ErrorEvent + Window
+html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html:
+- when scripting is disabled, the handler is never compiled
 html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Array instance
 - Date instance

@@ -52,6 +52,10 @@ const TREES = [
                                        // coverage gate only checks member EXISTENCE; this checks behaviour
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing', // queueMicrotask + microtask-checkpoint ordering
+  'html/webappapis/scripting/events',  // the HTML "event handler" algorithm — IDL/inline on-handler
+                                       // reflection, compile-on-first-use + lexical scopes, listener
+                                       // registration order, OnErrorEventHandler; validates the
+                                       // registered-listener on-handler model (events.js setHandlerSlot)
   'html/semantics/forms',              // form submission / constraint validation / FormData / input /
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
