@@ -683,30 +683,8 @@ html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
 - createImageBitmap from a HTMLImageElement with resize option.
 - createImageBitmap from an ImageBitmap with resize option.
 - createImageBitmap from an ImageData with resize option.
-html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-video-resize.html:
-- createImageBitmap(HTMLVideoElement) with resize option
 html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage-closed.html:
 - attempt to draw a closed ImageBitmap to a 2d canvas throws INVALID_STATE_ERR
-html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
-- createImageBitmap from an HTMLVideoElement from a data URL resized, and drawImage
-  on the created ImageBitmap
-- createImageBitmap from an HTMLVideoElement from a data URL scaled down, and drawImage
-  on the created ImageBitmap
-- createImageBitmap from an HTMLVideoElement from a data URL scaled up, and drawImage
-  on the created ImageBitmap
-- createImageBitmap from an HTMLVideoElement from a data URL with negative sw/sh,
-  and drawImage on the created ImageBitmap
-- createImageBitmap from an HTMLVideoElement from a data URL, and drawImage on the
-  created ImageBitmap
-- createImageBitmap from an HTMLVideoElement resized, and drawImage on the created
-  ImageBitmap
-- createImageBitmap from an HTMLVideoElement scaled down, and drawImage on the created
-  ImageBitmap
-- createImageBitmap from an HTMLVideoElement scaled up, and drawImage on the created
-  ImageBitmap
-- createImageBitmap from an HTMLVideoElement with negative sw/sh, and drawImage on
-  the created ImageBitmap
-- createImageBitmap from an HTMLVideoElement, and drawImage on the created ImageBitmap
 html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation.html:
 - createImageBitmap with EXIF rotation, imageOrientation flipY, and cropping
 - createImageBitmap with EXIF rotation, imageOrientation flipY, and no cropping
@@ -717,15 +695,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation.html:
 - createImageBitmap with EXIF rotation, imageOrientation from-image, and no cropping
 - createImageBitmap with EXIF rotation, imageOrientation from-image, no cropping,
   and resize
-html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
-- 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation: "flipY",
-  and drawImage on the created ImageBitmap'
-- 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation: "from-image",
-  and drawImage on the created ImageBitmap'
-- 'createImageBitmap from an HTMLVideoElement imageOrientation: "flipY", and drawImage
-  on the created ImageBitmap'
-- 'createImageBitmap from an HTMLVideoElement imageOrientation: "from-image", and
-  drawImage on the created ImageBitmap'
 html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
 - createImageBitmap with an available but undecodable image source.
 html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:

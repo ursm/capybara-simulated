@@ -11118,6 +11118,127 @@ html/canvas/element/manual/filters/tentative/idl-conversions/canvas-filter-seque
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-video-resize.html:
+- name: createImageBitmap(HTMLVideoElement) with resize option
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
+- name: createImageBitmap from an HTMLVideoElement from a data URL resized, and drawImage
+    on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement from a data URL scaled down, and
+    drawImage on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement from a data URL scaled up, and
+    drawImage on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement from a data URL with negative sw/sh,
+    and drawImage on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement from a data URL, and drawImage
+    on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement resized, and drawImage on the created
+    ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement scaled down, and drawImage on the
+    created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement scaled up, and drawImage on the
+    created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement with negative sw/sh, and drawImage
+    on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: createImageBitmap from an HTMLVideoElement, and drawImage on the created ImageBitmap
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
+- name: 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation:
+    "flipY", and drawImage on the created ImageBitmap'
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: 'createImageBitmap from an HTMLVideoElement from a data URL imageOrientation:
+    "from-image", and drawImage on the created ImageBitmap'
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: 'createImageBitmap from an HTMLVideoElement imageOrientation: "flipY", and
+    drawImage on the created ImageBitmap'
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
+- name: 'createImageBitmap from an HTMLVideoElement imageOrientation: "from-image",
+    and drawImage on the created ImageBitmap'
+  reason: 'video-frame RGB requires the video decoder''s specific YUV->RGB colorspace
+    pipeline; for a colorspace=unknown fixture ffmpeg''s output differs from the reference
+    browser''s (Chrome libvpx+Skia) by more than the test''s 3-unit tolerance. Verified:
+    the stored YUV decodes to [255,0,0]/[254,0,0] under BT.601/ffmpeg vs the Chrome-specific
+    expected [247,37,0]; other browsers diverge too. A media-decoder/colorspace detail,
+    not a driver gap (rule 1).'
 html/canvas/element/manual/wide-gamut-canvas/imagedata-no-color-settings-crash.html:
 - name: Putting a float-32 ImageData with no color settings on a context 2D should
     not crash.
