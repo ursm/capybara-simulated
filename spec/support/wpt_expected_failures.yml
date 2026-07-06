@@ -1490,6 +1490,190 @@ html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Date instance
 - Object instance
 - RegExp instance
+webmessaging/Channel_postMessage_DataCloneErr.any.js:
+- Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
+webmessaging/Channel_postMessage_clone_port.any.js:
+- 'Test Description: Test Description: When the user agent is to clone a port original
+  port, with the clone being owned by owner, it must return a new MessagePort object'
+webmessaging/Channel_postMessage_clone_port_error.any.js:
+- 'Test Description: Throw a DataCloneError if transfer array in postMessage contains
+  source port.'
+webmessaging/Channel_postMessage_ports_readonly_array.any.js:
+- 'Test Description: The postMessage() method - Make new ports into a read only array.'
+webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
+- |-
+  Tasks enqueued on the port-message-queue of an enabled port,
+    are transferred along with the port, when the transfer happens in the same task
+    during which postMessage is called
+webmessaging/Channel_postMessage_with_transfer_entangled.any.js:
+- An entangled port transferred to the same origin receives messages in order
+webmessaging/Channel_postMessage_with_transfer_incoming_messages.any.js:
+- |-
+  When transferring a non-enabled port mutiple times,
+      incoming messages sent at various transfer steps are received in order upon enablement.
+webmessaging/MessageEvent-trusted.any.js:
+- With a BroadcastChannel
+- With a MessageChannel and its MessagePorts
+webmessaging/MessageEvent-trusted.window.js:
+- With window
+webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
+- onmessage calling source postMessage
+webmessaging/MessagePort_initial_disabled.any.js:
+- MessagePort_initial_disabled
+webmessaging/Transferred_objects_unusable.sub.htm:
+- 'Test Description: Objects listed in transfer are transferred, not just cloned,
+  meaning that they are no longer usable on the sending side.'
+webmessaging/broadcastchannel/basics.any.js:
+- Closing a channel in onmessage prevents already queued tasks from firing onmessage
+  events
+webmessaging/broadcastchannel/blobs.html:
+- Blobs work with workers on BroadcastChannel
+webmessaging/broadcastchannel/cross-origin.html:
+- Messages aren't delivered across origins
+webmessaging/broadcastchannel/detached-iframe.html:
+- BroadcastChannel messages from detached iframe to parent should be ignored (BC created
+  after detaching)
+- BroadcastChannel messages from detached iframe to parent should be ignored (BC created
+  before detaching)
+- BroadcastChannel messages from parent to detached iframe should be ignored (BC created
+  after detaching)
+- BroadcastChannel messages from parent to detached iframe should be ignored (BC created
+  before detaching)
+- BroadcastChannel messages within detached iframe should be ignored (BCs created
+  after detaching)
+- BroadcastChannel messages within detached iframe should be ignored (BCs created
+  before detaching)
+webmessaging/broadcastchannel/opaque-origin.html:
+- BroadcastChannel messages from data URL dedicated workers should be self-contained
+- BroadcastChannel messages from data URL shared workers should be self-contained
+- BroadcastChannel messages from opaque origins should be self-contained
+- Opaque origin should be serialized to "null"
+webmessaging/broadcastchannel/ordering.html:
+- Messages are delivered in port creation order across multiple frames
+webmessaging/broadcastchannel/service-worker.https.html:
+- BroadcastChannel works in service workers
+webmessaging/broadcastchannel/workers.html:
+- BroadcastChannel messages from closed worker to parent should be ignored (BC created
+  after closing)
+- BroadcastChannel messages from closed worker to parent should be ignored (BC created
+  before closing)
+- BroadcastChannel messages from parent to closed worker should be ignored (BC created
+  after closing)
+- BroadcastChannel messages from parent to closed worker should be ignored (BC created
+  before closing)
+- BroadcastChannel messages within closed worker should be ignored (BCs created after
+  closing)
+- BroadcastChannel messages within closed worker should be ignored (BCs created before
+  closing)
+- BroadcastChannel works in shared workers
+- BroadcastChannel works in workers
+- Closing and re-opening a channel works.
+webmessaging/event.origin.sub.htm:
+- 'Test Description: event.origin returns the origin of the message.'
+webmessaging/event.ports.sub.htm:
+- 'Test Description: event.ports returns the MessagePort array sent with the message.'
+webmessaging/event.source.xorigin.sub.htm:
+- 'Test Description: Cross-origin: event.source returns the WindowProxy of the source
+  window.'
+webmessaging/message-channels/close.any.js:
+- Message sent to closed port from transferred port should not arrive.
+- Message sent to closed port should not arrive.
+- close() detaches a MessagePort (but not the one its entangled with)
+webmessaging/message-channels/cross-document.html:
+- cross-document channel
+webmessaging/message-channels/detached-iframe.window.js:
+- MessageChannel created from a detached iframe should not send messages (remove after
+  create)
+- MessageChannel created from a detached iframe should not send messages (remove before
+  create)
+webmessaging/message-channels/no-start.any.js:
+- no-start
+webmessaging/messageerror.html:
+- The default value of onmessageerror is null
+- The onmessageerror content attribute must be compiled into the onmessageerror property
+- The onmessageerror content attribute must execute when an event is dispatched on
+  the window
+webmessaging/multi-globals/broadcastchannel-current.sub.html:
+- The current page being cross-origin must prevent the BroadcastChannel message from
+  being seen
+webmessaging/multi-globals/broadcastchannel-incumbent.sub.html:
+- The incumbent page being cross-origin must not prevent the BroadcastChannel message
+  from being seen
+webmessaging/multi-globals/messageport-current.html:
+- Making the current page become non-active must prevent message transmission
+webmessaging/postMessage_CryptoKey_insecure.sub.html:
+- insecure context should not receive an object for secure contexts only
+webmessaging/postMessage_Document.htm:
+- 'Test Description: postMessage with Document object: Throw a DataCloneError if message
+  could not be cloned.'
+webmessaging/postMessage_Function.htm:
+- 'Test Description: postMessage with Function object: Throw a DataCloneError if message
+  could not be cloned.'
+webmessaging/postMessage_MessagePorts_sorigin.htm:
+- 'Test Description: postMessage to same-origin iframe with MessagePort array containing
+  100 ports.'
+webmessaging/postMessage_MessagePorts_xorigin.sub.htm:
+- 'Test Description: postMessage to cross-origin iframe with MessagePort array containing
+  100 ports.'
+webmessaging/postMessage_MessagePorts_xsite.sub.window.js:
+- 'Test Description: postMessage to cross-site iframe with MessagePort array containing
+  100 ports.'
+webmessaging/postMessage_crosssite.sub.htm:
+- cross-site windows can send transferred ArrayBuffer
+webmessaging/postMessage_dup_transfer_objects.htm:
+- 'Test Description: postMessage with duplicate transfer objects raises DataCloneError
+  exception.'
+webmessaging/postMessage_invalid_targetOrigin.htm:
+- 'Test Description: If the value of the targetOrigin argument is neither a single
+  U+002A ASTERISK character (*), a single U+002F SOLIDUS character (/), nor an absolute
+  URL, then throw a SyntaxError exception and abort the overall set of steps.'
+webmessaging/with-options/broken-origin.html:
+- resolving broken url
+webmessaging/with-options/host-specific-origin.html:
+- resolving url with stuff in host-specific
+webmessaging/with-options/message-channel-transferable.html:
+- MessageChannel's ports as MessagePort objects
+webmessaging/with-options/null-transfer.html:
+- null transfer
+webmessaging/with-ports/001.html:
+- resolving broken url
+webmessaging/with-ports/002.html:
+- resolving url with stuff in host-specific
+webmessaging/with-ports/003.html:
+- resolving 'example.org'
+webmessaging/with-ports/010.html:
+- undefined
+webmessaging/with-ports/015.html:
+- different origin
+webmessaging/with-ports/023.html:
+- null ports
+webmessaging/with-ports/025.html:
+- 1 as ports
+webmessaging/with-ports/026.html:
+- object with length as transferable
+webmessaging/with-ports/027.html:
+- MessageChannel's ports as MessagePort objects
+- Old-style array objects
+webmessaging/without-ports/001.html:
+- resolving broken url
+webmessaging/without-ports/002.html:
+- resolving url with stuff in host-specific
+webmessaging/without-ports/003.html:
+- resolving 'example.org'
+webmessaging/without-ports/009.html:
+- zero arguments
+webmessaging/without-ports/010.html:
+- undefined
+webmessaging/without-ports/015.html:
+- different origin
+webmessaging/without-ports/023.html:
+- 'Object cloning: own properties only, don''t follow prototype'
+webmessaging/without-ports/024.html:
+- 'Object cloning: throw an exception if function values encountered'
+webmessaging/without-ports/025.html:
+- MessagePort constructor properties
+webmessaging/without-ports/026.html:
+- Cloning objects with getter properties
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:

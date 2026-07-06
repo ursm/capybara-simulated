@@ -66,6 +66,12 @@ const TREES = [
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
   'html/webappapis/structured-clone',  // structuredClone — deep-clone of platform objects, no layout
+  'webmessaging',                      // postMessage / MessageChannel / MessagePort / BroadcastChannel /
+                                       // MessageEvent + cross-context structured-clone & transfer — the
+                                       // channel every SPA (Mastodon, React/Vue) and iframe integration
+                                       // hammers. Same-origin surface is in scope (we model MessageChannel
+                                       // + Worker + structured-clone); cross-origin / multi-global subtests
+                                       // that need the multi-origin subsystem earn out per rule 1.
   'css/cssom',                         // CSSOM object model — CSSStyleDeclaration / CSSRule / insertRule /
                                        // cssRules / style serialization, backed by our css-tree cascade
                                        // engine; the pure-API slice of CSS (css/cssom-view is the

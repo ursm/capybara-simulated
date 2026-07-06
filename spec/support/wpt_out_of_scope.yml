@@ -18901,6 +18901,77 @@ url/percent-encoding.window.js:
 - name: Input  with encoding gb18030
   reason: query percent-encoding per gb18030 needs a legacy (non-utf-8) encoder table
     plus the .py CGI endpoint; not modeled
+webmessaging/broadcastchannel/cross-partition.https.tentative.html:
+- name: BroadcastChannel messages aren't received from a cross-partition dedicated
+    worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: BroadcastChannel messages aren't received from a cross-partition iframe
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: BroadcastChannel messages aren't received from a cross-partition service worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: BroadcastChannel messages aren't received from a cross-partition shared worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: BroadcastChannel messages aren't received from a nested iframe with a cross-site
+    ancestor
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/message-channels/close-event/document-destroyed.tentative.window.js:
+- name: The context is navigated to a new document and a close event is fired.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The iframe is deleted and a close event is fired.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The window is closed and a close event is fired.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/message-channels/close-event/entangled-after-back-forward-cache-restore.https.tentative.window.js:
+- name: MessagePort still works after the page is restored from BFCache
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/message-channels/close-event/explicitly-closed.tentative.window.js:
+- name: Close event on port2 is fired when port1 is explicitly closed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Close event on port2 is fired when port1, in a different window, is closed
+    during the transfer of port2.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Close event on port2 is fired when port1, which is in a different window,
+    is explicitly closed.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/message-channels/close-event/garbage-collected.tentative.any.js:
+- name: Entangled port is garbage collected, and the close event is fired.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/message-channels/user-activation.tentative.any.js:
+- name: user-activation
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+webmessaging/worker_postMessage_user_activation.tentative.html:
+- name: Post Message from a worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 xhr/sync-xhr-supported-by-permissions-policy.tentative.html:
 - name: document.permissionsPolicy.features should advertise sync-xhr.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
