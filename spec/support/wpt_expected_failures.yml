@@ -1590,8 +1590,6 @@ input-events/input-events-exec-command.html:
 - Calling execCommand("hiliteColor", false, orange) (inputType value)
 - Calling execCommand("hiliteColor", false, transparent) (inputType value)
 - Calling execCommand("indent", false, null) (inputType value)
-- Calling execCommand("insertOrderedList", false, null) (inputType value)
-- Calling execCommand("insertUnorderedList", false, null) (inputType value)
 - Calling execCommand("italic", false, null) (inputType value)
 - Calling execCommand("justifyCenter", false, null) (inputType value)
 - Calling execCommand("justifyFull", false, null) (inputType value)
@@ -1609,8 +1607,6 @@ input-events/input-events-exec-command.html:
 - execCommand("bold") should wrap selected text with <b> element
 - execCommand("createLink") should create a link with absolute URL
 - execCommand("createLink") should create a link with relative URL
-- execCommand("insertOrderedList") should make <ol> and wrap the text with it
-- execCommand("insertUnorderedList") should make <ul> and wrap the text with it
 - execCommand("italic") should wrap selected text with <i> element
 - execCommand("justifyCenter") should wrap the text with <div> element whose text-align
   is center
