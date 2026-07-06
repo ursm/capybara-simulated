@@ -1485,12 +1485,7 @@ html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document after submit event cannot navigate"
 - "<form> not connected to a document cannot navigate"
-html/webappapis/scripting/events/compile-event-handler-lexical-scopes-form-owner.html:
-- "<img> has a form owner"
-- form-associated <x-foo> has a form owner
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
-- The EventHandler is an element's event handler and has a form owner.
-- The EventHandler is an element's event handler and has no form owner.
 - The EventHandler is not an element's event handler (i.e. Window's event handler)
   and has no form owner.
 html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
