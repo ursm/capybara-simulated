@@ -1487,7 +1487,6 @@ html/semantics/forms/form-submission-0/submission-checks.window.js:
 - "<form> not connected to a document cannot navigate"
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes-form-owner.html:
 - "<img> has a form owner"
-- "<input> has a form owner"
 - form-associated <x-foo> has a form owner
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
 - The EventHandler is an element's event handler and has a form owner.
@@ -1499,8 +1498,6 @@ html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
   must be that of the node document
 - The incumbent settings object while executing the compiled callback via Web IDL's
   invoke must be that of the node document
-html/webappapis/scripting/events/compile-event-handler-symbol-unscopables.html:
-- unscopable `document.testVariable` doesn't shadow `window.testVariable`
 html/webappapis/scripting/events/contextmenu-event-manual.htm:
 - contextmenu event generated from user action is MouseEvent
 html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
@@ -1524,12 +1521,6 @@ html/webappapis/scripting/events/event-handler-processing-algorithm-error/frames
 - error event has the right 5 args on Window, with a synthetic ErrorEvent
 - error event is weird (return true cancels; many args) on Window, with a synthetic
   ErrorEvent
-html/webappapis/scripting/events/event-handler-sourcetext.html:
-- error event handler not on body
-- error event handler on connected body, reflected to Window
-- error event handler on disconnected body
-- error event handler on disconnected frameset
-- non-error event handler
 html/webappapis/scripting/events/event-handler-spec-example.window.js:
 - Event handler listeners should be registered when they are first set to an object
   value (object "").
