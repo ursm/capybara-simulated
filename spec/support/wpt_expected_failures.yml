@@ -1500,13 +1500,6 @@ html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
   global
 - Event handler IDL attributes must return a function from the element's document's
   realm
-html/webappapis/scripting/events/event-handler-non-content-document-idl-attributes.html:
-- body.onreadystatechange is not an event handler content attribute
-- body.onvisibilitychange is not an event handler content attribute
-- div.onreadystatechange is not an event handler content attribute
-- div.onvisibilitychange is not an event handler content attribute
-- frameset.onreadystatechange is not an event handler content attribute
-- frameset.onvisibilitychange is not an event handler content attribute
 html/webappapis/scripting/events/event-handler-processing-algorithm-error/document-synthetic-errorevent.html:
 - Initial values of ErrorEvent members
 - error event is normal (return true does not cancel; one arg) on Document, with a
