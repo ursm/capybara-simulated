@@ -19,14 +19,8 @@ FileAPI/BlobURL/cross-partition.https.html:
 css/cssom/CSSStyleSheet-constructable-baseURL.html:
 - Constructing sheet with invalid base URL throws a NotAllowedError
 css/cssom/CSSStyleSheet-constructable.html:
-- Adopting a shadow host will empty adoptedStyleSheets if adopting to a different
-  document
-- Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a
-  different document
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
-- Re-attaching shadow host with adopted stylesheets work
 - Stylesheet constructed on iframe cannot be used in the main Document
-- Stylesheets constructed on the main Document cannot be used in iframes
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/HTMLLinkElement-disabled-001.html:
@@ -132,13 +126,11 @@ css/cssom/font-shorthand-serialization.html:
 - The font shorthand should be serialized just like any other shorthand.
 css/cssom/getComputedStyle-detached-subtree.html:
 - getComputedStyle returns no style for descendant outside the flat tree
-- getComputedStyle returns no style for detached element
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
   none)'
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
   none) from iframe''s window'
 - getComputedStyle returns no style for element outside the flat tree
-- getComputedStyle returns no style for shadow tree outside of flattened tree
 css/cssom/getComputedStyle-insets-relpos-inline.html:
 - OOF with left auto right fixed in relpos inline container
 - OOF with left auto right fixed in relpos inline container with mixed directions
