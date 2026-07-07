@@ -209,11 +209,6 @@ css/cssom/ttwf-cssom-doc-ext-load-tree-order.html:
 - styleSheets item 0 title must be kilo
 - styleSheets item 0 title must be zebra
 - styleSheets item 1 title must be zebra
-css/cssom/variable-names.html:
-- custom property '--0'
-- custom property '--\'
-- custom property '--a;b'
-- custom property '--ab'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
 fetch/api/abort/cache.https.any.js:
