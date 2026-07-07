@@ -22,14 +22,6 @@ css/cssom/CSSStyleRule-set-selectorText-namespace.html:
 - 'CSSStyleRule: selectorText value: |.style1| isMatch: false'
 - 'CSSStyleRule: selectorText value: |p| isMatch: false'
 - 'CSSStyleRule: selectorText value: |svg|*.style1  | isMatch: true'
-css/cssom/CSSStyleRule-set-selectorText.html:
-- 'CSSStyleRule: Invalid CSS selector: ::gibberish'
-- 'CSSStyleRule: Invalid CSS selector: :gibberish'
-- 'CSSStyleRule: selectorText value: |:after| isMatch: false'
-- 'CSSStyleRule: selectorText value: |:before| isMatch: false'
-- 'CSSStyleRule: selectorText value: |:first-letter| isMatch: false'
-- 'CSSStyleRule: selectorText value: |:first-line| isMatch: false'
-- 'CSSStyleRule: selectorText value: |[|lang]| isMatch: true'
 css/cssom/CSSStyleSheet-constructable-baseURL.html:
 - Constructing sheet with invalid base URL throws a NotAllowedError
 css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
