@@ -365,12 +365,6 @@ fetch/api/basic/error-after-response.any.js:
   resolving fetch promise
 fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
-fetch/api/basic/integrity.sub.any.js:
-- CORS invalid integrity
-- Invalid integrity
-- 'Multiple integrities: both are invalid'
-- 'Multiple integrities: invalid stronger than valid'
-- SHA-* integrity for opaque response
 fetch/api/basic/keepalive.any.js:
 - "[keepalive] simple GET request on 'pagehide' [no payload]"
 - "[keepalive] simple GET request on 'unload' [no payload]"
