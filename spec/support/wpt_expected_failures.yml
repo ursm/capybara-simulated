@@ -151,14 +151,6 @@ css/cssom/font-family-serialization-001.html:
 - Serialization of quoted "<generic-family>"
 css/cssom/font-shorthand-serialization.html:
 - The font shorthand should be serialized just like any other shorthand.
-css/cssom/font-variant-shorthand-serialization.html:
-- CSS-wide keyword in one longhand
-- CSS-wide keyword in shorthand
-- 'font-variant-ligatures: none serialization with non-default value for another longhand'
-- 'font-variant: none serialization'
-- 'font-variant: normal serialization'
-- 'font-variant: normal with non-default longhands'
-- 'font: menu serialization'
 css/cssom/getComputedStyle-detached-subtree.html:
 - getComputedStyle returns no style for descendant outside the flat tree
 - getComputedStyle returns no style for detached element
