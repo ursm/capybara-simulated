@@ -112,8 +112,6 @@ css/cssom/cssimportrule-parent.html:
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
-- "'all' shorthand with 'width' and 'height'"
-- "'all' shorthand with 'width', 'height' and custom properties"
 - "'all' shorthand with all longhands"
 css/cssom/cssstyledeclaration-csstext.html:
 - invalid property does not appear
