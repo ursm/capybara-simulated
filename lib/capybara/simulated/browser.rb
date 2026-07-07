@@ -3735,7 +3735,9 @@ module Capybara
         # non-zero area.
         return {'zeroSize' => true, 'width' => 0, 'height' => 0} if entry == :zero_size
         return nil unless entry
-        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
+        r
       end
 
       # A decoded-image cache entry for `key`, decoding + caching on a miss.
@@ -3781,7 +3783,9 @@ module Capybara
         # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
         # source is an InvalidStateError), so surface nil for the caller to reject on.
         return nil unless entry.is_a?(Hash)
-        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
+        r
       end
 
       # Decode an encoded image (PNG/JPEG/GIF/WEBP/SVG/…) to a packed RGBA bitmap via
@@ -3806,25 +3810,59 @@ module Capybara
         # RGB (incl. 16-bit `rgb16`); a non-RGB profiled source is colour-converted below.
         rgb = %i[srgb rgb rgb16].include?(img.interpretation)
         color_space = 'srgb'
+        p3_img = nil   # a second, Display-P3 rendering for a wide-gamut source (see below)
         if img.get_fields.include?('icc-profile-data')
           icc = img.get('icc-profile-data')
           if rgb && (icc.include?('Display P3') || icc.include?('DCI-P3'))
             color_space = 'display-p3'   # wide-gamut RGB: raw bytes are already P3-encoded
-          elsif img.interpretation == :cmyk || icc.include?('Adobe') || !rgb
-            img = (img.icc_transform('srgb') rescue img.colourspace('srgb'))
+          elsif img.interpretation == :cmyk || icc.include?('Adobe')
+            # A wide-gamut (Adobe-RGB / CMYK) profile can't be represented by a single
+            # buffer: an sRGB canvas needs the colour CLIPPED to sRGB, a Display-P3 canvas
+            # needs it PRESERVED in P3 (and those differ — ICC gamut-mapping to sRGB isn't a
+            # matrix clip of the P3 value). So decode BOTH renderings via libvips' built-in
+            # profiles; drawImage picks by the destination canvas's colour space. icc_transform
+            # needs random access, so re-decode without `access: :sequential`.
+            base = Vips::Image.new_from_buffer(bytes, '')
+            begin
+              img    = base.icc_transform('srgb', embedded: true)
+              p3_img = base.icc_transform('p3',   embedded: true)
+            rescue StandardError
+              img = img.colourspace('srgb'); p3_img = nil
+            end
+          elsif !rgb
+            img = img.colourspace('srgb')   # profiled grayscale / Lab → packed sRGB RGB
           end
           # else: an sRGB-profiled (or other) RGB image → trust the raw bytes as sRGB.
         elsif !rgb
           img = img.colourspace('srgb')
         end
-        img = img.cast('uchar', shift: true) if img.format == :ushort   # 16-bit source → 8-bit, scaled
-        img = img.bandjoin(255) if img.bands < 4
+        pack = lambda do |i|
+          i = i.cast('uchar', shift: true) if i.format == :ushort   # 16-bit source → 8-bit, scaled
+          i = i.bandjoin(255) if i.bands < 4
+          i
+        end
+        img    = pack.call(img)
+        p3_img = pack.call(p3_img) if p3_img
         if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
            (img.width > max_w.to_i || img.height > max_h.to_i)
           shrink = [img.width.to_f / max_w.to_i, img.height.to_f / max_h.to_i].max
-          img    = img.resize(1.0 / shrink) if shrink > 1
+          if shrink > 1
+            img    = img.resize(1.0 / shrink)
+            p3_img = p3_img.resize(1.0 / shrink) if p3_img
+          end
         end
-        {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory, 'colorSpace' => color_space}
+        out = {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory, 'colorSpace' => color_space}
+        # The P3 rendering is best-effort: libvips is lazy, so an ICC fault surfaces only
+        # here at sink evaluation — it must not break the already-rendered sRGB image, just
+        # drop the wide-gamut variant (that image then won't preserve wide colours in a P3 canvas).
+        if p3_img
+          begin
+            out['bytesP3'] = p3_img.write_to_memory
+          rescue StandardError
+            nil
+          end
+        end
+        out
       end
 
       # `decode_rgba` guarded. Outcomes:

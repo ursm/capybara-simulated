@@ -758,67 +758,52 @@ html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
 - shadowBlur Gaussian pixel values for small blur
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-cloned.html:
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-image.html:
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, cropSource=true
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, cropSource=true
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, cropSource=true
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=false
 - Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, cropSource=true
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-video.html:
 - Rec2020-222000000, Context display-p3, ImageData display-p3, cropSource=false
@@ -887,20 +872,12 @@ html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-video.h
 - sRGB-FF0100, Context srgb, ImageData srgb, scaleImage=false
 - sRGB-FF0100, Context srgb, ImageData srgb, scaleImage=true
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage.https.html:
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=false
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3, scaleImage=true
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=false
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb, scaleImage=true
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=false
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3, scaleImage=true
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=false
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb, scaleImage=true
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=false
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3, scaleImage=true
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=false
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb, scaleImage=true
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=false
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3, scaleImage=true
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=false
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb, scaleImage=true
 - Display-P3-0.7333-0-0.svg, Context display-p3, ImageData display-p3, scaleImage=false
@@ -921,19 +898,12 @@ html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage.https.h
 - Display-P3-1-0-0.svg, Context srgb, ImageData srgb, scaleImage=true
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, scaleImage=false
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3, scaleImage=true
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, scaleImage=false
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3, scaleImage=true
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-pattern-image.html:
-- Adobe-RGB-FF0000CC.png, Context display-p3, ImageData display-p3
 - Adobe-RGB-FF0000CC.png, Context display-p3, ImageData srgb
-- Adobe-RGB-FF0000FF.png, Context display-p3, ImageData display-p3
 - Adobe-RGB-FF0000FF.png, Context display-p3, ImageData srgb
-- Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData display-p3
 - Adobe-RGB-FFFF00000000CCCC.png, Context display-p3, ImageData srgb
-- Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData display-p3
 - Adobe-RGB-FFFF00000000FFFF.png, Context display-p3, ImageData srgb
 - Generic-CMYK-BE000000.jpg, Context display-p3, ImageData display-p3
-- Generic-CMYK-FF000000.jpg, Context display-p3, ImageData display-p3
 html/canvas/element/path-objects/2d.path.arc.selfintersect.1.html:
 - arc() with lineWidth > 2*radius is drawn sensibly
 html/canvas/element/path-objects/2d.path.arc.shape.3.html:
