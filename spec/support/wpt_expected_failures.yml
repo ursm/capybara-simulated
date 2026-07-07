@@ -18,19 +18,12 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition shared worker
 css/cssom/CSSStyleSheet-constructable-baseURL.html:
 - Constructing sheet with invalid base URL throws a NotAllowedError
-css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
-- Shouldn't crash / assert when inserting a stylesheet after there are disabled constructable
-  sheets
 css/cssom/CSSStyleSheet-constructable.html:
-- Adopted sheets are ordered after non-adopted sheets in the document
-- Adopted sheets are ordered after non-adopted sheets in the shadow root
 - Adopting a shadow host will empty adoptedStyleSheets if adopting to a different
   document
 - Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a
   different document
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
-- Constructed style sheets can be applied on document
-- Constructed style sheets can be applied on shadow root
 - Re-attaching shadow host with adopted stylesheets work
 - Stylesheet constructed on iframe cannot be used in the main Document
 - Stylesheets constructed on the main Document cannot be used in iframes
