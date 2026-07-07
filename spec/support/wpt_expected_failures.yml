@@ -255,21 +255,6 @@ css/cssom/setproperty-null-undefined.html:
 - Verify that setting a CSS property to undefined has no effect.
 css/cssom/shorthand-values.html:
 - 'The serialization of -webkit-line-clamp: none; should be canonical.'
-- 'The serialization of border-top: 1px; border-right: 1px; border-bottom: 1px; border-left:
-  1px; border-image: none; should be canonical.'
-- 'The serialization of border-top: 1px; border-right: 1px; border-bottom: 1px; border-left:
-  1px; should be canonical.'
-- 'The serialization of border-top: 1px; border-right: 2px; border-bottom: 3px; border-left:
-  4px; should be canonical.'
-- 'The serialization of border: 1px; border-top-color: red; should be canonical.'
-- 'The serialization of border: 1px; border-top: 1px !important; should be canonical.'
-- 'The serialization of border: 1px; border-top: 1px; should be canonical.'
-- 'The serialization of border: 1px; border-top: 2px; should be canonical.'
-- 'The serialization of border: solid; border-style: dotted should be canonical.'
-- 'The serialization of list-style-type: circle; list-style-position: inside; list-style-image:
-  none; should be canonical.'
-- 'The serialization of outline-width: 2px; outline-style: dotted; outline-color:
-  blue; should be canonical.'
 css/cssom/style-sheet-interfaces-001.html:
 - CSSStyleSheet_properties
 - StyleSheet_properties
