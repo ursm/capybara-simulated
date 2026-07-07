@@ -121,7 +121,11 @@ const SUPPORT_FILES = [
   // input-events editing tests pull EditorTestUtils (send copy/cut/paste shortcut
   // keys, set selection from markup) by absolute path from the editing/ tree,
   // which we don't vendor wholesale; it's self-contained on top of testdriver.
-  'editing/include/editor-test-utils.js'
+  'editing/include/editor-test-utils.js',
+  // css/cssom's font-family-serialization test pulls the <generic-family> /
+  // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
+  // the file is a plain array of keyword strings (no further includes).
+  'css/css-fonts/support/font-family-keywords.js'
 ];
 
 const CONCURRENCY = 24;

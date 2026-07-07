@@ -119,9 +119,13 @@ css/cssom/flex-serialization.html:
   correctly.
 - Single value flex with non-CSS-wide value should serialize correctly.
 css/cssom/font-family-serialization-001.html:
-- Serialization of <generic-family>
-- Serialization of prefixed -webkit-<generic-family>
-- Serialization of quoted "<generic-family>"
+- 'Computed: mixed font-family list serialization'
+- 'Computed: multi-word family name serializes unquoted'
+- 'Computed: quoted multi-word name normalizes to unquoted'
+- 'Specified: mixed font-family list serialization'
+- 'Specified: multi-word family name serializes unquoted'
+- 'Specified: quoted multi-word name normalizes to unquoted'
+- 'Specified: three-word family name serializes unquoted'
 css/cssom/font-shorthand-serialization.html:
 - The font shorthand should be serialized just like any other shorthand.
 css/cssom/getComputedStyle-detached-subtree.html:
