@@ -16,12 +16,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-css/cssom/CSSStyleRule-set-selectorText-namespace.html:
-- 'CSSStyleRule: selectorText value: | *.style1  | isMatch: false'
-- 'CSSStyleRule: selectorText value: |*|*.style1  | isMatch: true'
-- 'CSSStyleRule: selectorText value: |.style1| isMatch: false'
-- 'CSSStyleRule: selectorText value: |p| isMatch: false'
-- 'CSSStyleRule: selectorText value: |svg|*.style1  | isMatch: true'
 css/cssom/CSSStyleSheet-constructable-baseURL.html:
 - Constructing sheet with invalid base URL throws a NotAllowedError
 css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
