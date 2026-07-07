@@ -906,13 +906,6 @@ html/webappapis/scripting/events/event-handler-processing-algorithm-error/frames
 - error event has the right 5 args on Window, with a synthetic ErrorEvent
 - error event is weird (return true cancels; many args) on Window, with a synthetic
   ErrorEvent
-html/webappapis/scripting/events/event-handler-spec-example.window.js:
-- Event handler listeners should be registered when they are first set to an object
-  value (object "").
-- Event handler listeners should be registered when they are first set to an object
-  value (object "42").
-- Event handler listeners should be registered when they are first set to an object
-  value (object "[object Object]").
 html/webappapis/scripting/events/eventhandler-cancellation.html:
 - Returning true from [object Window]'s onerror event handler while ErrorEvent is
   firing should cancel the event
