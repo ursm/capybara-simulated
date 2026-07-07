@@ -111,8 +111,6 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
-css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
-- "'all' shorthand with all longhands"
 css/cssom/cssstyledeclaration-csstext.html:
 - invalid property does not appear
 - overwriting with invalid value
@@ -175,8 +173,6 @@ css/cssom/getComputedStyle-insets-relpos-inline.html:
 - OOF with left auto right fixed in relpos inline container with mixed directions
 - OOF with left fixed right auto in relpos inline container
 - OOF with left fixed right auto in relpos inline container with mixed directions
-css/cssom/getComputedStyle-logical-enumeration.html:
-- Logical properties in enumeration of computed style
 css/cssom/getComputedStyle-resolved-colors.html:
 - The resolved value for 'box-shadow' is the used value
 css/cssom/invalid-pseudo-elements.html:
