@@ -35,11 +35,6 @@ css/cssom/CSSStyleSheet-constructable-baseURL.html:
 css/cssom/CSSStyleSheet-constructable-disabled-regular-sheet-insertion.html:
 - Shouldn't crash / assert when inserting a stylesheet after there are disabled constructable
   sheets
-css/cssom/CSSStyleSheet-constructable-duplicate.html:
-- Appending duplicate stylesheets yields the correct cascade position in the Document
-- Appending duplicate stylesheets yields the correct cascade position in the ShadowRoot
-- Duplicate stylesheets have the right cascade position in the Document
-- Duplicate stylesheets have the right cascade position in the ShadowRoot
 css/cssom/CSSStyleSheet-constructable.html:
 - Adopted sheets are ordered after non-adopted sheets in the document
 - Adopted sheets are ordered after non-adopted sheets in the shadow root
@@ -253,12 +248,6 @@ css/cssom/selectorText-modification-restyle-002.html:
 - Check initial color.
 - 'Check that color changes correctly after shadow stylesheet selector and #container
   class is changed.'
-css/cssom/serialize-custom-props.html:
-- z-index can take a 12-digit integer
-- z-index can take a 25-digit integer
-- z-index can take a 4-digit integer
-- z-index can take a 6-digit integer
-- z-index can take a 8-digit integer
 css/cssom/serialize-values.html:
 - 'content: counter(par-num, decimal)'
 - 'font-family: ''Lucida Grande'''
