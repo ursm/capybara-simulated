@@ -111,44 +111,6 @@ css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
-css/cssom/cssstyledeclaration-all-shorthand.html:
-- getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property
-- getPropertyValue('all') returns css-wide keyword when 'all' overrides prior property
-  via insertRule
-- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
-  'margin'
-- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
-  'margin' via insertRule
-- getPropertyValue('all') returns css-wide keyword when 'all' overrides shorthand
-  'margin' via setProperty
-- getPropertyValue('all') returns empty string when property overridden after 'all'
-- getPropertyValue('all') returns empty string when property overridden after 'all'
-  via insertRule
-- getPropertyValue('all') returns empty string when property overridden after 'all'
-  via setProperty
-- getPropertyValue('all') returns empty string when single property overridden after
-  'all' via insertRule
-- getPropertyValue('all') returns empty string when single property overriden
-- getPropertyValue('all') returns empty string when single property overriden via
-  setProperty
-- getPropertyValue('all') returns empty string with shorthand 'margin'
-- getPropertyValue('all') returns empty string with shorthand 'margin' via insertRule
-- getPropertyValue('all') returns empty string with shorthand 'margin' via setProperty
-- getPropertyValue('all') returns later 'all' value when it overrides earlier 'all'
-  and properties
-- getPropertyValue('all') returns later 'all' value when it overrides earlier 'all'
-  and properties via insertRule
-- getPropertyValue('margin') returns all's value when 'all' after 'margin-top'
-- getPropertyValue('margin') returns all's value when 'all' is redeclared after margin
-  longhands
-- getPropertyValue('margin') returns all's value when all of 'margin's longhands are
-  overridden by 'all'
-- getPropertyValue('margin') returns empty string when some of 'margin's longhands
-  are overridden by 'all'
-- getPropertyValue('margin') returns serialized string when longhands are after 'all'
-- removeProperty('all') removes all declarations affected by 'all'
-- setProperty('all') overrides existing properties and earlier 'all'
-- setProperty('all') sets all property values
 css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
 - "'all' shorthand with 'width' and 'height'"
 - "'all' shorthand with 'width', 'height' and custom properties"
@@ -177,8 +139,6 @@ css/cssom/cssstyledeclaration-properties.html:
 css/cssom/cssstyledeclaration-registered-custom-properties.html:
 - Only relevant custom properties are included
 - Registered custom properties are included in CSSComputedStyleDeclaration
-css/cssom/cssstyledeclaration-removeProperty-all.html:
-- CSSStyleDeclaration.removeProperty("all")
 css/cssom/cssstyledeclaration-setter-attr.html:
 - Setting an invalid property via the declaration setter doesn't create a declaration
 - Setting an invalid value via the declaration setter doesn't create a declaration
