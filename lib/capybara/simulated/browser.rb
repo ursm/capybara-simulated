@@ -3735,7 +3735,7 @@ module Capybara
         # non-zero area.
         return {'zeroSize' => true, 'width' => 0, 'height' => 0} if entry == :zero_size
         return nil unless entry
-        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
+        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
       end
 
       # A decoded-image cache entry for `key`, decoding + caching on a miss.
@@ -3781,26 +3781,50 @@ module Capybara
         # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
         # source is an InvalidStateError), so surface nil for the caller to reject on.
         return nil unless entry.is_a?(Hash)
-        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes'])}
+        {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
       end
 
       # Decode an encoded image (PNG/JPEG/GIF/WEBP/SVG/…) to a packed RGBA bitmap via
       # libvips, optionally downscaled to fit within (max_w, max_h). `access:
       # :sequential` keeps libvips from applying the source ICC profile mid-stream (it
-      # shifts RGBA by ±2 vs a raw decode); `colourspace('srgb')` is the same transform
-      # Chrome's createImageBitmap runs, applied only when libvips reports a non-sRGB
-      # space so already-sRGB bytes are trusted verbatim. Returns {'width','height','bytes'}.
+      # shifts RGBA by ±2 vs a raw decode). Returns {'width','height','bytes','colorSpace'};
+      # `colorSpace` ('srgb' | 'display-p3') tells drawImage which space the bytes are in
+      # so it can convert into the destination canvas's colour space.
+      #
+      # Detection is by the profile's description text (both Display-P3 and the sRGB /
+      # Adobe profiles carry a readable name). A plain (unprofiled) OR sRGB-profiled RGB
+      # image is trusted as sRGB verbatim — the common case (incl. photos exported as
+      # sRGB) stays byte-identical. A Display-P3 image keeps its raw bytes: a Display-P3
+      # PNG already stores P3-encoded values, so we only TAG it and let drawImage do the
+      # gamut conversion. Adobe-RGB and CMYK aren't among the two predefined canvas colour
+      # spaces, so they're ICC-transformed to sRGB (their wide gamut is lost — a documented
+      # gap). Any other profiled non-RGB source (grayscale / Lab) is colour-converted to
+      # sRGB so it lands as packed RGB, never kept raw.
       private def decode_rgba(bytes, max_w = nil, max_h = nil)
         require 'vips' unless defined?(Vips)
         img = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
-        img = img.colourspace('srgb') unless img.interpretation == :srgb || img.interpretation == :rgb
+        # RGB (incl. 16-bit `rgb16`); a non-RGB profiled source is colour-converted below.
+        rgb = %i[srgb rgb rgb16].include?(img.interpretation)
+        color_space = 'srgb'
+        if img.get_fields.include?('icc-profile-data')
+          icc = img.get('icc-profile-data')
+          if rgb && (icc.include?('Display P3') || icc.include?('DCI-P3'))
+            color_space = 'display-p3'   # wide-gamut RGB: raw bytes are already P3-encoded
+          elsif img.interpretation == :cmyk || icc.include?('Adobe') || !rgb
+            img = (img.icc_transform('srgb') rescue img.colourspace('srgb'))
+          end
+          # else: an sRGB-profiled (or other) RGB image → trust the raw bytes as sRGB.
+        elsif !rgb
+          img = img.colourspace('srgb')
+        end
+        img = img.cast('uchar', shift: true) if img.format == :ushort   # 16-bit source → 8-bit, scaled
         img = img.bandjoin(255) if img.bands < 4
         if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
            (img.width > max_w.to_i || img.height > max_h.to_i)
           shrink = [img.width.to_f / max_w.to_i, img.height.to_f / max_h.to_i].max
           img    = img.resize(1.0 / shrink) if shrink > 1
         end
-        {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory}
+        {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory, 'colorSpace' => color_space}
       end
 
       # `decode_rgba` guarded. Outcomes:

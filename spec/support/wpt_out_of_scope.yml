@@ -10393,14 +10393,6 @@ fetch/h1-parsing/h1-parsing.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/color-type/2d.color.type.u8p3.to.u8srgb.to.u8p3.html:
-- name: test srgb unorm8 canvas storing 8-bit display-p3 data accurately
-  reason: Non-8-bit / non-sRGB canvas colour types (float16, display-p3) — a colour-management
-    / pixel-format subsystem we don't model (rule 1); the u8-sRGB path is covered.
-html/canvas/element/color-type/2d.color.type.u8srgb.to.u8p3.to.u8srgb.html:
-- name: test display-p3 unorm8 canvas not storing 8-bit srgb data accurately
-  reason: Non-8-bit / non-sRGB canvas colour types (float16, display-p3) — a colour-management
-    / pixel-format subsystem we don't model (rule 1); the u8-sRGB path is covered.
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - name: CSSHSL works as color input
   reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them
@@ -11765,10 +11757,6 @@ html/canvas/element/wide-gamut-canvas/2d.color.space.p3.fillText.shadow.html:
     subsystem we don't model (rule 1); the sRGB path is fully covered.
 html/canvas/element/wide-gamut-canvas/2d.color.space.p3.strokeText.html:
 - name: Test if strokeText can be used with a solid display-p3 color
-  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
-    subsystem we don't model (rule 1); the sRGB path is fully covered.
-html/canvas/element/wide-gamut-canvas/2d.color.space.p3.to.p3.html:
-- name: test getImageData with display-p3 and uint8 from display p3 uint8 canvas
   reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
     subsystem we don't model (rule 1); the sRGB path is fully covered.
 html/canvas/element/wide-gamut-canvas/2d.color.space.srgb-linear.html:
