@@ -154,10 +154,6 @@ css/cssom/cssstyledeclaration-csstext-all-shorthand.html:
 - "'all' shorthand with 'width', 'height' and custom properties"
 - "'all' shorthand with all longhands"
 css/cssom/cssstyledeclaration-csstext.html:
-- Shorthands _are_ serialized if there are no other properties with different logical
-  groups in between
-- Shorthands aren't serialized if there are other properties with different logical
-  groups in between
 - invalid property does not appear
 - overwriting with invalid value
 - uppercase property
@@ -186,9 +182,6 @@ css/cssom/cssstyledeclaration-removeProperty-all.html:
 css/cssom/cssstyledeclaration-setter-attr.html:
 - Setting an invalid property via the declaration setter doesn't create a declaration
 - Setting an invalid value via the declaration setter doesn't create a declaration
-css/cssom/cssstyledeclaration-setter-logical.html:
-- newly set declaration should be after all declarations in the same logical property
-  group but have different logical kind
 css/cssom/flex-serialization.html:
 - Multiple values flex with CSS-wide and two non-CSS-wide-keyword values should serialize
   correctly.
