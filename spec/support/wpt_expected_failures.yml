@@ -843,9 +843,6 @@ webmessaging/Channel_postMessage_with_transfer_incoming_messages.any.js:
       incoming messages sent at various transfer steps are received in order upon enablement.
 webmessaging/MessageEvent-trusted.any.js:
 - With a BroadcastChannel
-- With a MessageChannel and its MessagePorts
-webmessaging/MessageEvent-trusted.window.js:
-- With window
 webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
 - onmessage calling source postMessage
 webmessaging/MessagePort_initial_disabled.any.js:
