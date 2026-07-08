@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Local capybara-simulated test (NOT upstream WPT). Guards the service-worker
+     client↔SW messaging and fetch-interception round-trips (register → activate →
+     postMessage echo; clients.claim → controllerchange → intercepted / fall-through /
+     POST-body fetches) until a vendored upstream service-worker slice covers them. -->
+<meta charset=utf-8>
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<body><script>
+function wait_for_state(t, worker, state) {
+  if (worker.state === state) return Promise.resolve();
+  return new Promise(t.step_func(resolve => {
+    worker.addEventListener('statechange', t.step_func(() => { if (worker.state === state) resolve(); }));
+  }));
+}
+promise_test(async t => {
+  const reg = await navigator.serviceWorker.register('/service-workers/service-worker/resources/csim-echo-worker.js', {scope: 'resources/csim-msg-scope'});
+  const worker = reg.installing || reg.active;
+  await wait_for_state(t, worker, 'activated');
+  const got = await new Promise(t.step_func(resolve => {
+    navigator.serviceWorker.addEventListener('message', t.step_func(e => resolve(e.data)), {once: true});
+    worker.postMessage({hi: 1});
+  }));
+  assert_equals(got.echo.hi, 1, 'echoed payload');
+  assert_equals(got.from, 'sw', 'reply origin marker');
+  await reg.unregister();
+}, 'client↔SW postMessage round-trip');
+promise_test(async t => {
+  const scope = new URL('./', location).href;
+  const reg = await navigator.serviceWorker.register('/service-workers/service-worker/resources/csim-fetch-worker.js', {scope});
+  await wait_for_state(t, reg.installing || reg.active, 'activated');
+  if (!navigator.serviceWorker.controller) {
+    await new Promise(t.step_func(resolve => {
+      navigator.serviceWorker.addEventListener('controllerchange', t.step_func(() => resolve()), {once: true});
+    }));
+  }
+  assert_true(!!navigator.serviceWorker.controller, 'controller set after claim');
+  const intercepted = await fetch('./x?intercept=1');
+  assert_equals(await intercepted.text(), 'HELLO GET', 'intercepted GET');
+  assert_equals(intercepted.headers.get('X-SW'), 'yes', 'SW response header');
+  const posted = await fetch('./x?intercept=1', {method: 'POST', body: 'ping こんにちは'});
+  assert_equals(await posted.text(), 'HELLO POST ping こんにちは', 'UTF-8 request body reaches the SW (no wire-header leak); async respondWith');
+  const streamed = await fetch('./x?intercept=1&stream=1');
+  assert_equals(await streamed.text(), 'streamed', 'ReadableStream-constructed respondWith body');
+  await promise_rejects_js(t, TypeError, fetch('./x?intercept=1&err=1'), 'Response.error() respondWith rejects the fetch');
+  const fallthrough = await fetch('./no-such-resource');
+  assert_equals(fallthrough.status, 404, 'non-intercepted request falls through to the network');
+  await reg.unregister();
+}, 'fetch interception via clients.claim');
+</script></body>

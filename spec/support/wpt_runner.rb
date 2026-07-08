@@ -560,8 +560,11 @@ module WptRunner
   # the form-driven slice every app suite exercises), plus css/cssom (the pure-API
   # CSSOM object model, backed by our css-tree cascade engine — css/cssom-view is
   # the layout-dependent tree and is deliberately not vendored). Keep this list in
-  # sync with the vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element}'
+  # sync with the vendor manifest in script/vendor_wpt.mjs. Exception: service-workers
+  # is NOT vendored yet — it holds only the committed local `csim-*` fixtures (SW
+  # round-trip regression guards; vendor_wpt.mjs's cleanTree preserves the prefix)
+  # until the upstream service-worker slice is vendored.
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,service-workers}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/

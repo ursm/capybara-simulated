@@ -26,7 +26,7 @@
 // wrapper that we don't have; they're vendored as support but the runner only
 // visits real `.html` test files.
 
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm, readdir, rmdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -128,10 +128,12 @@ const SUPPORT_FILES = [
   'css/css-fonts/support/font-family-keywords.js'
   // NOTE: webmessaging/broadcastchannel/{cross-origin,detached-iframe} pull `with_iframe` from
   // service-workers/service-worker/resources/test-helpers.sub.js. We do NOT fetch the upstream file
-  // here — its `service_worker_test` helper, once DEFINED, makes SW tests (FileAPI/historical,
-  // fetch referrer-*-service-worker) register a service-worker subtest that fails (SW is an
-  // unmodeled non-goal). Instead a hand-written MINIMAL test-helpers.sub.js (only `with_iframe`) is
-  // committed under spec/wpt/…; it lives outside any cleaned tree so re-vendoring leaves it intact.
+  // here (yet) — its `service_worker_test` helper, once DEFINED, makes SW tests elsewhere
+  // (FileAPI/historical, fetch referrer-*-service-worker) register service-worker subtests that
+  // predate the SW runtime's current coverage. A hand-written MINIMAL test-helpers.sub.js (only
+  // `with_iframe`) is committed under spec/wpt/… instead; swap in the upstream helper when the
+  // service-worker tree slice is vendored. The service-workers tree also hosts committed local
+  // `csim-*` fixtures (SW round-trip regression guards) — `cleanTree` preserves those.
 ];
 
 const CONCURRENCY = 24;
@@ -204,13 +206,36 @@ async function vendorPath(sha, path) {
   await writeFile(dest, buf);
 }
 
+// Remove a vendored tree, PRESERVING locally-authored `csim-*` files — hand-written regression
+// guards committed inside otherwise-vendored trees (e.g. the service-worker round-trip
+// fixtures) — the same way resources/testharnessreport.js is preserved above. Directories left
+// non-empty by a surviving fixture are kept.
+async function cleanTree(dir) {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // tree doesn't exist yet
+  }
+  for (const ent of entries) {
+    const p = join(dir, ent.name);
+    if (ent.isDirectory()) await cleanTree(p);
+    else if (!ent.name.startsWith('csim-')) await rm(p, { force: true });
+  }
+  try {
+    await rmdir(dir);
+  } catch {
+    // non-empty (a csim-* fixture survived) — keep it
+  }
+}
+
 async function main() {
   const sha = await resolveSha(REF);
   console.error(`Vendoring web-platform-tests @ ${sha}`);
 
   // Clean the vendored trees (but keep our committed resources/testharnessreport.js).
   for (const tree of [...TREES, ...SUPPORT_TREES]) {
-    await rm(join(OUT, tree), { recursive: true, force: true });
+    await cleanTree(join(OUT, tree));
   }
   await rm(join(OUT, 'resources', 'testharness.js'), { force: true });
 

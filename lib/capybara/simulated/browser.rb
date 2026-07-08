@@ -355,6 +355,10 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
+        # One-slot head buffer for the settle wait: an event popped while blocking on the outbox
+        # is parked here (a push-back would reorder it behind concurrent worker pushes) and
+        # consumed first by the next deliver_worker_messages.
+        @worker_outbox_head = nil
         # Outstanding posts-to-worker; `polling?` stays true while > 0
         # so long-running compute (e.g. mozjpeg over an 8900×8900 frame)
         # isn't starved by the settle_gen idle gate.
@@ -370,6 +374,8 @@ module Capybara
         # a separate outbox event), so — like broadcasts — it needs its own pending tally, or a
         # listen-only SW would leave settle perpetually non-idle.
         @sw_message_pending = 0
+        # Controlled-client fetches awaiting the SW's respondWith (released by a `fetch_response`).
+        @sw_fetch_pending = 0
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -418,9 +424,13 @@ module Capybara
 
       # Worker thread polling and termination intervals — split so a
       # tuning change to one doesn't accidentally rebind the other.
-      WORKER_POLL_INTERVAL   = 0.05
-      WORKER_TERMINATE_GRACE = 0.05
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_TERMINATE_GRACE
+      WORKER_POLL_INTERVAL     = 0.05
+      # Max wall time settle blocks on a worker thread's outbox per call while it processes an
+      # inbound message / fetch (releasing the GVL so it runs). Bounded so a genuinely stuck worker
+      # can't hang settle — the outer poll loop re-drives across calls.
+      WORKER_ROUND_TRIP_BUDGET = 1.0
+      WORKER_TERMINATE_GRACE   = 0.05
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE
 
       # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
@@ -1488,6 +1498,7 @@ module Capybara
       def settle
         start_gen = @runtime.settle_gen
         prev_gen  = start_gen
+        worker_wait_deadline = nil
         SETTLE_MAX_ITER.times do
           deliver_event_source_events
           deliver_worker_messages
@@ -1510,6 +1521,29 @@ module Capybara
           deliver_window_messages
           deliver_websocket_events
           break if @runtime.settle_gen > start_gen
+          # A background worker thread owes us a CONTRACTUAL reply (a swack / bcack /
+          # fetch_response is posted under `ensure`, so it always comes) but hasn't posted it
+          # yet. With no timer, `run_loop_step(0)` returns instantly, so busy-spinning the
+          # remaining iterations would STARVE the worker thread of the GVL and it would never
+          # process its inbox. Block briefly on the outbox instead: this releases the GVL (the
+          # worker runs) and wakes the instant it posts. The popped event is parked in
+          # `@worker_outbox_head` — NOT pushed back, which would reorder it behind anything the
+          # worker enqueued in the meantime — and the next deliver drains it first. The budget is
+          # shared across the whole settle call, and exhausting it bails to Capybara's outer poll
+          # loop — a genuinely stuck worker must not pin every find's settle for
+          # SETTLE_MAX_ITER budgets. Gated on `worker_reply_pending?`, NOT `worker_pending?`:
+          # `@worker_in_flight` (plain postMessage — a listen-only worker never replies) and
+          # `@worker_initializing` have no matching reply, and blocking on them would tax every
+          # settle on such pages with the full budget.
+          if worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil?
+            worker_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+            while worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil? &&
+                  Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_wait_deadline
+              @worker_outbox_head = pop_with_timeout(@worker_outbox, WORKER_POLL_INTERVAL)
+            end
+            next if @worker_outbox_head || !@worker_outbox.empty?
+            break
+          end
           # No progress this iter (no DOM/URL change observed) — the
           # remaining timers are queued for the future; bail and let
           # Capybara's wall-clock-driven poll loop drive the next tick
@@ -3519,6 +3553,17 @@ module Capybara
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
       end
 
+      # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
+      # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
+      # respondWith. If the handle is dead, return false so the client falls back to the network.
+      def service_worker_controller_fetch(handle, req_json, fetch_id)
+        w = @workers[handle.to_i]
+        return false unless w
+        @sw_fetch_pending += 1
+        w[:inbox] << {kind: 'fetch', req: req_json.to_s, fetch_id: fetch_id.to_i}
+        true
+      end
+
       def worker_terminate(handle)
         w = @workers.delete(handle.to_i)
         return unless w
@@ -3533,17 +3578,39 @@ module Capybara
           w[:thread].kill
           w[:thread].join(WORKER_TERMINATE_GRACE)
         end
+        # The dead worker never answers what was still queued in its inbox: post the matching
+        # fallback replies so the reply-pending counters drain (a controlled fetch falls back to
+        # the network) instead of taxing every later settle's bounded wait. Mid-dispatch deaths
+        # are covered by the `ensure` acks in run_worker; only a respondWith parked on a worker
+        # timer that never fires can still strand a fetch (the client promise then just never
+        # settles, like a real dead SW).
+        until w[:inbox].empty?
+          msg = begin
+            w[:inbox].pop(true)
+          rescue ThreadError
+            break
+          end
+          next unless msg.is_a?(Hash)
+          case msg[:kind]
+          when 'sw_message' then @worker_outbox << {handle: handle.to_i, kind: 'swack'}
+          when 'broadcast'  then @worker_outbox << {handle: handle.to_i, kind: 'bcack'}
+          when 'fetch'      then @worker_outbox << {handle: handle.to_i, kind: 'fetch_response', fetch_id: msg[:fetch_id], resp: '{"fallthrough":true}'}
+          end
+        end
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
 
       def deliver_worker_messages
-        return 0 if @workers.empty? && @worker_outbox.empty?
+        head = @worker_outbox_head
+        @worker_outbox_head = nil
+        return 0 if head.nil? && @workers.empty? && @worker_outbox.empty?
         events = drain_queue(@worker_outbox)
+        events.unshift(head) if head
         return 0 if events.empty?
         # A worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
         # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
@@ -3551,10 +3618,19 @@ module Capybara
         broadcasts,  rest0 = events.partition {|e| e[:kind] == 'broadcast' }
         sw_msgs,     rest1 = rest0.partition  {|e| e[:kind] == 'sw_client_msg' }
         swacks,      rest2 = rest1.partition  {|e| e[:kind] == 'swack' }
-        acks,        msgs  = rest2.partition  {|e| e[:kind] == 'bcack' }
+        claims,      rest3 = rest2.partition  {|e| e[:kind] == 'sw_claim' }
+        fetch_resps, rest4 = rest3.partition  {|e| e[:kind] == 'fetch_response' }
+        acks,        msgs  = rest4.partition  {|e| e[:kind] == 'bcack' }
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
         # A service worker → client message: deliver to this window's navigator.serviceWorker 'message'.
         sw_msgs.each {|e| @runtime.call('__csim_swDeliverClientMessage', e[:data]) }
+        # clients.claim(): make the claiming worker this window's controller (if the document's
+        # matched registration is the claiming worker's). has_fetch = the SW's install-time
+        # fetch-listener snapshot; without one, the client skips interception entirely.
+        claims.each {|e| @runtime.call('__csim_swSetController', e[:handle], e[:has_fetch]) }
+        # A controlled fetch's respondWith result → resolve the pending client fetch.
+        fetch_resps.each {|e| @runtime.call('__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
+        @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size].max
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
         @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
         # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
@@ -3563,7 +3639,13 @@ module Capybara
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
+      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
+
+      # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
+      # fetch_response are posted under `ensure`, so they arrive even when the worker-side
+      # handler raises). Safe for settle to block a bounded wait on — unlike @worker_in_flight
+      # (a plain postMessage that a listen-only worker never answers) or @worker_initializing.
+      def worker_reply_pending? = @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -4294,9 +4376,11 @@ module Capybara
         end
         @workers.clear
         @worker_outbox.clear
-        @worker_in_flight = 0
+        @worker_outbox_head       = nil
+        @worker_in_flight         = 0
         @worker_broadcast_pending = 0
-        @sw_message_pending = 0
+        @sw_message_pending       = 0
+        @sw_fetch_pending         = 0
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
           @transfer_buffer_seq = 0
@@ -4681,9 +4765,18 @@ module Capybara
         # A worker's BroadcastChannel post rides the same thread-safe outbox; the main thread fans
         # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
         broadcast_out = ->(name, data, origin) { outbox << {handle: handle, kind: 'broadcast', name: name.to_s, data: data, origin: origin} }
-        # A service worker's client.postMessage crosses back to the client window via the outbox.
-        sw_post_to_client = ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} }
-        rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_post_to_client)
+        # Service-worker → main-thread signals ride the outbox (delivered by deliver_worker_messages):
+        # client.postMessage, clients.claim (→ set the client's controller), and a controlled fetch's
+        # respondWith result. `sw_has_fetch` is snapshotted after the SW script's initial run (the
+        # spec records fetch-handler presence at install time) so a claim can tell the client
+        # whether intercepting is worth the cross-isolate round-trip at all.
+        sw_has_fetch = false
+        sw_hooks = {
+          post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
+          claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
+          fetch_respond:  ->(fetch_id, resp)  { outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id.to_i, resp: resp.to_s} }
+        }
+        rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
@@ -4713,6 +4806,7 @@ module Capybara
         # worker's OWN install/activate handlers so their side effects — caching, importScripts —
         # execute). See sw-client.js + __csim_swFireLifecycleEvent.
         if service
+          sw_has_fetch = !!rt.call('__csim_swHasFetchListener')
           %w[install activate].each do |phase|
             rt.eval("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
             # Drain microtasks AND timers: a `waitUntil` promise may settle off a
@@ -4740,18 +4834,43 @@ module Capybara
             # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
             # A plain string is a postMessage to the worker.
             if msg.is_a?(Hash) && msg[:kind] == 'broadcast'
-              rt.call('__csim_deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
               # Ack so the main thread releases the broadcast-pending it counted for this delivery
-              # (a listen-only worker never posts back — the ack is the only signal it processed it).
-              outbox << {handle: handle, kind: 'bcack'}
+              # (a listen-only worker never posts back — the ack is the only signal it processed
+              # it). Under `ensure`: the ack is CONTRACTUAL (settle's bounded wait relies on it —
+              # see worker_reply_pending?), so a raising channel handler must not leak it.
+              begin
+                rt.call('__csim_deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
+              ensure
+                outbox << {handle: handle, kind: 'bcack'}
+              end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_message'
               # A client → service-worker postMessage: dispatch a `message` event with source = the
-              # posting client. Ack FIRST (releases the sw-message-pending the main thread counted)
-              # so a handler that raises / times out can't leak the counter and hang settle; the
-              # handler's own reply is a separate `sw_client_msg` on the outbox, which keeps settle
-              # alive on its own. The reply is pushed synchronously during the dispatch below.
-              outbox << {handle: handle, kind: 'swack'}
-              rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url])
+              # posting client. Ack AFTER the dispatch — the outbox is FIFO, so a handler's
+              # synchronous `client.postMessage` reply (`sw_client_msg`) is guaranteed to precede
+              # the `swack`; acking first opens a window where the main thread sees the pending
+              # count hit zero (worker_pending? false) while the handler is still running, and the
+              # virtual clock fast-forwards past the caller's timeout before the reply lands. The
+              # `ensure` keeps a raising handler from leaking the counter and hanging settle.
+              begin
+                rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url])
+              ensure
+                outbox << {handle: handle, kind: 'swack'}
+              end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'fetch'
+              # A controlled client's fetch: dispatch a `fetch` event. The SW's respondWith result
+              # (or a fall-through / network-error marker) is posted back as a `fetch_response`
+              # outbox event, which releases the @sw_fetch_pending counted for this request. A
+              # synchronous respondWith posts during the dispatch; an async one posts under the
+              # drain. If the dispatch itself dies (engine raise, Thread#kill) the JS side can
+              # never post — fall the client back to the network so the counter drains (a
+              # duplicate response is harmless: the client's pendingFetch entry is one-shot).
+              dispatched = false
+              begin
+                rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id])
+                dispatched = true
+              ensure
+                outbox << {handle: handle, kind: 'fetch_response', fetch_id: msg[:fetch_id], resp: '{"fallthrough":true}'} unless dispatched
+              end
             elsif msg
               rt.call('__csim_workerOnMessage', msg)
             end

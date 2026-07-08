@@ -122,6 +122,9 @@ module Capybara
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
+        # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
+        # is gone (client falls back to the network).
+        '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },

@@ -352,7 +352,7 @@ module Capybara
       # host fns attached *after* the replay (so snapshot_stubs.js's
       # no-ops don't overwrite real ones), `__csim_isWorker` set, +
       # the per-worker postMessage routed through `post_back`.
-      def self.build_worker(browser, post_back, broadcast_out = nil, sw_post_to_client = nil)
+      def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {})
         vm = Quickjs::VM.new(**VM_OPTIONS)
         bridge_runnable.run(on: vm)
         attach_host_fns(vm, browser)
@@ -360,8 +360,10 @@ module Capybara
         # A worker's BroadcastChannel fan-out routes through the thread-safe outbox, not
         # `browser.broadcast_to_windows` (cross-thread inbox mutation). See v8_runtime#build_worker.
         vm.define_function('__csimBroadcast') {|name, data, _rid, origin| broadcast_out&.call(name, data, origin); nil } if broadcast_out
-        # A service worker's client.postMessage crosses back to the client window via the outbox.
-        vm.define_function('__csim_swPostToClient') {|client_id, data| sw_post_to_client&.call(client_id, data); nil } if sw_post_to_client
+        # Service-worker → main-thread signals via the outbox (see v8_runtime#build_worker).
+        vm.define_function('__csim_swPostToClient') {|client_id, data| sw_hooks[:post_to_client]&.call(client_id, data); nil } if sw_hooks[:post_to_client]
+        vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
+        vm.define_function('__csim_swFetchRespond') {|fetch_id, resp| sw_hooks[:fetch_respond]&.call(fetch_id, resp); nil } if sw_hooks[:fetch_respond]
         # Override main's __setTimersActive so worker's empty-timer-map
         # flip doesn't race main's `polling?` gate. See v8_runtime's
         # build_worker for the long-form rationale.
