@@ -115,10 +115,10 @@ module Capybara
         # Fire an aux window's OWN `load` event (in its VM) — deferred by the
         # opener so a child `window.onload` runs after the opener's current task.
         '__csimFireAuxWindowLoad'    => ->(b, *a) { b.fire_aux_window_load(a[0]); nil },
-        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1]) },
+        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2]) },
         # navigator.serviceWorker.register (universal-server only) — spawn a worker
         # running the SW script as an executor context. Returns its handle.
-        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true) },
+        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },

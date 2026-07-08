@@ -3455,7 +3455,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil)
         handle       = (@worker_seq += 1)
         target       = resolve_against_current(url.to_s)
         # A worker script from a blob: URL in a DIFFERENT storage partition than this
@@ -3482,7 +3482,7 @@ module Capybara
         @worker_init_lock.synchronize { @worker_initializing += 1 }
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared, service: service)
+          run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared, service: service, creator_key: creator_key)
         end
         @workers[handle] = {thread: thread, inbox: inbox}
         handle
@@ -3706,12 +3706,16 @@ module Capybara
       # (`from_worker` = the posting worker's handle, `source_realm_id` nil).
       def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil, from_worker: nil)
         @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
-        # Same-isolate main + frame realms. A main/frame post reaches only the OTHER realms (the
-        # poster delivered to itself in-VM), so skip that only when a sibling realm actually exists.
-        # A worker post reaches realm 0 too (a separate isolate delivered to none in-VM), so always
-        # queue when it came from a worker.
+        # Same-isolate main + frame realms. The poster already delivered to itself in-VM, so this
+        # only reaches the OTHER realms — queue whenever one exists. A WORKER post reaches realm 0
+        # and every frame (a separate isolate delivered to none in-VM). A FRAME post always reaches
+        # main realm 0 — even when the posting frame's own realm isn't yet recorded in `frame_realms`
+        # (a BroadcastChannel posted SYNCHRONOUSLY during the frame's initial script runs before the
+        # realm is registered, so `has_frames` can be false though a valid target — main — exists). A
+        # MAIN post reaches the frames only when some are registered.
         has_frames = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
-        enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker
+        from_frame = !from_worker && !source_realm_id.nil? && source_realm_id != 0
+        enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker || from_frame
         # Every WORKER is a separate isolate reached via its thread-safe inbox — deliver to each live
         # one except the posting worker. Skip a worker whose thread has already exited (self-close /
         # termination in flight): it will never drain its inbox, so pushing would leak. Counted in a
@@ -4634,7 +4638,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -4662,6 +4666,19 @@ module Capybara
         # resolve chunks against the worker's own origin rather than
         # the snapshot-time `http://placeholder/`.
         rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
+        # A worker's BroadcastChannel origin KEY (its agent-cluster identity). A blob: worker
+        # INHERITS the creating context's origin (the blob URL carries no real origin of its own);
+        # a data: worker gets a FRESH opaque origin, unique per worker, so it never cross-talks with
+        # its creator or a sibling data: worker. An http(s) worker leaves this unset — the JS derives
+        # its key from `location.origin` (the script's own origin, same as the creator when
+        # same-origin). See `__csimBcOriginKey`.
+        worker_origin_key =
+          if url.to_s.start_with?('blob:')
+            creator_key
+          elsif url.to_s.start_with?('data:')
+            "opaque:worker#{handle}"
+          end
+        rt.eval("globalThis.__csimOriginKey = #{JSON.generate(worker_origin_key)};") if worker_origin_key
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs.
         rt.eval('__csim_installServiceWorkerScope();') if service
@@ -4732,7 +4749,12 @@ module Capybara
             return data[:bytes]
           end
           b64 = @runtime.call('__csimReadBlobBase64', u)
-          return nil unless b64
+          # A blob created INSIDE a frame realm lives in that realm's in-VM store, which the main
+          # runtime's `__csimReadBlobBase64` above can't see. But createObjectURL also registered its
+          # bytes in the cross-realm `@blob_registry` (crossCtx, since a frame realm is multi-realm),
+          # so fall back to it — this is what makes `new Worker(blobURL)` work from a data: iframe.
+          b64 = blob_resolve(u) if b64.nil? || b64.to_s.empty?
+          return nil if b64.nil? || b64.to_s.empty?
           return Base64.decode64(b64.to_s)
         end
         # `data:[<mediatype>][;base64],<data>` worker scripts (a worker created

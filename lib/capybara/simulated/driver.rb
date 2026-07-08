@@ -521,6 +521,14 @@ module Capybara
       # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels
       # with the same name (same-window delivery is handled in-VM by the sender).
       def broadcast_channel(source_browser, name, data, origin = nil)
+        # An opaque origin is unique to its own agent cluster; its key is a token ('opaque:…') minted
+        # per-realm and therefore only unique WITHIN one isolate — two unrelated opaque contexts in
+        # DIFFERENT windows could mint the same token. A BroadcastChannel never bridges two distinct
+        # opaque origins, and no opaque origin spans separate top-level windows here, so a cross-
+        # WINDOW post from an opaque origin reaches no one: drop it rather than risk a cross-isolate
+        # token collision. (Same-isolate opaque peers are reached in-VM / via enqueue_broadcast; an
+        # inherited-origin blob worker via its own inbox — neither goes through this cross-window path.)
+        return if origin.to_s.start_with?('opaque:')
         window_entries.each do |w|
           next if w[:browser].equal?(source_browser)
           w[:browser].enqueue_broadcast(name, data, nil, origin)

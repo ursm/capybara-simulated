@@ -832,11 +832,6 @@ webmessaging/Transferred_objects_unusable.sub.htm:
   meaning that they are no longer usable on the sending side.'
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
-webmessaging/broadcastchannel/opaque-origin.html:
-- BroadcastChannel messages from data URL dedicated workers should be self-contained
-- BroadcastChannel messages from data URL shared workers should be self-contained
-- BroadcastChannel messages from opaque origins should be self-contained
-- Opaque origin should be serialized to "null"
 webmessaging/broadcastchannel/ordering.html:
 - Messages are delivered in port creation order across multiple frames
 webmessaging/event.origin.sub.htm:
