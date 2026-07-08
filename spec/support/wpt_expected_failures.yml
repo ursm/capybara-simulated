@@ -145,9 +145,6 @@ css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
 - Preferred stylesheet where insertion order is tree order
-css/cssom/resolved-border-width.html:
-- checkbox
-- radio
 css/cssom/rule-restrictions.html:
 - "@keyframe"
 - "@page"
