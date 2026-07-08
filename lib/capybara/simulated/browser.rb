@@ -365,6 +365,11 @@ module Capybara
         # each broadcast it delivers (a `bcack` outbox event), which decrements this; `worker_pending?`
         # stays true until then so settle waits for the delivery.
         @worker_broadcast_pending = 0
+        # Client → service-worker messages awaiting the worker's ack (it processed the inbound
+        # `message`). A SW `postMessage` produces no 1:1 reply (the SW replies via client.postMessage,
+        # a separate outbox event), so — like broadcasts — it needs its own pending tally, or a
+        # listen-only SW would leave settle perpetually non-idle.
+        @sw_message_pending = 0
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -3504,6 +3509,16 @@ module Capybara
         w[:inbox] << data.to_s
       end
 
+      # `ServiceWorker.postMessage` from a client window → deliver to the SW's `message` event with
+      # `source` = the posting client. Tracked in @sw_message_pending (released by the worker's
+      # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
+      def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
+        w = @workers[handle.to_i]
+        return unless w
+        @sw_message_pending += 1
+        w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
+      end
+
       def worker_terminate(handle)
         w = @workers.delete(handle.to_i)
         return unless w
@@ -3521,7 +3536,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -3533,17 +3548,22 @@ module Capybara
         # A worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
         # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
         # broadcast-pending. Everything else ('message'/'__error') is a postMessage reply.
-        broadcasts, rest = events.partition {|e| e[:kind] == 'broadcast' }
-        acks,       msgs = rest.partition   {|e| e[:kind] == 'bcack' }
+        broadcasts,  rest0 = events.partition {|e| e[:kind] == 'broadcast' }
+        sw_msgs,     rest1 = rest0.partition  {|e| e[:kind] == 'sw_client_msg' }
+        swacks,      rest2 = rest1.partition  {|e| e[:kind] == 'swack' }
+        acks,        msgs  = rest2.partition  {|e| e[:kind] == 'bcack' }
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
+        # A service worker → client message: deliver to this window's navigator.serviceWorker 'message'.
+        sw_msgs.each {|e| @runtime.call('__csim_swDeliverClientMessage', e[:data]) }
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
+        @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
         # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
         @worker_in_flight = [0, @worker_in_flight - msgs.size].max
         @runtime.call('__csim_deliverWorkerMessages', msgs) unless msgs.empty?
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
+      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -4276,6 +4296,7 @@ module Capybara
         @worker_outbox.clear
         @worker_in_flight = 0
         @worker_broadcast_pending = 0
+        @sw_message_pending = 0
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
           @transfer_buffer_seq = 0
@@ -4660,7 +4681,9 @@ module Capybara
         # A worker's BroadcastChannel post rides the same thread-safe outbox; the main thread fans
         # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
         broadcast_out = ->(name, data, origin) { outbox << {handle: handle, kind: 'broadcast', name: name.to_s, data: data, origin: origin} }
-        rt        = engine_class.build_worker(self, post_back, broadcast_out)
+        # A service worker's client.postMessage crosses back to the client window via the outbox.
+        sw_post_to_client = ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} }
+        rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_post_to_client)
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
@@ -4721,6 +4744,14 @@ module Capybara
               # Ack so the main thread releases the broadcast-pending it counted for this delivery
               # (a listen-only worker never posts back — the ack is the only signal it processed it).
               outbox << {handle: handle, kind: 'bcack'}
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_message'
+              # A client → service-worker postMessage: dispatch a `message` event with source = the
+              # posting client. Ack FIRST (releases the sw-message-pending the main thread counted)
+              # so a handler that raises / times out can't leak the counter and hang settle; the
+              # handler's own reply is a separate `sw_client_msg` on the outbox, which keeps settle
+              # alive on its own. The reply is pushed synchronously during the dispatch below.
+              outbox << {handle: handle, kind: 'swack'}
+              rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url])
             elsif msg
               rt.call('__csim_workerOnMessage', msg)
             end
