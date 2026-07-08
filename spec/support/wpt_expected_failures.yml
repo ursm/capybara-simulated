@@ -822,8 +822,6 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
-webmessaging/Channel_postMessage_DataCloneErr.any.js:
-- Throw a DataCloneError when a host object (e.g. a DOM node) is used with postMessage.
 webmessaging/Channel_postMessage_clone_port.any.js:
 - 'Test Description: Test Description: When the user agent is to clone a port original
   port, with the clone being owned by owner, it must return a new MessagePort object'
@@ -990,10 +988,6 @@ webmessaging/without-ports/010.html:
 - undefined
 webmessaging/without-ports/015.html:
 - different origin
-webmessaging/without-ports/023.html:
-- 'Object cloning: own properties only, don''t follow prototype'
-webmessaging/without-ports/024.html:
-- 'Object cloning: throw an exception if function values encountered'
 webmessaging/without-ports/025.html:
 - MessagePort constructor properties
 webmessaging/without-ports/026.html:
