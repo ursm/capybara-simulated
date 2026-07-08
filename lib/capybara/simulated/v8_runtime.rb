@@ -1308,10 +1308,16 @@ module Capybara
       # the per-worker postMessage host fn closed over `post_back`.
       # Returns a uniform `WorkerRuntime` adapter that
       # `Browser#run_worker` drives.
-      def self.build_worker(browser, post_back)
+      def self.build_worker(browser, post_back, broadcast_out = nil)
         c = Ctx.new(snapshot: snapshot)
         attach_host_fns(c, browser)
         c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
+        # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
+        # browser's inbox from the worker thread). Route it through the thread-safe outbox instead
+        # (the shared BROWSER_HOST_FNS `__csimBroadcast` above, bound to `browser`, is overridden
+        # here). Same-worker-context delivery already happened in-VM via `_bcChannels`.
+        c.attach('__csimBroadcast', ->(name, data, _rid, origin) { broadcast_out&.call(name, data, origin); nil }) if broadcast_out
         # Worker's timer table is independent from main's; routing the
         # worker's `setTimersActive` through `browser.timers_active=`
         # races the main isolate's polling? gate, dropping main-thread

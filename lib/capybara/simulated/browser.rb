@@ -359,6 +359,12 @@ module Capybara
         # so long-running compute (e.g. mozjpeg over an 8900×8900 frame)
         # isn't starved by the settle_gen idle gate.
         @worker_in_flight = 0
+        # BroadcastChannel posts pushed to worker inboxes that the worker hasn't yet processed. Kept
+        # SEPARATE from @worker_in_flight: a broadcast is fire-and-forget (a listen-only worker never
+        # replies), so it must not be "answered" by an unrelated postMessage reply. The worker acks
+        # each broadcast it delivers (a `bcack` outbox event), which decrements this; `worker_pending?`
+        # stays true until then so settle waits for the delivery.
+        @worker_broadcast_pending = 0
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -3515,7 +3521,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        @worker_in_flight = 0 if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -3524,14 +3530,20 @@ module Capybara
         return 0 if @workers.empty? && @worker_outbox.empty?
         events = drain_queue(@worker_outbox)
         return 0 if events.empty?
-        # `__error` postbacks don't correspond to a prior post, so
-        # bottom out at zero.
-        @worker_in_flight = [0, @worker_in_flight - events.size].max
-        @runtime.call('__csim_deliverWorkerMessages', events)
+        # A worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
+        # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
+        # broadcast-pending. Everything else ('message'/'__error') is a postMessage reply.
+        broadcasts, rest = events.partition {|e| e[:kind] == 'broadcast' }
+        acks,       msgs = rest.partition   {|e| e[:kind] == 'bcack' }
+        broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
+        @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
+        # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
+        @worker_in_flight = [0, @worker_in_flight - msgs.size].max
+        @runtime.call('__csim_deliverWorkerMessages', msgs) unless msgs.empty?
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
+      def worker_pending? = !@worker_outbox.empty? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -3688,12 +3700,26 @@ module Capybara
       # fanout goes through the Driver; the same-ISOLATE fanout (main ↔ sibling realms,
       # sibling ↔ sibling) is queued here and delivered per-realm by
       # `deliver_window_messages`, which skips the posting realm.
-      def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil)
+      # Fan a BroadcastChannel post out to every OTHER same-origin browsing context. Called on the
+      # MAIN thread — either directly from a main/frame-realm post (`source_realm_id` = the poster's
+      # realm, `from_worker` nil), or from `deliver_worker_messages` for a WORKER-originated post
+      # (`from_worker` = the posting worker's handle, `source_realm_id` nil).
+      def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil, from_worker: nil)
         @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
-        # Only queue for same-isolate delivery when sibling realms exist — a single-
-        # realm page already delivered to itself in-VM, so this stays zero-overhead.
-        if @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
-          enqueue_broadcast(name, data, source_realm_id.to_i, origin)
+        # Same-isolate main + frame realms. A main/frame post reaches only the OTHER realms (the
+        # poster delivered to itself in-VM), so skip that only when a sibling realm actually exists.
+        # A worker post reaches realm 0 too (a separate isolate delivered to none in-VM), so always
+        # queue when it came from a worker.
+        has_frames = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
+        enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker
+        # Every WORKER is a separate isolate reached via its thread-safe inbox — deliver to each live
+        # one except the posting worker. Skip a worker whose thread has already exited (self-close /
+        # termination in flight): it will never drain its inbox, so pushing would leak. Counted in a
+        # dedicated pending tally so `settle` waits until the worker acks the delivery (a `bcack`).
+        @workers.each do |h, w|
+          next if h == from_worker || !w[:thread].alive?
+          @worker_broadcast_pending += 1
+          w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
         end
       end
 
@@ -4245,6 +4271,7 @@ module Capybara
         @workers.clear
         @worker_outbox.clear
         @worker_in_flight = 0
+        @worker_broadcast_pending = 0
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
           @transfer_buffer_seq = 0
@@ -4626,7 +4653,10 @@ module Capybara
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
         body = RuntimeShared.utf8_text(body)
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
-        rt        = engine_class.build_worker(self, post_back)
+        # A worker's BroadcastChannel post rides the same thread-safe outbox; the main thread fans
+        # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
+        broadcast_out = ->(name, data, origin) { outbox << {handle: handle, kind: 'broadcast', name: name.to_s, data: data, origin: origin} }
+        rt        = engine_class.build_worker(self, post_back, broadcast_out)
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
@@ -4652,7 +4682,17 @@ module Capybara
           loop do
             msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
             break if msg == :terminate
-            rt.call('__csim_workerOnMessage', msg) if msg
+            # A main-side BroadcastChannel post to this worker arrives as a {kind:'broadcast'} hash;
+            # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
+            # A plain string is a postMessage to the worker.
+            if msg.is_a?(Hash) && msg[:kind] == 'broadcast'
+              rt.call('__csim_deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
+              # Ack so the main thread releases the broadcast-pending it counted for this delivery
+              # (a listen-only worker never posts back — the ack is the only signal it processed it).
+              outbox << {handle: handle, kind: 'bcack'}
+            elsif msg
+              rt.call('__csim_workerOnMessage', msg)
+            end
             # Drive the worker's OWN event loop each tick: a message handler OR an
             # AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout
             # retry, which has no inbox message) may have pending timers. Drain ~one poll

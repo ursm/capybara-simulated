@@ -352,11 +352,14 @@ module Capybara
       # host fns attached *after* the replay (so snapshot_stubs.js's
       # no-ops don't overwrite real ones), `__csim_isWorker` set, +
       # the per-worker postMessage routed through `post_back`.
-      def self.build_worker(browser, post_back)
+      def self.build_worker(browser, post_back, broadcast_out = nil)
         vm = Quickjs::VM.new(**VM_OPTIONS)
         bridge_runnable.run(on: vm)
         attach_host_fns(vm, browser)
         vm.define_function('__csim_workerPostMessage') {|data| post_back.call(data); nil }
+        # A worker's BroadcastChannel fan-out routes through the thread-safe outbox, not
+        # `browser.broadcast_to_windows` (cross-thread inbox mutation). See v8_runtime#build_worker.
+        vm.define_function('__csimBroadcast') {|name, data, _rid, origin| broadcast_out&.call(name, data, origin); nil } if broadcast_out
         # Override main's __setTimersActive so worker's empty-timer-map
         # flip doesn't race main's `polling?` gate. See v8_runtime's
         # build_worker for the long-form rationale.

@@ -825,8 +825,6 @@ webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
   Tasks enqueued on the port-message-queue of an enabled port,
     are transferred along with the port, when the transfer happens in the same task
     during which postMessage is called
-webmessaging/MessageEvent-trusted.any.js:
-- With a BroadcastChannel
 webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
 - onmessage calling source postMessage
 webmessaging/Transferred_objects_unusable.sub.htm:
@@ -841,24 +839,6 @@ webmessaging/broadcastchannel/opaque-origin.html:
 - Opaque origin should be serialized to "null"
 webmessaging/broadcastchannel/ordering.html:
 - Messages are delivered in port creation order across multiple frames
-webmessaging/broadcastchannel/service-worker.https.html:
-- BroadcastChannel works in service workers
-webmessaging/broadcastchannel/workers.html:
-- BroadcastChannel messages from closed worker to parent should be ignored (BC created
-  after closing)
-- BroadcastChannel messages from closed worker to parent should be ignored (BC created
-  before closing)
-- BroadcastChannel messages from parent to closed worker should be ignored (BC created
-  after closing)
-- BroadcastChannel messages from parent to closed worker should be ignored (BC created
-  before closing)
-- BroadcastChannel messages within closed worker should be ignored (BCs created after
-  closing)
-- BroadcastChannel messages within closed worker should be ignored (BCs created before
-  closing)
-- BroadcastChannel works in shared workers
-- BroadcastChannel works in workers
-- Closing and re-opening a channel works.
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
 webmessaging/event.ports.sub.htm:
