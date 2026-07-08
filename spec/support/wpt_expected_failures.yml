@@ -881,10 +881,6 @@ webmessaging/event.ports.sub.htm:
 webmessaging/event.source.xorigin.sub.htm:
 - 'Test Description: Cross-origin: event.source returns the WindowProxy of the source
   window.'
-webmessaging/message-channels/close.any.js:
-- Message sent to closed port from transferred port should not arrive.
-- Message sent to closed port should not arrive.
-- close() detaches a MessagePort (but not the one its entangled with)
 webmessaging/message-channels/cross-document.html:
 - cross-document channel
 webmessaging/message-channels/detached-iframe.window.js:
@@ -927,43 +923,16 @@ webmessaging/postMessage_crosssite.sub.htm:
 webmessaging/postMessage_dup_transfer_objects.htm:
 - 'Test Description: postMessage with duplicate transfer objects raises DataCloneError
   exception.'
-webmessaging/postMessage_invalid_targetOrigin.htm:
-- 'Test Description: If the value of the targetOrigin argument is neither a single
-  U+002A ASTERISK character (*), a single U+002F SOLIDUS character (/), nor an absolute
-  URL, then throw a SyntaxError exception and abort the overall set of steps.'
-webmessaging/with-options/broken-origin.html:
-- resolving broken url
 webmessaging/with-options/host-specific-origin.html:
 - resolving url with stuff in host-specific
-webmessaging/with-options/message-channel-transferable.html:
-- MessageChannel's ports as MessagePort objects
-webmessaging/with-options/null-transfer.html:
-- null transfer
-webmessaging/with-ports/001.html:
-- resolving broken url
 webmessaging/with-ports/002.html:
 - resolving url with stuff in host-specific
-webmessaging/with-ports/003.html:
-- resolving 'example.org'
 webmessaging/with-ports/010.html:
 - undefined
 webmessaging/with-ports/015.html:
 - different origin
-webmessaging/with-ports/023.html:
-- null ports
-webmessaging/with-ports/025.html:
-- 1 as ports
-webmessaging/with-ports/026.html:
-- object with length as transferable
-webmessaging/with-ports/027.html:
-- MessageChannel's ports as MessagePort objects
-- Old-style array objects
-webmessaging/without-ports/001.html:
-- resolving broken url
 webmessaging/without-ports/002.html:
 - resolving url with stuff in host-specific
-webmessaging/without-ports/003.html:
-- resolving 'example.org'
 webmessaging/without-ports/009.html:
 - zero arguments
 webmessaging/without-ports/010.html:
@@ -972,8 +941,6 @@ webmessaging/without-ports/015.html:
 - different origin
 webmessaging/without-ports/025.html:
 - MessagePort constructor properties
-webmessaging/without-ports/026.html:
-- Cloning objects with getter properties
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
