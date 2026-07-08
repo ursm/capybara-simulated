@@ -144,8 +144,6 @@ css/cssom/getComputedStyle-resolved-colors.html:
 - The resolved value for 'box-shadow' is the used value
 css/cssom/invalid-pseudo-elements.html:
 - 'CSSOM: Test that rules with invalid pseudo elements are not found'
-css/cssom/link-element-stylesheet-title.html:
-- StyleSheet.title
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
@@ -169,11 +167,6 @@ css/cssom/setproperty-null-undefined.html:
 - Verify that setting a CSS property to undefined has no effect.
 css/cssom/shorthand-values.html:
 - 'The serialization of -webkit-line-clamp: none; should be canonical.'
-css/cssom/style-sheet-interfaces-001.html:
-- CSSStyleSheet_properties
-- StyleSheet_properties
-- StyleSheet_property_values
-- disabled attribute getter/setter
 css/cssom/stylesheet-cross-origin-redirect-quirks.sub.html:
 - Cross-origin redirect to same-origin with wrong MIME type
 - Cross-origin stylesheet with wrong MIME type
@@ -188,16 +181,8 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in cross-origin CSSOM Stylesheets (redirect from same-origin
   to cross-origin)
 - Origin-clean check in loading error CSSOM Stylesheets
-css/cssom/stylesheet-title.html:
-- StyleSheet.title
 css/cssom/ttwf-cssom-doc-ext-load-count.html:
 - stylesheet.css should be unloaded and styleSheets.length === 0
-css/cssom/ttwf-cssom-doc-ext-load-tree-order.html:
-- styleSheets item 0 title must be aaa
-- styleSheets item 0 title must be alpha
-- styleSheets item 0 title must be kilo
-- styleSheets item 0 title must be zebra
-- styleSheets item 1 title must be zebra
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
 fetch/api/abort/cache.https.any.js:
