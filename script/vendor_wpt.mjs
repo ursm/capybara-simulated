@@ -86,11 +86,19 @@ const TREES = [
                                        // cssRules / style serialization, backed by our css-tree cascade
                                        // engine; the pure-API slice of CSS (css/cssom-view is the
                                        // layout-dependent one and is deliberately NOT vendored)
-  'html/canvas/element'                // 2D canvas context — the in-process software rasterizer (paths /
+  'html/canvas/element',               // 2D canvas context — the in-process software rasterizer (paths /
                                        // gradients / text via libvips / shadow / compositing / Path2D / AA)
                                        // measured against the harness tests. Pixel-exact-Chrome-AA / filter
                                        // / reftest cases earn out; the API + close-enough-pixel slice is in
                                        // scope. (offscreen/ mirrors this via OffscreenCanvas — added later.)
+  'service-workers/service-worker',    // registration / lifecycle / messaging / fetch interception against
+                                       // the real SW runtime; ships the FULL upstream test-helpers.sub.js
+                                       // (service_worker_test & friends) plus committed local csim-* fixtures
+  'service-workers/cache-storage'      // Cache Storage API (caches/Cache) — the origin-partitioned,
+                                       // Ruby-backed store (cache-storage.js), visible from window + SW
+                                       // isolates; the pure-API slice. cache-abort (unbounded streaming
+                                       // fetch) is skip-listed; cache-storage-buckets earns out (Storage
+                                       // Buckets subsystem)
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)

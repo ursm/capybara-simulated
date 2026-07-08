@@ -179,9 +179,6 @@ css/cssom/ttwf-cssom-doc-ext-load-count.html:
 - stylesheet.css should be unloaded and styleSheets.length === 0
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
-fetch/api/abort/cache.https.any.js:
-- Signals are not stored in the cache API
-- Signals are not stored in the cache API, even if they're already aborted
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -819,6 +816,17 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
+service-workers/cache-storage/cache-api-nested-worker.https.html:
+- Cache API in nested worker
+service-workers/cache-storage/cache-keys-attributes-for-service-worker.https.html:
+- Request.IsHistoryNavigation should persist.
+- Request.IsReloadNavigation should persist.
+service-workers/cache-storage/cache-storage.https.any.js:
+- CacheStorage names are DOMStrings not USVStrings
+service-workers/cache-storage/credentials.https.html:
+- Cache API matching includes credentials
+service-workers/cache-storage/sandboxed-iframes.https.html:
+- Sandboxed iframe without allow-same-origin is denied access
 service-workers/service-worker/Service-Worker-Allowed-header.https.html:
 - Registering outside Service-Worker-Allowed path
 - Registering outside Service-Worker-Allowed path with parent reference
@@ -2365,6 +2373,8 @@ service-workers/service-worker/redirected-response.https.html:
 - 'mode: "manual", mode change: "follow"'
 - 'mode: "manual", no mode change'
 - 'mode: "manual", non-intercepted request'
+- restore global state (caches)
+- restore global state (service worker registration)
 service-workers/service-worker/referer.https.html:
 - Verify the referer
 service-workers/service-worker/referrer-policy-header.https.html:

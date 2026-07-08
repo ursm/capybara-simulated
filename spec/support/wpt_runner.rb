@@ -568,14 +568,16 @@ module WptRunner
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
-  # structured-clone + the fetch/ request slice (api/data-urls/h1-parsing) — each was
+  # structured-clone + the fetch/ request slice (api/data-urls/h1-parsing) +
+  # service-workers/cache-storage/ (Cache Storage API — swept crasher-free save
+  # cache-abort, which streams an unbounded body and is on the skip list) — each was
   # swept per-file with a hang timeout and found crasher-free (xhr 86, html/dom+forms
   # 26, fetch+atob+structured-clone 145: 0 hangs). The TOP-LEVEL dom/ tree is still
   # excluded: it has synchronous-infinite-loop crashers that hang the V8 call (no
   # virtual-clock timeout catches them) and needs a skip-list before it can be
   # scanned. (.tentative files auto-route to out-of-scope, so a tentative window.js
   # here self-excludes.)
-  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing}'
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage}'
 
   def test_files
     @test_files ||= begin

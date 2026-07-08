@@ -28074,6 +28074,36 @@ input-events/select-event-drag-remove.html:
   reason: Clicks/drags via a testdriver Actions pointer at getBoundingClientRect +
     viewport coordinates; needs coordinate hit-testing on the spinner / text region
     — layout engine deliberately unmodeled.
+service-workers/cache-storage/cache-storage-buckets.https.any.js:
+- name: cache.open promise is rejected when bucket is gone
+  reason: "[WICG] Storage Buckets API (navigator.storageBuckets, https://wicg.github.io/storage-buckets/)
+    — an unratified WICG Community Group draft shipped only in Chromium (no Firefox/Safari).
+    Buildable in-process (a bucket dimension on the origin-partitioned cache store), but
+    unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec bakes in
+    churn). Re-audit if it advances to a ratified standard."
+- name: caches from different buckets have different contents
+  reason: "[WICG] Storage Buckets API (navigator.storageBuckets, https://wicg.github.io/storage-buckets/)
+    — an unratified WICG Community Group draft shipped only in Chromium (no Firefox/Safari).
+    Buildable in-process (a bucket dimension on the origin-partitioned cache store), but
+    unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec bakes in
+    churn). Re-audit if it advances to a ratified standard."
+service-workers/cache-storage/cross-partition.https.tentative.html:
+- name: CacheStorage caches shouldn't be shared with a cross-partition dedicated worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: CacheStorage caches shouldn't be shared with a cross-partition iframe
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: CacheStorage caches shouldn't be shared with a cross-partition service worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: CacheStorage caches shouldn't be shared with a cross-partition shared worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/partitioned-claim.tentative.https.html:
 - name: ServiceWorker's clients.claim() is partitioned
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

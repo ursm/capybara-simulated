@@ -146,3 +146,9 @@
   (same class as infinite_backtracking). Needs engine-level eval preemption
   (Isolate::TerminateExecution surfaced through rusty_racer) plus Clear-Site-Data
   semantics before it can run.
+"service-workers/cache-storage/cache-abort.https.any.js": >-
+  Aborts an in-flight cache.add/addAll/put whose request targets
+  fetch/api/resources/infinite-slow-response.py — a handler that streams an unbounded
+  body. Our fetch reads the response body synchronously on the calling thread (GVL held),
+  so it spins before the abort can fire — the whole file hangs uninterruptibly (same class
+  as infinite_backtracking). Needs an abortable streaming-fetch runtime.

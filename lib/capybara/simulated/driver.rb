@@ -72,6 +72,10 @@ module Capybara
         # Browser still has its own sessionStorage + DOM + JS VM.
         @cookies         = {}
         @local_storage   = {}
+        # Cache Storage (caches/Cache) is origin-shared like localStorage — owned at the
+        # Driver level and injected, so a service worker and every same-origin window see
+        # the same caches (partitioned by origin key within the store).
+        @cache_storage   = {}
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
         # restores it. Every window (incl. aux windows opened later) inherits this so
@@ -101,6 +105,7 @@ module Capybara
                     js_engine:       @js_engine,
                     cookies:         @cookies,
                     local_storage:   @local_storage,
+                    cache_storage:   @cache_storage,
                     all_hosts_local: @all_hosts_local)
       end
 

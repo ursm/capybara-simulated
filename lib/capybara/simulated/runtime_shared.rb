@@ -77,6 +77,18 @@ module Capybara
         '__csim_storageClear'        => ->(b, *a) { b.storage_clear(a[0]); nil },
         '__csim_storageKey'          => ->(b, *a) { b.storage_key(a[0], a[1]) },
         '__csim_storageLength'       => ->(b, *a) { b.storage_length(a[0]) },
+        # Cache Storage — origin-partitioned (a[0] = origin key), Ruby-backed so it
+        # survives the per-visit VM rebuild and is shared between a service worker and
+        # the client it controls. The JS side (cache-storage.js) owns the spec matching;
+        # Ruby is a dumb ordered store keyed by (origin, cache name).
+        '__csim_cacheStorageOpen'    => ->(b, *a) { b.cache_storage_open(a[0], a[1]) },
+        '__csim_cacheStorageHas'     => ->(b, *a) { b.cache_storage_has(a[0], a[1]) },
+        '__csim_cacheStorageDelete'  => ->(b, *a) { b.cache_storage_delete(a[0], a[1]) },
+        '__csim_cacheStorageKeys'    => ->(b, *a) { b.cache_storage_keys(a[0]) },
+        '__csim_cacheEntries'        => ->(b, *a) { b.cache_entries(a[0], a[1]) },
+        '__csim_cacheEntryResponse'  => ->(b, *a) { b.cache_entry_response(a[0], a[1], a[2]) },
+        '__csim_cachePut'            => ->(b, *a) { b.cache_put(a[0], a[1], a[2], a[3], a[4]); nil },
+        '__csim_cacheDeleteEntries'  => ->(b, *a) { b.cache_delete_entries(a[0], a[1], a[2]) },
         '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },

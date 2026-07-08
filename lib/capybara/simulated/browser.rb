@@ -196,7 +196,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -240,6 +240,9 @@ module Capybara
         # without a Driver (gem-internal callers) get fresh jars.
         @cookies                      = cookies       || {}
         @local_storage                = local_storage || {}
+        # Cache Storage is origin-shared like localStorage (the Driver owns the store
+        # and injects it into every window Browser), origin-partitioned within.
+        @cache_storage                = cache_storage || {}
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
@@ -2649,6 +2652,7 @@ module Capybara
       def reset!
         @cookies.clear
         @local_storage.clear
+        @cache_storage.clear
         @session_storage.clear
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
@@ -6220,6 +6224,62 @@ module Capybara
       end
       private def store(kind)
         kind.to_s == 'session' ? @session_storage : @local_storage
+      end
+
+      # Cache Storage backing — origin-partitioned dumb store; the JS side owns the spec
+      # matching (cache-storage.js). `@cache_storage` is
+      #   origin => {seq:, names: {name => cache_id}, caches: {cache_id => {seq:, entries:}}}
+      # The name→id indirection models the spec's "dooms, but does not delete immediately":
+      # `caches.delete(name)` unmaps the name, but a Cache handle already bound to the id
+      # keeps operating on its own storage (a fresh `open(name)` gets a new id / empty cache).
+      # Each entry is `{id:, meta:, response:}` — `meta` the parsed request metadata the
+      # matcher needs ({url, method, headers, vary}), `response` an opaque serialized-Response
+      # JSON blob. Each host fn runs a single read-modify-write under the GVL, so concurrent
+      # access from a service-worker thread stays atomic without a lock (localStorage
+      # precedent). A doomed cache's storage lingers until `reset!` (per-test) frees it — a
+      # bounded leak we accept rather than refcount handles across the JS boundary.
+      def cache_storage_open(origin, name)
+        store = (@cache_storage[origin.to_s] ||= {seq: 0, names: {}, caches: {}})
+        id    = (store[:names][name.to_s] ||= (store[:seq] += 1))
+        store[:caches][id] ||= {seq: 0, entries: []}
+        id
+      end
+      def cache_storage_has(origin, name)
+        @cache_storage.dig(origin.to_s, :names)&.key?(name.to_s) || false
+      end
+      def cache_storage_delete(origin, name)
+        names = @cache_storage.dig(origin.to_s, :names) or return false
+        !names.delete(name.to_s).nil?
+      end
+      def cache_storage_keys(origin)
+        (@cache_storage.dig(origin.to_s, :names) || {}).keys
+      end
+      def cache_entries(origin, cache_id)
+        cache = cache_for(origin, cache_id) or return nil
+        JSON.generate(cache[:entries].map {|e| {id: e[:id]}.merge(e[:meta]) })
+      end
+      def cache_entry_response(origin, cache_id, entry_id)
+        cache = cache_for(origin, cache_id) or return nil
+        entry = cache[:entries].find {|e| e[:id] == entry_id.to_i } or return nil
+        entry[:response]
+      end
+      def cache_put(origin, cache_id, delete_ids_json, meta_json, response_json)
+        cache = cache_for(origin, cache_id) or return nil
+        ids   = JSON.parse(delete_ids_json).map(&:to_i)
+        cache[:entries].reject! {|e| ids.include?(e[:id]) } unless ids.empty?
+        cache[:entries] << {id: (cache[:seq] += 1), meta: JSON.parse(meta_json), response: response_json.to_s}
+        nil
+      end
+      def cache_delete_entries(origin, cache_id, ids_json)
+        cache  = cache_for(origin, cache_id) or return 0
+        ids    = JSON.parse(ids_json).map(&:to_i)
+        before = cache[:entries].size
+        cache[:entries].reject! {|e| ids.include?(e[:id]) }
+        before - cache[:entries].size
+      end
+      # The cache hash ({seq:, entries:}) bound to a Cache handle's id, or nil if it's gone.
+      private def cache_for(origin, cache_id)
+        @cache_storage.dig(origin.to_s, :caches, cache_id.to_i)
       end
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops
