@@ -3648,8 +3648,8 @@ module Capybara
       # `source_realm_id` is the posting realm's context id within THIS isolate (0 =
       # main), or nil when the post came from ANOTHER isolate (the Driver's cross-
       # window fanout) — a nil source matches no local realm, so it reaches every one.
-      def enqueue_broadcast(name, data, source_realm_id = nil)
-        @broadcast_inbox << {'name' => name.to_s, 'data' => data, 'source' => source_realm_id}
+      def enqueue_broadcast(name, data, source_realm_id = nil, origin = nil)
+        @broadcast_inbox << {'name' => name.to_s, 'data' => data, 'source' => source_realm_id, 'origin' => origin}
       end
 
       # Fire queued cross-window messages (postMessage + BroadcastChannel).
@@ -3688,12 +3688,12 @@ module Capybara
       # fanout goes through the Driver; the same-ISOLATE fanout (main ↔ sibling realms,
       # sibling ↔ sibling) is queued here and delivered per-realm by
       # `deliver_window_messages`, which skips the posting realm.
-      def broadcast_to_windows(name, data, source_realm_id = 0)
-        @driver.broadcast_channel(self, name.to_s, data) if @driver.respond_to?(:broadcast_channel)
+      def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil)
+        @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
         # Only queue for same-isolate delivery when sibling realms exist — a single-
         # realm page already delivered to itself in-VM, so this stays zero-overhead.
         if @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
-          enqueue_broadcast(name, data, source_realm_id.to_i)
+          enqueue_broadcast(name, data, source_realm_id.to_i, origin)
         end
       end
 

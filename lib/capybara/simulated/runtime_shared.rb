@@ -98,7 +98,7 @@ module Capybara
         # forces noopener for a cross-partition blob: target.
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(a[0], a[1], a[2]); nil },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
-        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i); nil },
+        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to

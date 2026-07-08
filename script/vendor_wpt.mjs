@@ -126,6 +126,12 @@ const SUPPORT_FILES = [
   // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
   // the file is a plain array of keyword strings (no further includes).
   'css/css-fonts/support/font-family-keywords.js'
+  // NOTE: webmessaging/broadcastchannel/{cross-origin,detached-iframe} pull `with_iframe` from
+  // service-workers/service-worker/resources/test-helpers.sub.js. We do NOT fetch the upstream file
+  // here — its `service_worker_test` helper, once DEFINED, makes SW tests (FileAPI/historical,
+  // fetch referrer-*-service-worker) register a service-worker subtest that fails (SW is an
+  // unmodeled non-goal). Instead a hand-written MINIMAL test-helpers.sub.js (only `with_iframe`) is
+  // committed under spec/wpt/…; it lives outside any cleaned tree so re-vendoring leaves it intact.
 ];
 
 const CONCURRENCY = 24;

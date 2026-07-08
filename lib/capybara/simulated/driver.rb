@@ -520,10 +520,10 @@ module Capybara
 
       # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels
       # with the same name (same-window delivery is handled in-VM by the sender).
-      def broadcast_channel(source_browser, name, data)
+      def broadcast_channel(source_browser, name, data, origin = nil)
         window_entries.each do |w|
           next if w[:browser].equal?(source_browser)
-          w[:browser].enqueue_broadcast(name, data)
+          w[:browser].enqueue_broadcast(name, data, nil, origin)
         end
       end
 

@@ -834,21 +834,6 @@ webmessaging/Transferred_objects_unusable.sub.htm:
   meaning that they are no longer usable on the sending side.'
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
-webmessaging/broadcastchannel/cross-origin.html:
-- Messages aren't delivered across origins
-webmessaging/broadcastchannel/detached-iframe.html:
-- BroadcastChannel messages from detached iframe to parent should be ignored (BC created
-  after detaching)
-- BroadcastChannel messages from detached iframe to parent should be ignored (BC created
-  before detaching)
-- BroadcastChannel messages from parent to detached iframe should be ignored (BC created
-  after detaching)
-- BroadcastChannel messages from parent to detached iframe should be ignored (BC created
-  before detaching)
-- BroadcastChannel messages within detached iframe should be ignored (BCs created
-  after detaching)
-- BroadcastChannel messages within detached iframe should be ignored (BCs created
-  before detaching)
 webmessaging/broadcastchannel/opaque-origin.html:
 - BroadcastChannel messages from data URL dedicated workers should be self-contained
 - BroadcastChannel messages from data URL shared workers should be self-contained
