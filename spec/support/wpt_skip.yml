@@ -138,3 +138,11 @@
   Catastrophic-backtracking pattern regex; V8 runs it synchronously for ~56 s
   (finite but pathological), uninterruptible by the virtual-clock force-timeout.
   Skipped to keep the gate fast — see header.
+"service-workers/service-worker/unregister-immediately-before-installed.https.html": >-
+  Registers a worker script that is a DELIBERATE synchronous infinite loop
+  (resources/onparse-infiniteloop-worker.js) and expects Clear-Site-Data to abort it.
+  run_worker evaluates the worker script with an in-thread V8 eval that holds the GVL,
+  so the spinning script freezes the whole process — uninterruptible by timeout/kill
+  (same class as infinite_backtracking). Needs engine-level eval preemption
+  (Isolate::TerminateExecution surfaced through rusty_racer) plus Clear-Site-Data
+  semantics before it can run.

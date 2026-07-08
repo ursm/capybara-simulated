@@ -126,14 +126,12 @@ const SUPPORT_FILES = [
   // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
   // the file is a plain array of keyword strings (no further includes).
   'css/css-fonts/support/font-family-keywords.js'
-  // NOTE: webmessaging/broadcastchannel/{cross-origin,detached-iframe} pull `with_iframe` from
-  // service-workers/service-worker/resources/test-helpers.sub.js. We do NOT fetch the upstream file
-  // here (yet) — its `service_worker_test` helper, once DEFINED, makes SW tests elsewhere
-  // (FileAPI/historical, fetch referrer-*-service-worker) register service-worker subtests that
-  // predate the SW runtime's current coverage. A hand-written MINIMAL test-helpers.sub.js (only
-  // `with_iframe`) is committed under spec/wpt/… instead; swap in the upstream helper when the
-  // service-worker tree slice is vendored. The service-workers tree also hosts committed local
-  // `csim-*` fixtures (SW round-trip regression guards) — `cleanTree` preserves those.
+  // NOTE: service-workers/service-worker (vendored above) ships the FULL upstream
+  // test-helpers.sub.js — `service_worker_test` and friends run against the real SW runtime.
+  // The hand-written minimal helper that used to live at that path (with_iframe only, while SW
+  // tests were meant to abort) is gone; webmessaging/broadcastchannel and the SW subtests in
+  // FileAPI / fetch/api all include the upstream helper now. The tree also hosts committed
+  // local `csim-*` fixtures (SW round-trip regression guards) — `cleanTree` preserves those.
 ];
 
 const CONCURRENCY = 24;

@@ -350,9 +350,16 @@ fetch/api/headers/header-values.any.js:
 - fetch() with all valid values
 fetch/api/policies/csp-blocked.html:
 - Fetch is blocked by CSP, got a TypeError
+fetch/api/policies/referrer-origin-service-worker.https.html:
+- Cross-origin referrer is overridden by client origin
+- Request's referrer is origin
+fetch/api/policies/referrer-origin-when-cross-origin-service-worker.https.html:
+- Request's referrer is origin
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
+fetch/api/policies/referrer-unsafe-url-service-worker.https.html:
+- Request's referrer is the full url of current document/worker
 fetch/api/redirect/redirect-keepalive.any.js:
 - "[keepalive][new window][unload] cross-origin redirect"
 - "[keepalive][new window][unload] cross-origin redirect + preflight"
@@ -369,10 +376,8 @@ fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should fail on 307
 - Fetch upload streaming should fail on 308
 fetch/api/request/destination/fetch-destination-frame.https.html:
-- Initialize global state
 - frame fetches with a "frame" Request.destination
 fetch/api/request/destination/fetch-destination-iframe.https.html:
-- Initialize global state
 - iframe fetches with a "iframe" Request.destination
 fetch/api/request/destination/fetch-destination-no-load-event.https.html:
 - '@import fetches with a "style" Request.destination'
@@ -380,16 +385,13 @@ fetch/api/request/destination/fetch-destination-no-load-event.https.html:
 - CSS font fetches with an "font" Request.destination
 - Cache.add() fetches with an empty string Request.destination
 - Font loading API fetches with an "font" Request.destination
-- Initialize global state
 - SVG use element fetches with an "image" Request.destination
 - importScripts() fetches with a "script" Request.destination
 - sendBeacon() fetches with an empty string Request.destination
 fetch/api/request/destination/fetch-destination-prefetch.https.html:
 - HTMLLinkElement with rel=prefetch fetches with an empty string Request.destination
-- Initialize global state
 fetch/api/request/destination/fetch-destination-worker.https.html:
 - DedicatedWorker fetches with a "worker" Request.destination
-- Initialize global state
 - SharedWorker fetches with a "sharedworker" Request.destination
 fetch/api/request/destination/fetch-destination.https.html:
 - AudioWorklet module fetches with a "audioworklet" Request.destination
@@ -420,7 +422,6 @@ fetch/api/request/destination/fetch-destination.https.html:
 - 'Import declaration with `type: "css"` fetches with a "style" Request.destination'
 - 'Import declaration with `type: "json"` fetches with a "json" Request.destination'
 - 'Import declaration with `type: "text"` fetches with a "text" Request.destination'
-- Initialize global state
 - SVGImageElement fetches with an "image" Request.destination
 - XMLHttpRequest() fetches with an empty string Request.destination
 - fetch() fetches with an empty string Request.destination
@@ -802,8 +803,6 @@ html/webappapis/scripting/events/event-handler-processing-algorithm-error/frames
 html/webappapis/scripting/events/eventhandler-cancellation.html:
 - Returning true from [object Window]'s onerror event handler while ErrorEvent is
   firing should cancel the event
-html/webappapis/scripting/events/messageevent-constructor.https.html:
-- Passing ServiceWorker for source member
 html/webappapis/scripting/events/onerroreventhandler.html:
 - onerror + !ErrorEvent + Window
 - onerror + Document
@@ -820,6 +819,2144 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
+service-workers/service-worker/Service-Worker-Allowed-header.https.html:
+- Registering outside Service-Worker-Allowed path
+- Registering outside Service-Worker-Allowed path with parent reference
+- Service-Worker-Allowed is cross-origin to page, same-origin to script
+- Service-Worker-Allowed is cross-origin to script, registering on a normally allowed
+  scope
+- Service-Worker-Allowed is cross-origin to script, registering on a normally disallowed
+  scope
+service-workers/service-worker/ServiceWorkerGlobalScope/close.https.html:
+- ServiceWorkerGlobalScope close operation
+service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
+- Verify error event is received
+service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event-constructor.https.html:
+- "`bubbles` is specified"
+- "`cancelable` is specified"
+- "`data` is specified"
+- "`lastEventId` is specified"
+- "`origin` is specified"
+- "`ports` is specified"
+- "`source` is specified"
+- all initial values are specified
+- no initializer specified
+service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
+- Post an extendable message from a nested client
+- Post an extendable message from a top-level client
+- Post extendable messages among service workers
+- Post loopback extendable messages
+service-workers/service-worker/ServiceWorkerGlobalScope/message-event-ports.https.html:
+- Verify MessageEvent.ports getter returns the same object
+service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
+- Post loopback messages
+- Post messages among service workers
+service-workers/service-worker/ServiceWorkerGlobalScope/registration-attribute.https.html:
+- Verify registration attributes on ServiceWorkerGlobalScope
+- Verify registration attributes on ServiceWorkerGlobalScope of the newer worker
+service-workers/service-worker/ServiceWorkerGlobalScope/service-worker-error-event.https.html:
+- Error handlers inside serviceworker should see the attributes of ErrorEvent
+service-workers/service-worker/ServiceWorkerGlobalScope/unregister.https.html:
+- Unregister controlling service worker
+- Unregister on activate event
+- Unregister on installing event
+- Unregister on script evaluation
+service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
+- Update a registration on ServiceWorkerGlobalScope
+service-workers/service-worker/about-blank-replacement.https.html:
+- Dynamic about:blank is controlled and is exposed to clients.matchAll().
+- Initial about:blank is controlled, exposed to clients.matchAll(), and final Client
+  is not controlled by a service worker.
+- Initial about:blank is controlled, exposed to clients.matchAll(), and matches final
+  Client.
+- Initial about:blank modified by parent is controlled, exposed to clients.matchAll(),
+  and matches final Client.
+- Nested about:srcdoc is controlled and is exposed to clients.matchAll().
+- Popup initial about:blank is controlled, exposed to clients.matchAll(), and matches
+  final Client.
+- Simple about:blank is controlled and is exposed to clients.matchAll().
+service-workers/service-worker/activation.https.html:
+- finishing a request triggers activation
+- finishing a request triggers unregister
+- loss of controllees triggers activation
+- skipWaiting bypasses no controllee requirement
+service-workers/service-worker/add-routes.https.html:
+- addRoutes() will not be executed outside of installing
+service-workers/service-worker/claim-affect-other-registration.https.html:
+- claim() should affect the originally controlling registration.
+service-workers/service-worker/claim-fetch.https.html:
+- fetch() should be intercepted after the client is claimed.
+service-workers/service-worker/claim-not-using-registration.https.html:
+- Test claim client when there's a longer-matched registration not already used by
+  the page
+- Test claim client which is not using registration
+service-workers/service-worker/claim-shared-worker-fetch.https.html:
+- fetch() in SharedWorker should be intercepted after the client is claimed.
+service-workers/service-worker/claim-using-registration.https.html:
+- Test for the waiting worker claims a client which is using the same registration
+- Test worker claims client which is using another registration
+service-workers/service-worker/claim-with-redirect.https.html:
+- Claim works after redirection to another origin
+service-workers/service-worker/claim-worker-fetch.https.html:
+- fetch() in Worker should be intercepted after the client is claimed.
+- fetch() in blob URL Worker should be intercepted after the client is claimed.
+- fetch() in nested Worker created from a blob URL Worker should be intercepted after
+  the client is claimed.
+- fetch() in nested Worker should be intercepted after the client is claimed.
+- fetch() in nested blob URL Worker created from a Worker should be intercepted after
+  the client is claimed.
+- fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
+  after the client is claimed.
+service-workers/service-worker/client-id.https.html:
+- Client.id returns the client's ID.
+service-workers/service-worker/client-navigate.https.html:
+- Frame location should not be accessible after cross-origin navigation
+- Frame location should not be accessible after redirect
+- Frame location should not update on failed about:blank navigation
+- Frame location should not update on failed mixed-content navigation
+- Frame location should update on successful navigation
+service-workers/service-worker/client-url-creation-url.https.html:
+- Fragment only navigation doesn't change creation URL
+- Going back over pushstate to creation URL
+- Going back over pushstate to other pushstate via back
+- Going back to new document changes creation URL
+- No navigation creation URL is same as window URL
+- Pushstate doesn't change creation URL
+- Query navigation changes creation URL
+- Reloading doesn't change creation URL
+- Reloading pushstate URL changes creation URL
+- Replacestate doesn't change creation URL
+service-workers/service-worker/client-url-of-blob-url-worker.https.html:
+- Client.url of a blob URL worker should be a blob URL.
+service-workers/service-worker/clients-get-client-types.https.html:
+- Test Clients.get() with window and worker clients
+service-workers/service-worker/clients-get-cross-origin.https.html:
+- Test Clients.get() cross origin
+service-workers/service-worker/clients-get-resultingClientId.https.html:
+- get(resultingClientId) for document sandboxed by CSP header
+- get(resultingClientId) for document sandboxed by CSP header with allow-same-origin
+- get(resultingClientId) for same-origin document
+- get(resultingClientId) on cross-origin redirect
+- global cleanup
+service-workers/service-worker/clients-get.https.html:
+- Test Clients.get()
+- Test successful Clients.get(FetchEvent.resultingClientId)
+- Test unsuccessful Clients.get(FetchEvent.resultingClientId)
+service-workers/service-worker/clients-matchall-blob-url-worker.https.html:
+- Test Clients.matchAll() with a blob URL worker client.
+- Test Clients.matchAll() with an uncontrolled blob URL worker client.
+service-workers/service-worker/clients-matchall-client-types.https.html:
+- Verify matchAll() with window client type
+- Verify matchAll() with {window, sharedworker, worker} client types
+service-workers/service-worker/clients-matchall-exact-controller.https.html:
+- Test Clients.matchAll() with exact controller
+service-workers/service-worker/clients-matchall-frozen.https.html:
+- Test Clients.matchAll()
+service-workers/service-worker/clients-matchall-include-uncontrolled.https.html:
+- Verify matchAll() with shared workers respect includeUncontrolled
+- Verify matchAll() with windows respect includeUncontrolled
+service-workers/service-worker/clients-matchall-on-evaluation.https.html:
+- Test Clients.matchAll() on script evaluation
+service-workers/service-worker/clients-matchall-order.https.html:
+- Clients.matchAll() returns controlled windows and frames in focus order.
+- Clients.matchAll() returns controlled windows in focus order.  Case 1.
+- Clients.matchAll() returns controlled windows in focus order.  Case 2.
+- Clients.matchAll() returns non-focused controlled windows in creation order.
+- Clients.matchAll() returns non-focused uncontrolled windows in creation order.
+- Clients.matchAll() returns uncontrolled windows in focus order.  Case 1.
+- Clients.matchAll() returns uncontrolled windows in focus order.  Case 2.
+service-workers/service-worker/clients-matchall.https.html:
+- Test Clients.matchAll()
+service-workers/service-worker/controlled-dedicatedworker-postMessage.https.html:
+- Verify dedicated worker does not get all messages if not setting event listener
+  early
+- Verify dedicated worker gets messages if setting event listener early
+service-workers/service-worker/controlled-iframe-postMessage.https.html:
+- Verify frame does get messages in order
+- Verify frame gets early messages if setting synchronously message event listener
+service-workers/service-worker/controller-on-disconnect.https.html:
+- controller is cleared on disconnected window
+service-workers/service-worker/controller-on-load.https.html:
+- controller is set for a controlled document
+service-workers/service-worker/controller-on-reload.https.html:
+- controller is set upon reload after registration
+service-workers/service-worker/credentials.https.html:
+- Imported script should have credentials
+- Main script should have credentials
+- Module with an imported statement should not have credentials
+- Script with service worker served as modules should not have credentials
+service-workers/service-worker/data-iframe.html:
+- 'navigator.serviceWorker is not available in a data: iframe'
+service-workers/service-worker/dedicated-worker-service-worker-interception.https.html:
+- Dynamic import should be intercepted by a service worker.
+- Static import should be intercepted by a service worker.
+- Top-level module loading should be intercepted by a service worker.
+service-workers/service-worker/detached-context.https.html:
+- accessing a ServiceWorker object from a removed iframe
+- accessing a ServiceWorkerRegistration from a removed iframe
+- accessing navigator.serviceWorker on a detached iframe
+service-workers/service-worker/embed-and-object-are-not-intercepted.https.html:
+- post-load navigation of EMBED elements should not be intercepted by service workers
+- post-load navigation of OBJECT elements should not be intercepted by service workers
+- requests for EMBED elements of an image should not be intercepted by service workers
+- requests for EMBED elements of embedded HTML content should not be intercepted by
+  service workers
+- requests for OBJECT elements of an image should not be intercepted by service workers
+- requests for OBJECT elements of embedded HTML content should not be intercepted
+  by service workers
+- restore global state
+service-workers/service-worker/extendable-event-async-waituntil.https.html:
+- Test calling waitUntil after the current extension expired in a different task fails
+- Test calling waitUntil asynchronously inside microtask of respondWith promise (event
+  is being dispatched).
+- Test calling waitUntil asynchronously inside microtask of respondWith promise (event
+  is not being dispatched).
+- Test calling waitUntil asynchronously with pending respondWith promise.
+- Test calling waitUntil at the end of an existing extension promise handler succeeds
+  (event is still being dispatched)
+- Test calling waitUntil in a different task an existing extension succeeds
+- Test calling waitUntil in a microtask at the end of an existing extension promise
+  handler succeeds (event is still being dispatched)
+- Test calling waitUntil in a microtask at the end of an existing extension promise
+  handler throws (event is not being dispatched)
+- Test calling waitUntil in a microtask at the end of the event handler without an
+  existing extension suceeds
+- Test calling waitUntil in a task at the end of the event handler without an existing
+  extension throws
+- Test calling waitUntil in an existing extension promise handler succeeds (event
+  is not being dispatched)
+- Test calling waitUntil on a script constructed ExtendableEvent throws exception
+- Test calling waitUntil synchronously inside microtask of respondWith promise (event
+  is being dispatched).
+- Test calling waitUntil synchronously inside microtask of respondWith promise (event
+  is not being dispatched).
+service-workers/service-worker/extendable-event-waituntil.https.html:
+- Test ExtendableEvent multiple waitUntil fulfilled.
+- Test ExtendableEvent waitUntil reject precedence.
+- Test activate event waitUntil fulfilled
+- Test activate event waitUntil rejected.
+- Test install event waitUntil fulfilled
+- Test install event waitUntil rejected
+service-workers/service-worker/fetch-audio-tainting.https.html:
+- Verify CORS XHR of fetch() in a Service Worker
+service-workers/service-worker/fetch-canvas-tainting-double-write.https.html:
+- canvas is tainted after writing both a non-opaque image and an opaque image from
+  the same URL
+service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
+- initialize global state
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "" should be TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+service-workers/service-worker/fetch-canvas-tainting-image.https.html:
+- initialize global state
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "" should be TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
+- initialize global state
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "" should be TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+service-workers/service-worker/fetch-canvas-tainting-video-with-range-request.https.html:
+- range responses from single origin (same-origin)
+- range responses from single origin with both opaque and non-opaque responses
+- synth and same-origin fallback range responses
+service-workers/service-worker/fetch-canvas-tainting-video.https.html:
+- initialize global state
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "" should be TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "" should be TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "anonymous" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "use-credentials" should be LOAD_ERROR
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "anonymous" should be NOT_TAINTED
+- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
+  with crossOrigin "use-credentials" should be NOT_TAINTED
+service-workers/service-worker/fetch-cors-xhr.https.html:
+- Verify CORS XHR of fetch() in a Service Worker
+service-workers/service-worker/fetch-csp.https.html:
+- Verify CSP control of fetch() in a Service Worker
+service-workers/service-worker/fetch-error.https.html:
+- Make sure a load that makes progress does not time out
+service-workers/service-worker/fetch-event-after-navigation-within-page.https.html:
+- Service Worker should respond to fetch event after the hash changes
+- Service Worker should respond to fetch event after the pushState
+service-workers/service-worker/fetch-event-async-respond-with.https.html:
+- global cleanup
+- respondWith in a microtask does not throw
+- respondWith in a task throws InvalidStateError
+service-workers/service-worker/fetch-event-handled.https.html:
+- FetchEvent.handled should reject when respondWith() is not called and the event
+  is canceled
+- FetchEvent.handled should reject when the promise provided to respondWith() is rejected
+- FetchEvent.handled should reject when the promise provided to respondWith() is resolved
+  to an invalid response
+- FetchEvent.handled should resolve when respondWith() is not called for a navigation
+  request
+- FetchEvent.handled should resolve when respondWith() is not called for a sub-resource
+  request
+- FetchEvent.handled should resolve when the promise provided to respondWith() is
+  resolved
+- global cleanup
+service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
+- FetchEvent#request.isReloadNavigation is true for manual reload.
+service-workers/service-worker/fetch-event-network-error.https.html:
+- Rejecting the fetch event or using preventDefault() causes a network error
+service-workers/service-worker/fetch-event-redirect.https.html:
+- Non-navigation, error redirect, cors mode Request redirected to cors with credentials
+  should fail interception and response should not be redirected
+- Non-navigation, error redirect, cors mode Request redirected to cors without credentials
+  should fail interception and response should not be redirected
+- Non-navigation, error redirect, cors mode Request redirected to no-cors with credentials
+  should fail interception and response should not be redirected
+- Non-navigation, error redirect, cors mode Request redirected to no-cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, cors mode Request redirected to same-origin with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, cors mode Request redirected to same-origin without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to cors with credentials
+  should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to no-cors with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to no-cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to same-origin with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, no-cors mode Request redirected to same-origin without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to cors with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to no-cors with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to no-cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to same-origin
+  with credentials should fail interception and response should not be redirected
+- Non-navigation, error redirect, same-origin mode Request redirected to same-origin
+  without credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to cors with credentials
+  should fail interception and response should be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to cors without credentials
+  should succeed interception and response should be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
+  should fail interception and response should not be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to no-cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to same-origin with
+  credentials should succeed interception and response should be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to same-origin without
+  credentials should succeed interception and response should be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to cors with credentials
+  should succeed interception and response should not be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to cors without
+  credentials should succeed interception and response should not be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to no-cors with
+  credentials should succeed interception and response should not be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to no-cors without
+  credentials should succeed interception and response should not be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to same-origin
+  with credentials should succeed interception and response should be redirected
+- Non-navigation, follow redirect, no-cors mode Request redirected to same-origin
+  without credentials should succeed interception and response should be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to cors with
+  credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to cors without
+  credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to no-cors
+  with credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to no-cors
+  without credentials should fail interception and response should not be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to same-origin
+  with credentials should succeed interception and response should be redirected
+- Non-navigation, follow redirect, same-origin mode Request redirected to same-origin
+  without credentials should succeed interception and response should be redirected
+- Non-navigation, manual redirect, cors mode Request redirected to cors with credentials
+  should succeed opaqueredirect interception and response should not be redirected
+- Non-navigation, manual redirect, cors mode Request redirected to cors without credentials
+  should succeed opaqueredirect interception and response should not be redirected
+- Non-navigation, manual redirect, cors mode Request redirected to no-cors with credentials
+  should succeed opaqueredirect interception and response should not be redirected
+- Non-navigation, manual redirect, cors mode Request redirected to no-cors without
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, cors mode Request redirected to same-origin with
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, cors mode Request redirected to same-origin without
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to cors with credentials
+  should succeed opaqueredirect interception and response should not be redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to cors without
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to no-cors with
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to no-cors without
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to same-origin
+  with credentials should succeed opaqueredirect interception and response should
+  not be redirected
+- Non-navigation, manual redirect, no-cors mode Request redirected to same-origin
+  without credentials should succeed opaqueredirect interception and response should
+  not be redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to cors with
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to cors without
+  credentials should succeed opaqueredirect interception and response should not be
+  redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to no-cors
+  with credentials should succeed opaqueredirect interception and response should
+  not be redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to no-cors
+  without credentials should succeed opaqueredirect interception and response should
+  not be redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
+  with credentials should succeed opaqueredirect interception and response should
+  not be redirected
+- Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
+  without credentials should succeed opaqueredirect interception and response should
+  not be redirected
+service-workers/service-worker/fetch-event-referrer-policy.https.html:
+- Service Worker responds to fetch event with the referrer policy
+- Service Worker should respond to fetch with the default referrer policy
+- Service Worker should respond to fetch with the referrer URL when a member of RequestInit
+  is present - Default Referrer
+service-workers/service-worker/fetch-event-respond-with-argument.https.html:
+- respondWith() takes either a Response or a promise that resolves with a Response.
+  Other values should raise a network error.
+service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
+- Respond by chunks with a Response being loaded
+service-workers/service-worker/fetch-event-respond-with-custom-response.https.html:
+- Navigation resource built from a blob
+- Navigation resource built from a buffer
+- Navigation resource built from a buffer-view
+- Navigation resource built from a string
+- Navigation resource built from search-params
+- Subresource built from a blob
+- Subresource built from a buffer
+- Subresource built from a buffer-view
+- Subresource built from a string
+- Subresource built from form-data
+- Subresource built from search-params
+service-workers/service-worker/fetch-event-respond-with-partial-stream.https.html:
+- respondWith() streams data to an intercepted fetch()
+service-workers/service-worker/fetch-event-respond-with-readable-stream-chunk.https.html:
+- Respond by chunks with a Response built from a ReadableStream
+service-workers/service-worker/fetch-event-respond-with-readable-stream.https.html:
+- Abort in the page should be observable in the service worker with empty stream
+- Abort in the page should be observable in the service worker with nonempty stream
+- Cancellation in the page should be observable in the service worker with empty stream
+- Cancellation in the page should be observable in the service worker with nonempty
+  stream
+- Main resource built from a ReadableStream
+- Main resource built from a ReadableStream - delayed
+- Main resource built from a ReadableStream - fetch stream
+- Subresource built from a ReadableStream
+- Subresource built from a ReadableStream - delayed
+- Subresource built from a ReadableStream - fetch stream
+service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html:
+- Response with a ReadableStream having non-Uint8Array chunks should be transferred
+  as errored
+service-workers/service-worker/fetch-event-respond-with-stops-propagation.https.html:
+- respondWith() invokes stopImmediatePropagation()
+service-workers/service-worker/fetch-event-throws-after-respond-with.https.html:
+- Fetch event handler throws after a successful respondWith()
+service-workers/service-worker/fetch-event-within-sw-manual.https.html:
+- Notification requests intercepted both from window and SW
+service-workers/service-worker/fetch-event-within-sw.https.html:
+- Service worker does not intercept fetch/cache requests within service worker
+- Service worker intercepts requests from window
+service-workers/service-worker/fetch-event.https.h2.html:
+- Network fallback for streaming upload.
+- Running clone() in the service worker does not prevent network fallback.
+- The streaming request body is readable in the service worker.
+- When the streaming request body is used, network fallback fails.
+service-workers/service-worker/fetch-event.https.html:
+- Fetch with POST with text on sw 421 response should not be retried.
+- FetchEvent#body is a ReadableStream
+- FetchEvent#body is a blob
+- FetchEvent#body is a blob and is passed to network fallback
+- FetchEvent#body is a none Uint8Array ReadableStream and is passed to a service worker
+- FetchEvent#body is a string
+- FetchEvent#body is a string and is passed to network fallback
+- FetchEvent#body is a string, cloned and passed to network fallback
+- FetchEvent#body is a string, used and passed to network fallback
+- FetchEvent#request.isHistoryNavigation is false (with history.go(0))
+- FetchEvent#request.isHistoryNavigation is false (with location.reload)
+- FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
+- FetchEvent#request.isHistoryNavigation is true (with history.go(-1))
+- FetchEvent#request.isHistoryNavigation is true (with history.go(-2))
+- FetchEvent#request.isHistoryNavigation is true (with history.go(1))
+- FetchEvent#request.isHistoryNavigation is true (with history.go(2))
+- FetchEvent#request.isReloadNavigation is true (POST + location.reload())
+- FetchEvent#request.isReloadNavigation is true (history.go(0))
+- FetchEvent#request.isReloadNavigation is true (location.reload())
+- FetchEvent#request.isReloadNavigation is true (with history traversal)
+- Multiple calls of respondWith must throw InvalidStateErrors
+- Service Worker event.respondWith must set the used flag
+- Service Worker fetches other file in fetch event
+- Service Worker headers in the request of a fetch event
+- Service Worker responds to fetch event using request fragment with string
+- Service Worker responds to fetch event with POST form
+- Service Worker responds to fetch event with an existing client id
+- Service Worker responds to fetch event with blob body
+- Service Worker responds to fetch event with null response body
+- Service Worker responds to fetch event with string
+- Service Worker responds to fetch event with the correct cache types
+- Service Worker responds to fetch event with the correct integrity_metadata
+- Service Worker responds to fetch event with the correct keepalive value
+- Service Worker responds to fetch event with the correct resulting client id
+- Service Worker responds to fetch event with the referrer URL
+- Service Worker should expose FetchEvent URL fragments.
+- Service Worker should intercept EventSource
+- XHR upload progress events for network fallback
+- XHR upload progress events for response coming from SW
+- restore global state
+service-workers/service-worker/fetch-frame-resource.https.html:
+- Basic type response could be loaded in the iframe.
+- Basic type response could be loaded in the new window.
+- CORS type response could be loaded in the iframe.
+- CORS type response could be loaded in the new window.
+service-workers/service-worker/fetch-header-visibility.https.html:
+- Visibility of defaulted headers during interception
+service-workers/service-worker/fetch-mixed-content-to-inscope.https.html:
+- Verify Mixed content of fetch() in a Service Worker
+service-workers/service-worker/fetch-mixed-content-to-outscope.https.html:
+- Verify Mixed content of fetch() in a Service Worker
+service-workers/service-worker/fetch-request-css-base-url.https.html:
+- base URL when service worker does respondWith(fetch(responseUrl)).
+- base URL when service worker does respondWith(new Response()).
+- cleanup global state
+service-workers/service-worker/fetch-request-css-cross-origin.https.html:
+- MIME checking of CSS resources fetched via service worker when Content-Type is not
+  set.
+- Same-origin policy for access to CSS resources fetched via service worker
+service-workers/service-worker/fetch-request-css-images.https.html:
+- Verify FetchEvent for css image (backgroundImage).
+- Verify FetchEvent for css image (shapeOutside).
+- Verify FetchEvent for css image-set (backgroundImage).
+- Verify FetchEvent for css image-set (shapeOutside).
+service-workers/service-worker/fetch-request-fallback.https.html:
+- The SW must intercept only the first request for XHR which is redirected to CORS-supported
+  other origin.
+- The SW must intercept only the first request for XHR which is redirected to CORS-unsupported
+  other origin.
+- The SW must intercept only the first request for image resource which is redirected
+  to CORS-supported other origin.
+- The SW must intercept only the first request for image resource which is redirected
+  to CORS-unsupported other origin.
+- The SW must intercept only the first request for image resource which is redirected
+  to other origin.
+- The SW must intercept only the first request for redirected image resource.
+- The SW must intercept only the first request of redirected XHR.
+- The SW must intercept the request for CORS-supported other origin image.
+- The SW must intercept the request for CORS-unsupported other origin image.
+- The SW must intercept the request for a main resource.
+- The SW must intercept the request for image.
+- The SW must intercept the request for other origin image.
+- The SW must intercept the request of CORS-supported other origin XHR.
+- The SW must intercept the request of CORS-unsupported other origin XHR.
+- The SW must intercept the request of same origin XHR.
+- restore global state
+service-workers/service-worker/fetch-request-no-freshness-headers.https.html:
+- The headers of FetchEvent shouldn't contain freshness headers.
+service-workers/service-worker/fetch-request-redirect.https.html:
+- Loading redirected image with Request.redirect=follow should succeed. - default
+- Redirected XHR with Request.redirect=error should fail. - default
+- Redirected XHR with Request.redirect=manual should fail. - default
+- Verify redirect mode of Fetch API and ServiceWorker FetchEvent.
+- Verify redirected of Response(Fetch API) and ServiceWorker FetchEvent.
+- Verify redirected of Response(Fetch API), Cache API and ServiceWorker FetchEvent.
+service-workers/service-worker/fetch-request-resources.https.html:
+- Verify FetchEvent for resources.
+service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
+- Verify SyncXHR on Worker is intercepted
+service-workers/service-worker/fetch-request-xhr-sync.https.html:
+- Verify SyncXHR is intercepted
+service-workers/service-worker/fetch-request-xhr.https.html:
+- FetchEvent#request.body contains XHR request data (blob)
+- FetchEvent#request.body contains XHR request data (string)
+- FetchEvent#request.method is set to XHR method
+- XHR to data URL
+- XHR using OPTIONS method
+- XHR with form data
+- XHR with mode/credentials set
+- event.request has the expected headers for cross-origin GET.
+- event.request has the expected headers for cross-origin POST.
+- event.request has the expected headers for same-origin GET.
+- event.request has the expected headers for same-origin POST.
+- restore global state
+service-workers/service-worker/fetch-response-taint.https.html:
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"include" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"omit" should succeed.
+- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"include" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"no-cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=*"
+  mode:"cors" credentials:"omit" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=*"
+  mode:"cors" credentials:"same-origin" should succeed.
+- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=https://web-platform.test:8443&ACACredentials=true"
+  mode:"cors" credentials:"include" should succeed.
+- initialize global state
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"cors" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"no-cors" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"cors" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"include" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"omit" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
+  mode:"same-origin" credentials:"same-origin" should fail.
+- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=*"
+  mode:"cors" credentials:"include" should fail.
+service-workers/service-worker/fetch-response-xhr.https.html:
+- Verify the response of FetchEvent using XMLHttpRequest
+service-workers/service-worker/fetch-waits-for-activate.https.html:
+- Navigation fetch events should wait for the activate event to complete.
+- Subresource fetch events should wait for the activate event to complete.
+service-workers/service-worker/getregistration.https.html:
+- getRegistration with a cross origin URL
+service-workers/service-worker/getregistrations.https.html:
+- Register then Unregister with controlled frame then getRegistrations
+service-workers/service-worker/http-to-https-redirect-and-register.https.html:
+- register on a non-secure page after redirect from an non-secure url
+service-workers/service-worker/immutable-prototype-serviceworker.https.html:
+- worker prototype chain should be immutable
+service-workers/service-worker/import-scripts-mime-types.https.html:
+- Importing script with bad MIME type text/plain
+- 'Importing script with no MIME type '
+service-workers/service-worker/import-scripts-redirect.https.html:
+- an imported script doesn't redirect initially, then redirects during the update
+  check and the body changes
+- an imported script redirects, and the body changes during the update check
+service-workers/service-worker/import-scripts-updated-flag.https.html:
+- import script not previously imported
+service-workers/service-worker/indexeddb.https.html:
+- Verify Indexed DB operation in a Service Worker
+- 'clean up: registration'
+service-workers/service-worker/intercepted-referrer.https.html:
+- document.referrer for a navigation intercepted by a Service Worker is unchanged
+  and matches the parent URL
+service-workers/service-worker/interface-requirements-sw.https.html:
+- Event constructors
+- xhr is not exposed
+service-workers/service-worker/invalid-blobtype.https.html:
+- Verify the response of FetchEvent using XMLHttpRequest
+service-workers/service-worker/invalid-header.https.html:
+- Verify the response of FetchEvent using XMLHttpRequest
+service-workers/service-worker/iso-latin1-header.https.html:
+- Verify the response of FetchEvent using XMLHttpRequest
+service-workers/service-worker/local-url-inherit-controller.https.html:
+- Data URL iframe should not intercept fetch().
+- Data URL worker should not inherit service worker controller.
+- Data URL worker should not intercept fetch().
+- Same-origin blob URL iframe should inherit service worker controller.
+- Same-origin blob URL iframe should intercept fetch().
+- Same-origin blob URL sharedworker should inherit service worker controller.
+- Same-origin blob URL sharedworker should intercept fetch().
+- Same-origin blob URL worker should inherit service worker controller.
+- Same-origin blob URL worker should intercept fetch().
+service-workers/service-worker/mime-sniffing.https.html:
+- The response from service worker should be correctly MIME siniffed.
+service-workers/service-worker/multi-globals/url-parsing.https.html:
+- getRegistration should use the relevant global of the object it was called on to
+  resolve the script URL
+- register should use the relevant global of the object it was called on to resolve
+  the script URL and the default scope URL
+- register should use the relevant global of the object it was called on to resolve
+  the script URL and the given scope URL
+service-workers/service-worker/multipart-image.https.html:
+- cross-origin multipart image via SW with approved CORS should be readable
+- cross-origin multipart image with no-cors via SW should not be readable
+- same-origin multipart image via SW should be readable
+service-workers/service-worker/multiple-register.https.html:
+- Subsequent registrations from a different iframe resolve to the different registration
+  object but they refer to the same registration and workers
+- Subsequent registrations resolve to the same registration object
+service-workers/service-worker/multiple-update.https.html:
+- Trigger multiple updates.
+service-workers/service-worker/navigate-window.https.html:
+- Clients.matchAll() should not show an old window after it navigates.
+- Clients.matchAll() should not show an old window as controlled after it navigates.
+service-workers/service-worker/navigation-headers.https.html:
+- GET Navigation, cross-site with fallback service worker sets correct origin and
+  referer headers.
+- GET Navigation, cross-site with fallback service worker sets correct sec-fetch headers.
+- GET Navigation, cross-site with navpreload service worker sets correct origin and
+  referer headers.
+- GET Navigation, cross-site with navpreload service worker sets correct sec-fetch
+  headers.
+- GET Navigation, cross-site with no service worker sets correct origin and referer
+  headers.
+- GET Navigation, cross-site with no service worker sets correct sec-fetch headers.
+- GET Navigation, cross-site with passthrough service worker sets correct origin and
+  referer headers.
+- GET Navigation, cross-site with passthrough service worker sets correct sec-fetch
+  headers.
+- GET Navigation, cross-site with service worker that changes the request sets correct
+  origin and referer headers.
+- GET Navigation, cross-site with service worker that changes the request sets correct
+  sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect and change-request service
+  worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect and fallback service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect and navpreload service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect and no service worker sets
+  correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect and passthrough service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  change-request service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  fallback service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  navpreload service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  no service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  passthrough service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with fallback service worker sets correct origin and
+  referer headers.
+- GET Navigation, same-origin with fallback service worker sets correct sec-fetch
+  headers.
+- GET Navigation, same-origin with navpreload service worker sets correct origin and
+  referer headers.
+- GET Navigation, same-origin with navpreload service worker sets correct sec-fetch
+  headers.
+- GET Navigation, same-origin with no service worker sets correct origin and referer
+  headers.
+- GET Navigation, same-origin with no service worker sets correct sec-fetch headers.
+- GET Navigation, same-origin with passthrough service worker sets correct origin
+  and referer headers.
+- GET Navigation, same-origin with passthrough service worker sets correct sec-fetch
+  headers.
+- GET Navigation, same-origin with same-site redirect and change-request service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with same-site redirect and fallback service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with same-site redirect and navpreload service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with same-site redirect and no service worker sets correct
+  sec-fetch headers.
+- GET Navigation, same-origin with same-site redirect and passthrough service worker
+  sets correct sec-fetch headers.
+- GET Navigation, same-origin with service worker that changes the request sets correct
+  origin and referer headers.
+- GET Navigation, same-origin with service worker that changes the request sets correct
+  sec-fetch headers.
+- GET Navigation, same-site with fallback service worker sets correct origin and referer
+  headers.
+- GET Navigation, same-site with fallback service worker sets correct sec-fetch headers.
+- GET Navigation, same-site with navpreload service worker sets correct origin and
+  referer headers.
+- GET Navigation, same-site with navpreload service worker sets correct sec-fetch
+  headers.
+- GET Navigation, same-site with no service worker sets correct origin and referer
+  headers.
+- GET Navigation, same-site with no service worker sets correct sec-fetch headers.
+- GET Navigation, same-site with passthrough service worker sets correct origin and
+  referer headers.
+- GET Navigation, same-site with passthrough service worker sets correct sec-fetch
+  headers.
+- GET Navigation, same-site with service worker that changes the request sets correct
+  origin and referer headers.
+- GET Navigation, same-site with service worker that changes the request sets correct
+  sec-fetch headers.
+- POST Navigation, cross-site with fallback service worker sets correct origin and
+  referer headers.
+- POST Navigation, cross-site with fallback service worker sets correct sec-fetch
+  headers.
+- POST Navigation, cross-site with no service worker sets correct origin and referer
+  headers.
+- POST Navigation, cross-site with no service worker sets correct sec-fetch headers.
+- POST Navigation, cross-site with passthrough service worker sets correct origin
+  and referer headers.
+- POST Navigation, cross-site with passthrough service worker sets correct sec-fetch
+  headers.
+- POST Navigation, cross-site with service worker that changes the request sets correct
+  origin and referer headers.
+- POST Navigation, cross-site with service worker that changes the request sets correct
+  sec-fetch headers.
+- POST Navigation, same-origin with cross-site redirect and change-request service
+  worker sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect and fallback service worker
+  sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect and no service worker sets
+  correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect and passthrough service worker
+  sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  change-request service worker sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  fallback service worker sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  no service worker sets correct origin and referer headers.
+- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
+  passthrough service worker sets correct origin and referer headers.
+- POST Navigation, same-origin with fallback service worker sets correct origin and
+  referer headers.
+- POST Navigation, same-origin with fallback service worker sets correct sec-fetch
+  headers.
+- POST Navigation, same-origin with no service worker sets correct origin and referer
+  headers.
+- POST Navigation, same-origin with no service worker sets correct sec-fetch headers.
+- POST Navigation, same-origin with passthrough service worker sets correct origin
+  and referer headers.
+- POST Navigation, same-origin with passthrough service worker sets correct sec-fetch
+  headers.
+- POST Navigation, same-origin with same-site redirect and change-request service
+  worker sets correct origin and referer headers.
+- POST Navigation, same-origin with same-site redirect and fallback service worker
+  sets correct origin and referer headers.
+- POST Navigation, same-origin with same-site redirect and no service worker sets
+  correct origin and referer headers.
+- POST Navigation, same-origin with same-site redirect and passthrough service worker
+  sets correct origin and referer headers.
+- POST Navigation, same-origin with service worker that changes the request sets correct
+  origin and referer headers.
+- POST Navigation, same-origin with service worker that changes the request sets correct
+  sec-fetch headers.
+- POST Navigation, same-site with fallback service worker sets correct origin and
+  referer headers.
+- POST Navigation, same-site with fallback service worker sets correct sec-fetch headers.
+- POST Navigation, same-site with no service worker sets correct origin and referer
+  headers.
+- POST Navigation, same-site with no service worker sets correct sec-fetch headers.
+- POST Navigation, same-site with passthrough service worker sets correct origin and
+  referer headers.
+- POST Navigation, same-site with passthrough service worker sets correct sec-fetch
+  headers.
+- POST Navigation, same-site with service worker that changes the request sets correct
+  origin and referer headers.
+- POST Navigation, same-site with service worker that changes the request sets correct
+  sec-fetch headers.
+service-workers/service-worker/navigation-preload/broken-chunked-encoding.https.html:
+- FetchEvent#preloadResponse resolves even if the body is sent with broken chunked
+  encoding with some delays
+- FetchEvent#preloadResponse resolves even if the body is sent with broken chunked
+  encoding.
+service-workers/service-worker/navigation-preload/empty-preload-response-body.https.html:
+- Navigation Preload empty response body.
+service-workers/service-worker/navigation-preload/get-state.https.html:
+- getState
+- getState from a worker
+- no active worker
+service-workers/service-worker/navigation-preload/navigationPreload.https.html:
+- The navigationPreload attribute must return service worker registration's NavigationPreloadManager
+  object.
+service-workers/service-worker/navigation-preload/redirect.https.html:
+- Navigation Preload no-location redirect response with body.
+- Navigation Preload no-location redirect response.
+- Navigation Preload redirect response.
+- Navigation Preload redirect to the same scope.
+service-workers/service-worker/navigation-preload/request-headers.https.html:
+- Navigation Preload request headers.
+service-workers/service-worker/navigation-preload/resource-timing.https.html:
+- Navigation Preload Resource Timing.
+service-workers/service-worker/navigation-preload/samesite-cookies.https.html:
+- Navigation Preload for same site cookies (Lax).
+- Navigation Preload for same site cookies (None).
+- Navigation Preload for same site cookies (Strict).
+- Set up a service worker for navigation preload tests.
+service-workers/service-worker/navigation-redirect-resolution.https.html:
+- test relative opaqueredirect
+- test relative opaqueredirect with CacheStorage
+- test relative opaqueredirect with clone
+service-workers/service-worker/navigation-redirect-to-http.https.html:
+- Verify Service Worker can receive HTTP opaqueredirect response.
+service-workers/service-worker/navigation-redirect.https.html:
+- No location redirect response via Cache.
+- No location redirect response via Cache.
+- No location redirect response.
+- No location redirect response.
+- Normal redirect to other-origin scope.
+- Normal redirect to other-origin scope.
+- Normal redirect to same-origin scope with a hash fragment.
+- Normal redirect to same-origin scope with a hash fragment.
+- Normal redirect to same-origin scope with different hash fragments.
+- Normal redirect to same-origin scope with different hash fragments.
+- Normal redirect to same-origin scope.
+- Normal redirect to same-origin scope.
+- Redirect to other-origin in-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to other-origin in-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to other-origin in-scope with opaque redirect response.
+- Redirect to other-origin in-scope with opaque redirect response.
+- Redirect to other-origin out-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to other-origin out-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to other-origin out-scope with opaque redirect response.
+- Redirect to other-origin out-scope with opaque redirect response.
+- Redirect to same-origin other-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin other-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin other-scope with opaque redirect response.
+- Redirect to same-origin other-scope with opaque redirect response.
+- Redirect to same-origin out-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin out-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin out-scope with opaque redirect response.
+- Redirect to same-origin out-scope with opaque redirect response.
+- Redirect to same-origin same-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin same-scope with opaque redirect response which is passed
+  through Cache.
+- Redirect to same-origin same-scope with opaque redirect response.
+- Redirect to same-origin same-scope with opaque redirect response.
+- SW-fallbacked redirect to other-origin and back to same-origin.
+- SW-fallbacked redirect to other-origin and back to same-origin.
+- SW-fallbacked redirect to other-origin in-scope.
+- SW-fallbacked redirect to other-origin in-scope.
+- SW-fallbacked redirect to other-origin out-scope.
+- SW-fallbacked redirect to other-origin out-scope.
+- SW-fallbacked redirect to same-origin other-scope.
+- SW-fallbacked redirect to same-origin other-scope.
+- SW-fallbacked redirect to same-origin out-scope.
+- SW-fallbacked redirect to same-origin out-scope.
+- SW-fallbacked redirect to same-origin same-scope with a hash fragment.
+- SW-fallbacked redirect to same-origin same-scope with a hash fragment.
+- SW-fallbacked redirect to same-origin same-scope with different hash fragments.
+- SW-fallbacked redirect to same-origin same-scope with different hash fragments.
+- SW-fallbacked redirect to same-origin same-scope.
+- SW-fallbacked redirect to same-origin same-scope.
+- SW-fetched redirect to other-origin in-scope.
+- SW-fetched redirect to other-origin in-scope.
+- SW-fetched redirect to other-origin out-scope.
+- SW-fetched redirect to other-origin out-scope.
+- SW-fetched redirect to same-origin other-scope.
+- SW-fetched redirect to same-origin other-scope.
+- SW-fetched redirect to same-origin out-scope.
+- SW-fetched redirect to same-origin out-scope.
+- SW-fetched redirect to same-origin same-scope.
+- SW-fetched redirect to same-origin same-scope.
+- SW-fetched response from different URL, same-origin same-scope.
+- SW-fetched response from different URL, same-origin same-scope.
+- SW-generated redirect to other-origin in-scope.
+- SW-generated redirect to other-origin in-scope.
+- SW-generated redirect to other-origin out-scope.
+- SW-generated redirect to other-origin out-scope.
+- SW-generated redirect to same-origin other-scope.
+- SW-generated redirect to same-origin other-scope.
+- SW-generated redirect to same-origin out-scope with a hash fragment.
+- SW-generated redirect to same-origin out-scope with a hash fragment.
+- SW-generated redirect to same-origin out-scope with different hash fragments.
+- SW-generated redirect to same-origin out-scope with different hash fragments.
+- SW-generated redirect to same-origin out-scope.
+- SW-generated redirect to same-origin out-scope.
+- SW-generated redirect to same-origin same-scope.
+- SW-generated redirect to same-origin same-scope.
+- clean up global state
+- clean up global state
+service-workers/service-worker/navigation-sets-cookie.https.html:
+- Setup service workers
+service-workers/service-worker/navigation-timing-extended.https.html:
+- Service worker controlled navigation timing
+service-workers/service-worker/navigation-timing-sizes.https.html:
+- Body sizes in a pass-through with non html content
+- Body sizes in a regular pass-through
+- Body sizes in a regular pass-through with gzip
+service-workers/service-worker/navigation-timing.https.html:
+- Service worker controlled navigation timing
+- Service worker controlled navigation timing network fallback
+- Service worker controlled navigation timing redirect
+service-workers/service-worker/nested-blob-url-workers.https.html:
+- Nested blob URL worker created from a worker should be intercepted by a service
+  worker.
+- Nested blob URL workers should be intercepted by a service worker.
+- Nested worker created from a blob URL worker should be intercepted by a service
+  worker.
+service-workers/service-worker/next-hop-protocol.https.html:
+- nextHopProtocol reports H1 correctly when routed via a service worker.
+- nextHopProtocol reports H2 correctly when routed via a service worker.
+service-workers/service-worker/oninstall-script-error.https.html:
+- install handler throws an error in the waitUntil
+service-workers/service-worker/opaque-response-preloaded.https.html:
+- Opaque responses should not be reused for XHRs, done case
+- Opaque responses should not be reused for XHRs, loading case
+service-workers/service-worker/opaque-script.https.html:
+- Verify large cross-origin cache_storage scripts are opaque.
+- Verify small cross-origin cache_storage scripts are opaque.
+service-workers/service-worker/performance-timeline.https.html:
+- Resource Timing
+- empty service worker fetch event included in performance timings
+service-workers/service-worker/postmessage-blob-url.https.html:
+- postMessage Blob URL to a ServiceWorker
+service-workers/service-worker/postmessage-from-waiting-serviceworker.https.html:
+- Client.postMessage() from waiting serviceworker.
+service-workers/service-worker/postmessage-msgport-to-client.https.html:
+- postMessage MessagePorts from ServiceWorker to Client
+service-workers/service-worker/postmessage-to-client-message-queue.https.html:
+- Messages from ServiceWorker to Client only received after DOMContentLoaded event.
+- Messages from ServiceWorker to Client only received after calling startMessages().
+- Messages from ServiceWorker to Client only received after setting onmessage.
+- Microtasks run before dispatching messages after calling startMessages().
+- Microtasks run before dispatching messages after setting onmessage.
+service-workers/service-worker/postmessage-to-client.https.html:
+- postMessage from ServiceWorker to Client.
+service-workers/service-worker/postmessage.https.html:
+- postMessage a transferable ArrayBuffer between ServiceWorker and Client
+- postMessage a transferable ArrayBuffer between ServiceWorker and Client over MessagePort
+- postMessage to a ServiceWorker (and back via MessagePort)
+- postMessage to a redundant worker
+- postMessage with dictionary a transferable ArrayBuffer between ServiceWorker and
+  Client
+service-workers/service-worker/redirected-response.https.html:
+- Fetch should follow the redirect response 20 times
+- Fetch should not follow the redirect response 21 times.
+- The URL for the service worker redirected request should be propagated to response.
+- initialize global state (service worker registration and caches)
+- 'mode: "error", generated redirect response'
+- 'mode: "error", generated relative redirect response'
+- 'mode: "error", manually-generated redirect response'
+- 'mode: "error", mode change: "follow"'
+- 'mode: "error", mode change: "manual"'
+- 'mode: "error", non-intercepted request'
+- 'mode: "follow", generated redirect response'
+- 'mode: "follow", generated relative redirect response'
+- 'mode: "follow", manually-generated redirect response'
+- 'mode: "follow", mode change: "manual"'
+- 'mode: "follow", no mode change'
+- 'mode: "follow", no mode change, no server redirect'
+- 'mode: "follow", non-intercepted request'
+- 'mode: "follow", non-intercepted request, no server redirect'
+- 'mode: "manual", generated redirect response'
+- 'mode: "manual", generated relative redirect response'
+- 'mode: "manual", manually-generated redirect response'
+- 'mode: "manual", mode change: "follow"'
+- 'mode: "manual", no mode change'
+- 'mode: "manual", non-intercepted request'
+service-workers/service-worker/referer.https.html:
+- Verify the referer
+service-workers/service-worker/referrer-policy-header.https.html:
+- Referrer for a main resource redirected with a module script with referrer-policy
+  (origin) should only have origin.
+- Referrer for a main resource redirected with referrer-policy (origin) should only
+  have origin.
+- Referrer for fetch requests initiated from a service worker with referrer-policy
+  (origin) should only have origin.
+service-workers/service-worker/referrer-toplevel-script-fetch.https.html:
+- Referrer of the module script fetch should be the document URL
+- Referrer of the top-level script fetch should be the document URL
+service-workers/service-worker/register-default-scope.https.html:
+- null scope
+service-workers/service-worker/register-same-scope-different-script-url.https.html:
+- Register different scripts concurrently
+- Register same-scope new script url effect on controller
+- Register then register new script URL
+- Register then register new script URL that 404s
+- Register then register new script that does not install
+service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
+- register worker that calls waitUntil with a promise that never resolves in oninstall
+service-workers/service-worker/registration-basic.https.html:
+- Registering scope with fragment
+service-workers/service-worker/registration-end-to-end.https.html:
+- 'Registration: end-to-end'
+service-workers/service-worker/registration-events.https.html:
+- 'Registration: events'
+service-workers/service-worker/registration-iframe.https.html:
+- A scope url should start with the given script url
+- register method should use the "relevant global object" to parse its scriptURL and
+  scope - error case
+service-workers/service-worker/registration-mime-types.https.html:
+- Registering script that imports script with bad MIME type
+- Registering script that imports script with no MIME type
+- Registering script with bad MIME type
+- Registering script with no MIME type
+service-workers/service-worker/registration-schedule-job.https.html:
+- different type
+- different updateViaCache
+service-workers/service-worker/registration-scope-module-static-import.https.html:
+- imported-module-script.js works when used as top-level
+- static imports redirecting to outside path restriction should be allowed
+- static imports to outside path restriction should be allowed
+service-workers/service-worker/registration-scope.https.html:
+- 'Scope URL is same-origin filesystem: URL'
+- 'Scope URL scheme is a data: URL'
+- 'Scope URL scheme is an ftp: URL'
+- Scope including URL-encoded backslash
+- Scope including URL-encoded slash
+service-workers/service-worker/registration-script-module.https.html:
+- Registering invalid chunked encoding script
+- Registering invalid chunked encoding script with flush
+- Registering non-existent script
+- Registering script including parse error
+- 'Registering script including uncaught exception: module'
+- 'Registering script including undefined error: module'
+- Registering script with module instantiation error
+- Registering script with module instantiation error and top-level await
+- Registering script with top-level await
+service-workers/service-worker/registration-script-url.https.html:
+- Script URL including URL-encoded backslash
+- Script URL including URL-encoded slash
+- Script URL including uppercase URL-encoded backslash
+- Script URL including uppercase URL-encoded slash
+- Script URL is a data URL
+- Script URL is a data URL and scope URL is not relative
+service-workers/service-worker/registration-script.https.html:
+- Registering invalid chunked encoding script
+- Registering invalid chunked encoding script with flush
+- Registering non-existent script
+- Registering script importing malformed script
+- Registering script importing non-existent script
+- Registering script including parse error
+- 'Registering script including uncaught exception: classic'
+- 'Registering script including undefined error: classic'
+service-workers/service-worker/registration-security-error.https.html:
+- Registering redirected script
+- Registering same scope as the script directory without the last slash
+- Registering scope outside domain
+- Registering script outside domain
+- Registration scope outside the script directory
+- Scope including parent-reference and not under the script directory
+- Script URL including consecutive slashes
+- 'Script URL is same-origin filesystem: URL'
+service-workers/service-worker/registration-service-worker-attributes.https.html:
+- installing/waiting/active after registration
+service-workers/service-worker/registration-updateviacache.https.html:
+- access-updateViaCache-after-unregister-all
+- access-updateViaCache-after-unregister-imports
+- access-updateViaCache-after-unregister-none
+- access-updateViaCache-after-unregister-undefined
+- register-with-updateViaCache-all
+- register-with-updateViaCache-all-then-all
+- register-with-updateViaCache-all-then-imports
+- register-with-updateViaCache-all-then-none
+- register-with-updateViaCache-all-then-undefined
+- register-with-updateViaCache-imports
+- register-with-updateViaCache-imports-then-all
+- register-with-updateViaCache-imports-then-imports
+- register-with-updateViaCache-imports-then-none
+- register-with-updateViaCache-imports-then-undefined
+- register-with-updateViaCache-none
+- register-with-updateViaCache-none-then-all
+- register-with-updateViaCache-none-then-imports
+- register-with-updateViaCache-none-then-none
+- register-with-updateViaCache-none-then-undefined
+- register-with-updateViaCache-undefined
+- register-with-updateViaCache-undefined-then-all
+- register-with-updateViaCache-undefined-then-imports
+- register-with-updateViaCache-undefined-then-none
+- register-with-updateViaCache-undefined-then-undefined
+- updateViaCache is not updated if register() rejects
+service-workers/service-worker/rejections.https.html:
+- Rejections are DOMExceptions
+service-workers/service-worker/request-end-to-end.https.html:
+- Test FetchEvent.request passed to onfetch
+service-workers/service-worker/resource-timing-bodySize.https.html:
+- 'Response body size: constructed, cors, TAO fail'
+- 'Response body size: constructed, cors, TAO pass'
+- 'Response body size: constructed, no-cors, TAO fail'
+- 'Response body size: constructed, no-cors, TAO pass'
+- 'Response body size: constructed, same-origin, TAO fail'
+- 'Response body size: constructed, same-origin, TAO pass'
+- 'Response body size: forward, cors, TAO fail'
+- 'Response body size: forward, cors, TAO pass'
+- 'Response body size: forward, no-cors, TAO fail'
+- 'Response body size: forward, no-cors, TAO pass'
+- 'Response body size: forward, same-origin, TAO fail'
+- 'Response body size: forward, same-origin, TAO pass'
+- 'Response body size: passthrough, cors, TAO fail'
+- 'Response body size: passthrough, cors, TAO pass'
+- 'Response body size: passthrough, no-cors, TAO fail'
+- 'Response body size: passthrough, no-cors, TAO pass'
+- 'Response body size: passthrough, same-origin, TAO fail'
+- 'Response body size: passthrough, same-origin, TAO pass'
+- 'Response body size: stream, cors, TAO fail'
+- 'Response body size: stream, cors, TAO pass'
+- 'Response body size: stream, no-cors, TAO fail'
+- 'Response body size: stream, no-cors, TAO pass'
+- 'Response body size: stream, same-origin, TAO fail'
+- 'Response body size: stream, same-origin, TAO pass'
+service-workers/service-worker/resource-timing-cross-origin.https.html:
+- Test that timing allow check fails when service worker changes origin from same
+  to cross origin (cors).
+- Test that timing allow check fails when service worker changes origin from same
+  to cross origin (no-cors).
+service-workers/service-worker/resource-timing-fetch-variants.https.html:
+- Connection info from within a service-worker should not be exposed to client ResourceTiming
+- Delay from within service-worker (after internal fetching) should be accessible
+  through `responseStart`
+- Delay from within service-worker (before internal fetching) should be measured before
+  responseStart in the client ResourceTiming entry
+- Redirects done from within a service-worker should not be exposed to client ResourceTiming
+- requestStart should never be before fetchStart
+service-workers/service-worker/resource-timing.sub.https.html:
+- Controlled resource loads
+- Non-controlled resource loads
+service-workers/service-worker/respond-with-body-accessed-response.https.html:
+- 'test: type=basic'
+- 'test: type=basic&clone=1'
+- 'test: type=basic&clone=1&passThroughCache=true'
+- 'test: type=basic&clone=2'
+- 'test: type=basic&clone=2&passThroughCache=true'
+- 'test: type=basic&passThroughCache=true'
+- 'test: type=default'
+- 'test: type=default&clone=1'
+- 'test: type=default&clone=1&passThroughCache=true'
+- 'test: type=default&clone=2'
+- 'test: type=default&clone=2&passThroughCache=true'
+- 'test: type=default&passThroughCache=true'
+- 'test: type=opaque'
+- 'test: type=opaque&clone=1'
+- 'test: type=opaque&clone=1&passThroughCache=true'
+- 'test: type=opaque&clone=2'
+- 'test: type=opaque&clone=2&passThroughCache=true'
+- 'test: type=opaque&passThroughCache=true'
+service-workers/service-worker/same-site-cookies.https.html:
+- Cleanup service workers
+- Setup service workers
+- cross-site, form post with change-request
+- cross-site, form post with fallback
+- cross-site, form post with no service worker
+- cross-site, form post with passthrough
+- cross-site, window.open with change-request
+- cross-site, window.open with fallback
+- cross-site, window.open with navpreload
+- cross-site, window.open with no service worker
+- cross-site, window.open with passthrough
+- same-origin, form post with change-request
+- same-origin, form post with change-request and cross-site redirect
+- same-origin, form post with change-request and same-site redirect
+- same-origin, form post with change-request, cross-site redirect, and same-origin
+  redirect
+- same-origin, form post with fallback
+- same-origin, form post with fallback and cross-site redirect
+- same-origin, form post with fallback and same-site redirect
+- same-origin, form post with fallback, cross-site redirect, and same-origin redirect
+- same-origin, form post with no service worker
+- same-origin, form post with no service worker and cross-site redirect
+- same-origin, form post with no service worker and same-site redirect
+- same-origin, form post with no service worker, cross-site redirect, and same-origin
+  redirect
+- same-origin, form post with passthrough
+- same-origin, form post with passthrough and cross-site redirect
+- same-origin, form post with passthrough and same-site redirect
+- same-origin, form post with passthrough, cross-site redirect, and same-origin redirect
+- same-origin, nested set location with cross-site middle frame and change-request
+  service worker
+- same-origin, nested set location with cross-site middle frame and fallback service
+  worker
+- same-origin, nested set location with cross-site middle frame and navpreload service
+  worker
+- same-origin, nested set location with cross-site middle frame and no service worker
+- same-origin, nested set location with cross-site middle frame and passthrough service
+  worker
+- same-origin, nested window.open with cross-site middle frame and change-request
+  service worker
+- same-origin, nested window.open with cross-site middle frame and fallback service
+  worker
+- same-origin, nested window.open with cross-site middle frame and navpreload service
+  worker
+- same-origin, nested window.open with cross-site middle frame and no service worker
+- same-origin, nested window.open with cross-site middle frame and passthrough service
+  worker
+- same-origin, window.open with change-request
+- same-origin, window.open with change-request and cross-site redirect
+- same-origin, window.open with change-request and same-site redirect
+- same-origin, window.open with change-request, cross-site redirect, and same-origin
+  redirect
+- same-origin, window.open with fallback
+- same-origin, window.open with fallback and cross-site redirect
+- same-origin, window.open with fallback and same-site redirect
+- same-origin, window.open with fallback, cross-site redirect, and same-origin redirect
+- same-origin, window.open with navpreload
+- same-origin, window.open with navpreload and cross-site redirect
+- same-origin, window.open with navpreload and same-site redirect
+- same-origin, window.open with navpreload, cross-site redirect, and same-origin redirect
+- same-origin, window.open with no service worker
+- same-origin, window.open with no service worker and cross-site redirect
+- same-origin, window.open with no service worker and same-site redirect
+- same-origin, window.open with no service worker, cross-site redirect, and same-origin
+  redirect
+- same-origin, window.open with passthrough
+- same-origin, window.open with passthrough and cross-site redirect
+- same-origin, window.open with passthrough and same-site redirect
+- same-origin, window.open with passthrough, cross-site redirect, and same-origin
+  redirect
+- same-site, form post with change-request
+- same-site, form post with fallback
+- same-site, form post with no service worker
+- same-site, form post with passthrough
+- same-site, window.open with change-request
+- same-site, window.open with fallback
+- same-site, window.open with navpreload
+- same-site, window.open with no service worker
+- same-site, window.open with passthrough
+service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
+- Fetch request from a normal iframe
+- Fetch request from a worker in a normal iframe
+- Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
+  and allow-same-origin flag
+- Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
+  flag
+- Fetch request from iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin
+  flag
+- Fetch request from iframe sandboxed by CSP HTTP header with allow-scripts flag
+- Fetch request from iframe sandboxed by an attribute with allow-scripts and allow-same-origin
+  flag
+- Fetch request from iframe sandboxed by an attribute with allow-scripts flag
+- Prepare a normal iframe.
+- Prepare an iframe sandboxed by <iframe sandbox="allow-scripts allow-same-origin">.
+- Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
+- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
+- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts.
+- Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
+  and allow-same-origin flag
+- Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
+  flag
+- Request for an iframe in the iframe sandboxed by an attribute with allow-scripts
+  and allow-same-origin flag
+- Request for an iframe in the iframe sandboxed by an attribute with allow-scripts
+  flag
+- Request for an iframe in the normal iframe
+- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
+  the iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin
+  flag
+- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
+  the iframe sandboxed by CSP HTTP header with allow-scripts flag
+- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
+  the iframe sandboxed by an attribute with allow-scripts flag
+- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
+  the iframe sandboxed by attribute with allow-scripts and allow-same-origin flag
+- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
+  the normal iframe
+- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
+  by CSP HTTP header with allow-scripts and allow-same-origin flag
+- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
+  by CSP HTTP header with allow-scripts flag
+- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
+  by an attribute with allow-scripts flag
+- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
+  by attribute with allow-scripts and allow-same-origin flag
+- Request for an sandboxed iframe with allow-scripts flag in the normal iframe
+service-workers/service-worker/sandboxed-iframe-navigator-serviceworker.https.html:
+- Accessing navigator.serviceWorker in sandboxed iframe should throw.
+- Switching iframe sandbox attribute while loading the iframe
+service-workers/service-worker/secure-context.https.html:
+- Ensure service worker is bypassed in insecure contexts
+service-workers/service-worker/service-worker-csp-default.https.html:
+- eval test for default-src
+- importScripts test for default-src
+service-workers/service-worker/service-worker-csp-script.https.html:
+- Fetch test for script-src
+- Redirected fetch test for script-src
+- eval test for script-src
+- importScripts test for script-src
+service-workers/service-worker/serviceworker-message-event-historical.https.html:
+- Test MessageEvent supplants ServiceWorkerMessageEvent.
+service-workers/service-worker/serviceworkerobject-scripturl.https.html:
+- 'Verify the scriptURL property: with-fragment'
+service-workers/service-worker/skip-waiting-installed.https.html:
+- Test skipWaiting when a installed worker is waiting
+service-workers/service-worker/skip-waiting-using-registration.https.html:
+- Test skipWaiting while a client is using the registration
+service-workers/service-worker/skip-waiting.https.html:
+- Test skipWaiting with both active and waiting workers
+service-workers/service-worker/srcdoc-iframe.https.html:
+- controller.postMessage should work in srcdoc iframe
+- getRegistration should work in srcdoc iframe
+- nested same origin sandboxed srcdoc frame should inherit controller
+- should be able to serve resource from controller for srcdoc frame
+service-workers/service-worker/static-router-cross-origin-navigation.https.html:
+- Cross-origin navigation with static router cache rule
+service-workers/service-worker/static-router-fetch-event.https.html:
+- Main resource matched the rule with fetch-event source
+- Subresource load matched the rule fetch-event source
+service-workers/service-worker/static-router-invalid-rules.https.html:
+- addRoutes should raise for forbidden request method.
+- addRoutes should raise for invalid ByteString request method.
+- addRoutes should raise for invalid HTTP request method.
+- addRoutes should raise if not condition exceeds the depth limit
+- addRoutes should raise if or condition exceeds the depth limit
+- addRoutes should raise if the conditon does not exist in the rule
+- addRoutes should raise if the number of router rules exceeds the length limit
+- addRoutes should raise if the source does not exiswt in the rule
+service-workers/service-worker/static-router-main-resource.https.html:
+- Main resource fallback to the network when there is no cache entry
+- Main resource load matched with the cache source
+- Main resource load matched with the cache source, with specifying the cache name
+- Main resource load matched with the condition
+- Main resource load matched with the ignore case condition
+- Main resource load matched without the ignore case condition
+- Main resource load not matched with the condition
+- Main resource load should match the condition without not
+- Main resource load should not match the condition with not
+service-workers/service-worker/static-router-multiple-router-registrations.https.html:
+- Main reosurce load matched with the service worker having multiple rules
+- Resource load matched with the rule registered in the imported service worker
+service-workers/service-worker/static-router-mutiple-conditions.https.html:
+- Multiple conditions including requestDestination work with `and` operation
+- Multiple conditions work with `and` operation
+service-workers/service-worker/static-router-no-fetch-handler.https.html:
+- The router rule is evaluated without fetch handlers in service worker
+- addRoutes should raise if the fetch-event source is used without onfetch
+- addRoutes should raise if the race-network-and-fetch-handler source is used without
+  onfetch
+service-workers/service-worker/static-router-race-network-and-fetch-handler.https.html:
+- Main resource load matched the rule with race-network-and-fetch-handler source,
+  and the fetch handler response is faster than the server response
+- Main resource load matched the rule with race-network-and-fetch-handler source,
+  and the fetch handler response is faster than the server response while fetch()
+  is triggered inside the fetch handler
+- Main resource load matched the rule with race-network-and-fetch-handler source,
+  and the server reseponse is faster than the fetch handler
+- Main resource load matched the rule with race-network-and-fetch-handler source,
+  and the server reseponse is faster than the fetch handler while fetch() is triggered
+  inside the fetch handler
+- Subresource load matched the rule with race-network-and-fetch-handler source, and
+  the fetch handler response is faster than the server response
+- Subresource load matched the rule with race-network-and-fetch-handler source, and
+  the server reseponse is faster than the fetch handler
+- Subresource load matched the rule with race-network-and-fetch-handler source, and
+  the server reseponse is faster than the fetch handler, but not found
+- Subresource load matched the rule with race-network-and-fetch-handler source, and
+  the server reseponse with 204 response is faster than the fetch handler
+service-workers/service-worker/static-router-request-destination.https.html:
+- Subreosurce load matched with the requestMethod script condition
+- Subreosurce load not matched with the requestMethod script condition
+service-workers/service-worker/static-router-request-method.https.html:
+- Subresource load matched with the requestMethod DELETE condition
+- Subresource load matched with the requestMethod GET condition
+- Subresource load matched with the requestMethod POST condition
+- Subresource load matched with the requestMethod PUT condition
+service-workers/service-worker/static-router-subresource.https.html:
+- Subresource cross origin load matched with URLPattern condition via constructed
+  object
+- Subresource cross origin load not matched with URLPattern condition via URLPatternCompatible
+- Subresource cross origin load not matched with URLPattern condition via string
+- Subresource load did not match with the cache and fallback to the network
+- Subresource load matched with RequestMode condition
+- Subresource load matched with URLPattern condition
+- Subresource load matched with URLPattern condition via URLPatternCompatible
+- Subresource load matched with URLPattern condition via string
+- Subresource load matched with ignoreCase URLPattern condition
+- Subresource load matched with the cache source rule
+- Subresource load matched with the cache source, with specifying the cache name
+- Subresource load matched with the nested `or` condition
+- Subresource load matched with the next `or` condition
+- Subresource load matched without ignoreCase URLPattern condition
+- Subresource load not matched with URLPattern condition
+- Subresource load not matched with `or` condition
+- Subresource load should match with a file other than not
+- Subresource load should not match with the not condition
+service-workers/service-worker/unregister-controller.https.html:
+- Unregister does not affect existing controller
+- Unregister prevents control of subsequent navigations
+service-workers/service-worker/unregister-immediately-during-extendable-events.https.html:
+- Clear-Site-Data must fail pending subresource fetch events.
+service-workers/service-worker/unregister-immediately.https.html:
+- Clear-Site-Data must clear an unregistered registration waiting for  controlled
+  clients to unload.
+- Clear-Site-Data must unregister a registration with a worker in the "activating"
+  state.
+- Clear-Site-Data must unregister an activated registration with an update waiting.
+- Clear-Site-Data must unregister an activated registration with controlled clients.
+service-workers/service-worker/unregister-then-register-new-script.https.html:
+- Registering a new script URL that 404s does not resurrect unregistered registration
+- Registering a new script URL that fails to install does not resurrect unregistered
+  registration
+- Registering a new script URL while an unregistered registration is in use
+service-workers/service-worker/unregister-then-register.https.html:
+- Unregister then register does not resurrect the registration
+service-workers/service-worker/unregister.https.html:
+- Unregister twice
+service-workers/service-worker/update-after-navigation-fetch-event.https.html:
+- Update should be triggered after a navigation (fetch event worker).
+- Update should be triggered after a navigation (network error).
+- Update should be triggered after a navigation (no fetch event worker).
+service-workers/service-worker/update-after-navigation-redirect.https.html:
+- service workers are updated on redirects during navigation
+service-workers/service-worker/update-after-oneday.https.html:
+- Update should be triggered after a functional event when last update time is over
+  24 hours
+service-workers/service-worker/update-bytecheck-cors-import.https.html:
+- 'Test module script(main: default, imported: default)'
+- 'Test module script(main: default, imported: time)'
+- 'Test module script(main: time, imported: default)'
+- 'Test module script(main: time, imported: time)'
+- 'Test(main: default, imported: time)'
+- 'Test(main: time, imported: default)'
+- 'Test(main: time, imported: time)'
+service-workers/service-worker/update-bytecheck.https.html:
+- 'Test module script(main: default, imported: default)'
+- 'Test module script(main: default, imported: time)'
+- 'Test module script(main: time, imported: default)'
+- 'Test module script(main: time, imported: time)'
+- 'Test(main: default, imported: time)'
+- 'Test(main: time, imported: default)'
+- 'Test(main: time, imported: time)'
+service-workers/service-worker/update-import-scripts.https.html:
+- update() should fail when a new worker imports an unavailable script.
+- update() should find an update in an imported script but update() should result
+  in failure due to missing the other imported script.
+- update() should succeed when the old imported script no longer exist but the new
+  worker doesn't import it.
+- update() should treat 404 on imported scripts as no change.
+- update() should work with cross-origin importScripts.
+service-workers/service-worker/update-missing-import-scripts.https.html:
+- Update service worker with new script that's missing importScripts()
+service-workers/service-worker/update-module-request-mode.https.html:
+- headers of a main module script
+service-workers/service-worker/update-no-cache-request-headers.https.html:
+- headers in no-cache mode
+service-workers/service-worker/update-not-allowed.https.html:
+- ServiceWorkerRegistration.update() from active service worker succeeds while installing
+  service worker.
+- ServiceWorkerRegistration.update() from client succeeds while installing service
+  worker.
+- ServiceWorkerRegistration.update() from installing service worker throws.
+service-workers/service-worker/update-recovery.https.html:
+- Recover from a bad service worker by updating after a failed navigation.
+service-workers/service-worker/update-registration-with-type.https.html:
+- Does not update the registration with the same script type and the same main script.
+- Update the registration with a different script type (classic => module) and with
+  a same main script.
+- Update the registration with a different script type (classic => module) and with
+  a same main script. Expect evaluation failed.
+- Update the registration with a different script type (classic => module).
+- Update the registration with a different script type (module => classic) and with
+  a same main script.
+- Update the registration with a different script type (module => classic) and with
+  a same main script. Expect evaluation failed.
+- Update the registration with a different script type (module => classic).
+service-workers/service-worker/update.https.html:
+- update() should fail when a new script contains a syntax error.
+- update() should fail when a response for the main script is redirect.
+- update() should fail when mime type is invalid.
+- update() should fail when the pending uninstall flag is set.
+- update() should resolve when the install event throws.
+- update() should succeed when new script is available.
+- update() should succeed when the script shrinks.
+service-workers/service-worker/websocket-in-service-worker.https.html:
+- Verify WebSockets can be created in a Service Worker
+service-workers/service-worker/websocket.https.html:
+- Verify WebSocket handshake channel does not get intercepted
+service-workers/service-worker/webvtt-cross-origin.https.html:
+- cross-origin text track with approved cors request should not load
+- cross-origin text track with no-cors request should not load
+- cross-origin text track with rejected cors request should not load
+- same-origin text track should load
+- same-origin text track that redirects cross-origin should not load
+- same-origin text track that redirects same-origin should load
+- same-origin text track that redirects to a cross-origin text track with approved
+  cors should not load
+- same-origin text track that redirects to a cross-origin text track with rejected
+  cors should not load
+service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
+- iframe referrerpolicy="", origin A
+- iframe referrerpolicy="no-referrer", origin A
+- iframe referrerpolicy="same-origin", origin A
+- iframe referrerpolicy="same-origin", origin B
+service-workers/service-worker/windowclient-navigate.https.html:
+- blank url
+- cross origin url
+- in scope but not controlled test on active worker
+- in scope but not controlled test on installing worker
+- invalid url (about:blank)
+- invalid url (file:///)
+- invalid url (http://[example.com])
+- invalid url (view-source://example.com)
+- navigate on a top-level window client
+- normal
+- out of scope
+service-workers/service-worker/worker-client-id.https.html:
+- Verify workers have a unique client id separate from their owning documents window
+service-workers/service-worker/worker-in-sandboxed-iframe-by-csp-fetch-event.https.html:
+- Fetch request from a worker in iframe sandboxed by CSP HTTP header allow-scripts
+  flag
+- Fetch request from a worker in iframe sandboxed by CSP HTTP header with allow-scripts
+  and allow-same-origin flag
+- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
+- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts.
+service-workers/service-worker/worker-interception-redirect.https.html:
+- 'Case #1: network scope1->scope2 (classic DedicatedWorker)'
+- 'Case #1: network scope1->scope2 (classic SharedWorker)'
+- 'Case #1: network scope1->scope2 (module DedicatedWorker)'
+- 'Case #1: network scope1->scope2 (module SharedWorker)'
+- 'Case #2: network scope1->out-scope (classic DedicatedWorker)'
+- 'Case #2: network scope1->out-scope (classic SharedWorker)'
+- 'Case #2: network scope1->out-scope (module DedicatedWorker)'
+- 'Case #2: network scope1->out-scope (module SharedWorker)'
+- 'Case #3: sw scope1->scope2 (classic DedicatedWorker)'
+- 'Case #3: sw scope1->scope2 (classic SharedWorker)'
+- 'Case #3: sw scope1->scope2 (module DedicatedWorker)'
+- 'Case #3: sw scope1->scope2 (module SharedWorker)'
+- 'Case #4: sw scope1->out-scope (classic DedicatedWorker)'
+- 'Case #4: sw scope1->out-scope (classic SharedWorker)'
+- 'Case #4: sw scope1->out-scope (module DedicatedWorker)'
+- 'Case #4: sw scope1->out-scope (module SharedWorker)'
+service-workers/service-worker/worker-interception.https.html:
+- Register a service worker for worker subresource interception tests.
+- Requests on a dedicated worker controlled by a service worker.
+- Requests on a dedicated worker nested in a dedicated worker and controlled by a
+  service worker
+- Requests on a dedicated worker nested in a shared worker and controlled by a service
+  worker
+- Requests on a shared worker controlled by a service worker.
+- Unregister a service worker for subresource interception tests.
+- Verify a cors worker script served by a service worker fails dedicated worker start.
+- Verify a cors worker script served by a service worker fails shared worker start.
+- Verify a dedicated worker script request gets correct client Ids
+- Verify a dedicated worker script request issued from a uncontrolled document is
+  intercepted by worker's own service worker.
+- Verify a no-cors cross-origin worker script served by a service worker fails dedicated
+  worker start.
+- Verify a no-cors cross-origin worker script served by a service worker fails shared
+  worker start.
+- Verify a same-origin worker script served by a service worker succeeds in starting
+  a dedicated worker.
+- Verify a same-origin worker script served by a service worker succeeds in starting
+  a shared worker.
+- Verify a shared worker script request issued from a uncontrolled document is intercepted
+  by worker's own service worker.
+- Verify an out-of-scope dedicated worker script request issued from a controlled
+  document should not be intercepted by document's service worker.
+service-workers/service-worker/xhr-response-url.https.html:
+- XHR Document should use the response URL
+- XHR Document should use the response URL (generated response)
+- XHR responseURL should be the response URL
+service-workers/service-worker/xsl-base-url.https.html:
+- base URL when service worker does respondWith(fetch(responseUrl))
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,
