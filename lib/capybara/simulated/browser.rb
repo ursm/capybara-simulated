@@ -4684,6 +4684,20 @@ module Capybara
         rt.eval('__csim_installServiceWorkerScope();') if service
         rt.eval(body)
         rt.drain_microtasks
+        # Drive the service worker's lifecycle: fire `install`, then `activate`, draining each
+        # phase's `waitUntil` promises before the next (the client-side ServiceWorker object plays
+        # out the observable installing→installed→activating→activated timeline; here we run the
+        # worker's OWN install/activate handlers so their side effects — caching, importScripts —
+        # execute). See sw-client.js + __csim_swFireLifecycleEvent.
+        if service
+          %w[install activate].each do |phase|
+            rt.eval("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
+            # Drain microtasks AND timers: a `waitUntil` promise may settle off a
+            # setTimeout (e.g. a delayed cache warm-up), so advance the worker clock too.
+            rt.drain_microtasks
+            rt.drain_timers
+          end
+        end
         # A SharedWorker fires `connect` AFTER its script set `self.onconnect`; the
         # connect handler's port post lands in the outbox before release_init, so
         # worker_pending? stays true until it's delivered.
