@@ -489,8 +489,6 @@ html/canvas/element/color-type/2d.color.type.u8p3.to.f16srgb.to.u8p3.html:
 - test srgb float16 canvas storing 8-bit display-p3 data accurately
 html/canvas/element/color-type/2d.color.type.u8srgb.to.f16p3.to.u8srgb.html:
 - test display-p3 float16 canvas storing 8-bit srgb data accurately
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.detachedcanvas.html:
-- drawImage with detached OffscreenCanvas as the source should throw exception
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
@@ -822,29 +820,15 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
-webmessaging/Channel_postMessage_clone_port.any.js:
-- 'Test Description: Test Description: When the user agent is to clone a port original
-  port, with the clone being owned by owner, it must return a new MessagePort object'
-webmessaging/Channel_postMessage_clone_port_error.any.js:
-- 'Test Description: Throw a DataCloneError if transfer array in postMessage contains
-  source port.'
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,
     are transferred along with the port, when the transfer happens in the same task
     during which postMessage is called
-webmessaging/Channel_postMessage_with_transfer_entangled.any.js:
-- An entangled port transferred to the same origin receives messages in order
-webmessaging/Channel_postMessage_with_transfer_incoming_messages.any.js:
-- |-
-  When transferring a non-enabled port mutiple times,
-      incoming messages sent at various transfer steps are received in order upon enablement.
 webmessaging/MessageEvent-trusted.any.js:
 - With a BroadcastChannel
 webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
 - onmessage calling source postMessage
-webmessaging/MessagePort_initial_disabled.any.js:
-- MessagePort_initial_disabled
 webmessaging/Transferred_objects_unusable.sub.htm:
 - 'Test Description: Objects listed in transfer are transferred, not just cloned,
   meaning that they are no longer usable on the sending side.'
@@ -908,8 +892,6 @@ webmessaging/message-channels/detached-iframe.window.js:
   create)
 - MessageChannel created from a detached iframe should not send messages (remove before
   create)
-webmessaging/message-channels/no-start.any.js:
-- no-start
 webmessaging/messageerror.html:
 - The default value of onmessageerror is null
 - The onmessageerror content attribute must be compiled into the onmessageerror property
