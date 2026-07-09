@@ -820,7 +820,6 @@ service-workers/cache-storage/cache-api-nested-worker.https.html:
 - Cache API in nested worker
 service-workers/cache-storage/cache-keys-attributes-for-service-worker.https.html:
 - Request.IsHistoryNavigation should persist.
-- Request.IsReloadNavigation should persist.
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
