@@ -62,6 +62,10 @@ module Capybara
         # like __csimFrameNavigate — see Browser#frame_submit_self.
         '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i); nil },
         '__csimFrameHistoryGo'       => ->(b, *a) { b.frame_history_go(a[0].to_i, a[1].to_i); nil },
+        # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
+        # document) so history.go(-1) can traverse back — and a controlling SW sees
+        # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
+        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1]); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1]); nil },

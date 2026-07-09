@@ -6012,6 +6012,19 @@ module Capybara
       def reload_frame_to_entry(realm_id, entry)
         url = entry[:url].to_s
         return if url.empty?
+        # A history traversal is a navigation: route it through the controlling SW's fetch event
+        # (isHistoryNavigation) first — the traversal refetch happens here, Ruby-side, bypassing the
+        # __csimFrameWindow interception the initial/reload paths use. A respondWith serves the
+        # document; a network error fails the navigation; nil falls through to the network below.
+        if (sw = service_worker_navigation_fetch(url, is_history: true))
+          return if sw['networkError']
+
+          # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
+          # does the single utf8_text re-tag, matching the network path below.
+          reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
+                                   response_content_type(sw['headers'] || {}), restore_state: entry[:form_state])
+          return
+        end
         env = Rack::MockRequest.env_for(url, method: 'GET')
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
