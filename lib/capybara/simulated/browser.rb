@@ -5965,6 +5965,12 @@ module Capybara
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
             navigate_realm_self_post(realm_id, cur[:url], cur[:body], cur[:content_type], is_reload: true)
+          elsif cur && cur[:url].to_s.match?(%r{\Ahttps?://}i)
+            # Reload the CURRENT history entry (isReloadNavigation), not the frame's `src`: after a
+            # back/forward the src is stale, so `history.go(0)` / `location.reload()` must refetch the
+            # entry's URL. (A blob:/data:/srcdoc frame keeps the JS reload path — it reuses retained
+            # bytes a URL refetch can't reproduce.)
+            reload_frame_to_entry(realm_id, cur, is_reload: true, is_history: false)
           else
             @runtime.call('__csimReloadFrameByRealm', realm_id)
           end
@@ -6096,31 +6102,33 @@ module Capybara
       rescue StandardError
         nil
       end
-      # Re-fetch a history entry's URL and rebuild the frame realm from it, then
-      # restore the entry's captured form state (before the element load fires).
-      def reload_frame_to_entry(realm_id, entry)
+      # Re-fetch a history entry's URL and rebuild the frame realm from it, then restore the entry's
+      # captured form state (before the element load fires). Used for a history traversal
+      # (isHistoryNavigation) AND for a reload of the current entry (isReloadNavigation — e.g.
+      # `history.go(0)` / `location.reload()` after a back/forward, where the frame's `src` is stale
+      # and only the current entry names the right URL).
+      def reload_frame_to_entry(realm_id, entry, is_reload: false, is_history: true)
         url = entry[:url].to_s
         return if url.empty?
-        # An entry reached by a POST submission re-POSTS on traversal (with the recorded body); a
-        # normal entry re-GETs. The method drives both the SW fetch event and the network fallback.
-        is_post = entry[:method] == 'POST'
-        body    = entry[:body].to_s
-        # A history traversal is a navigation: route it through the controlling SW's fetch event
-        # (isHistoryNavigation) first — the traversal refetch happens here, Ruby-side, bypassing the
-        # __csimFrameWindow interception the initial/reload paths use. A respondWith serves the
-        # document; a network error fails the navigation; nil falls through to the network below.
-        sw = if is_post
-          service_worker_navigation_fetch(url, is_history: true, method: 'POST', body_b64: Base64.strict_encode64(body), content_type: entry[:content_type])
-        else
-          service_worker_navigation_fetch(url, is_history: true)
-        end
-        if sw
+        # An entry reached by a POST submission re-POSTS (with the recorded body); a normal entry
+        # re-GETs. The method drives both the SW fetch event and the network fallback.
+        is_post   = entry[:method] == 'POST'
+        body      = entry[:body].to_s
+        post_args = is_post ? {method: 'POST', body_b64: Base64.strict_encode64(body), content_type: entry[:content_type]} : {}
+        # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
+        # fresh document, so it must NOT restore the (possibly stale) snapshot the entry was left with.
+        restore = is_reload ? nil : entry[:form_state]
+        # A traversal / reload is a navigation: route it through the controlling SW's fetch event
+        # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
+        # the initial load uses. A respondWith serves the document; a network error fails the
+        # navigation; nil falls through to the network below.
+        if (sw = service_worker_navigation_fetch(url, is_reload: is_reload, is_history: is_history, **post_args))
           return if sw['networkError']
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
-                                   response_content_type(sw['headers'] || {}), restore_state: entry[:form_state])
+                                   response_content_type(sw['headers'] || {}), restore_state: restore)
           return
         end
         env = Rack::MockRequest.env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -6133,7 +6141,7 @@ module Capybara
         merge_set_cookie(headers, url)
         return if download_response?(headers)
         html = read_rack_body(resp_body)
-        reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: entry[:form_state])
+        reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: restore)
       end
       # Serialize + route a form submitted inside frame realm `realm_id`. We
       # serialize in the INITIATING realm (so shadow-tree controls are excluded

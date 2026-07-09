@@ -1426,8 +1426,6 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   without credentials should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to cors with credentials
   should fail interception and response should be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to cors without credentials
-  should succeed interception and response should be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
   should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to same-origin with
@@ -1535,7 +1533,6 @@ service-workers/service-worker/fetch-event.https.h2.html:
 - When the streaming request body is used, network fallback fails.
 service-workers/service-worker/fetch-event.https.html:
 - Fetch with POST with text on sw 421 response should not be retried.
-- FetchEvent#request.isReloadNavigation is true (with history traversal)
 - XHR upload progress events for response coming from SW
 service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the iframe.
