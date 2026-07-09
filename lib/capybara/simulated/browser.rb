@@ -3616,8 +3616,17 @@ module Capybara
         end
         return nil unless best
 
-        w = @workers[best]
-        (w && w[:has_fetch]) ? best : nil
+        w = @workers[best] or return nil
+        # has_fetch is published from the worker thread AFTER its initial eval, so a navigation
+        # into a freshly-activated registration can read it as nil (unknown) — race-prone for the
+        # 2nd+ registration, whose initial load fires before the publish. Treat unknown as "maybe":
+        # route through and let the fetch dispatch fall through if the SW turns out to have no
+        # handler. Skip only a KNOWN-false (messaging/push-only) SW, or one whose thread is already
+        # DEAD (crashed during eval / closed) — routing there would just stall the nav for the full
+        # round-trip budget with no one to answer.
+        return nil if w[:has_fetch] == false || !w[:thread]&.alive?
+
+        best
       end
 
       # Route a navigation request (document / iframe load) to its controlling SW's `fetch`

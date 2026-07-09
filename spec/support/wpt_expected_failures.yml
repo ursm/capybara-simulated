@@ -818,8 +818,6 @@ input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
 service-workers/cache-storage/cache-api-nested-worker.https.html:
 - Cache API in nested worker
-service-workers/cache-storage/cache-keys-attributes-for-service-worker.https.html:
-- Request.IsHistoryNavigation should persist.
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
@@ -1529,11 +1527,6 @@ service-workers/service-worker/fetch-event-respond-with-argument.https.html:
 service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
 - Respond by chunks with a Response being loaded
 service-workers/service-worker/fetch-event-respond-with-custom-response.https.html:
-- Navigation resource built from a blob
-- Navigation resource built from a buffer
-- Navigation resource built from a buffer-view
-- Navigation resource built from a string
-- Navigation resource built from search-params
 - Subresource built from a blob
 - Subresource built from a buffer
 - Subresource built from a buffer-view
@@ -1550,8 +1543,6 @@ service-workers/service-worker/fetch-event-respond-with-readable-stream.https.ht
 - Cancellation in the page should be observable in the service worker with empty stream
 - Cancellation in the page should be observable in the service worker with nonempty
   stream
-- Main resource built from a ReadableStream
-- Main resource built from a ReadableStream - delayed
 - Main resource built from a ReadableStream - fetch stream
 - Subresource built from a ReadableStream
 - Subresource built from a ReadableStream - delayed
@@ -2165,9 +2156,6 @@ service-workers/service-worker/navigation-headers.https.html:
   origin and referer headers.
 - POST Navigation, same-site with service worker that changes the request sets correct
   sec-fetch headers.
-service-workers/service-worker/navigation-preload/broken-chunked-encoding.https.html:
-- FetchEvent#preloadResponse resolves even if the body is sent with broken chunked
-  encoding with some delays
 service-workers/service-worker/navigation-preload/chunked-encoding.https.html:
 - Navigation Preload must work with chunked encoding.
 service-workers/service-worker/navigation-preload/content-encoding.https.html:
