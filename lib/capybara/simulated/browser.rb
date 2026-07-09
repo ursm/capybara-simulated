@@ -379,6 +379,11 @@ module Capybara
         @sw_message_pending = 0
         # Controlled-client fetches awaiting the SW's respondWith (released by a `fetch_response`).
         @sw_fetch_pending = 0
+        # Deadline (CLOCK_MONOTONIC) capping how long the event-loop drain holds the virtual clock
+        # for an outstanding SW-side fetch (see run_event_loop_frame). Shared across frames so a
+        # stuck fetch costs the budget ONCE, not per frame; reset on each delivered reply so the next
+        # fetch in a sequence waits afresh.
+        @sw_fetch_wait_deadline = nil
         # SW navigation-interception state. `@sw_registrations` mirrors scope-href → active
         # worker handle (from the client lifecycle) so a navigation fetched Ruby-side — before
         # the destination realm's JS exists — can find its controlling SW; it survives the
@@ -1539,20 +1544,19 @@ module Capybara
           # remaining iterations would STARVE the worker thread of the GVL and it would never
           # process its inbox. Block briefly on the outbox instead: this releases the GVL (the
           # worker runs) and wakes the instant it posts. The popped event is parked in
-          # `@worker_outbox_head` — NOT pushed back, which would reorder it behind anything the
-          # worker enqueued in the meantime — and the next deliver drains it first. The budget is
-          # shared across the whole settle call, and exhausting it bails to Capybara's outer poll
-          # loop — a genuinely stuck worker must not pin every find's settle for
-          # SETTLE_MAX_ITER budgets. Gated on `worker_reply_pending?`, NOT `worker_pending?`:
-          # `@worker_in_flight` (plain postMessage — a listen-only worker never replies) and
-          # `@worker_initializing` have no matching reply, and blocking on them would tax every
-          # settle on such pages with the full budget.
+          # (via `park_worker_reply`, which parks it in `@worker_outbox_head` — NOT pushed back,
+          # which would reorder it behind anything the worker enqueued in the meantime — so the next
+          # deliver drains it first). The budget is shared across the whole settle call, and
+          # exhausting it bails to Capybara's outer poll loop — a genuinely stuck worker must not pin
+          # every find's settle for SETTLE_MAX_ITER budgets. Gated on `worker_reply_pending?`, NOT
+          # `worker_pending?`: `@worker_in_flight` (plain postMessage — a listen-only worker never
+          # replies) and `@worker_initializing` have no matching reply, and blocking on them would
+          # tax every settle on such pages with the full budget.
           if worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil?
             worker_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
-            while worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil? &&
-                  Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_wait_deadline
-              @worker_outbox_head = pop_with_timeout(@worker_outbox, WORKER_POLL_INTERVAL)
-            end
+            park_worker_reply(worker_wait_deadline) while worker_reply_pending? &&
+              @worker_outbox.empty? && @worker_outbox_head.nil? &&
+              Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_wait_deadline
             next if @worker_outbox_head || !@worker_outbox.empty?
             break
           end
@@ -2273,6 +2277,21 @@ module Capybara
           break unless progressed
           break if turns >= EVENT_LOOP_QUIESCENCE_CAP
         end
+
+        # Interlude — hold the virtual clock while a controlled-client fetch is awaiting the
+        # service worker's `respondWith`. The SW does the real request off-thread (a live network
+        # hop, an in-VM handler) and its reply is delivered Ruby-side, invisible to the JS event-loop
+        # probe. Advancing the clock now (phase 2) would let a caller's virtual-timeout outrun that
+        # off-thread work and mark the still-pending fetch as timed-out before the reply lands. So
+        # block briefly on the worker outbox — releasing the GVL so the worker runs, exactly like
+        # `settle` — and deliver the reply at the current instant, WITHOUT advancing the clock, then
+        # keep pumping. A fetch that never replies is bounded by `@sw_fetch_wait_deadline` (and, past
+        # that, the caller's own max-steps backstop), so it can't wedge the drain.
+        if @sw_fetch_pending.positive? && (held = hold_for_sw_fetch(turns))
+          return held
+        end
+        @sw_fetch_wait_deadline = nil unless @sw_fetch_pending.positive?
+
         # Phase 2 — advance one real frame so the next batch of timers becomes due.
         # Its work counts toward `progressed` too: a timer that first comes due in
         # this advance (e.g. a `setTimeout(…, 8)` firing mid-frame) and the nav hop
@@ -2290,6 +2309,43 @@ module Capybara
           # turn that ends the loop is the +1); OR phase 2's advance did.
           'progressed' => turns > 1 || frame_progressed
         }
+      end
+
+      # Hold the virtual clock for one frame while a controlled-client fetch awaits the SW's
+      # respondWith. Blocks briefly on the worker outbox (GVL released) up to a budget shared across
+      # frames; on a reply, delivers it at the current instant (a zero-advance `run_loop_step`) and
+      # returns the frame's loop-state so the caller keeps pumping without advancing time. Returns
+      # nil once the budget is spent, so the caller falls through to a normal frame (advancing the
+      # clock) and a genuinely stuck fetch can't wedge the drain. Reports the REAL nearest timer —
+      # holding the clock doesn't hide a parked timer, we simply haven't advanced to it yet.
+      private def hold_for_sw_fetch(turns)
+        @sw_fetch_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        park_worker_reply(@sw_fetch_wait_deadline)
+        reply_ready = @worker_outbox_head || !@worker_outbox.empty?
+        # A delivered reply refreshes the budget so the NEXT fetch in a sequence waits afresh instead
+        # of inheriting a spent deadline (which would abandon it to a premature timeout).
+        @sw_fetch_wait_deadline = nil if reply_ready
+        return nil unless reply_ready || Process.clock_gettime(Process::CLOCK_MONOTONIC) < @sw_fetch_wait_deadline
+
+        held_progressed = reply_ready && step_and_drain_progressed(@runtime.run_loop_step(0))
+        probe = dom_call('__csimEventLoopProbe')
+        {
+          'raf'        => !!probe['raf'],
+          'async'      => true,
+          'next_timer' => probe['nextTimer'].to_f,
+          'progressed' => turns > 1 || held_progressed
+        }
+      end
+
+      # Block up to one poll interval for a worker reply, parking it in the one-slot head buffer —
+      # NOT pushed back, which would reorder it behind anything the worker enqueued meanwhile. The
+      # `pop_with_timeout` releases the GVL so the worker thread runs and wakes us the instant it
+      # posts. No-op if a reply is already buffered or the budget is spent. Shared by `settle` and
+      # the SW-fetch hold in `run_event_loop_frame`.
+      private def park_worker_reply(deadline)
+        return unless @worker_outbox.empty? && @worker_outbox_head.nil? &&
+                      Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+        @worker_outbox_head = pop_with_timeout(@worker_outbox, WORKER_POLL_INTERVAL)
       end
 
       # Drain the Ruby-side async / navigation / form-submit / download chains a
@@ -3755,7 +3811,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -4537,6 +4593,7 @@ module Capybara
         @worker_broadcast_pending = 0
         @sw_message_pending       = 0
         @sw_fetch_pending         = 0
+        @sw_fetch_wait_deadline   = nil
         @sw_registrations.clear
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {

@@ -1388,50 +1388,24 @@ service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.ht
 service-workers/service-worker/fetch-event-network-error.https.html:
 - Rejecting the fetch event or using preventDefault() causes a network error
 service-workers/service-worker/fetch-event-redirect.https.html:
-- Non-navigation, error redirect, cors mode Request redirected to cors with credentials
-  should fail interception and response should not be redirected
 - Non-navigation, error redirect, cors mode Request redirected to cors without credentials
   should fail interception and response should not be redirected
-- Non-navigation, error redirect, cors mode Request redirected to no-cors with credentials
-  should fail interception and response should not be redirected
-- Non-navigation, error redirect, cors mode Request redirected to no-cors without
-  credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, cors mode Request redirected to same-origin with
   credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, cors mode Request redirected to same-origin without
   credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to cors with credentials
-  should fail interception and response should not be redirected
 - Non-navigation, error redirect, no-cors mode Request redirected to cors without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to no-cors with
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to no-cors without
   credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, no-cors mode Request redirected to same-origin with
   credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, no-cors mode Request redirected to same-origin without
   credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to cors with
-  credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, same-origin mode Request redirected to cors without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to no-cors with
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to no-cors without
   credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, same-origin mode Request redirected to same-origin
   with credentials should fail interception and response should not be redirected
 - Non-navigation, error redirect, same-origin mode Request redirected to same-origin
   without credentials should fail interception and response should not be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to cors with credentials
-  should fail interception and response should be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to cors without credentials
-  should succeed interception and response should be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
-  should fail interception and response should not be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to same-origin with
-  credentials should succeed interception and response should be redirected
 - Non-navigation, follow redirect, no-cors mode Request redirected to cors with credentials
   should succeed interception and response should not be redirected
 - Non-navigation, follow redirect, no-cors mode Request redirected to cors without
@@ -1440,22 +1414,8 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   credentials should succeed interception and response should not be redirected
 - Non-navigation, follow redirect, no-cors mode Request redirected to no-cors without
   credentials should succeed interception and response should not be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to same-origin
-  with credentials should succeed interception and response should be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to same-origin
-  without credentials should succeed interception and response should be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to cors with
-  credentials should fail interception and response should not be redirected
 - Non-navigation, follow redirect, same-origin mode Request redirected to cors without
   credentials should fail interception and response should not be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to no-cors
-  with credentials should fail interception and response should not be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to no-cors
-  without credentials should fail interception and response should not be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to same-origin
-  with credentials should succeed interception and response should be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to same-origin
-  without credentials should succeed interception and response should be redirected
 - Non-navigation, manual redirect, cors mode Request redirected to cors with credentials
   should succeed opaqueredirect interception and response should not be redirected
 - Non-navigation, manual redirect, cors mode Request redirected to cors without credentials
@@ -1506,7 +1466,6 @@ service-workers/service-worker/fetch-event-redirect.https.html:
 - Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
   without credentials should succeed opaqueredirect interception and response should
   not be redirected
-- restore global state
 service-workers/service-worker/fetch-event-referrer-policy.https.html:
 - Service Worker should respond to fetch with the default referrer policy
 service-workers/service-worker/fetch-event-respond-with-argument.https.html:
