@@ -1524,8 +1524,6 @@ service-workers/service-worker/fetch-event-respond-with-readable-stream.https.ht
 - Cancellation in the page should be observable in the service worker with empty stream
 - Cancellation in the page should be observable in the service worker with nonempty
   stream
-- Main resource built from a ReadableStream - fetch stream
-- Subresource built from a ReadableStream - fetch stream
 service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html:
 - Response with a ReadableStream having non-Uint8Array chunks should be transferred
   as errored
@@ -1535,8 +1533,6 @@ service-workers/service-worker/fetch-event-throws-after-respond-with.https.html:
 - Fetch event handler throws after a successful respondWith()
 service-workers/service-worker/fetch-event-within-sw-manual.https.html:
 - Notification requests intercepted both from window and SW
-service-workers/service-worker/fetch-event-within-sw.https.html:
-- Service worker does not intercept fetch/cache requests within service worker
 service-workers/service-worker/fetch-event.https.h2.html:
 - Network fallback for streaming upload.
 - Running clone() in the service worker does not prevent network fallback.
@@ -1563,8 +1559,6 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isReloadNavigation is true (history.go(0))
 - FetchEvent#request.isReloadNavigation is true (location.reload())
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
-- Service Worker event.respondWith must set the used flag
-- Service Worker fetches other file in fetch event
 - Service Worker responds to fetch event with POST form
 - Service Worker responds to fetch event with an existing client id
 - Service Worker responds to fetch event with the correct cache types
