@@ -379,6 +379,15 @@ module Capybara
         @sw_message_pending = 0
         # Controlled-client fetches awaiting the SW's respondWith (released by a `fetch_response`).
         @sw_fetch_pending = 0
+        # SW navigation-interception state. `@sw_registrations` mirrors scope-href → active
+        # worker handle (from the client lifecycle) so a navigation fetched Ruby-side — before
+        # the destination realm's JS exists — can find its controlling SW; it survives the
+        # per-visit rebuild_ctx (unlike the per-realm JS registrations Map). A navigation fetch
+        # is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off the general outbox)
+        # keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with client-fetch replies.
+        @sw_registrations = {}
+        @sw_nav_outbox    = Thread::Queue.new
+        @sw_nav_seq       = 0
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -3568,6 +3577,86 @@ module Capybara
         true
       end
 
+      # A SW `fetch` event's respondWith result. A NAVIGATION fetch (negative id — see
+      # service_worker_navigation_fetch) is awaited SYNCHRONOUSLY on a dedicated queue, off the
+      # general outbox, so it never interleaves with the client-fetch / message reply protocol;
+      # a client fetch (positive id) rides the outbox as before.
+      private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox)
+        if fetch_id.negative?
+          @sw_nav_outbox << {fetch_id: fetch_id, resp: resp}
+        else
+          outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp}
+        end
+      end
+
+      # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
+      # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
+      # find its controlling SW even after the destination realm's JS was rebuilt.
+      def sw_register_scope(scope, handle)
+        @sw_registrations[scope.to_s] = handle.to_i
+        nil
+      end
+      def sw_unregister_scope(scope)
+        @sw_registrations.delete(scope.to_s)
+        nil
+      end
+
+      # The active fetch-handling worker controlling a navigation to `url` — the registration
+      # whose serialized scope is the longest prefix of `url` (spec "Match Service Worker
+      # Registration"; the scope embeds the origin, so a cross-origin scope can't prefix-match).
+      # nil when uncontrolled or the SW has no fetch listener (→ load from the network).
+      private def sw_controller_for_navigation(url)
+        u = url.to_s
+        best = nil
+        best_len = -1
+        @sw_registrations.each do |scope, handle|
+          next unless u.start_with?(scope) && scope.length > best_len
+          best     = handle
+          best_len = scope.length
+        end
+        return nil unless best
+
+        w = @workers[best]
+        (w && w[:has_fetch]) ? best : nil
+      end
+
+      # Route a navigation request (document / iframe load) to its controlling SW's `fetch`
+      # event and BLOCK for the respondWith result. Mirrors settle's bounded wait: the main
+      # thread releases the GVL on the dedicated `@sw_nav_outbox`, so the worker thread runs the
+      # handler and posts back. Navigation ids are NEGATIVE so the response is delivered on that
+      # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
+      # hash (SW served the document), or nil to load from the network (no controller, no
+      # respondWith, network error, or the SW didn't answer within the round-trip budget).
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false)
+        handle = sw_controller_for_navigation(url) or return nil
+        w      = @workers[handle] or return nil
+        fetch_id = (@sw_nav_seq -= 1)
+        req = JSON.generate(
+          method:              'GET',
+          url:                 url.to_s,
+          # The Accept header Fetch inserts for a navigation request (destination 'document').
+          headers:             {'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'},
+          body_b64:            '',
+          mode:                'navigate',
+          destination:         'document',
+          isReloadNavigation:  is_reload,
+          isHistoryNavigation: is_history
+        )
+        w[:inbox] << {kind: 'fetch', req:, fetch_id:}
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          ev = pop_with_timeout(@sw_nav_outbox, WORKER_POLL_INTERVAL) or next
+          next unless ev[:fetch_id] == fetch_id   # discard a stale response from a timed-out nav
+
+          resp = JSON.parse(ev[:resp])
+          return nil                        if resp['fallthrough']    # no respondWith → load from the network
+          return {'networkError' => true}   if resp['networkError']   # respondWith(Response.error()) → failed navigation
+
+          return resp
+        end
+        nil   # SW never answered within budget → load from the network
+      end
+
       def worker_terminate(handle)
         w = @workers.delete(handle.to_i)
         return unless w
@@ -3598,9 +3687,12 @@ module Capybara
           case msg[:kind]
           when 'sw_message' then @worker_outbox << {handle: handle.to_i, kind: 'swack'}
           when 'broadcast'  then @worker_outbox << {handle: handle.to_i, kind: 'bcack'}
-          when 'fetch'      then @worker_outbox << {handle: handle.to_i, kind: 'fetch_response', fetch_id: msg[:fetch_id], resp: '{"fallthrough":true}'}
+          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, '{"fallthrough":true}', @worker_outbox)
           end
         end
+        # Drop any navigation scope mirrored to this now-dead worker so a later navigation
+        # doesn't route to it (it falls through to the network instead).
+        @sw_registrations.reject! {|_scope, h| h == handle.to_i }
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
@@ -4385,6 +4477,8 @@ module Capybara
         @worker_broadcast_pending = 0
         @sw_message_pending       = 0
         @sw_fetch_pending         = 0
+        @sw_registrations.clear
+        @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
           @transfer_buffer_seq = 0
@@ -4778,7 +4872,7 @@ module Capybara
         sw_hooks = {
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
-          fetch_respond:  ->(fetch_id, resp)  { outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id.to_i, resp: resp.to_s} }
+          fetch_respond:  ->(fetch_id, resp)  { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox) }
         }
         rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
         # Set the worker's `self.location.href` so webpack /
@@ -4811,6 +4905,9 @@ module Capybara
         # execute). See sw-client.js + __csim_swFireLifecycleEvent.
         if service
           sw_has_fetch = !!rt.call('__csim_swHasFetchListener')
+          # Publish the fetch-handler snapshot on the worker record so a NAVIGATION into this
+          # SW's scope can decide (Ruby-side) whether routing through it is worthwhile.
+          (w = @workers[handle]) && (w[:has_fetch] = sw_has_fetch)
           %w[install activate].each do |phase|
             rt.eval("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
             # Drain microtasks AND timers: a `waitUntil` promise may settle off a
@@ -4873,7 +4970,7 @@ module Capybara
                 rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id])
                 dispatched = true
               ensure
-                outbox << {handle: handle, kind: 'fetch_response', fetch_id: msg[:fetch_id], resp: '{"fallthrough":true}'} unless dispatched
+                sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, '{"fallthrough":true}', outbox) unless dispatched
               end
             elsif msg
               rt.call('__csim_workerOnMessage', msg)

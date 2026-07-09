@@ -137,6 +137,13 @@ module Capybara
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2]) },
+        # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
+        # Ruby-side before the destination realm's JS exists) can find its controlling SW.
+        '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
+        '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
+        # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
+        # synchronously. Returns the response wire hash, or nil to load from the network.
+        '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },

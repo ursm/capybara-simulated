@@ -1595,22 +1595,16 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isReloadNavigation is true (history.go(0))
 - FetchEvent#request.isReloadNavigation is true (location.reload())
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
-- Multiple calls of respondWith must throw InvalidStateErrors
 - Service Worker event.respondWith must set the used flag
 - Service Worker fetches other file in fetch event
-- Service Worker headers in the request of a fetch event
 - Service Worker responds to fetch event using request fragment with string
 - Service Worker responds to fetch event with POST form
 - Service Worker responds to fetch event with an existing client id
-- Service Worker responds to fetch event with blob body
-- Service Worker responds to fetch event with null response body
-- Service Worker responds to fetch event with string
 - Service Worker responds to fetch event with the correct cache types
 - Service Worker responds to fetch event with the correct integrity_metadata
 - Service Worker responds to fetch event with the correct keepalive value
 - Service Worker responds to fetch event with the correct resulting client id
 - Service Worker responds to fetch event with the referrer URL
-- Service Worker should expose FetchEvent URL fragments.
 - Service Worker should intercept EventSource
 - XHR upload progress events for network fallback
 - XHR upload progress events for response coming from SW
@@ -1998,8 +1992,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 - Same-origin blob URL sharedworker should intercept fetch().
 - Same-origin blob URL worker should inherit service worker controller.
 - Same-origin blob URL worker should intercept fetch().
-service-workers/service-worker/mime-sniffing.https.html:
-- The response from service worker should be correctly MIME siniffed.
 service-workers/service-worker/multi-globals/url-parsing.https.html:
 - getRegistration should use the relevant global of the object it was called on to
   resolve the script URL
@@ -2177,8 +2169,10 @@ service-workers/service-worker/navigation-headers.https.html:
 service-workers/service-worker/navigation-preload/broken-chunked-encoding.https.html:
 - FetchEvent#preloadResponse resolves even if the body is sent with broken chunked
   encoding with some delays
-- FetchEvent#preloadResponse resolves even if the body is sent with broken chunked
-  encoding.
+service-workers/service-worker/navigation-preload/chunked-encoding.https.html:
+- Navigation Preload must work with chunked encoding.
+service-workers/service-worker/navigation-preload/content-encoding.https.html:
+- Navigation Preload must work with content encoding.
 service-workers/service-worker/navigation-preload/empty-preload-response-body.https.html:
 - Navigation Preload empty response body.
 service-workers/service-worker/navigation-preload/get-state.https.html:

@@ -28078,15 +28078,15 @@ service-workers/cache-storage/cache-storage-buckets.https.any.js:
 - name: cache.open promise is rejected when bucket is gone
   reason: "[WICG] Storage Buckets API (navigator.storageBuckets, https://wicg.github.io/storage-buckets/)
     — an unratified WICG Community Group draft shipped only in Chromium (no Firefox/Safari).
-    Buildable in-process (a bucket dimension on the origin-partitioned cache store), but
-    unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec bakes in
-    churn). Re-audit if it advances to a ratified standard."
+    Buildable in-process (a bucket dimension on the origin-partitioned cache store),
+    but unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec
+    bakes in churn). Re-audit if it advances to a ratified standard."
 - name: caches from different buckets have different contents
   reason: "[WICG] Storage Buckets API (navigator.storageBuckets, https://wicg.github.io/storage-buckets/)
     — an unratified WICG Community Group draft shipped only in Chromium (no Firefox/Safari).
-    Buildable in-process (a bucket dimension on the origin-partitioned cache store), but
-    unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec bakes in
-    churn). Re-audit if it advances to a ratified standard."
+    Buildable in-process (a bucket dimension on the origin-partitioned cache store),
+    but unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec
+    bakes in churn). Re-audit if it advances to a ratified standard."
 service-workers/cache-storage/cross-partition.https.tentative.html:
 - name: CacheStorage caches shouldn't be shared with a cross-partition dedicated worker
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -28125,10 +28125,6 @@ service-workers/service-worker/partitioned-matchAll.tentative.https.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/partitioned.tentative.https.html:
-- name: Services workers under different top-level sites are partitioned.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Services workers with cross-site ancestors are partitioned.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
