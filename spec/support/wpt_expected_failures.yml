@@ -1538,7 +1538,6 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
 - FetchEvent#request.isReloadNavigation is true (POST + location.reload())
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
-- Service Worker responds to fetch event with POST form
 - Service Worker responds to fetch event with an existing client id
 - Service Worker responds to fetch event with the correct resulting client id
 - XHR upload progress events for response coming from SW

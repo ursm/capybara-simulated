@@ -147,7 +147,7 @@ module Capybara
         '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3]) },
+        '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },

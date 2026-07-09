@@ -3676,16 +3676,20 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, method: 'GET', body_b64: '', content_type: nil)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
+        # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
+        # via `event.request.text()`); the Content-Type the form's enctype implies rides its headers.
+        headers = {'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'}
+        headers['Content-Type'] = content_type.to_s unless content_type.to_s.empty?
         req = JSON.generate(
-          method:              'GET',
+          method:              method.to_s.empty? ? 'GET' : method.to_s.upcase,
           url:                 url.to_s,
           # The Accept header Fetch inserts for a navigation request (destination 'document').
-          headers:             {'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'},
-          body_b64:            '',
+          headers:             headers,
+          body_b64:            body_b64.to_s,
           mode:                'navigate',
           destination:         'document',
           isReloadNavigation:  is_reload,
