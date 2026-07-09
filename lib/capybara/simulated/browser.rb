@@ -3676,7 +3676,7 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -3689,7 +3689,13 @@ module Capybara
           mode:                'navigate',
           destination:         'document',
           isReloadNavigation:  is_reload,
-          isHistoryNavigation: is_history
+          isHistoryNavigation: is_history,
+          # A reload navigation revalidates (cache mode 'no-cache'); a fresh/history load is 'default'.
+          cache:               is_reload ? 'no-cache' : 'default',
+          # The navigation's referrer is the initiating document (the frame's parent), resolved
+          # under its referrer policy — the document default absent a meta/header (strict-origin-
+          # when-cross-origin), so a same-origin nav keeps the full URL.
+          referrer:            compute_referrer(nil, referrer_source, url.to_s).to_s
         )
         w[:inbox] << {kind: 'fetch', req:, fetch_id:}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET

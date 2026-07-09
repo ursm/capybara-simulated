@@ -428,8 +428,6 @@ fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should not be allowed if the Quota is used up.
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
 - A Keep-Alive fetch() with a body over the Quota Limit should reject.
-fetch/api/request/request-keepalive.any.js:
-- keepalive flag
 fetch/api/request/request-reset-attributes.https.html:
 - Request.isHistoryNavigation is reset with non-empty RequestInit
 - Request.isReloadNavigation is reset with non-empty RequestInit
@@ -1542,10 +1540,7 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
 - Service Worker responds to fetch event with POST form
 - Service Worker responds to fetch event with an existing client id
-- Service Worker responds to fetch event with the correct cache types
-- Service Worker responds to fetch event with the correct keepalive value
 - Service Worker responds to fetch event with the correct resulting client id
-- Service Worker responds to fetch event with the referrer URL
 - XHR upload progress events for response coming from SW
 service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the iframe.
