@@ -150,6 +150,14 @@ module Capybara
         normalize(result)
       end
 
+      # QuickJS has no per-frame realms (iframes share the one VM): `within_frame` falls back to
+      # the same realm, and any realm id routes to the single global context.
+      def supports_frames? = false
+
+      def realm_call(_realm_id, name, *args) = call(name, *args)
+
+      def frame_realm_ids = []
+
       # bridge.js owns the virtual clock; we drive it from Ruby because
       # Capybara's polling cadence is wall-clock-anchored.
       def drain_timers(max_ms = nil)
@@ -363,7 +371,7 @@ module Capybara
         # Service-worker → main-thread signals via the outbox (see v8_runtime#build_worker).
         vm.define_function('__csim_swPostToClient') {|client_id, data| sw_hooks[:post_to_client]&.call(client_id, data); nil } if sw_hooks[:post_to_client]
         vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
-        vm.define_function('__csim_swFetchRespond') {|fetch_id, resp| sw_hooks[:fetch_respond]&.call(fetch_id, resp); nil } if sw_hooks[:fetch_respond]
+        vm.define_function('__csim_swFetchRespond') {|fetch_id, resp, realm_id| sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil } if sw_hooks[:fetch_respond]
         # Override main's __setTimersActive so worker's empty-timer-map
         # flip doesn't race main's `polling?` gate. See v8_runtime's
         # build_worker for the long-form rationale.

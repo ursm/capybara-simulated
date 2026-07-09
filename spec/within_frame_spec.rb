@@ -188,3 +188,26 @@ RSpec.describe 'within_frame / switch_to_frame' do
     expect(session.find(:css, '#divInMainWindow')).to be_truthy
   end
 end
+
+# QuickJS has no per-frame browsing context, so `within_frame` can't route DOM ops into a
+# nested realm. It must fail with a clear `FrameNotSupported` (an engine-capability signal),
+# never a confusing stale-element / NoMethodError. Guards the `supports_frames?` predicate the
+# engine detection rides on — a runtime that grows a `realm_call`-shaped method must not be
+# mistaken for the V8 frame engine.
+RSpec.describe 'within_frame on QuickJS' do
+  before { skip 'exercises the QuickJS same-realm fallback' if CsimEngine.v8? }
+
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><body><iframe id="f" src="about:blank"></iframe></body>']]
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit('/') }
+
+  it 'raises FrameNotSupported rather than a misleading error' do
+    expect {
+      session.within_frame('f') { session.find(:css, 'body') }
+    }.to raise_error(Capybara::Simulated::FrameNotSupported)
+  end
+end

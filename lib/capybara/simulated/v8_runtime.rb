@@ -364,6 +364,10 @@ module Capybara
       # Browser's `@current_realm_id` may still point at it; the Browser uses
       # this to raise a stale-element instead of running a frame handle op
       # against the main registry.
+      # Per-frame browsing contexts (nested realms for iframes / aux windows) are a V8-engine
+      # feature; QuickJS keeps a same-realm fallback. `within_frame` gates on this.
+      def supports_frames? = true
+
       # Ids of every live frame / window realm in this isolate (excludes the main
       # realm, id 0). Used to fan a BroadcastChannel post out to sibling realms.
       def frame_realm_ids = frame_realms.keys
@@ -853,6 +857,13 @@ module Capybara
           end
         end
         frame_realms[realm.id] = realm
+        # If a service worker's scope covers this frame's URL, the frame is a CONTROLLED client:
+        # wire its `navigator.serviceWorker.controller` so subresource fetch() / EventSource route
+        # through the SW's fetch event. The frame never called register(), so its per-realm
+        # registration Map is empty — set the controller directly from Ruby's scope→handle mirror.
+        if (ctrl = @browser.sw_client_controller_for(url.to_s))
+          realm.call('__csim_swSetControllerDirect', *ctrl)
+        end
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
         # `window.onload = () => parent.postMessage(...)` a frame reports back
@@ -1317,7 +1328,7 @@ module Capybara
         # and a controlled fetch's respondWith result. See run_worker for the closures.
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
-        c.attach('__csim_swFetchRespond', ->(fetch_id, resp)  { sw_hooks[:fetch_respond]&.call(fetch_id, resp); nil }) if sw_hooks[:fetch_respond]
+        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
         # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
         # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
         # browser's inbox from the worker thread). Route it through the thread-safe outbox instead

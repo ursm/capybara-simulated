@@ -140,7 +140,7 @@ module Capybara
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
-        '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2]) },
+        '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },
         # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },

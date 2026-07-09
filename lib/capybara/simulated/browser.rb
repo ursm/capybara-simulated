@@ -648,7 +648,7 @@ module Capybara
           # browsing context to route into. Distinguish that (unsupported
           # engine) from a frame that simply failed to build (below), so the
           # error doesn't misattribute a load failure to the engine.
-          unless @runtime.respond_to?(:realm_call)
+          unless @runtime.supports_frames?
             raise Capybara::Simulated::FrameNotSupported,
               'within_frame needs a per-frame browsing context, which only the ' \
               'V8 (rusty_racer) engine provides; QuickJS keeps a same-realm fallback.'
@@ -3569,23 +3569,44 @@ module Capybara
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
       # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
       # respondWith. If the handle is dead, return false so the client falls back to the network.
-      def service_worker_controller_fetch(handle, req_json, fetch_id)
+      def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
         w = @workers[handle.to_i]
         return false unless w
+        # Resolve BEFORE bumping the pending counter: a raise here must not strand @sw_fetch_pending
+        # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
+        req = resolve_sw_fetch_referrer(req_json.to_s)
         @sw_fetch_pending += 1
-        w[:inbox] << {kind: 'fetch', req: req_json.to_s, fetch_id: fetch_id.to_i}
+        # fetch ids are per-realm (so they collide across realms) — carry the ORIGINATING realm so
+        # the response is delivered back to it, not the main realm (realm 0 = main/top window).
+        w[:inbox] << {kind: 'fetch', req:, fetch_id: fetch_id.to_i, realm_id: realm_id.to_i}
         true
+      end
+
+      # Resolve a controlled fetch's referrer the way the network hop would (compute_referrer
+      # applies the request's Referrer-Policy to its referrer source), so the SW's
+      # `event.request.referrer` matches a real browser's. The client sends the referrer SOURCE
+      # (`referrerSource`, its document URL for the `about:client` default); we replace it with the
+      # policy-resolved value under `referrer` (nil / stripped → '', the no-referrer state). No
+      # source (older payload / navigation request) → passed through untouched.
+      private def resolve_sw_fetch_referrer(req_json)
+        req = JSON.parse(req_json)
+        return req_json unless req.is_a?(Hash) && req.key?('referrerSource')
+
+        req['referrer'] = compute_referrer(req['referrerPolicy'], req.delete('referrerSource'), req['url']).to_s
+        JSON.generate(req)
+      rescue JSON::ParserError
+        req_json
       end
 
       # A SW `fetch` event's respondWith result. A NAVIGATION fetch (negative id — see
       # service_worker_navigation_fetch) is awaited SYNCHRONOUSLY on a dedicated queue, off the
       # general outbox, so it never interleaves with the client-fetch / message reply protocol;
-      # a client fetch (positive id) rides the outbox as before.
-      private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox)
+      # a client fetch (positive id) rides the outbox as before, tagged with the originating realm.
+      private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
         if fetch_id.negative?
           @sw_nav_outbox << {fetch_id: fetch_id, resp: resp}
         else
-          outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp}
+          outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp, realm_id: realm_id}
         end
       end
 
@@ -3601,11 +3622,10 @@ module Capybara
         nil
       end
 
-      # The active fetch-handling worker controlling a navigation to `url` — the registration
-      # whose serialized scope is the longest prefix of `url` (spec "Match Service Worker
-      # Registration"; the scope embeds the origin, so a cross-origin scope can't prefix-match).
-      # nil when uncontrolled or the SW has no fetch listener (→ load from the network).
-      private def sw_controller_for_navigation(url)
+      # The registration handle controlling `url` — the one whose serialized scope is the longest
+      # prefix of `url` (spec "Match Service Worker Registration"; the scope embeds the origin, so
+      # a cross-origin scope can't prefix-match). nil when no registration's scope matches.
+      private def sw_scope_match(url)
         u = url.to_s
         best = nil
         best_len = -1
@@ -3614,7 +3634,27 @@ module Capybara
           best     = handle
           best_len = scope.length
         end
-        return nil unless best
+        best
+      end
+
+      # The controller for a freshly-built frame realm at `url`, for wiring its
+      # `navigator.serviceWorker.controller`. Returns [handle, has_fetch, script_url] or nil.
+      # Unlike the navigation variant this keeps a controller whose fetch-handler snapshot is
+      # still UNKNOWN (nil, racing the SW's initial eval) — resolved to `true` here so the frame
+      # is controlled and routes; a controlled subresource fetch simply falls through to the
+      # network if no handler materializes. Only a KNOWN-false (messaging/push-only) SW skips.
+      def sw_client_controller_for(url)
+        handle = sw_scope_match(url) or return nil
+        w      = @workers[handle] or return nil
+        return nil unless w[:thread]&.alive?
+
+        [handle, w[:has_fetch] != false, w[:script_url].to_s]
+      end
+
+      # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
+      # or the SW is known to have no fetch listener (→ load from the network).
+      private def sw_controller_for_navigation(url)
+        best = sw_scope_match(url) or return nil
 
         w = @workers[best] or return nil
         # has_fetch is published from the worker thread AFTER its initial eval, so a navigation
@@ -3696,7 +3736,7 @@ module Capybara
           case msg[:kind]
           when 'sw_message' then @worker_outbox << {handle: handle.to_i, kind: 'swack'}
           when 'broadcast'  then @worker_outbox << {handle: handle.to_i, kind: 'bcack'}
-          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, '{"fallthrough":true}', @worker_outbox)
+          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, '{"fallthrough":true}', @worker_outbox, msg[:realm_id].to_i)
           end
         end
         # Drop any navigation scope mirrored to this now-dead worker so a later navigation
@@ -3733,8 +3773,9 @@ module Capybara
         # matched registration is the claiming worker's). has_fetch = the SW's install-time
         # fetch-listener snapshot; without one, the client skips interception entirely.
         claims.each {|e| @runtime.call('__csim_swSetController', e[:handle], e[:has_fetch]) }
-        # A controlled fetch's respondWith result → resolve the pending client fetch.
-        fetch_resps.each {|e| @runtime.call('__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
+        # A controlled fetch's respondWith result → resolve the pending client fetch in the
+        # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
+        fetch_resps.each {|e| @runtime.realm_call(e[:realm_id].to_i, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
         @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size].max
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
         @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
@@ -4881,7 +4922,7 @@ module Capybara
         sw_hooks = {
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
-          fetch_respond:  ->(fetch_id, resp)  { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox) }
+          fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) }
         }
         rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
         # Set the worker's `self.location.href` so webpack /
@@ -4914,9 +4955,13 @@ module Capybara
         # execute). See sw-client.js + __csim_swFireLifecycleEvent.
         if service
           sw_has_fetch = !!rt.call('__csim_swHasFetchListener')
-          # Publish the fetch-handler snapshot on the worker record so a NAVIGATION into this
-          # SW's scope can decide (Ruby-side) whether routing through it is worthwhile.
-          (w = @workers[handle]) && (w[:has_fetch] = sw_has_fetch)
+          # Publish the fetch-handler snapshot + script URL on the worker record so a NAVIGATION
+          # into this SW's scope can decide (Ruby-side) whether routing through it is worthwhile,
+          # and a freshly-built frame client can mint a `controller` naming this script.
+          if (w = @workers[handle])
+            w[:has_fetch]  = sw_has_fetch
+            w[:script_url] = url.to_s
+          end
           %w[install activate].each do |phase|
             rt.eval("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
             # Drain microtasks AND timers: a `waitUntil` promise may settle off a
@@ -4976,10 +5021,10 @@ module Capybara
               # duplicate response is harmless: the client's pendingFetch entry is one-shot).
               dispatched = false
               begin
-                rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id])
+                rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id], msg[:realm_id])
                 dispatched = true
               ensure
-                sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, '{"fallthrough":true}', outbox) unless dispatched
+                sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, '{"fallthrough":true}', outbox, msg[:realm_id].to_i) unless dispatched
               end
             elsif msg
               rt.call('__csim_workerOnMessage', msg)

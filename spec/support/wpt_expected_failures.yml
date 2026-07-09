@@ -870,8 +870,6 @@ service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
 - Update a registration on ServiceWorkerGlobalScope
 service-workers/service-worker/about-blank-replacement.https.html:
 - Dynamic about:blank is controlled and is exposed to clients.matchAll().
-- Initial about:blank is controlled, exposed to clients.matchAll(), and final Client
-  is not controlled by a service worker.
 - Initial about:blank is controlled, exposed to clients.matchAll(), and matches final
   Client.
 - Initial about:blank modified by parent is controlled, exposed to clients.matchAll(),
@@ -1373,8 +1371,6 @@ service-workers/service-worker/fetch-event-after-navigation-within-page.https.ht
 - Service Worker should respond to fetch event after the hash changes
 - Service Worker should respond to fetch event after the pushState
 service-workers/service-worker/fetch-event-async-respond-with.https.html:
-- global cleanup
-- respondWith in a microtask does not throw
 - respondWith in a task throws InvalidStateError
 service-workers/service-worker/fetch-event-handled.https.html:
 - FetchEvent.handled should reject when respondWith() is not called and the event
@@ -1436,11 +1432,7 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   should succeed interception and response should be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
   should fail interception and response should not be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to no-cors without
-  credentials should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to same-origin with
-  credentials should succeed interception and response should be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to same-origin without
   credentials should succeed interception and response should be redirected
 - Non-navigation, follow redirect, no-cors mode Request redirected to cors with credentials
   should succeed interception and response should not be redirected
@@ -1516,27 +1508,16 @@ service-workers/service-worker/fetch-event-redirect.https.html:
 - Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
   without credentials should succeed opaqueredirect interception and response should
   not be redirected
+- restore global state
 service-workers/service-worker/fetch-event-referrer-policy.https.html:
-- Service Worker responds to fetch event with the referrer policy
 - Service Worker should respond to fetch with the default referrer policy
-- Service Worker should respond to fetch with the referrer URL when a member of RequestInit
-  is present - Default Referrer
 service-workers/service-worker/fetch-event-respond-with-argument.https.html:
 - respondWith() takes either a Response or a promise that resolves with a Response.
   Other values should raise a network error.
 service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
 - Respond by chunks with a Response being loaded
-service-workers/service-worker/fetch-event-respond-with-custom-response.https.html:
-- Subresource built from a blob
-- Subresource built from a buffer
-- Subresource built from a buffer-view
-- Subresource built from a string
-- Subresource built from form-data
-- Subresource built from search-params
 service-workers/service-worker/fetch-event-respond-with-partial-stream.https.html:
 - respondWith() streams data to an intercepted fetch()
-service-workers/service-worker/fetch-event-respond-with-readable-stream-chunk.https.html:
-- Respond by chunks with a Response built from a ReadableStream
 service-workers/service-worker/fetch-event-respond-with-readable-stream.https.html:
 - Abort in the page should be observable in the service worker with empty stream
 - Abort in the page should be observable in the service worker with nonempty stream
@@ -1544,8 +1525,6 @@ service-workers/service-worker/fetch-event-respond-with-readable-stream.https.ht
 - Cancellation in the page should be observable in the service worker with nonempty
   stream
 - Main resource built from a ReadableStream - fetch stream
-- Subresource built from a ReadableStream
-- Subresource built from a ReadableStream - delayed
 - Subresource built from a ReadableStream - fetch stream
 service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html:
 - Response with a ReadableStream having non-Uint8Array chunks should be transferred
@@ -1558,7 +1537,6 @@ service-workers/service-worker/fetch-event-within-sw-manual.https.html:
 - Notification requests intercepted both from window and SW
 service-workers/service-worker/fetch-event-within-sw.https.html:
 - Service worker does not intercept fetch/cache requests within service worker
-- Service worker intercepts requests from window
 service-workers/service-worker/fetch-event.https.h2.html:
 - Network fallback for streaming upload.
 - Running clone() in the service worker does not prevent network fallback.
@@ -1587,7 +1565,6 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
 - Service Worker event.respondWith must set the used flag
 - Service Worker fetches other file in fetch event
-- Service Worker responds to fetch event using request fragment with string
 - Service Worker responds to fetch event with POST form
 - Service Worker responds to fetch event with an existing client id
 - Service Worker responds to fetch event with the correct cache types
@@ -1604,8 +1581,6 @@ service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the new window.
 - CORS type response could be loaded in the iframe.
 - CORS type response could be loaded in the new window.
-service-workers/service-worker/fetch-header-visibility.https.html:
-- Visibility of defaulted headers during interception
 service-workers/service-worker/fetch-mixed-content-to-inscope.https.html:
 - Verify Mixed content of fetch() in a Service Worker
 service-workers/service-worker/fetch-mixed-content-to-outscope.https.html:
@@ -1940,6 +1915,8 @@ service-workers/service-worker/fetch-response-xhr.https.html:
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
+service-workers/service-worker/fetch-with-body.https.html:
+- Validate body is preserved
 service-workers/service-worker/getregistration.https.html:
 - getRegistration with a cross origin URL
 service-workers/service-worker/getregistrations.https.html:
@@ -2787,8 +2764,6 @@ service-workers/service-worker/unregister-then-register-new-script.https.html:
 - Registering a new script URL that fails to install does not resurrect unregistered
   registration
 - Registering a new script URL while an unregistered registration is in use
-service-workers/service-worker/unregister-then-register.https.html:
-- Unregister then register does not resurrect the registration
 service-workers/service-worker/unregister.https.html:
 - Unregister twice
 service-workers/service-worker/update-after-navigation-fetch-event.https.html:
