@@ -1426,6 +1426,8 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   without credentials should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to cors with credentials
   should fail interception and response should be redirected
+- Non-navigation, follow redirect, cors mode Request redirected to cors without credentials
+  should succeed interception and response should be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
   should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to same-origin with
@@ -1533,7 +1535,6 @@ service-workers/service-worker/fetch-event.https.h2.html:
 - When the streaming request body is used, network fallback fails.
 service-workers/service-worker/fetch-event.https.html:
 - Fetch with POST with text on sw 421 response should not be retried.
-- XHR upload progress events for response coming from SW
 service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the iframe.
 - Basic type response could be loaded in the new window.
@@ -1582,7 +1583,6 @@ service-workers/service-worker/fetch-request-no-freshness-headers.https.html:
 - The headers of FetchEvent shouldn't contain freshness headers.
 service-workers/service-worker/fetch-request-redirect.https.html:
 - Loading redirected image with Request.redirect=follow should succeed. - default
-- Redirected XHR with Request.redirect=error should fail. - default
 - Redirected XHR with Request.redirect=manual should fail. - default
 - Verify redirect mode of Fetch API and ServiceWorker FetchEvent.
 - Verify redirected of Response(Fetch API) and ServiceWorker FetchEvent.
@@ -1595,17 +1595,7 @@ service-workers/service-worker/fetch-request-xhr-sync.https.html:
 - Verify SyncXHR is intercepted
 service-workers/service-worker/fetch-request-xhr.https.html:
 - FetchEvent#request.body contains XHR request data (blob)
-- FetchEvent#request.body contains XHR request data (string)
-- FetchEvent#request.method is set to XHR method
-- XHR to data URL
-- XHR using OPTIONS method
 - XHR with form data
-- XHR with mode/credentials set
-- event.request has the expected headers for cross-origin GET.
-- event.request has the expected headers for cross-origin POST.
-- event.request has the expected headers for same-origin GET.
-- event.request has the expected headers for same-origin POST.
-- restore global state
 service-workers/service-worker/fetch-response-taint.https.html:
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
   mode:"cors" credentials:"include" should succeed.
@@ -2878,7 +2868,6 @@ service-workers/service-worker/worker-interception.https.html:
 service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL
 - XHR Document should use the response URL (generated response)
-- XHR responseURL should be the response URL
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
