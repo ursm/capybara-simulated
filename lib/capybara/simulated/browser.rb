@@ -5958,8 +5958,13 @@ module Capybara
           # JS-side, reusing the retained content so blob bytes survive a revoke.
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
+          cur   = current_frame_history_entry(realm_id)
           if entry && !url.empty?
             navigate_frame(url, entry: entry)
+          elsif cur && cur[:method] == 'POST'
+            # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
+            # body, rather than the JS reload path's GET refetch of the frame's src.
+            navigate_realm_self_post(realm_id, cur[:url], cur[:body], cur[:content_type], is_reload: true)
           else
             @runtime.call('__csimReloadFrameByRealm', realm_id)
           end
@@ -6026,8 +6031,9 @@ module Capybara
         return if h.nil?
         target = h[:idx] + delta
         return if target.negative? || target >= h[:entries].size
-        # Snapshot the entry we're leaving so a later forward traversal restores it.
-        h[:entries][h[:idx]] = frame_history_entry(realm_id) if h[:idx] >= 0
+        # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
+        # was reached, so a POST entry re-POSTs when traversed back to).
+        h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]]) if h[:idx] >= 0
         reload_frame_to_entry(realm_id, h[:entries][target])
         h[:idx] = target   # advance only after the rebuild succeeds
       end
@@ -6037,27 +6043,46 @@ module Capybara
       # into the frame form-submission paths; frame navigations driven by
       # `location.href` / link clicks aren't recorded yet (history.back there falls
       # through to the top document, as before).
-      def record_frame_nav(realm_id, new_url)
+      # `post` (a {body, content_type}) records that this entry was reached by a POST submission,
+      # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
+      def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
-        outgoing = frame_history_entry(realm_id)
         if h[:idx] >= 0
-          h[:entries][h[:idx]] = outgoing
+          h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]])
         else
-          h[:entries] << outgoing
+          h[:entries] << frame_history_entry(realm_id)
           h[:idx] = 0
         end
         h[:entries] = h[:entries][0..h[:idx]]
-        h[:entries] << {url: new_url.to_s, form_state: nil}
+        entry = {url: new_url.to_s, form_state: nil}
+        entry.merge!(method: 'POST', body: post[:body], content_type: post[:content_type]) if post
+        h[:entries] << entry
         h[:idx] = h[:entries].size - 1
+      end
+      # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
+      # whether to re-POST.
+      def current_frame_history_entry(realm_id)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        return nil if handle.zero?
+        h = (@frame_histories || {})[[parent, handle]]
+        h && h[:idx] >= 0 ? h[:entries][h[:idx]] : nil
       end
       # The history entry for the document currently loaded in `realm_id`: its URL
       # plus a snapshot of its form-control state.
       def frame_history_entry(realm_id)
         {url: frame_realm_url(realm_id), form_state: capture_frame_form_state(realm_id)}
+      end
+      # Refresh the outgoing entry's url + form-state snapshot while PRESERVING how it was reached
+      # (a POST entry's method / body / content_type) — leaving a document doesn't change the request
+      # that loaded it, so a later traversal back re-POSTs rather than GET-ing.
+      def snapshot_outgoing_entry(realm_id, prev)
+        snap = frame_history_entry(realm_id)
+        prev ? prev.merge(snap) : snap
       end
       def frame_realm_url(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
@@ -6076,11 +6101,20 @@ module Capybara
       def reload_frame_to_entry(realm_id, entry)
         url = entry[:url].to_s
         return if url.empty?
+        # An entry reached by a POST submission re-POSTS on traversal (with the recorded body); a
+        # normal entry re-GETs. The method drives both the SW fetch event and the network fallback.
+        is_post = entry[:method] == 'POST'
+        body    = entry[:body].to_s
         # A history traversal is a navigation: route it through the controlling SW's fetch event
         # (isHistoryNavigation) first — the traversal refetch happens here, Ruby-side, bypassing the
         # __csimFrameWindow interception the initial/reload paths use. A respondWith serves the
         # document; a network error fails the navigation; nil falls through to the network below.
-        if (sw = service_worker_navigation_fetch(url, is_history: true))
+        sw = if is_post
+          service_worker_navigation_fetch(url, is_history: true, method: 'POST', body_b64: Base64.strict_encode64(body), content_type: entry[:content_type])
+        else
+          service_worker_navigation_fetch(url, is_history: true)
+        end
+        if sw
           return if sw['networkError']
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
@@ -6089,12 +6123,16 @@ module Capybara
                                    response_content_type(sw['headers'] || {}), restore_state: entry[:form_state])
           return
         end
-        env = Rack::MockRequest.env_for(url, method: 'GET')
+        env = Rack::MockRequest.env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
+        if is_post
+          env['CONTENT_TYPE']   = entry[:content_type].to_s.empty? ? 'application/x-www-form-urlencoded' : entry[:content_type]
+          env['CONTENT_LENGTH'] = body.bytesize.to_s
+        end
         apply_default_request_env(env, referer: current_browsing_context_url)
-        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+        status, headers, resp_body = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil)
         merge_set_cookie(headers, url)
         return if download_response?(headers)
-        html = read_rack_body(body)
+        html = read_rack_body(resp_body)
         reload_frame_realm_by_id(realm_id, url, html, response_content_type(headers), restore_state: entry[:form_state])
       end
       # Serialize + route a form submitted inside frame realm `realm_id`. We
@@ -6174,12 +6212,27 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0)
+      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false)
         raise 'too many redirects' if depth > 10
-        record_frame_nav(realm_id, url) if depth.zero?
+        # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
+        # a fresh submission records history. The POST method/body is tagged onto the entry AFTER a
+        # DIRECT (non-redirect) response (tag_frame_entry_post below): a POST that redirects (the
+        # Post/Redirect/Get pattern) resolves to a GET document, so its entry must NOT re-POST on a
+        # later reload / back — only a directly-served POST does.
+        record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame_post(url, body, content_type, entry: entry) if entry
         invalidate_find_cache
+        # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
+        # POST — the SW reads the body via event.request.text()); respondWith serves the document,
+        # a network error fails it, nil falls through to the network POST below.
+        if (sw = service_worker_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history))
+          return if sw['networkError']
+
+          tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
+          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
+          return
+        end
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -6192,7 +6245,7 @@ module Capybara
           # 307/308 preserve method + body; 301/302/303 → GET the frame (routed
           # through the realm that OWNS the iframe, as in navigate_realm_self_get).
           if [307, 308].include?(status)
-            return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1)
+            return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history)
           end
           parent = @runtime.frame_realm_parent(realm_id)
           return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, next_url)
@@ -6201,7 +6254,15 @@ module Capybara
           save_downloaded_response(url, headers, resp_body)
           return
         end
+        tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
         reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers))
+      end
+      # Tag the frame's current history entry as reached by a POST (with its body), so a later
+      # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
+      # so a Post/Redirect/Get entry stays a GET.
+      def tag_frame_entry_post(realm_id, body, content_type)
+        cur = current_frame_history_entry(realm_id)
+        cur.merge!(method: 'POST', body: body, content_type: content_type) if cur
       end
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
