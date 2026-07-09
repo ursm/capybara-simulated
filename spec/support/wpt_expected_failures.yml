@@ -1426,8 +1426,6 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   without credentials should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to cors with credentials
   should fail interception and response should be redirected
-- Non-navigation, follow redirect, cors mode Request redirected to cors without credentials
-  should succeed interception and response should be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to no-cors with credentials
   should fail interception and response should not be redirected
 - Non-navigation, follow redirect, cors mode Request redirected to same-origin with
@@ -1538,8 +1536,6 @@ service-workers/service-worker/fetch-event.https.html:
 - FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
 - FetchEvent#request.isReloadNavigation is true (POST + location.reload())
 - FetchEvent#request.isReloadNavigation is true (with history traversal)
-- Service Worker responds to fetch event with an existing client id
-- Service Worker responds to fetch event with the correct resulting client id
 - XHR upload progress events for response coming from SW
 service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the iframe.
