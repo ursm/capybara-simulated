@@ -2614,20 +2614,12 @@ webmessaging/with-options/host-specific-origin.html:
 - resolving url with stuff in host-specific
 webmessaging/with-ports/002.html:
 - resolving url with stuff in host-specific
-webmessaging/with-ports/010.html:
-- undefined
 webmessaging/with-ports/015.html:
 - different origin
 webmessaging/without-ports/002.html:
 - resolving url with stuff in host-specific
-webmessaging/without-ports/009.html:
-- zero arguments
-webmessaging/without-ports/010.html:
-- undefined
 webmessaging/without-ports/015.html:
 - different origin
-webmessaging/without-ports/025.html:
-- MessagePort constructor properties
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/abort-after-timeout.any.js:
