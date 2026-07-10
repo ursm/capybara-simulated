@@ -1492,8 +1492,6 @@ service-workers/service-worker/fetch-event-within-sw-manual.https.html:
 - Notification requests intercepted both from window and SW
 service-workers/service-worker/fetch-event.https.h2.html:
 - When the streaming request body is used, network fallback fails.
-service-workers/service-worker/fetch-event.https.html:
-- Fetch with POST with text on sw 421 response should not be retried.
 service-workers/service-worker/fetch-frame-resource.https.html:
 - Basic type response could be loaded in the iframe.
 - Basic type response could be loaded in the new window.
@@ -1822,8 +1820,6 @@ service-workers/service-worker/fetch-response-xhr.https.html:
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
-service-workers/service-worker/fetch-with-body.https.html:
-- Validate body is preserved
 service-workers/service-worker/getregistration.https.html:
 - getRegistration with a cross origin URL
 service-workers/service-worker/getregistrations.https.html:
