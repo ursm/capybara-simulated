@@ -183,17 +183,9 @@ fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
 - Abort reason serialization happens on abort
-- Already aborted request does not land in service worker
 - Service Worker can observe the fetch abort and associated abort reason
 - Stream errors once aborted.
-- fetch() rejects with abort reason
 - fetch() response body has abort reason
-- response.arrayBuffer() rejects if already aborted
-- response.blob() rejects if already aborted
-- response.bytes() rejects if already aborted
-- response.formData() rejects if already aborted
-- response.json() rejects if already aborted
-- response.text() rejects if already aborted
 fetch/api/basic/block-mime-as-script.html:
 - Should fail loading empty script with audio/aiff MIME type
 - Should fail loading empty script with audio/midi MIME type
