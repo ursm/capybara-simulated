@@ -1212,8 +1212,6 @@ service-workers/service-worker/fetch-error.https.html:
 service-workers/service-worker/fetch-event-after-navigation-within-page.https.html:
 - Service Worker should respond to fetch event after the hash changes
 - Service Worker should respond to fetch event after the pushState
-service-workers/service-worker/fetch-event-async-respond-with.https.html:
-- respondWith in a task throws InvalidStateError
 service-workers/service-worker/fetch-event-handled.https.html:
 - FetchEvent.handled should reject when respondWith() is not called and the event
   is canceled
