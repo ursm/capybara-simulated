@@ -773,9 +773,6 @@ html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
 html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.js:
 - dir=auto changes for slot reassignment
-html/semantics/forms/form-submission-0/submission-checks.window.js:
-- "<form> not connected to a document after submit event cannot navigate"
-- "<form> not connected to a document cannot navigate"
 html/webappapis/scripting/events/compile-event-handler-lexical-scopes.html:
 - The EventHandler is not an element's event handler (i.e. Window's event handler)
   and has no form owner.
@@ -820,8 +817,6 @@ service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
 - Cache API matching includes credentials
-service-workers/cache-storage/sandboxed-iframes.https.html:
-- Sandboxed iframe without allow-same-origin is denied access
 service-workers/service-worker/Service-Worker-Allowed-header.https.html:
 - Registering outside Service-Worker-Allowed path
 - Registering outside Service-Worker-Allowed path with parent reference
@@ -867,15 +862,12 @@ service-workers/service-worker/ServiceWorkerGlobalScope/unregister.https.html:
 service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
 - Update a registration on ServiceWorkerGlobalScope
 service-workers/service-worker/about-blank-replacement.https.html:
-- Dynamic about:blank is controlled and is exposed to clients.matchAll().
 - Initial about:blank is controlled, exposed to clients.matchAll(), and matches final
   Client.
 - Initial about:blank modified by parent is controlled, exposed to clients.matchAll(),
   and matches final Client.
-- Nested about:srcdoc is controlled and is exposed to clients.matchAll().
 - Popup initial about:blank is controlled, exposed to clients.matchAll(), and matches
   final Client.
-- Simple about:blank is controlled and is exposed to clients.matchAll().
 service-workers/service-worker/activation.https.html:
 - finishing a request triggers activation
 - finishing a request triggers unregister
@@ -2566,8 +2558,6 @@ service-workers/service-worker/skip-waiting.https.html:
 service-workers/service-worker/srcdoc-iframe.https.html:
 - controller.postMessage should work in srcdoc iframe
 - getRegistration should work in srcdoc iframe
-- nested same origin sandboxed srcdoc frame should inherit controller
-- should be able to serve resource from controller for srcdoc frame
 service-workers/service-worker/static-router-cross-origin-navigation.https.html:
 - Cross-origin navigation with static router cache rule
 service-workers/service-worker/static-router-fetch-event.https.html:

@@ -393,6 +393,13 @@ module Capybara
         @sw_registrations = {}
         @sw_nav_outbox    = Thread::Queue.new
         @sw_nav_seq       = 0
+        # Service-worker Client registry: realm id → {handle, rec} for every
+        # controlled frame/window client, mirrored into the SW's clientsById so
+        # matchAll / getClientByURL see the real set. `@sw_realm_controller` records
+        # each realm's controller so an opaque child (about:blank / srcdoc) inherits
+        # it. Both keyed by realm id, cleared when the last worker exits.
+        @sw_clients          = {}
+        @sw_realm_controller = {}
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -3707,6 +3714,51 @@ module Capybara
         [handle, w[:has_fetch] != false, w[:script_url].to_s]
       end
 
+      # The controller an OPAQUE child browsing context (about:blank / srcdoc)
+      # inherits from its creator. An about:blank document has no URL to scope-match,
+      # so it's controlled by its parent's active service worker (HTML "create and
+      # initialize a Document" inherits the creator's controller). Keyed by the
+      # parent frame realm's id, recorded when that realm was wired (below).
+      def sw_inherited_controller_for(parent_realm_id)
+        return nil if parent_realm_id.nil? || parent_realm_id.to_i.zero?
+        ctrl = @sw_realm_controller[parent_realm_id.to_i]
+        return nil unless ctrl && @workers[ctrl[0]]&.dig(:thread)&.alive?
+
+        ctrl
+      end
+
+      # Remember a frame/window realm's controller so its OWN opaque children can
+      # inherit it (sw_inherited_controller_for). Set at frame-realm build for both
+      # a scope-matched and an inherited controller, so inheritance chains through
+      # nested about:blank frames.
+      def sw_note_realm_controller(realm_id, ctrl)
+        @sw_realm_controller[realm_id.to_i] = ctrl
+        nil
+      end
+
+      # Register a controlled client (a frame/window realm) with its controlling SW
+      # so `clients.matchAll()` / `getClientByURL` reflect the real client set — not
+      # only clients that happened to postMessage the worker. The client id is
+      # realm-scoped (`client-<realm>`), stable for the realm's life. Pushed to the
+      # SW inbox (processed FIFO, so it precedes any later message that matchAll's it).
+      def sw_register_client(realm_id, url, type, frame_type, handle)
+        w = @workers[handle.to_i] or return
+        rec = {'id' => "client-#{realm_id.to_i}", 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
+        @sw_clients[realm_id.to_i] = {handle: handle.to_i, rec: rec}
+        w[:inbox] << {kind: 'client_register', client: rec}
+        nil
+      end
+
+      # Drop a client whose realm was disposed (frame navigated away / removed) so
+      # matchAll stops returning a dead client. No-op for an unregistered realm.
+      def sw_unregister_client(realm_id)
+        @sw_realm_controller.delete(realm_id.to_i)
+        entry = @sw_clients.delete(realm_id.to_i) or return
+        w = @workers[entry[:handle]] or return
+        w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
+        nil
+      end
+
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
       private def sw_controller_for_navigation(url)
@@ -3811,7 +3863,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -4595,6 +4647,8 @@ module Capybara
         @sw_fetch_pending         = 0
         @sw_fetch_wait_deadline   = nil
         @sw_registrations.clear
+        @sw_clients          = {}
+        @sw_realm_controller = {}
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
@@ -5078,6 +5132,15 @@ module Capybara
               ensure
                 outbox << {handle: handle, kind: 'swack'}
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'client_register'
+              # A controlled client (frame/window realm) came into existence: mirror it into the
+              # SW's clientsById so matchAll/getClientByURL see it. Fire-and-forget (no reply /
+              # pending counter): the inbox is FIFO, so it's processed before any later message
+              # whose handler matchAll's the client.
+              rt.call('__csim_swRegisterClient', msg[:client])
+            elsif msg.is_a?(Hash) && msg[:kind] == 'client_unregister'
+              # The client's realm was disposed — drop it so matchAll stops returning a dead client.
+              rt.call('__csim_swUnregisterClient', msg[:id])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch'
               # A controlled client's fetch: dispatch a `fetch` event. The SW's respondWith result
               # (or a fall-through / network-error marker) is posted back as a `fetch_response`

@@ -467,6 +467,8 @@ module Capybara
         # The frame's browsing context is going away — revoke the blob URLs it
         # created (url-lifetime "Removing an iframe").
         @browser.revoke_realm_blobs(id) rescue nil
+        # Drop it from the SW Client registry so matchAll stops returning a dead client.
+        @browser.sw_unregister_client(id) rescue nil
         @realm_module_handles&.delete(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
@@ -737,8 +739,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -764,6 +766,15 @@ module Capybara
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
 
+      # A frame whose document URL is opaque — about:blank (empty src), about:srcdoc,
+      # or empty — has no scope of its own; its controller is inherited from the
+      # creator. (create_frame_realm receives 'about:blank'/'about:srcdoc' as the url
+      # for these, seeded by __csimFrameWindow.)
+      def opaque_frame_url?(url)
+        u = url.to_s
+        u.empty? || u.start_with?('about:')
+      end
+
       # Bring a freshly-created realm context up to a runnable bridge, shared by the
       # frame and window realm constructors. Re-evaling the snapshot source would
       # redefine snapshot globals (e.g. the `scrollX` accessor) and throw, so only
@@ -781,7 +792,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -840,6 +851,11 @@ module Capybara
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
         realm.call('__csimSetLocationOrigin', frame_location_origin.to_s) unless frame_location_origin.nil?
+        # An about:blank / about:srcdoc frame's URL is opaque, but its base URL (for
+        # relative-URL resolution) is INHERITED from the creator. Seed that inherited
+        # base BEFORE the document loads so its load-time scripts resolve relative URLs
+        # against the parent, even though location.href reports about:blank/srcdoc.
+        realm.call('__csimSetAboutBaseURL', frame_about_base.to_s) unless frame_about_base.to_s.empty?
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # A `javascript:` URL frame: the initial empty document is now loaded and
         # parent/top are wired, so evaluate the URL's script in the realm (global
@@ -861,8 +877,29 @@ module Capybara
         # wire its `navigator.serviceWorker.controller` so subresource fetch() / EventSource route
         # through the SW's fetch event. The frame never called register(), so its per-realm
         # registration Map is empty — set the controller directly from Ruby's scope→handle mirror.
-        if (ctrl = @browser.sw_client_controller_for(url.to_s))
+        # An OPAQUE child (about:blank / srcdoc) has no scope of its own, so it INHERITS its
+        # parent frame's controller (HTML: an about:blank document is controlled by its creator).
+        # Inheritance chains through controlled FRAME realms (sw_note_realm_controller below);
+        # a direct about:blank child of a controlled TOP-LEVEL page isn't covered yet — the main
+        # document's controller isn't recorded in @sw_realm_controller (deferred, with the
+        # http-src client model, to the two-phase frame work).
+        opaque = opaque_frame_url?(url)
+        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin
+        # 'null') and is cross-origin to its creator, so it does NOT inherit the
+        # creator's controller (srcdoc-iframe: "sandboxed srcdoc should not inherit").
+        # allow-same-origin restores the parent origin, so it DOES inherit.
+        inheritable = opaque && frame_doc_origin.to_s != 'null'
+        ctrl   = @browser.sw_client_controller_for(url.to_s)
+        ctrl ||= @browser.sw_inherited_controller_for(parent_id) if inheritable
+        if ctrl
           realm.call('__csim_swSetControllerDirect', *ctrl)
+          # Remember it so this frame's own opaque children inherit it. Only an OPAQUE
+          # (about:blank / srcdoc) frame is mirrored into the SW's clients.matchAll():
+          # a real-URL frame's registration would fire during its SYNCHRONOUS SW
+          # nav-fetch (main thread blocked on @sw_nav_outbox), perturbing worker timing
+          # — the http-src client model is deferred to the two-phase frame work.
+          @browser.sw_note_realm_controller(realm.id, ctrl)
+          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if opaque
         end
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
