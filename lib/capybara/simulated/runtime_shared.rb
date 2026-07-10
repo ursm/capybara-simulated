@@ -138,6 +138,10 @@ module Capybara
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
+        # Cross-isolate MessagePort channel (client-realm side): register this realm's endpoint, and
+        # relay a client-realm port's postMessage to its remote (worker/SW) peer.
+        '__csimClientPortEndpoint' => ->(b, *a) { b.port_channel_endpoint_realm(a[0], a[1]); nil },
+        '__csimClientPortPost'     => ->(b, *a) { b.client_port_post(a[0], a[1]); nil },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },

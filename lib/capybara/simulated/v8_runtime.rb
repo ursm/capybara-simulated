@@ -1366,6 +1366,9 @@ module Capybara
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
+        # Cross-isolate MessagePort channel signals (a worker/SW port endpoint + its outbound messages).
+        c.attach('__csim_workerPortPost',     ->(channel, data) { sw_hooks[:port_post]&.call(channel, data); nil }) if sw_hooks[:port_post]
+        c.attach('__csim_workerPortEndpoint', ->(channel)       { sw_hooks[:port_endpoint]&.call(channel); nil }) if sw_hooks[:port_endpoint]
         # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
         # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
         # browser's inbox from the worker thread). Route it through the thread-safe outbox instead

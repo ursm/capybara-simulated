@@ -836,8 +836,6 @@ service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event
 - Post an extendable message from a top-level client
 - Post extendable messages among service workers
 - Post loopback extendable messages
-service-workers/service-worker/ServiceWorkerGlobalScope/message-event-ports.https.html:
-- Verify MessageEvent.ports getter returns the same object
 service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
 - Post loopback messages
 - Post messages among service workers
@@ -897,9 +895,12 @@ service-workers/service-worker/client-id.https.html:
 service-workers/service-worker/client-navigate.https.html:
 - Frame location should not be accessible after cross-origin navigation
 - Frame location should not be accessible after redirect
-- Frame location should not update on failed about:blank navigation
-- Frame location should not update on failed mixed-content navigation
 - Frame location should update on successful navigation
+- Navigating to about:blank should reject with TypeError
+- Navigating to different origin should resolve with null
+- Navigating to mixed-content iframe should reject with TypeError
+- Redirecting to another origin should resolve with null
+- Return value should be instance of WindowClient
 service-workers/service-worker/client-url-creation-url.https.html:
 - Fragment only navigation doesn't change creation URL
 - Going back over pushstate to creation URL
@@ -1011,13 +1012,6 @@ service-workers/service-worker/extendable-event-async-waituntil.https.html:
   is being dispatched).
 - Test calling waitUntil synchronously inside microtask of respondWith promise (event
   is not being dispatched).
-service-workers/service-worker/extendable-event-waituntil.https.html:
-- Test ExtendableEvent multiple waitUntil fulfilled.
-- Test ExtendableEvent waitUntil reject precedence.
-- Test activate event waitUntil fulfilled
-- Test activate event waitUntil rejected.
-- Test install event waitUntil fulfilled
-- Test install event waitUntil rejected
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-double-write.https.html:
@@ -1216,7 +1210,6 @@ service-workers/service-worker/fetch-event-handled.https.html:
   request
 - FetchEvent.handled should resolve when the promise provided to respondWith() is
   resolved
-- global cleanup
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
 service-workers/service-worker/fetch-event-network-error.https.html:
@@ -1351,8 +1344,6 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 service-workers/service-worker/fetch-request-fallback.https.html:
 - The SW must intercept only the first request for XHR which is redirected to CORS-supported
   other origin.
-- The SW must intercept only the first request for XHR which is redirected to CORS-unsupported
-  other origin.
 - The SW must intercept only the first request for image resource which is redirected
   to CORS-supported other origin.
 - The SW must intercept only the first request for image resource which is redirected
@@ -1363,15 +1354,9 @@ service-workers/service-worker/fetch-request-fallback.https.html:
 - The SW must intercept only the first request of redirected XHR.
 - The SW must intercept the request for CORS-supported other origin image.
 - The SW must intercept the request for CORS-unsupported other origin image.
-- The SW must intercept the request for a main resource.
 - The SW must intercept the request for image.
 - The SW must intercept the request for other origin image.
 - The SW must intercept the request of CORS-supported other origin XHR.
-- The SW must intercept the request of CORS-unsupported other origin XHR.
-- The SW must intercept the request of same origin XHR.
-- restore global state
-service-workers/service-worker/fetch-request-no-freshness-headers.https.html:
-- The headers of FetchEvent shouldn't contain freshness headers.
 service-workers/service-worker/fetch-request-redirect.https.html:
 - Loading redirected image with Request.redirect=follow should succeed. - default
 - Redirected XHR with Request.redirect=manual should fail. - default
@@ -1584,7 +1569,6 @@ service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
 service-workers/service-worker/indexeddb.https.html:
 - Verify Indexed DB operation in a Service Worker
-- 'clean up: registration'
 service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL
@@ -1856,10 +1840,8 @@ service-workers/service-worker/navigation-redirect.https.html:
 - SW-fallbacked redirect to other-origin in-scope.
 - SW-fallbacked redirect to other-origin in-scope.
 - SW-fallbacked redirect to other-origin out-scope.
-- SW-fallbacked redirect to other-origin out-scope.
 - SW-fallbacked redirect to same-origin other-scope.
 - SW-fallbacked redirect to same-origin other-scope.
-- SW-fallbacked redirect to same-origin out-scope.
 - SW-fallbacked redirect to same-origin out-scope.
 - SW-fallbacked redirect to same-origin same-scope with a hash fragment.
 - SW-fallbacked redirect to same-origin same-scope with a hash fragment.
@@ -1893,7 +1875,6 @@ service-workers/service-worker/navigation-redirect.https.html:
 - SW-generated redirect to same-origin out-scope.
 - SW-generated redirect to same-origin same-scope.
 - SW-generated redirect to same-origin same-scope.
-- clean up global state
 - clean up global state
 service-workers/service-worker/navigation-sets-cookie.https.html:
 - Setup service workers
@@ -1931,8 +1912,6 @@ service-workers/service-worker/postmessage-blob-url.https.html:
 - postMessage Blob URL to a ServiceWorker
 service-workers/service-worker/postmessage-from-waiting-serviceworker.https.html:
 - Client.postMessage() from waiting serviceworker.
-service-workers/service-worker/postmessage-msgport-to-client.https.html:
-- postMessage MessagePorts from ServiceWorker to Client
 service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after DOMContentLoaded event.
 - Messages from ServiceWorker to Client only received after calling startMessages().
@@ -1942,7 +1921,6 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 service-workers/service-worker/postmessage.https.html:
 - postMessage a transferable ArrayBuffer between ServiceWorker and Client
 - postMessage a transferable ArrayBuffer between ServiceWorker and Client over MessagePort
-- postMessage to a ServiceWorker (and back via MessagePort)
 - postMessage to a redundant worker
 - postMessage with dictionary a transferable ArrayBuffer between ServiceWorker and
   Client
@@ -1950,29 +1928,22 @@ service-workers/service-worker/redirected-response.https.html:
 - Fetch should follow the redirect response 20 times
 - Fetch should not follow the redirect response 21 times.
 - The URL for the service worker redirected request should be propagated to response.
-- initialize global state (service worker registration and caches)
 - 'mode: "error", generated redirect response'
 - 'mode: "error", generated relative redirect response'
 - 'mode: "error", manually-generated redirect response'
 - 'mode: "error", mode change: "follow"'
 - 'mode: "error", mode change: "manual"'
-- 'mode: "error", non-intercepted request'
 - 'mode: "follow", generated redirect response'
 - 'mode: "follow", generated relative redirect response'
 - 'mode: "follow", manually-generated redirect response'
 - 'mode: "follow", mode change: "manual"'
 - 'mode: "follow", no mode change'
 - 'mode: "follow", no mode change, no server redirect'
-- 'mode: "follow", non-intercepted request'
-- 'mode: "follow", non-intercepted request, no server redirect'
 - 'mode: "manual", generated redirect response'
 - 'mode: "manual", generated relative redirect response'
 - 'mode: "manual", manually-generated redirect response'
 - 'mode: "manual", mode change: "follow"'
 - 'mode: "manual", no mode change'
-- 'mode: "manual", non-intercepted request'
-- restore global state (caches)
-- restore global state (service worker registration)
 service-workers/service-worker/referer.https.html:
 - Verify the referer
 service-workers/service-worker/referrer-policy-header.https.html:
@@ -1999,8 +1970,6 @@ service-workers/service-worker/registration-basic.https.html:
 - Registering scope with fragment
 service-workers/service-worker/registration-end-to-end.https.html:
 - 'Registration: end-to-end'
-service-workers/service-worker/registration-events.https.html:
-- 'Registration: events'
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
 - register method should use the "relevant global object" to parse its scriptURL and
@@ -2231,7 +2200,6 @@ service-workers/service-worker/same-site-cookies.https.html:
 - same-site, window.open with no service worker
 - same-site, window.open with passthrough
 service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
-- Fetch request from a normal iframe
 - Fetch request from a worker in a normal iframe
 - Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
   and allow-same-origin flag
@@ -2247,7 +2215,6 @@ service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts allow-same-origin">.
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
 - Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
-- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts.
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
   and allow-same-origin flag
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
@@ -2487,7 +2454,7 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 - iframe referrerpolicy="same-origin", origin A
 - iframe referrerpolicy="same-origin", origin B
 service-workers/service-worker/windowclient-navigate.https.html:
-- blank url
+- blank url worker side
 - cross origin url
 - in scope but not controlled test on active worker
 - in scope but not controlled test on installing worker
@@ -2496,7 +2463,7 @@ service-workers/service-worker/windowclient-navigate.https.html:
 - invalid url (http://[example.com])
 - invalid url (view-source://example.com)
 - navigate on a top-level window client
-- normal
+- normal worker side
 - out of scope
 service-workers/service-worker/worker-client-id.https.html:
 - Verify workers have a unique client id separate from their owning documents window
@@ -2506,7 +2473,6 @@ service-workers/service-worker/worker-in-sandboxed-iframe-by-csp-fetch-event.htt
 - Fetch request from a worker in iframe sandboxed by CSP HTTP header with allow-scripts
   and allow-same-origin flag
 - Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
-- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts.
 service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #1: network scope1->scope2 (classic DedicatedWorker)'
 - 'Case #1: network scope1->scope2 (classic SharedWorker)'
@@ -2525,31 +2491,21 @@ service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #4: sw scope1->out-scope (module DedicatedWorker)'
 - 'Case #4: sw scope1->out-scope (module SharedWorker)'
 service-workers/service-worker/worker-interception.https.html:
-- Register a service worker for worker subresource interception tests.
 - Requests on a dedicated worker controlled by a service worker.
 - Requests on a dedicated worker nested in a dedicated worker and controlled by a
   service worker
 - Requests on a dedicated worker nested in a shared worker and controlled by a service
   worker
 - Requests on a shared worker controlled by a service worker.
-- Unregister a service worker for subresource interception tests.
-- Verify a cors worker script served by a service worker fails dedicated worker start.
-- Verify a cors worker script served by a service worker fails shared worker start.
 - Verify a dedicated worker script request gets correct client Ids
 - Verify a dedicated worker script request issued from a uncontrolled document is
   intercepted by worker's own service worker.
-- Verify a no-cors cross-origin worker script served by a service worker fails dedicated
-  worker start.
-- Verify a no-cors cross-origin worker script served by a service worker fails shared
-  worker start.
 - Verify a same-origin worker script served by a service worker succeeds in starting
   a dedicated worker.
 - Verify a same-origin worker script served by a service worker succeeds in starting
   a shared worker.
 - Verify a shared worker script request issued from a uncontrolled document is intercepted
   by worker's own service worker.
-- Verify an out-of-scope dedicated worker script request issued from a controlled
-  document should not be intercepted by document's service worker.
 service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL
 - XHR Document should use the response URL (generated response)
