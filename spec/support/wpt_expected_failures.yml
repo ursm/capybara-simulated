@@ -1036,19 +1036,10 @@ service-workers/service-worker/fetch-canvas-tainting-double-write.https.html:
 - canvas is tainted after writing both a non-opaque image and an opaque image from
   the same URL
 service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
-- initialize global state
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
@@ -1057,49 +1048,27 @@ service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
   with crossOrigin "" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&reject"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
   with crossOrigin "" should be TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&ignore"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
   with crossOrigin "" should be TAINTED
@@ -1107,26 +1076,11 @@ service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 service-workers/service-worker/fetch-canvas-tainting-image.https.html:
-- initialize global state
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
@@ -1135,49 +1089,27 @@ service-workers/service-worker/fetch-canvas-tainting-image.https.html:
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
   with crossOrigin "" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&reject"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ACAOrigin=https://web-platform.test:8443&ignore"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
   with crossOrigin "" should be TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&ignore"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
   with crossOrigin "" should be TAINTED
@@ -1185,14 +1117,7 @@ service-workers/service-worker/fetch-canvas-tainting-image.https.html:
   with crossOrigin "anonymous" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
   with crossOrigin "use-credentials" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
 service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
-- initialize global state
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
@@ -1202,67 +1127,33 @@ service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "" should be TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&reject"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26cache%3Dtrue"
@@ -1274,7 +1165,6 @@ service-workers/service-worker/fetch-canvas-tainting-video-with-range-request.ht
 - range responses from single origin with both opaque and non-opaque responses
 - synth and same-origin fallback range responses
 service-workers/service-worker/fetch-canvas-tainting-video.https.html:
-- initialize global state
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
@@ -1284,67 +1174,33 @@ service-workers/service-worker/fetch-canvas-tainting-video.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "" should be TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "anonymous" should be NOT_TAINTED
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&reject"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ignore"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ACAOrigin=https://web-platform.test:8443&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&Auth&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&ignore"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&credentials=same-origin&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACACredentials%3Dtrue%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
   with crossOrigin "anonymous" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO%26ACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
-  with crossOrigin "anonymous" should be LOAD_ERROR
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
-  with crossOrigin "use-credentials" should be LOAD_ERROR
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
@@ -1582,12 +1438,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
   mode:"same-origin" credentials:"omit" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
   mode:"same-origin" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
   mode:"cors" credentials:"include" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
@@ -1654,12 +1504,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
   mode:"no-cors" credentials:"omit" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
   mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
   mode:"cors" credentials:"include" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
@@ -1696,7 +1540,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
   mode:"cors" credentials:"same-origin" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=https://web-platform.test:8443&ACACredentials=true"
   mode:"cors" credentials:"include" should succeed.
-- initialize global state
 - url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"cors" credentials:"include" should fail.
 - url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
@@ -1708,36 +1551,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
 - url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"same-origin" credentials:"omit" should fail.
 - url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"include" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"omit" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"same-origin" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"include" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"omit" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"same-origin" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"same-origin" credentials:"same-origin" should fail.
 - url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
   mode:"same-origin" credentials:"include" should fail.
@@ -1763,52 +1576,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
   mode:"same-origin" credentials:"omit" should fail.
 - url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"cors" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"no-cors" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=*"
-  mode:"cors" credentials:"include" should fail.
-service-workers/service-worker/fetch-response-xhr.https.html:
-- Verify the response of FetchEvent using XMLHttpRequest
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
@@ -1838,12 +1605,6 @@ service-workers/service-worker/intercepted-referrer.https.html:
 service-workers/service-worker/interface-requirements-sw.https.html:
 - Event constructors
 - xhr is not exposed
-service-workers/service-worker/invalid-blobtype.https.html:
-- Verify the response of FetchEvent using XMLHttpRequest
-service-workers/service-worker/invalid-header.https.html:
-- Verify the response of FetchEvent using XMLHttpRequest
-service-workers/service-worker/iso-latin1-header.https.html:
-- Verify the response of FetchEvent using XMLHttpRequest
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL iframe should not intercept fetch().
 - Data URL worker should not inherit service worker controller.
@@ -2817,22 +2578,15 @@ webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
     during which postMessage is called
 webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
 - onmessage calling source postMessage
-webmessaging/Transferred_objects_unusable.sub.htm:
-- 'Test Description: Objects listed in transfer are transferred, not just cloned,
-  meaning that they are no longer usable on the sending side.'
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
 webmessaging/broadcastchannel/ordering.html:
 - Messages are delivered in port creation order across multiple frames
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
-webmessaging/event.ports.sub.htm:
-- 'Test Description: event.ports returns the MessagePort array sent with the message.'
 webmessaging/event.source.xorigin.sub.htm:
 - 'Test Description: Cross-origin: event.source returns the WindowProxy of the source
   window.'
-webmessaging/message-channels/cross-document.html:
-- cross-document channel
 webmessaging/message-channels/detached-iframe.window.js:
 - MessageChannel created from a detached iframe should not send messages (remove after
   create)
@@ -2859,15 +2613,6 @@ webmessaging/postMessage_Document.htm:
 webmessaging/postMessage_Function.htm:
 - 'Test Description: postMessage with Function object: Throw a DataCloneError if message
   could not be cloned.'
-webmessaging/postMessage_MessagePorts_sorigin.htm:
-- 'Test Description: postMessage to same-origin iframe with MessagePort array containing
-  100 ports.'
-webmessaging/postMessage_MessagePorts_xorigin.sub.htm:
-- 'Test Description: postMessage to cross-origin iframe with MessagePort array containing
-  100 ports.'
-webmessaging/postMessage_MessagePorts_xsite.sub.window.js:
-- 'Test Description: postMessage to cross-site iframe with MessagePort array containing
-  100 ports.'
 webmessaging/postMessage_crosssite.sub.htm:
 - cross-site windows can send transferred ArrayBuffer
 webmessaging/postMessage_dup_transfer_objects.htm:
