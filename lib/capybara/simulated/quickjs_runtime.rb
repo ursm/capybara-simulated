@@ -156,6 +156,11 @@ module Capybara
 
       def realm_call(_realm_id, name, *args) = call(name, *args)
 
+      # No per-frame realms, so no realm is ever "alive" as a distinct browsing context —
+      # every client id resolves to 'client-window' (the single global). Defined so a
+      # caller that gates realm routing on it (deliver_worker_messages) works on both engines.
+      def frame_realm_alive?(_realm_id) = false
+
       def frame_realm_ids = []
 
       # bridge.js owns the virtual clock; we drive it from Ruby because

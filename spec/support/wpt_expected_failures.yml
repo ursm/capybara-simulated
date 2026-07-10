@@ -2192,8 +2192,6 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after setting onmessage.
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
-service-workers/service-worker/postmessage-to-client.https.html:
-- postMessage from ServiceWorker to Client.
 service-workers/service-worker/postmessage.https.html:
 - postMessage a transferable ArrayBuffer between ServiceWorker and Client
 - postMessage a transferable ArrayBuffer between ServiceWorker and Client over MessagePort
@@ -2545,8 +2543,6 @@ service-workers/service-worker/service-worker-csp-script.https.html:
 - Redirected fetch test for script-src
 - eval test for script-src
 - importScripts test for script-src
-service-workers/service-worker/serviceworker-message-event-historical.https.html:
-- Test MessageEvent supplants ServiceWorkerMessageEvent.
 service-workers/service-worker/serviceworkerobject-scripturl.https.html:
 - 'Verify the scriptURL property: with-fragment'
 service-workers/service-worker/skip-waiting-installed.https.html:
@@ -2556,7 +2552,6 @@ service-workers/service-worker/skip-waiting-using-registration.https.html:
 service-workers/service-worker/skip-waiting.https.html:
 - Test skipWaiting with both active and waiting workers
 service-workers/service-worker/srcdoc-iframe.https.html:
-- controller.postMessage should work in srcdoc iframe
 - getRegistration should work in srcdoc iframe
 service-workers/service-worker/static-router-cross-origin-navigation.https.html:
 - Cross-origin navigation with static router cache rule

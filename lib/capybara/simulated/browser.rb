@@ -3885,8 +3885,21 @@ module Capybara
         fetch_resps, rest4 = rest3.partition  {|e| e[:kind] == 'fetch_response' }
         acks,        msgs  = rest4.partition  {|e| e[:kind] == 'bcack' }
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
-        # A service worker → client message: deliver to this window's navigator.serviceWorker 'message'.
-        sw_msgs.each {|e| @runtime.call('__csim_swDeliverClientMessage', e[:data]) }
+        # A service worker → client message: deliver to the POSTING client's realm. The client id
+        # encodes it — `client-<realm>` for a frame/window realm, 'client-window' for the main realm.
+        # A `client.postMessage` to a controlled IFRAME must reach THAT frame's navigator.service-
+        # Worker, not the top window (postmessage-to-client). `e[:handle]` is the SENDING worker, so
+        # the client's message `source` is exact. A message to a DISCARDED frame realm is dropped
+        # (matching a real browser — a message to a gone client is discarded, not misrouted to top).
+        sw_msgs.each do |e|
+          m = /\Aclient-(\d+)\z/.match(e[:client].to_s)
+          if m
+            rid = m[1].to_i
+            @runtime.realm_call(rid, '__csim_swDeliverClientMessage', e[:data], e[:handle]) if @runtime.frame_realm_alive?(rid)
+          else
+            @runtime.call('__csim_swDeliverClientMessage', e[:data], e[:handle])
+          end
+        end
         # clients.claim(): make the claiming worker this window's controller (if the document's
         # matched registration is the claiming worker's). has_fetch = the SW's install-time
         # fetch-listener snapshot; without one, the client skips interception entirely.
