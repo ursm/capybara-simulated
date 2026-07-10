@@ -5,7 +5,7 @@ gemspec
 # JS engines: both installed in dev so the spec suite exercises both
 # (CSIM_JS_ENGINE=v8 / =quickjs). Downstream apps add whichever one
 # they want — neither is a hard dependency of the gem itself.
-gem 'rusty_racer', '~> 0.1.10'
+gem 'rusty_racer', '~> 0.1.11'
 gem 'nokogiri'
 # Pinned to 0.18: quickjs 0.19 regressed interpreter execution ~2.8x (QuickJS spec
 # suite 5.6 → 15.5 min) and split Intl into a separate quickjs-polyfill-intl gem.
