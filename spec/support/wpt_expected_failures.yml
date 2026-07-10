@@ -1311,8 +1311,6 @@ service-workers/service-worker/fetch-event-respond-with-readable-stream.https.ht
 service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html:
 - Response with a ReadableStream having non-Uint8Array chunks should be transferred
   as errored
-service-workers/service-worker/fetch-event-respond-with-stops-propagation.https.html:
-- respondWith() invokes stopImmediatePropagation()
 service-workers/service-worker/fetch-event-throws-after-respond-with.https.html:
 - Fetch event handler throws after a successful respondWith()
 service-workers/service-worker/fetch-event-within-sw-manual.https.html:
