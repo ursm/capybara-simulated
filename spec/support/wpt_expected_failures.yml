@@ -969,10 +969,6 @@ service-workers/service-worker/controlled-iframe-postMessage.https.html:
 - Verify frame gets early messages if setting synchronously message event listener
 service-workers/service-worker/controller-on-disconnect.https.html:
 - controller is cleared on disconnected window
-service-workers/service-worker/controller-on-load.https.html:
-- controller is set for a controlled document
-service-workers/service-worker/controller-on-reload.https.html:
-- controller is set upon reload after registration
 service-workers/service-worker/credentials.https.html:
 - Imported script should have credentials
 - Main script should have credentials
@@ -2312,8 +2308,6 @@ service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
 service-workers/service-worker/skip-waiting.https.html:
 - Test skipWaiting with both active and waiting workers
-service-workers/service-worker/srcdoc-iframe.https.html:
-- getRegistration should work in srcdoc iframe
 service-workers/service-worker/static-router-cross-origin-navigation.https.html:
 - Cross-origin navigation with static router cache rule
 service-workers/service-worker/static-router-fetch-event.https.html:

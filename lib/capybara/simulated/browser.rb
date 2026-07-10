@@ -3694,7 +3694,7 @@ module Capybara
         best_len = -1
         @sw_registrations.each do |scope, handle|
           next unless u.start_with?(scope) && scope.length > best_len
-          best     = handle
+          best     = [handle, scope]
           best_len = scope.length
         end
         best
@@ -3707,11 +3707,12 @@ module Capybara
       # is controlled and routes; a controlled subresource fetch simply falls through to the
       # network if no handler materializes. Only a KNOWN-false (messaging/push-only) SW skips.
       def sw_client_controller_for(url)
-        handle = sw_scope_match(url) or return nil
-        w      = @workers[handle] or return nil
+        match = sw_scope_match(url) or return nil
+        handle, scope = match
+        w = @workers[handle] or return nil
         return nil unless w[:thread]&.alive?
 
-        [handle, w[:has_fetch] != false, w[:script_url].to_s]
+        [handle, w[:has_fetch] != false, w[:script_url].to_s, scope]
       end
 
       # The controller an OPAQUE child browsing context (about:blank / srcdoc)
@@ -3762,9 +3763,9 @@ module Capybara
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
       private def sw_controller_for_navigation(url)
-        best = sw_scope_match(url) or return nil
-
-        w = @workers[best] or return nil
+        match = sw_scope_match(url) or return nil
+        handle = match[0]
+        w = @workers[handle] or return nil
         # has_fetch is published from the worker thread AFTER its initial eval, so a navigation
         # into a freshly-activated registration can read it as nil (unknown) — race-prone for the
         # 2nd+ registration, whose initial load fires before the publish. Treat unknown as "maybe":
@@ -3774,7 +3775,7 @@ module Capybara
         # round-trip budget with no one to answer.
         return nil if w[:has_fetch] == false || !w[:thread]&.alive?
 
-        best
+        handle
       end
 
       # Route a navigation request (document / iframe load) to its controlling SW's `fetch`
