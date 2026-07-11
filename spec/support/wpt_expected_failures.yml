@@ -812,7 +812,6 @@ service-workers/cache-storage/credentials.https.html:
 service-workers/service-worker/Service-Worker-Allowed-header.https.html:
 - Registering outside Service-Worker-Allowed path
 - Registering outside Service-Worker-Allowed path with parent reference
-- Service-Worker-Allowed is cross-origin to page, same-origin to script
 - Service-Worker-Allowed is cross-origin to script, registering on a normally allowed
   scope
 - Service-Worker-Allowed is cross-origin to script, registering on a normally disallowed
@@ -1962,8 +1961,6 @@ service-workers/service-worker/register-same-scope-different-script-url.https.ht
 - Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
 - register worker that calls waitUntil with a promise that never resolves in oninstall
-service-workers/service-worker/registration-basic.https.html:
-- Registering scope with fragment
 service-workers/service-worker/registration-end-to-end.https.html:
 - 'Registration: end-to-end'
 service-workers/service-worker/registration-iframe.https.html:
@@ -2017,8 +2014,6 @@ service-workers/service-worker/registration-script.https.html:
 service-workers/service-worker/registration-security-error.https.html:
 - Registering redirected script
 - Registering same scope as the script directory without the last slash
-- Registering scope outside domain
-- Registering script outside domain
 - Registration scope outside the script directory
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
@@ -2051,8 +2046,6 @@ service-workers/service-worker/registration-updateviacache.https.html:
 - register-with-updateViaCache-undefined-then-none
 - register-with-updateViaCache-undefined-then-undefined
 - updateViaCache is not updated if register() rejects
-service-workers/service-worker/rejections.https.html:
-- Rejections are DOMExceptions
 service-workers/service-worker/request-end-to-end.https.html:
 - Test FetchEvent.request passed to onfetch
 service-workers/service-worker/resource-timing-bodySize.https.html:
@@ -2253,8 +2246,6 @@ service-workers/service-worker/service-worker-csp-script.https.html:
 - Redirected fetch test for script-src
 - eval test for script-src
 - importScripts test for script-src
-service-workers/service-worker/serviceworkerobject-scripturl.https.html:
-- 'Verify the scriptURL property: with-fragment'
 service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
