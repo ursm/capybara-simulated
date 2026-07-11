@@ -856,6 +856,31 @@ module Capybara
         # base BEFORE the document loads so its load-time scripts resolve relative URLs
         # against the parent, even though location.href reports about:blank/srcdoc.
         realm.call('__csimSetAboutBaseURL', frame_about_base.to_s) unless frame_about_base.to_s.empty?
+        # If a service worker's scope covers this frame's URL, the frame is a CONTROLLED client:
+        # wire its `navigator.serviceWorker.controller` BEFORE its document loads, so the frame's
+        # load-time scripts see the controller and route their subresource fetch() / XHR / EventSource
+        # through the SW's fetch event (fetch-event-network-error's controllee fires XHRs during load).
+        # The frame never called register(), so its per-realm registration Map is empty — set the
+        # controller directly from Ruby's scope→handle mirror. An OPAQUE child (about:blank / srcdoc)
+        # has no scope of its own, so it INHERITS its parent frame's controller (HTML: an about:blank
+        # document is controlled by its creator). Inheritance chains through controlled FRAME realms
+        # (sw_note_realm_controller); recording it BEFORE the load also lets a NESTED frame built during
+        # this frame's load inherit the controller.
+        opaque = opaque_frame_url?(url)
+        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null') and is
+        # cross-origin to its creator, so it does NOT inherit the creator's controller (srcdoc-iframe:
+        # "sandboxed srcdoc should not inherit"). allow-same-origin restores the parent origin → inherits.
+        inheritable = opaque && frame_doc_origin.to_s != 'null'
+        ctrl   = @browser.sw_client_controller_for(url.to_s)
+        ctrl ||= @browser.sw_inherited_controller_for(parent_id) if inheritable
+        if ctrl
+          realm.call('__csim_swSetControllerDirect', *ctrl)
+          # Only an OPAQUE (about:blank / srcdoc) frame is mirrored into the SW's clients.matchAll():
+          # a real-URL frame's registration would fire during its SYNCHRONOUS SW nav-fetch (main thread
+          # blocked on @sw_nav_outbox), perturbing worker timing — the http-src client model is deferred.
+          @browser.sw_note_realm_controller(realm.id, ctrl)
+          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if opaque
+        end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # A `javascript:` URL frame: the initial empty document is now loaded and
         # parent/top are wired, so evaluate the URL's script in the realm (global
@@ -873,34 +898,6 @@ module Capybara
           end
         end
         frame_realms[realm.id] = realm
-        # If a service worker's scope covers this frame's URL, the frame is a CONTROLLED client:
-        # wire its `navigator.serviceWorker.controller` so subresource fetch() / EventSource route
-        # through the SW's fetch event. The frame never called register(), so its per-realm
-        # registration Map is empty — set the controller directly from Ruby's scope→handle mirror.
-        # An OPAQUE child (about:blank / srcdoc) has no scope of its own, so it INHERITS its
-        # parent frame's controller (HTML: an about:blank document is controlled by its creator).
-        # Inheritance chains through controlled FRAME realms (sw_note_realm_controller below);
-        # a direct about:blank child of a controlled TOP-LEVEL page isn't covered yet — the main
-        # document's controller isn't recorded in @sw_realm_controller (deferred, with the
-        # http-src client model, to the two-phase frame work).
-        opaque = opaque_frame_url?(url)
-        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin
-        # 'null') and is cross-origin to its creator, so it does NOT inherit the
-        # creator's controller (srcdoc-iframe: "sandboxed srcdoc should not inherit").
-        # allow-same-origin restores the parent origin, so it DOES inherit.
-        inheritable = opaque && frame_doc_origin.to_s != 'null'
-        ctrl   = @browser.sw_client_controller_for(url.to_s)
-        ctrl ||= @browser.sw_inherited_controller_for(parent_id) if inheritable
-        if ctrl
-          realm.call('__csim_swSetControllerDirect', *ctrl)
-          # Remember it so this frame's own opaque children inherit it. Only an OPAQUE
-          # (about:blank / srcdoc) frame is mirrored into the SW's clients.matchAll():
-          # a real-URL frame's registration would fire during its SYNCHRONOUS SW
-          # nav-fetch (main thread blocked on @sw_nav_outbox), perturbing worker timing
-          # — the http-src client model is deferred to the two-phase frame work.
-          @browser.sw_note_realm_controller(realm.id, ctrl)
-          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if opaque
-        end
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
         # `window.onload = () => parent.postMessage(...)` a frame reports back
