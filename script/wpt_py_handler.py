@@ -185,6 +185,22 @@ class RequestHeaders:
                 seen.append(k)
         return iter(seen)
 
+    def items(self):
+        # wptserve exposes request.headers.items() as (name, value) pairs — one per
+        # distinct header name, repeated values comma-joined (RFC 7230 §3.2.2). Without
+        # it, fetch-access-control.py's `{... for key, value in request.headers.items()}`
+        # raised AttributeError → 500 → the client eval'd the traceback (SyntaxError).
+        merged = {}
+        order  = []
+        for k, v in self._items:
+            lk = k.lower()
+            if lk in merged:
+                merged[lk] = (merged[lk][0], merged[lk][1] + b', ' + v)
+            else:
+                merged[lk] = (k, v)
+                order.append(lk)
+        return [merged[lk] for lk in order]
+
     def __str__(self):
         # wptserve's raw_headers stringifies to the on-the-wire header block; echo
         # -headers.py returns `str(request.raw_headers)` and the test greps it for
