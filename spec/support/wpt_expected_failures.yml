@@ -1208,8 +1208,6 @@ service-workers/service-worker/fetch-event-handled.https.html:
   resolved
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
-service-workers/service-worker/fetch-event-network-error.https.html:
-- Rejecting the fetch event or using preventDefault() causes a network error
 service-workers/service-worker/fetch-event-redirect.https.html:
 - Non-navigation, error redirect, cors mode Request redirected to cors without credentials
   should fail interception and response should not be redirected
@@ -1291,9 +1289,6 @@ service-workers/service-worker/fetch-event-redirect.https.html:
   not be redirected
 service-workers/service-worker/fetch-event-referrer-policy.https.html:
 - Service Worker should respond to fetch with the default referrer policy
-service-workers/service-worker/fetch-event-respond-with-argument.https.html:
-- respondWith() takes either a Response or a promise that resolves with a Response.
-  Other values should raise a network error.
 service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
 - Respond by chunks with a Response being loaded
 service-workers/service-worker/fetch-event-respond-with-partial-stream.https.html:
