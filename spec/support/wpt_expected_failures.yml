@@ -1194,9 +1194,6 @@ service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
 service-workers/service-worker/fetch-error.https.html:
 - Make sure a load that makes progress does not time out
-service-workers/service-worker/fetch-event-after-navigation-within-page.https.html:
-- Service Worker should respond to fetch event after the hash changes
-- Service Worker should respond to fetch event after the pushState
 service-workers/service-worker/fetch-event-handled.https.html:
 - FetchEvent.handled should reject when respondWith() is not called and the event
   is canceled
