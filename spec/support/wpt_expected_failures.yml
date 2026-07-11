@@ -1194,18 +1194,6 @@ service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
 service-workers/service-worker/fetch-error.https.html:
 - Make sure a load that makes progress does not time out
-service-workers/service-worker/fetch-event-handled.https.html:
-- FetchEvent.handled should reject when respondWith() is not called and the event
-  is canceled
-- FetchEvent.handled should reject when the promise provided to respondWith() is rejected
-- FetchEvent.handled should reject when the promise provided to respondWith() is resolved
-  to an invalid response
-- FetchEvent.handled should resolve when respondWith() is not called for a navigation
-  request
-- FetchEvent.handled should resolve when respondWith() is not called for a sub-resource
-  request
-- FetchEvent.handled should resolve when the promise provided to respondWith() is
-  resolved
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
 service-workers/service-worker/fetch-event-redirect.https.html:
