@@ -954,8 +954,6 @@ service-workers/service-worker/controlled-dedicatedworker-postMessage.https.html
 service-workers/service-worker/controlled-iframe-postMessage.https.html:
 - Verify frame does get messages in order
 - Verify frame gets early messages if setting synchronously message event listener
-service-workers/service-worker/controller-on-disconnect.https.html:
-- controller is cleared on disconnected window
 service-workers/service-worker/credentials.https.html:
 - Imported script should have credentials
 - Main script should have credentials
