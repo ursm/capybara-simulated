@@ -1003,8 +1003,8 @@ service-workers/service-worker/extendable-event-async-waituntil.https.html:
 service-workers/service-worker/extendable-event-waituntil.https.html:
 - Test ExtendableEvent waitUntil reject precedence.
 - Test activate event waitUntil fulfilled
-- Test install event waitUntil rejected
 - Test activate event waitUntil rejected.
+- Test install event waitUntil rejected
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-double-write.https.html:
@@ -1188,85 +1188,6 @@ service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
-service-workers/service-worker/fetch-event-redirect.https.html:
-- Non-navigation, error redirect, cors mode Request redirected to cors without credentials
-  should fail interception and response should not be redirected
-- Non-navigation, error redirect, cors mode Request redirected to same-origin with
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, cors mode Request redirected to same-origin without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to cors without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to same-origin with
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, no-cors mode Request redirected to same-origin without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to cors without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to same-origin
-  with credentials should fail interception and response should not be redirected
-- Non-navigation, error redirect, same-origin mode Request redirected to same-origin
-  without credentials should fail interception and response should not be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to cors with credentials
-  should succeed interception and response should not be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to cors without
-  credentials should succeed interception and response should not be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to no-cors with
-  credentials should succeed interception and response should not be redirected
-- Non-navigation, follow redirect, no-cors mode Request redirected to no-cors without
-  credentials should succeed interception and response should not be redirected
-- Non-navigation, follow redirect, same-origin mode Request redirected to cors without
-  credentials should fail interception and response should not be redirected
-- Non-navigation, manual redirect, cors mode Request redirected to cors with credentials
-  should succeed opaqueredirect interception and response should not be redirected
-- Non-navigation, manual redirect, cors mode Request redirected to cors without credentials
-  should succeed opaqueredirect interception and response should not be redirected
-- Non-navigation, manual redirect, cors mode Request redirected to no-cors with credentials
-  should succeed opaqueredirect interception and response should not be redirected
-- Non-navigation, manual redirect, cors mode Request redirected to no-cors without
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, cors mode Request redirected to same-origin with
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, cors mode Request redirected to same-origin without
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to cors with credentials
-  should succeed opaqueredirect interception and response should not be redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to cors without
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to no-cors with
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to no-cors without
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to same-origin
-  with credentials should succeed opaqueredirect interception and response should
-  not be redirected
-- Non-navigation, manual redirect, no-cors mode Request redirected to same-origin
-  without credentials should succeed opaqueredirect interception and response should
-  not be redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to cors with
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to cors without
-  credentials should succeed opaqueredirect interception and response should not be
-  redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to no-cors
-  with credentials should succeed opaqueredirect interception and response should
-  not be redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to no-cors
-  without credentials should succeed opaqueredirect interception and response should
-  not be redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
-  with credentials should succeed opaqueredirect interception and response should
-  not be redirected
-- Non-navigation, manual redirect, same-origin mode Request redirected to same-origin
-  without credentials should succeed opaqueredirect interception and response should
-  not be redirected
 service-workers/service-worker/fetch-event-referrer-policy.https.html:
 - Service Worker should respond to fetch with the default referrer policy
 service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
@@ -1358,19 +1279,13 @@ service-workers/service-worker/fetch-response-taint.https.html:
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"cors" credentials:"include" should succeed.
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"cors" credentials:"same-origin" should succeed.
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"no-cors" credentials:"include" should succeed.
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"no-cors" credentials:"same-origin" should succeed.
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"same-origin" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"omit" should succeed.
 - fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"same-origin" credentials:"same-origin" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
@@ -1396,12 +1311,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"no-cors" credentials:"omit" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
   mode:"no-cors" credentials:"same-origin" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=https://web-platform.test:8443&ACACredentials=true"
   mode:"cors" credentials:"include" should succeed.
@@ -1429,44 +1338,12 @@ service-workers/service-worker/fetch-response-taint.https.html:
   mode:"same-origin" credentials:"omit" should fail.
 - url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"same-origin" should fail.
 - url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"cors" credentials:"include" should fail.
 - url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"cors" credentials:"omit" should fail.
 - url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
   mode:"cors" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=no-cors&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3D*&mode=cors&credentials=omit&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"include" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"omit" should fail.
-- url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"same-origin" credentials:"same-origin" should fail.
-- url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=*"
-  mode:"cors" credentials:"include" should fail.
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
@@ -1837,9 +1714,9 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
 service-workers/service-worker/postmessage.https.html:
+- postMessage to a redundant worker
 - postMessage with dictionary a transferable ArrayBuffer between ServiceWorker and
   Client
-- postMessage to a redundant worker
 service-workers/service-worker/redirected-response.https.html:
 - Fetch should follow the redirect response 20 times
 - Fetch should not follow the redirect response 21 times.
@@ -2486,8 +2363,6 @@ xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
 - CORS sync request with URL credentials
-xhr/access-control-preflight-request-must-not-contain-cookie.htm:
-- Preflight request must not contain any cookie header
 xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
 - Sandboxed iframe is denied CORS access to server that allows parent origin
 xhr/access-control-sandboxed-iframe-denied.htm:

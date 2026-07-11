@@ -353,6 +353,12 @@ class Cookies:
     def get(self, name, default=None):
         return self._d.get(_b(name), default)
 
+    def __getitem__(self, name):
+        # wptserve's request.cookies is a dict subscriptable by name —
+        # fetch-access-control.py does `request.cookies[b'cookie'].value`, which raised
+        # "'Cookies' object is not subscriptable" (→ 500 → client SyntaxError) without this.
+        return self._d[_b(name)]
+
     def __contains__(self, name):
         return _b(name) in self._d
 
