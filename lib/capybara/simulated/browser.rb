@@ -3681,6 +3681,17 @@ module Capybara
         true
       end
 
+      # A controlled client cancelled a streaming respondWith body (`response.body.cancel()` or an
+      # AbortController abort): route the cancel to the worker that owns this [realm, fetch] stream so
+      # it cancels the reader it's draining — firing the SW source stream's `cancel()`. @sw_open_streams
+      # maps the stream to its emitting worker; the worker's terminal frame still clears the counter.
+      def sw_stream_cancel(fetch_id, realm_id)
+        key = [realm_id.to_i, fetch_id.to_i]
+        handle, = @sw_open_streams.find {|_h, streams| streams.key?(key) }
+        return unless handle && (w = @workers[handle])
+        w[:inbox] << {kind: 'fetch_cancel', fetch_id: fetch_id.to_i}
+      end
+
       # Resolve a controlled fetch's referrer the way the network hop would (compute_referrer
       # applies the request's Referrer-Policy to its referrer source), so the SW's
       # `event.request.referrer` matches a real browser's. The client sends the referrer SOURCE
@@ -5355,6 +5366,12 @@ module Capybara
               ensure
                 sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, '{"fallthrough":true}', outbox, msg[:realm_id].to_i) unless dispatched
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'fetch_cancel'
+              # The client cancelled this streaming respondWith body — cancel the reader
+              # streamDeliver is draining, firing the SW source stream's `cancel()`. Fire-and-forget:
+              # the reader's cancellation resolves its read as done, emitting the terminal frame that
+              # clears @sw_fetch_pending; no ack/counter of its own.
+              rt.call('__csim_swStreamCancel', msg[:fetch_id])
             elsif msg
               rt.call('__csim_workerOnMessage', msg)
             end
