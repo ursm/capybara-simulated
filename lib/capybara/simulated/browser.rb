@@ -391,6 +391,9 @@ module Capybara
         # is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off the general outbox)
         # keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with client-fetch replies.
         @sw_registrations = {}
+        # clients.claim() events that arrived before their scope was mirrored into @sw_registrations
+        # (activate→claim() races the client-side lifecycle) — buffered here, flushed by sw_register_scope.
+        @sw_pending_claims = []
         @sw_nav_outbox    = Thread::Queue.new
         @sw_nav_seq       = 0
         # Service-worker Client registry: realm id → {handle, rec} for every
@@ -458,7 +461,12 @@ module Capybara
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
       WORKER_TERMINATE_GRACE   = 0.05
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE
+      # Per-frame GVL yield (run_event_loop_frame) while a worker thread is alive, so it gets a clean
+      # slice for cross-isolate work (transferIn / message replies) instead of being starved by the
+      # phase-1 spin. 0.3ms is the empirical floor for a deterministic cross-isolate transfer reply;
+      # 0.5ms adds margin for machine variance while staying cheap (only paid on worker/SW files).
+      WORKER_GVL_YIELD         = 0.0005
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD
 
       # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
@@ -2281,6 +2289,17 @@ module Capybara
       # caller's concern — read it separately with `peek_script` (clock-free).
       def run_event_loop_frame(frame_ms)
         turns = 0
+        # Give any live worker/SW thread a clean GVL slice before the phase-1 quiescence loop
+        # monopolises it. That loop spins `run_loop_step(0)` holding the GVL, which STARVES a
+        # worker mid-flight — in particular a CROSS-ISOLATE zero-copy transfer (`RustyRacer.
+        # transferIn` over a SendBackingStore) that a `worker.postMessage(view, [view.buffer])`
+        # reply must complete on the worker thread. Under starvation transferIn fails, the SW's
+        # message handler throws on the null result, and no reply is posted → the client's
+        # `onmessage` never fires and the drain force-timeouts it (postmessage.https transferable
+        # subtests; the whole SW→client message reply cluster). A brief `sleep` releases the GVL
+        # so the worker runs (Thread.pass does NOT hand it over); gated on a live worker so
+        # worker-free files pay nothing.
+        sleep(WORKER_GVL_YIELD) if @workers.any? {|_, w| w[:thread]&.alive? }
         loop do
           r = @runtime.run_loop_step(0)          # run only what's due NOW + microtasks + render; no clock advance
           progressed = step_and_drain_progressed(r)
@@ -3682,6 +3701,26 @@ module Capybara
       # find its controlling SW even after the destination realm's JS was rebuilt.
       def sw_register_scope(scope, handle)
         @sw_registrations[scope.to_s] = handle.to_i
+        # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
+        # `activate → clients.claim()` fires decoupled from the client-side lifecycle that populates
+        # @sw_registrations, so the claim can be drained first — see the claim handler above).
+        if @sw_pending_claims.any? {|e| e[:handle].to_i == handle.to_i }
+          flush, @sw_pending_claims = @sw_pending_claims.partition {|e| e[:handle].to_i == handle.to_i }
+          flush.each {|e| broadcast_claim(e[:handle], e[:has_fetch], scope.to_s) }
+        end
+        nil
+      end
+
+      # Deliver a clients.claim() to EVERY in-scope client: broadcast to the main realm AND every
+      # frame realm; each self-checks whether its own document is in the claiming registration's
+      # scope (__csim_swClaimClient) so no realm→URL map is needed here. has_fetch = the SW's
+      # install-time fetch-listener snapshot, so a claimed client routes its fetches.
+      private def broadcast_claim(handle, has_fetch, scope)
+        script_url = @workers.dig(handle.to_i, :script_url).to_s
+        @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope)
+        @runtime.frame_realm_ids.each do |rid|
+          @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope) if @runtime.frame_realm_alive?(rid)
+        end
         nil
       end
       def sw_unregister_scope(scope)
@@ -3914,7 +3953,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -3968,10 +4007,23 @@ module Capybara
             @runtime.call('__csim_swDeliverClientMessage', e[:data], e[:handle])
           end
         end
-        # clients.claim(): make the claiming worker this window's controller (if the document's
-        # matched registration is the claiming worker's). has_fetch = the SW's install-time
-        # fetch-listener snapshot; without one, the client skips interception entirely.
-        claims.each {|e| @runtime.call('__csim_swSetController', e[:handle], e[:has_fetch]) }
+        # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
+        # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
+        # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
+        # registration must be installed before the shallower one runs, or a client the shallow claim
+        # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
+        # page would double-fire). A claim whose scope isn't mirrored into @sw_registrations yet — the
+        # worker fires activate→claim() decoupled from the CLIENT-side lifecycle that populates it — is
+        # BUFFERED and flushed by sw_register_scope, so an `activate → clients.claim()` isn't lost.
+        claims.map {|e| [e, @sw_registrations.key(e[:handle].to_i)] }
+              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
+              .each do |e, scope|
+          if scope
+            broadcast_claim(e[:handle], e[:has_fetch], scope)
+          else
+            @sw_pending_claims << e
+          end
+        end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
         fetch_resps.each {|e| @runtime.realm_call(e[:realm_id].to_i, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
@@ -4728,6 +4780,7 @@ module Capybara
         @sw_fetch_pending         = 0
         @sw_fetch_wait_deadline   = nil
         @sw_registrations.clear
+        @sw_pending_claims   = []
         @sw_clients          = {}
         @sw_realm_controller = {}
         @port_channels       = {}

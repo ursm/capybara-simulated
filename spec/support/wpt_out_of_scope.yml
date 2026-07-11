@@ -28104,11 +28104,6 @@ service-workers/cache-storage/cross-partition.https.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-service-workers/service-worker/partitioned-claim.tentative.https.html:
-- name: ServiceWorker's clients.claim() is partitioned
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

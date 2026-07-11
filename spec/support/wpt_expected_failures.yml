@@ -869,15 +869,10 @@ service-workers/service-worker/claim-affect-other-registration.https.html:
 - claim() should affect the originally controlling registration.
 service-workers/service-worker/claim-fetch.https.html:
 - fetch() should be intercepted after the client is claimed.
-service-workers/service-worker/claim-not-using-registration.https.html:
-- Test claim client when there's a longer-matched registration not already used by
-  the page
-- Test claim client which is not using registration
 service-workers/service-worker/claim-shared-worker-fetch.https.html:
 - fetch() in SharedWorker should be intercepted after the client is claimed.
 service-workers/service-worker/claim-using-registration.https.html:
 - Test for the waiting worker claims a client which is using the same registration
-- Test worker claims client which is using another registration
 service-workers/service-worker/claim-with-redirect.https.html:
 - Claim works after redirection to another origin
 service-workers/service-worker/claim-worker-fetch.https.html:
@@ -1012,6 +1007,11 @@ service-workers/service-worker/extendable-event-async-waituntil.https.html:
   is being dispatched).
 - Test calling waitUntil synchronously inside microtask of respondWith promise (event
   is not being dispatched).
+service-workers/service-worker/extendable-event-waituntil.https.html:
+- Test ExtendableEvent waitUntil reject precedence.
+- Test activate event waitUntil fulfilled
+- Test install event waitUntil rejected
+- Test activate event waitUntil rejected.
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-double-write.https.html:
@@ -1916,6 +1916,10 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after setting onmessage.
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
+service-workers/service-worker/postmessage.https.html:
+- postMessage with dictionary a transferable ArrayBuffer between ServiceWorker and
+  Client
+- postMessage to a redundant worker
 service-workers/service-worker/redirected-response.https.html:
 - Fetch should follow the redirect response 20 times
 - Fetch should not follow the redirect response 21 times.
