@@ -1916,12 +1916,6 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after setting onmessage.
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
-service-workers/service-worker/postmessage.https.html:
-- postMessage a transferable ArrayBuffer between ServiceWorker and Client
-- postMessage a transferable ArrayBuffer between ServiceWorker and Client over MessagePort
-- postMessage to a redundant worker
-- postMessage with dictionary a transferable ArrayBuffer between ServiceWorker and
-  Client
 service-workers/service-worker/redirected-response.https.html:
 - Fetch should follow the redirect response 20 times
 - Fetch should not follow the redirect response 21 times.

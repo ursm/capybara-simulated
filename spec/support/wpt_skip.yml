@@ -147,6 +147,17 @@
   it fails). Skipped until the port-sync-vs-install-state timing is made deterministic (hold the
   clock across an in-flight port round-trip, like the inc-5o SW-fetch clock hold). The other
   subtests (waitUntil reject precedence / activate+install fulfilled/rejected) work.
+"service-workers/service-worker/postmessage.https.html": >-
+  FLAKY (not a crasher): the two "transferable ArrayBuffer between ServiceWorker and Client"
+  subtests post to r.installing and get the reply through a client.postMessage, an @sw_message_pending
+  SW→client reply that RACES the virtual clock (same class as extendable-event-waituntil). Once the
+  cross-isolate typed-array VIEW transfer fix (commit 798b69da) made their CONTENT correct, the only
+  remaining failure mode is timing, so they became a load-dependent coin-flip: full-gate runs on the
+  same machine saw them both PASS (allowlisted→red) and FAIL (green) with identical code. Can't be
+  per-subtest allowlisted deterministically. Skipped (losing the deterministic subtest 1 "…and back via
+  MessagePort") until the SW-message-reply-vs-virtual-clock race is fixed (broadening inc-5o's clock-hold
+  to @sw_message_pending keeps about-blank green but does NOT reliably land this reply — the race is
+  deeper; see the wpt_service_workers campaign memory). Un-skip when that lands.
 "service-workers/service-worker/unregister-immediately-before-installed.https.html": >-
   Registers a worker script that is a DELIBERATE synchronous infinite loop
   (resources/onparse-infiniteloop-worker.js) and expects Clear-Site-Data to abort it.
