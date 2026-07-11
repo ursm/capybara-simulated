@@ -424,8 +424,6 @@ fetch/api/request/request-reset-attributes.https.html:
 - Request.isHistoryNavigation is reset with non-empty RequestInit
 - Request.isReloadNavigation is reset with non-empty RequestInit
 - Request.mode is reset with non-empty RequestInit when it's "navigate"
-fetch/api/request/url-encoding.html:
-- URL encoding and fetch()
 fetch/api/response/multi-globals/url-parsing.html:
 - should parse the redirect Location URL relative to the current settings object
 fetch/api/response/response-arraybuffer-realm.window.js:
@@ -866,8 +864,6 @@ service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
 service-workers/service-worker/claim-affect-other-registration.https.html:
 - claim() should affect the originally controlling registration.
-service-workers/service-worker/claim-fetch.https.html:
-- fetch() should be intercepted after the client is claimed.
 service-workers/service-worker/claim-shared-worker-fetch.https.html:
 - fetch() in SharedWorker should be intercepted after the client is claimed.
 service-workers/service-worker/claim-using-registration.https.html:
@@ -2293,7 +2289,6 @@ service-workers/service-worker/static-router-subresource.https.html:
 - Subresource cross origin load not matched with URLPattern condition via string
 - Subresource load did not match with the cache and fallback to the network
 - Subresource load matched with RequestMode condition
-- Subresource load matched with URLPattern condition
 - Subresource load matched with URLPattern condition via URLPatternCompatible
 - Subresource load matched with URLPattern condition via string
 - Subresource load matched with ignoreCase URLPattern condition
