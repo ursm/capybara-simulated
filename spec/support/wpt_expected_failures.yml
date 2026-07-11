@@ -1547,8 +1547,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
-service-workers/service-worker/getregistration.https.html:
-- getRegistration with a cross origin URL
 service-workers/service-worker/getregistrations.https.html:
 - Register then Unregister with controlled frame then getRegistrations
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
@@ -1961,8 +1959,6 @@ service-workers/service-worker/register-same-scope-different-script-url.https.ht
 - Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
 - register worker that calls waitUntil with a promise that never resolves in oninstall
-service-workers/service-worker/registration-end-to-end.https.html:
-- 'Registration: end-to-end'
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
 - register method should use the "relevant global object" to parse its scriptURL and
@@ -2018,8 +2014,6 @@ service-workers/service-worker/registration-security-error.https.html:
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
 - 'Script URL is same-origin filesystem: URL'
-service-workers/service-worker/registration-service-worker-attributes.https.html:
-- installing/waiting/active after registration
 service-workers/service-worker/registration-updateviacache.https.html:
 - access-updateViaCache-after-unregister-all
 - access-updateViaCache-after-unregister-imports

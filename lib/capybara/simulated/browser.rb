@@ -3717,9 +3717,12 @@ module Capybara
       # install-time fetch-listener snapshot, so a claimed client routes its fetches.
       private def broadcast_claim(handle, has_fetch, scope)
         script_url = @workers.dig(handle.to_i, :script_url).to_s
-        @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope)
+        # The authoritative registration scope set — the claim's longest-registration-wins check runs
+        # against this, not a realm-local map that can lag under load (claim-not-using-registration).
+        all_scopes = @sw_registrations.keys
+        @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes)
         @runtime.frame_realm_ids.each do |rid|
-          @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope) if @runtime.frame_realm_alive?(rid)
+          @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes) if @runtime.frame_realm_alive?(rid)
         end
         nil
       end
