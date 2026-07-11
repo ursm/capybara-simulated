@@ -379,6 +379,10 @@ module Capybara
         @sw_message_pending = 0
         # Controlled-client fetches awaiting the SW's respondWith (released by a `fetch_response`).
         @sw_fetch_pending = 0
+        # Streaming respondWith bodies still open (head delivered, terminal frame not yet), keyed by
+        # the emitting worker handle → the [realm_id, fetch_id] frames it opened. Lets worker_terminate
+        # release + error a stream its worker died mid-flight, instead of stranding @sw_fetch_pending.
+        @sw_open_streams = Hash.new {|h, k| h[k] = {} }
         # Deadline (CLOCK_MONOTONIC) capping how long the event-loop drain holds the virtual clock
         # for an outstanding SW-side fetch (see run_event_loop_frame). Shared across frames so a
         # stuck fetch costs the budget ONCE, not per frame; reset on each delivered reply so the next
@@ -466,7 +470,16 @@ module Capybara
       # phase-1 spin. 0.3ms is the empirical floor for a deterministic cross-isolate transfer reply;
       # 0.5ms adds margin for machine variance while staying cheap (only paid on worker/SW files).
       WORKER_GVL_YIELD         = 0.0005
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD
+      # Client-realm handler for each streaming respondWith frame kind (see deliver_worker_messages
+      # + sw-client.js). `fr_start` builds a ReadableStream-backed Response; `fr_chunk` enqueues;
+      # `fr_close` / `fr_error` close / error the body stream.
+      STREAM_FRAME_FNS = {
+        'fr_start' => '__csim_swFetchStreamStart',
+        'fr_chunk' => '__csim_swFetchStreamChunk',
+        'fr_close' => '__csim_swFetchStreamClose',
+        'fr_error' => '__csim_swFetchStreamError'
+      }.freeze
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :STREAM_FRAME_FNS
 
       # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
@@ -3950,13 +3963,23 @@ module Capybara
           when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, '{"fallthrough":true}', @worker_outbox, msg[:realm_id].to_i)
           end
         end
+        # A streaming respondWith whose worker died mid-body never emits its terminal frame: error the
+        # client's stream (so a pending body read rejects, not hangs) and release the @sw_fetch_pending
+        # each open stream still holds, so settle can reach idle.
+        open = @sw_open_streams.delete(handle.to_i)
+        if open&.any?
+          open.each_key do |realm_id, fetch_id|
+            @runtime.realm_call(realm_id, '__csim_swFetchStreamError', fetch_id)
+          end
+          @sw_fetch_pending = [0, @sw_fetch_pending - open.size].max
+        end
         # Drop any navigation scope mirrored to this now-dead worker so a later navigation
         # doesn't route to it (it falls through to the network instead).
         @sw_registrations.reject! {|_scope, h| h == handle.to_i }
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -3977,8 +4000,9 @@ module Capybara
         sw_msgs,     rest1  = rest0c.partition {|e| e[:kind] == 'sw_client_msg' }
         swacks,      rest2  = rest1.partition  {|e| e[:kind] == 'swack' }
         claims,      rest3  = rest2.partition  {|e| e[:kind] == 'sw_claim' }
-        fetch_resps, rest4  = rest3.partition  {|e| e[:kind] == 'fetch_response' }
-        acks,        msgs   = rest4.partition  {|e| e[:kind] == 'bcack' }
+        fetch_resps,   rest4  = rest3.partition  {|e| e[:kind] == 'fetch_response' }
+        stream_frames, rest4b = rest4.partition  {|e| e[:kind].to_s.start_with?('fr_') }
+        acks,          msgs   = rest4b.partition {|e| e[:kind] == 'bcack' }
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
         # A worker/SW registering its end of a cross-isolate MessagePort channel — record it BEFORE
         # the message events below, so a port message carried in the same drain can already route.
@@ -4030,7 +4054,21 @@ module Capybara
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
         fetch_resps.each {|e| @runtime.realm_call(e[:realm_id].to_i, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
-        @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size].max
+        # Streaming respondWith frames — deliver IN EMISSION ORDER (per fetch id: start → chunk* →
+        # close/error) so the client reassembles the body ReadableStream correctly. The request's
+        # @sw_fetch_pending was counted at fetch time and clears on the terminal frame.
+        stream_frames.each do |e|
+          fn = STREAM_FRAME_FNS[e[:kind]]
+          @runtime.realm_call(e[:realm_id].to_i, fn, e[:fetch_id], e[:payload]) if fn
+          # Track a stream's open span (head → terminal) per emitting worker, so worker_terminate
+          # can release + error a body its worker died mid-stream.
+          key = [e[:realm_id].to_i, e[:fetch_id].to_i]
+          if e[:kind] == 'fr_start' then @sw_open_streams[e[:handle].to_i][key] = true
+          else                           @sw_open_streams[e[:handle].to_i].delete(key)
+          end
+        end
+        stream_terminals          = stream_frames.count {|e| e[:kind] == 'fr_close' || e[:kind] == 'fr_error' }
+        @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size - stream_terminals].max
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
         @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
         # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
@@ -4781,6 +4819,7 @@ module Capybara
         @worker_broadcast_pending = 0
         @sw_message_pending       = 0
         @sw_fetch_pending         = 0
+        @sw_open_streams.clear
         @sw_fetch_wait_deadline   = nil
         @sw_registrations.clear
         @sw_pending_claims   = []
@@ -5182,6 +5221,11 @@ module Capybara
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
           fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) },
+          # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
+          # fetch — rides the outbox in emission order so the client realm reassembles the body
+          # stream incrementally (deliver_worker_messages). The request's @sw_fetch_pending stays up
+          # for the whole stream and clears on the terminal (close / error) frame.
+          fetch_stream:   ->(fetch_id, kind, payload, realm_id) { outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fetch_id.to_i, payload: payload.to_s, realm_id: realm_id.to_i} },
           # Cross-isolate MessagePort channel: this worker's port endpoint + its outbound messages
           # ride the outbox (delivered by deliver_worker_messages → the peer client realm).
           port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },

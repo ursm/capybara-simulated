@@ -377,6 +377,7 @@ module Capybara
         vm.define_function('__csim_swPostToClient') {|client_id, data| sw_hooks[:post_to_client]&.call(client_id, data); nil } if sw_hooks[:post_to_client]
         vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
         vm.define_function('__csim_swFetchRespond') {|fetch_id, resp, realm_id| sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil } if sw_hooks[:fetch_respond]
+        vm.define_function('__csim_swFetchStream') {|fetch_id, kind, payload, realm_id| sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil } if sw_hooks[:fetch_stream]
         vm.define_function('__csim_workerPortPost')     {|channel, data| sw_hooks[:port_post]&.call(channel, data); nil } if sw_hooks[:port_post]
         vm.define_function('__csim_workerPortEndpoint') {|channel|       sw_hooks[:port_endpoint]&.call(channel); nil } if sw_hooks[:port_endpoint]
         # Override main's __setTimersActive so worker's empty-timer-map
