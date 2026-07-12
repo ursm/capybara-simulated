@@ -196,7 +196,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil, cookies: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, js_engine: nil, cookies: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -239,6 +239,12 @@ module Capybara
         # see the same auth state and storage as the primary. Tests
         # without a Driver (gem-internal callers) get fresh jars.
         @cookies                      = cookies       || {}
+        # HTTP Basic-auth credential cache, keyed by target origin: once credentials authenticate an
+        # origin, the UA sends them pre-emptively for later credentialed requests to it (RFC 7617
+        # §2.2), so a Basic-auth resource loads without re-challenging. Session-scoped (cleared on
+        # reset) and Driver-injected like the cookie jar, so target=_blank aux windows share one
+        # session's auth state (a real browser shares the HTTP auth cache across a session's tabs).
+        @auth_cache                   = auth_cache     || {}
         @local_storage                = local_storage || {}
         # Cache Storage is origin-shared like localStorage (the Driver owns the store
         # and injects it into every window Browser), origin-partitioned within.
@@ -2759,6 +2765,7 @@ module Capybara
 
       def reset!
         @cookies.clear
+        @auth_cache.clear
         @local_storage.clear
         @cache_storage.clear
         @session_storage.clear
@@ -5675,6 +5682,14 @@ module Capybara
           body = Base64.decode64(body.to_s)
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
+        # The Authorization header, when present, is cacheable auth (below) ONLY when it carries this
+        # internal marker — set by the XHR authentication path (open() user/password / URL userinfo),
+        # NOT a raw setRequestHeader('Authorization'). Strip the marker so it never reaches the server.
+        auth_cacheable = false
+        if headers.is_a?(Hash) && (mk = headers.keys.find {|k| k.to_s.casecmp?('x-csim-auth-cache') })
+          auth_cacheable = true
+          headers = headers.reject {|k, _| k == mk }
+        end
         # The request's origin starts as the document origin; a cross-origin REDIRECT
         # taints it to an opaque origin (serialized "null") per Fetch "HTTP-redirect
         # fetch". `effective_origin` IS that origin — it's what the Origin header
@@ -5770,6 +5785,14 @@ module Capybara
           hop_cross_origin = !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
           send_cookies     = credentials == 'include' || (credentials != 'omit' && !hop_cross_origin)
           env.delete('HTTP_COOKIE') unless send_cookies
+          # HTTP auth caching (RFC 7617 §2.2): once credentials succeed for an origin (cached below),
+          # the UA sends them pre-emptively for later credentialed requests to it — so a Basic-auth
+          # resource loads without a fresh 401 challenge (the login helper authenticates first, then
+          # the guarded image/XHR requests carry the cached header). Gated on the same credential
+          # decision as cookies; the caller's own Authorization (an explicit user:pass) always wins.
+          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && (cached = @auth_cache[url_origin(target)])
+            env['HTTP_AUTHORIZATION'] = cached
+          end
           # A CORS request to a URL carrying credentials (`user:pass@`) is a network
           # error (access-control-and-redirects "user info" subtest).
           return nil if cross_origin && url_has_userinfo?(target)
@@ -5793,6 +5816,17 @@ module Capybara
           # Fetch credentials mode "omit" ignores credentials the response sends back too —
           # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
           merge_set_cookie(resp_headers, target) unless credentials == 'omit'
+          # Cache the credentials that this origin ACCEPTED (AUTHENTICATION credentials — marked
+          # above — that weren't rejected with a 401 challenge), for the pre-emptive send above.
+          # `omit` ignores credentials wholesale, so it neither sends nor caches them. Only the
+          # request's OWN origin is ever cached: the Authorization is stripped on a cross-origin
+          # redirect hop (above), so origin A's credentials can't seed origin B's cache — the actual
+          # cross-origin leak risk. (A non-2xx same-origin response — an opaque status-0 no-cors
+          # fetch, a same-origin 3xx the UA follows — still legitimately establishes the credentials
+          # for THAT origin, so the gate is "not a 401", not "is a 2xx".)
+          if auth_cacheable && credentials != 'omit' && (authz = env['HTTP_AUTHORIZATION']) && status.to_i != 401
+            @auth_cache[url_origin(target)] = authz
+          end
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
@@ -5857,6 +5891,12 @@ module Capybara
             # hop out of a same-origin request keeps the real origin (redirect-origin
             # "same origin to other origin" sends the document origin, not null).
             effective_origin = 'null' if cors && crossed && url_origin(next_url) != url_origin(target)
+            # Fetch "HTTP-redirect fetch": a CROSS-ORIGIN redirect strips the request's
+            # `Authorization` — credentials sent to the first origin must not be replayed to a
+            # different one (nor seed that origin's auth cache below).
+            if url_origin(next_url) != url_origin(target) && headers.is_a?(Hash)
+              headers = headers.reject {|k, _| k.to_s.casecmp?('authorization') }
+            end
             target = carry_fragment(target, next_url)
             if bad_port?(target)   # a redirect to a blocked port is a network error too
               resp_body.close if resp_body.respond_to?(:close)

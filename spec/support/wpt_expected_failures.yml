@@ -332,8 +332,6 @@ fetch/api/cors/data-url-worker.html:
 - fetching data url script should be allowed.
 fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
-fetch/api/credentials/authentication-redirection.any.js:
-- getAuthorizationHeaderValue - cross origin redirection
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - fetch() with all valid values
@@ -990,15 +988,11 @@ service-workers/service-worker/extendable-event-waituntil.https.html:
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
-  with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
   with crossOrigin "" should be TAINTED
 service-workers/service-worker/fetch-canvas-tainting-image.https.html:
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
-  with crossOrigin "" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
@@ -1145,24 +1139,6 @@ service-workers/service-worker/fetch-request-xhr.https.html:
 - FetchEvent#request.body contains XHR request data (blob)
 - XHR with form data
 service-workers/service-worker/fetch-response-taint.https.html:
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"same-origin" credentials:"same-origin" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"cors" credentials:"include" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
@@ -1174,30 +1150,6 @@ service-workers/service-worker/fetch-response-taint.https.html:
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"no-cors" credentials:"omit" should succeed.
 - fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?"
-  mode:"same-origin" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3F&mode=same-origin&credentials=same-origin&"
   mode:"no-cors" credentials:"same-origin" should succeed.
 - fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
   mode:"cors" credentials:"include" should succeed.
@@ -2327,8 +2279,6 @@ xhr/timeout-cors-async.htm:
 xhr/timeout-multiple-fetches.html:
 - CORS preflights should not reset the timer
 - Redirects should not reset the timer
-xhr/xhr-authorization-redirect.any.js:
-- getAuthorizationHeaderValue - cross origin redirection
 xhr/xmlhttprequest-timeout-aborted.html:
 - 'Timeout test: time to abort is 5000, timeout set at 2000'
 xhr/xmlhttprequest-timeout-abortedonmain.html:
