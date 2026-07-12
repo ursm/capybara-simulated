@@ -992,24 +992,16 @@ service-workers/service-worker/fetch-audio-tainting.https.html:
 service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "" should be TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
   with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE%26cache%3Dtrue"
-  with crossOrigin "" should be TAINTED
 service-workers/service-worker/fetch-canvas-tainting-image.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
-- url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
-  with crossOrigin "" should be TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
-  with crossOrigin "" should be TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FPNGIMAGE"
   with crossOrigin "" should be TAINTED
 service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
