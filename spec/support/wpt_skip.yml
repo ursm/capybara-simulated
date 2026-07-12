@@ -138,18 +138,6 @@
   Catastrophic-backtracking pattern regex; V8 runs it synchronously for ~56 s
   (finite but pathological), uninterruptible by the virtual-clock force-timeout.
   Skipped to keep the gate fast — see header.
-"service-workers/service-worker/postmessage.https.html": >-
-  Order-dependent SW→client message-reply flake under full-suite load. The transferable-ArrayBuffer
-  subtests post a buffer to the SW and await a reply that is a cross-isolate zero-copy transfer
-  (RustyRacer.transferIn) which must complete ON THE WORKER THREAD; a slower / more-loaded runner
-  (CI) starves that thread by the time this file runs late in the suite, so transferIn fails, no
-  reply is posted, and the client's onmessage never fires — the file passes cleanly in isolation but
-  DETERMINISTICALLY reds a loaded full run (retrying in-process doesn't clear the accumulated load).
-  A per-frame GVL yield (WORKER_GVL_YIELD) and a bigger busy-yield both only trade this for a
-  streaming-respondWith flake. Skipped until SW-message-reply delivery is made deterministic under the
-  virtual clock (generalize inc-5o's @sw_fetch_pending clock-hold to message replies — the whole
-  clients/claim/postmessage cluster is gated on it); the subtest-1 (non-transferable) coverage is the
-  cost. Un-skip when that lands.
 "service-workers/service-worker/unregister-immediately-before-installed.https.html": >-
   Registers a worker script that is a DELIBERATE synchronous infinite loop
   (resources/onparse-infiniteloop-worker.js) and expects Clear-Site-Data to abort it.
