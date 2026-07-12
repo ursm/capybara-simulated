@@ -4304,10 +4304,13 @@ module Capybara
       # fetched or decoded (the caller fires `error`). A scheme with no host-side reader
       # yet (blob:, whose bytes live in the VM) returns {'unsupported' => true} so the
       # caller stays inert rather than reporting a spuriously-broken image.
-      def load_image(url)
+      # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
+      # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
+      # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
+      def load_image(url, cors = false, credentials = 'same-origin')
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
-        entry = cached_image(key)
+        entry = cached_image(key, cors, credentials)
         return {'unsupported' => true} if entry == :unsupported
         # A valid zero-area image: complete + not broken, but no pixels. rsvg throws
         # before dimensions can be read, so the intrinsic size collapses to 0×0 (a
@@ -4323,10 +4326,17 @@ module Capybara
 
       # A decoded-image cache entry for `key`, decoding + caching on a miss.
       # :unsupported for a scheme we can't fetch host-side; nil on fetch/decode failure.
-      private def cached_image(key)
-        cached = @@image_cache_lock.synchronize { @@image_cache[key] }
+      # A CORS load caches under a key tagged with the mode, the credentials, AND the requesting
+      # document origin — its success/failure is origin-dependent (a response's ACAO may allow one
+      # origin and not another), and @@image_cache is process-wide (shared across documents /
+      # sessions), so an origin-blind key would serve one origin's CORS success to another origin
+      # whose load should fail. A no-cors load is origin-independent (it always reads the bytes),
+      # so it keeps the bare URL key and shares the cache with the decode / canvas loaders.
+      private def cached_image(key, cors = false, credentials = 'same-origin')
+        cache_key = cors ? "cors:#{credentials}:#{url_origin(@current_url)}:#{key}" : key
+        cached = @@image_cache_lock.synchronize { @@image_cache[cache_key] }
         return cached if cached
-        bytes = image_source_bytes(key)
+        bytes = image_source_bytes(key, cors, credentials)
         return bytes if bytes == :unsupported
         return nil unless bytes
         entry = decode_or_nil(bytes)
@@ -4334,21 +4344,23 @@ module Capybara
         return entry unless entry.is_a?(Hash)
         @@image_cache_lock.synchronize do
           @@image_cache.clear if @@image_cache.size >= IMAGE_CACHE_MAX
-          @@image_cache[key] = entry
+          @@image_cache[cache_key] = entry
         end
         entry
       end
 
       # Raw (encoded) bytes for an image URL: `data:` decoded inline, http(s) via a
       # binary-safe fetch (the raw bytes ride `body_b64`; the text body would mangle
-      # non-ASCII image bytes). :unsupported for a scheme with no host-side reader,
-      # nil for a missing / failed / empty resource.
-      private def image_source_bytes(key)
+      # non-ASCII image bytes). A `cors` load threads 'cors' mode + credentials into the
+      # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
+      # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
+      # nil for a missing / failed / CORS-rejected / empty resource.
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin')
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
-          result = rack_fetch('GET', key, '', {}, 'follow')
+          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials)
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
           bytes.empty? ? nil : bytes
