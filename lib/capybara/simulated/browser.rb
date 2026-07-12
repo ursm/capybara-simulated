@@ -394,6 +394,10 @@ module Capybara
         # stuck fetch costs the budget ONCE, not per frame; reset on each delivered reply so the next
         # fetch in a sequence waits afresh.
         @sw_fetch_wait_deadline = nil
+        # Same budget for a pending SW message swack / broadcast ack (drain_pending_message_reply);
+        # separate from the fetch deadline so a message wait and a fetch hold don't share a spent
+        # budget. Reset once no message/broadcast reply is outstanding.
+        @sw_msg_wait_deadline = nil
         # SW navigation-interception state. `@sw_registrations` mirrors scope-href → active
         # worker handle (from the client lifecycle) so a navigation fetched Ruby-side — before
         # the destination realm's JS exists — can find its controlling SW; it survives the
@@ -2341,6 +2345,17 @@ module Capybara
         end
         @sw_fetch_wait_deadline = nil unless @sw_fetch_pending.positive?
 
+        # Same interlude for a pending SW message swack / broadcast ack — but WITHOUT holding
+        # the clock. Its reply is the same kind of cross-isolate transfer completed on the worker
+        # thread (a `worker.postMessage(view, [view.buffer])` reply zero-copies via transferIn),
+        # so we block briefly on the outbox to give a loaded runner's worker real GVL time to post
+        # it, then fall through to phase 2 — a message reply is delivered at the current instant by
+        # the drain below and the client-side lifecycle / nav timers its test then waits on advance
+        # via the clock, so (unlike a fetch) we must NOT hold: holding regressed about-blank-
+        # replacement. See drain_pending_message_reply.
+        drain_pending_message_reply if worker_message_reply_pending?
+        @sw_msg_wait_deadline = nil unless worker_message_reply_pending?
+
         # Phase 2 — advance one real frame so the next batch of timers becomes due.
         # Its work counts toward `progressed` too: a timer that first comes due in
         # this advance (e.g. a `setTimeout(…, 8)` firing mid-frame) and the nav hop
@@ -2384,6 +2399,29 @@ module Capybara
           'next_timer' => probe['nextTimer'].to_f,
           'progressed' => turns > 1 || held_progressed
         }
+      end
+
+      # Park briefly (GVL released) for an outstanding SW message swack / broadcast ack and deliver
+      # it at the current instant, then RETURN — the caller proceeds to phase 2 and advances the
+      # clock. Unlike `hold_for_sw_fetch` this does NOT hold time: a message/broadcast reply's test
+      # advances its client-side lifecycle / nav timers via the clock, so holding on it deadlocks
+      # (regressed about-blank-replacement). The only thing missing under load is worker GVL time for
+      # the cross-isolate transferable reply to complete — a fixed micro-sleep isn't enough margin on
+      # a loaded runner (postmessage.https transferable subtests), so we block on the outbox exactly
+      # like the fetch hold / `settle`. Budget shared across frames (a genuinely stuck reply pays it
+      # once — the spent deadline stays in the past, so later frames don't re-block and the clock runs
+      # free until the reply lands or the test times out); reset in `run_event_loop_frame` once no
+      # message/broadcast reply is outstanding, so the next one waits afresh.
+      private def drain_pending_message_reply
+        @sw_msg_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        park_worker_reply(@sw_msg_wait_deadline) while worker_message_reply_pending? &&
+          @worker_outbox.empty? && @worker_outbox_head.nil? &&
+          Process.clock_gettime(Process::CLOCK_MONOTONIC) < @sw_msg_wait_deadline
+        # `deliver_worker_messages` (inside step_and_drain) refreshes @sw_msg_wait_deadline whenever it
+        # delivers a swack/bcack, so the NEXT reply in a sequence waits afresh — and it does so on
+        # WHICHEVER drain path delivered the reply (this one, hold_for_sw_fetch's outbox drain, or
+        # settle), which resetting only here would miss when a co-pending fetch hold delivers it.
+        step_and_drain_progressed(@runtime.run_loop_step(0)) if @worker_outbox_head || !@worker_outbox.empty?
       end
 
       # Block up to one poll interval for a worker reply, parking it in the one-slot head buffer —
@@ -3997,7 +4035,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -4089,6 +4127,12 @@ module Capybara
         @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size - stream_terminals].max
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
         @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
+        # A delivered swack/bcack refreshes the message-wait budget (drain_pending_message_reply), so
+        # the next reply in a sequence waits afresh instead of inheriting a spent deadline. Done here,
+        # at the single delivery point, so it fires no matter which drain path delivered the reply —
+        # including hold_for_sw_fetch's outbox drain when a fetch co-pends (which would otherwise
+        # strand an expired deadline and re-starve the next transferable reply under load).
+        @sw_msg_wait_deadline     = nil if acks.size.positive? || swacks.size.positive?
         # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
         @worker_in_flight = [0, @worker_in_flight - msgs.size].max
         @runtime.call('__csim_deliverWorkerMessages', msgs) unless msgs.empty?
@@ -4102,6 +4146,12 @@ module Capybara
       # handler raises). Safe for settle to block a bounded wait on — unlike @worker_in_flight
       # (a plain postMessage that a listen-only worker never answers) or @worker_initializing.
       def worker_reply_pending? = @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0
+
+      # The message/broadcast subset of `worker_reply_pending?` — a swack (client→SW postMessage /
+      # cross-isolate port message) or a bcack (BroadcastChannel post). `run_event_loop_frame` waits
+      # on these WITHOUT holding the clock (drain_pending_message_reply); the SW-fetch pending is held
+      # separately (hold_for_sw_fetch), so it's deliberately excluded here.
+      def worker_message_reply_pending? = @worker_broadcast_pending > 0 || @sw_message_pending > 0
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -4866,6 +4916,7 @@ module Capybara
         @sw_fetch_pending         = 0
         @sw_open_streams.clear
         @sw_fetch_wait_deadline   = nil
+        @sw_msg_wait_deadline     = nil
         @sw_registrations.clear
         @sw_pending_claims   = []
         @sw_clients          = {}
