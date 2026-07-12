@@ -71,6 +71,7 @@ module Capybara
         # level and inject them into every per-window Browser. Each
         # Browser still has its own sessionStorage + DOM + JS VM.
         @cookies         = {}
+        @auth_cache      = {}
         @local_storage   = {}
         # Cache Storage (caches/Cache) is origin-shared like localStorage — owned at the
         # Driver level and injected, so a service worker and every same-origin window see
@@ -104,6 +105,7 @@ module Capybara
                     driver:          self,
                     js_engine:       @js_engine,
                     cookies:         @cookies,
+                    auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     cache_storage:   @cache_storage,
                     all_hosts_local: @all_hosts_local)
