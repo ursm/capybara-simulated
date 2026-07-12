@@ -5914,7 +5914,7 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
-          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true) if no_cors_mode && crossed
+          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str) if no_cors_mode && crossed
           return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
@@ -6020,7 +6020,7 @@ module Capybara
       # text body when `body_b64` is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false)
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # A NUL in a header value is not a valid HTTP message; a real server can't
@@ -6078,6 +6078,15 @@ module Capybara
         # (decodeResponseBytes). `ascii_only?` is a cheap C-level scan, so the dominant
         # pure-ASCII app JSON/HTML traffic keeps the fast path and pays no base64.
         out['body_b64'] = Base64.strict_encode64(raw) unless is_text && raw.ascii_only?
+        # An OPAQUE (no-cors cross-origin) response hides its body from every script-visible read
+        # (body/body_b64 are empty). But the bytes are still needed to RENDER an <img> the response
+        # backs (a cross-origin image displays, merely canvas-tainting) — carry them on a private
+        # side channel the image decode path reads, never a public body accessor. Attached to EVERY
+        # opaque response, not just image requests: this is `rack_fetch`, which has no request
+        # destination (a SW's own no-cors `fetch()` doesn't know its eventual consumer is an <img>),
+        # so the choice is made client-side. The bytes are already in memory (`body_str`); the added
+        # cost is one base64 per opaque response, off any hot path.
+        out['opaque_render_b64'] = Base64.strict_encode64(opaque_render) if opaque_render && !opaque_render.empty?
         out
       end
 
