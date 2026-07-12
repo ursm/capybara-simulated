@@ -4317,11 +4317,26 @@ module Capybara
         # browser would keep the non-zero axis, e.g. 0×100 → naturalHeight 100) — a minor
         # divergence, immaterial to createPattern / drawImage, which both need a
         # non-zero area.
-        return {'zeroSize' => true, 'width' => 0, 'height' => 0} if entry == :zero_size
+        tainted = image_tainted?(key, cors)
+        return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
         return nil unless entry
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
+        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => tainted}
         r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         r
+      end
+
+      # Whether a successfully-loaded image taints a canvas it's drawn into: its bytes came
+      # cross-origin without CORS approval — i.e. a no-cors http(s) load from a different origin
+      # than the document. A CORS load that reached here passed the Access-Control check (so it's
+      # origin-clean), and same-origin / data: images are always clean. An opaque-origin document
+      # (data:/srcdoc/sandboxed — nil origin) is cross-origin to every http(s) image, so any such
+      # image taints it.
+      private def image_tainted?(key, cors)
+        return false if cors || !key.match?(%r{\Ahttps?://}i)
+        img = url_origin(key)
+        return false unless img
+        doc = url_origin(@current_url)
+        doc.nil? || doc != img
       end
 
       # A decoded-image cache entry for `key`, decoding + caching on a miss.
