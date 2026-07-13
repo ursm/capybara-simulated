@@ -1236,22 +1236,14 @@ service-workers/service-worker/navigation-headers.https.html:
   sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect and change-request service
   worker sets correct sec-fetch headers.
-- GET Navigation, same-origin with cross-site redirect and fallback service worker
-  sets correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect and navpreload service worker
   sets correct sec-fetch headers.
-- GET Navigation, same-origin with cross-site redirect and no service worker sets
-  correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect and passthrough service worker
   sets correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
   change-request service worker sets correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
-  fallback service worker sets correct sec-fetch headers.
-- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
   navpreload service worker sets correct sec-fetch headers.
-- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
-  no service worker sets correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
   passthrough service worker sets correct sec-fetch headers.
 - GET Navigation, same-origin with navpreload service worker sets correct origin and
@@ -1264,12 +1256,8 @@ service-workers/service-worker/navigation-headers.https.html:
   headers.
 - GET Navigation, same-origin with same-site redirect and change-request service worker
   sets correct sec-fetch headers.
-- GET Navigation, same-origin with same-site redirect and fallback service worker
-  sets correct sec-fetch headers.
 - GET Navigation, same-origin with same-site redirect and navpreload service worker
   sets correct sec-fetch headers.
-- GET Navigation, same-origin with same-site redirect and no service worker sets correct
-  sec-fetch headers.
 - GET Navigation, same-origin with same-site redirect and passthrough service worker
   sets correct sec-fetch headers.
 - GET Navigation, same-origin with service worker that changes the request sets correct
@@ -1298,18 +1286,10 @@ service-workers/service-worker/navigation-headers.https.html:
   sec-fetch headers.
 - POST Navigation, same-origin with cross-site redirect and change-request service
   worker sets correct origin and referer headers.
-- POST Navigation, same-origin with cross-site redirect and fallback service worker
-  sets correct origin and referer headers.
-- POST Navigation, same-origin with cross-site redirect and no service worker sets
-  correct origin and referer headers.
 - POST Navigation, same-origin with cross-site redirect and passthrough service worker
   sets correct origin and referer headers.
 - POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
   change-request service worker sets correct origin and referer headers.
-- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
-  fallback service worker sets correct origin and referer headers.
-- POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
-  no service worker sets correct origin and referer headers.
 - POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
   passthrough service worker sets correct origin and referer headers.
 - POST Navigation, same-origin with passthrough service worker sets correct origin
@@ -1318,10 +1298,6 @@ service-workers/service-worker/navigation-headers.https.html:
   headers.
 - POST Navigation, same-origin with same-site redirect and change-request service
   worker sets correct origin and referer headers.
-- POST Navigation, same-origin with same-site redirect and fallback service worker
-  sets correct origin and referer headers.
-- POST Navigation, same-origin with same-site redirect and no service worker sets
-  correct origin and referer headers.
 - POST Navigation, same-origin with same-site redirect and passthrough service worker
   sets correct origin and referer headers.
 - POST Navigation, same-origin with service worker that changes the request sets correct
