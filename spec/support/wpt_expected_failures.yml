@@ -1222,16 +1222,10 @@ service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
 service-workers/service-worker/navigation-headers.https.html:
-- GET Navigation, cross-site with fallback service worker sets correct origin and
-  referer headers.
-- GET Navigation, cross-site with fallback service worker sets correct sec-fetch headers.
 - GET Navigation, cross-site with navpreload service worker sets correct origin and
   referer headers.
 - GET Navigation, cross-site with navpreload service worker sets correct sec-fetch
   headers.
-- GET Navigation, cross-site with no service worker sets correct origin and referer
-  headers.
-- GET Navigation, cross-site with no service worker sets correct sec-fetch headers.
 - GET Navigation, cross-site with passthrough service worker sets correct origin and
   referer headers.
 - GET Navigation, cross-site with passthrough service worker sets correct sec-fetch
@@ -1260,17 +1254,10 @@ service-workers/service-worker/navigation-headers.https.html:
   no service worker sets correct sec-fetch headers.
 - GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
   passthrough service worker sets correct sec-fetch headers.
-- GET Navigation, same-origin with fallback service worker sets correct origin and
-  referer headers.
-- GET Navigation, same-origin with fallback service worker sets correct sec-fetch
-  headers.
 - GET Navigation, same-origin with navpreload service worker sets correct origin and
   referer headers.
 - GET Navigation, same-origin with navpreload service worker sets correct sec-fetch
   headers.
-- GET Navigation, same-origin with no service worker sets correct origin and referer
-  headers.
-- GET Navigation, same-origin with no service worker sets correct sec-fetch headers.
 - GET Navigation, same-origin with passthrough service worker sets correct origin
   and referer headers.
 - GET Navigation, same-origin with passthrough service worker sets correct sec-fetch
@@ -1289,16 +1276,10 @@ service-workers/service-worker/navigation-headers.https.html:
   origin and referer headers.
 - GET Navigation, same-origin with service worker that changes the request sets correct
   sec-fetch headers.
-- GET Navigation, same-site with fallback service worker sets correct origin and referer
-  headers.
-- GET Navigation, same-site with fallback service worker sets correct sec-fetch headers.
 - GET Navigation, same-site with navpreload service worker sets correct origin and
   referer headers.
 - GET Navigation, same-site with navpreload service worker sets correct sec-fetch
   headers.
-- GET Navigation, same-site with no service worker sets correct origin and referer
-  headers.
-- GET Navigation, same-site with no service worker sets correct sec-fetch headers.
 - GET Navigation, same-site with passthrough service worker sets correct origin and
   referer headers.
 - GET Navigation, same-site with passthrough service worker sets correct sec-fetch

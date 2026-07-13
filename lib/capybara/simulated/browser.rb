@@ -6324,6 +6324,14 @@ module Capybara
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
           if entry
             navigate_frame(url, entry: entry)
+          elsif url.match?(%r{\Ahttps?://}i)
+            # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
+            # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
+            # non-http(s) and relative URLs stay on the JS src-reassignment path via
+            # navigate_realm_self_get. `record: false` — a location/link frame nav isn't history-
+            # recorded yet (that's a form-submission-only path), and must not push where a
+            # location.replace should overwrite.
+            navigate_realm_self_get(realm_id, url, record: false)
           else
             @runtime.call('__csimNavigateFrameByRealm', realm_id, url)
           end
@@ -6656,20 +6664,58 @@ module Capybara
       end
       # A self-targeted GET form submit in the initiating frame realm: navigate
       # that frame to the action URL (query already mutated in).
-      def navigate_realm_self_get(realm_id, get_url)
-        record_frame_nav(realm_id, get_url)
+      # `record: false` for a `location.href=` / link-click self-nav — those frame navigations are
+      # deliberately NOT recorded in frame history yet (see record_frame_nav; history.back there falls
+      # through to the top document), and recording them here would push an entry where a
+      # `location.replace` must overwrite. A form GET submission (the default) IS a history push.
+      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true)
+        raise 'too many redirects' if depth > 10
+        record_frame_nav(realm_id, get_url) if record && depth.zero? && !is_reload && !is_history
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        if entry
-          navigate_frame(resolve_against_current(get_url), entry: entry)
-        else
-          # A frame reached via contentWindow (not on the entered stack): its
-          # owning iframe lives in its PARENT realm's document (the main realm for
-          # a top-level frame, an intermediate realm for a nested one), so route
-          # the by-realm src-reassignment there — not unconditionally to main.
-          # (relative get_url resolves against the frame's base on rebuild).
-          parent = @runtime.frame_realm_parent(realm_id)
-          frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
+        return navigate_frame(resolve_against_current(get_url), entry: entry) if entry
+        # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
+        # fetched Ruby-side (like navigate_realm_self_post) so the navigation carries correct request
+        # headers — a Referer under the initiating document's Referrer-Policy, no Origin (GET), the
+        # Fetch-Metadata triple. A non-http(s) target (data:/blob:/javascript:/about:blank) or a
+        # relative one stays on the JS src-reassignment path, which owns those schemes and resolves a
+        # relative URL against the frame's base on rebuild — routed through the frame's PARENT realm
+        # (where the owning iframe lives), not unconditionally to main.
+        parent = @runtime.frame_realm_parent(realm_id)
+        unless get_url.is_a?(String) && get_url.match?(%r{\Ahttps?://}i)
+          return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
         end
+        # The realm may have been disposed earlier in THIS drain batch — an ancestor frame that also
+        # self-navigated discarded this descendant (dispose_frame_realm_tree). Bail before issuing a
+        # network fetch whose response (reload_frame_realm_by_id) would find no container and be thrown
+        # away — the fetch's cookie / server side effects would fire for a navigation that never commits.
+        return unless @runtime.frame_realm_alive?(realm_id)
+        invalidate_find_cache
+        # A controlled navigation goes to the SW's fetch event first (mode 'navigate'); respondWith
+        # serves the document, a network error fails it, nil falls through to the network GET below.
+        if (sw = service_worker_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history))
+          return if sw['networkError']
+
+          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
+        end
+        env = Rack::MockRequest.env_for(get_url, method: 'GET')
+        navigation_request_headers(
+          env,
+          method:          'GET',
+          initiator_url:   frame_realm_url(realm_id),
+          target:          get_url,
+          dest:            'iframe',
+          referrer_policy: frame_document_referrer_policy(realm_id)
+        )
+        status, headers, resp_body = dispatch_rack_or_http(get_url, env, method: 'GET')
+        merge_set_cookie(headers, get_url)
+        if (loc = redirect_location(status, headers))
+          resp_body.close if resp_body.respond_to?(:close)
+          return navigate_realm_self_get(realm_id, resolve_against(loc, get_url), depth: depth + 1, is_reload: is_reload, is_history: is_history)
+        end
+        if download_response?(headers)
+          return save_downloaded_response(get_url, headers, resp_body)
+        end
+        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers))
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
