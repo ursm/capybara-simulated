@@ -405,6 +405,16 @@ module Capybara
         # is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off the general outbox)
         # keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with client-fetch replies.
         @sw_registrations = {}
+        # Navigation Preload state, per active-worker HANDLE (the registration's active worker — the
+        # client's `registration.active._handle` and the worker's own `__csimWorkerHandle` are the
+        # same id, so both isolates key here identically). {enabled:, header:}; absent → the spec
+        # default {false, 'true'}. Read at navigation time to decide whether to issue the parallel
+        # preload request (see service_worker_navigation_fetch), and by the NavigationPreloadManager.
+        # EARNED GAP: the spec keeps this per-REGISTRATION (it survives a SW update); keying by the
+        # active worker's handle means an update — which mints a fresh handle — resets it to default.
+        # No vendored subtest enables preload then updates the worker, so handle-keying (which needs no
+        # scope plumbing to the worker isolate) is the simpler load-bearing choice.
+        @sw_navpreload = {}
         # clients.claim() events that arrived before their scope was mirrored into @sw_registrations
         # (activate→claim() races the client-side lifecycle) — buffered here, flushed by sw_register_scope.
         @sw_pending_claims = []
@@ -3795,6 +3805,31 @@ module Capybara
         end
         nil
       end
+      # Navigation Preload state for a registration's active worker (keyed by its handle). Returns the
+      # spec default {enabled:false, headerValue:'true'} when never set. Read by the client- and
+      # worker-side NavigationPreloadManager (getState) and at navigation time (nav_preload_enabled?).
+      def nav_preload_state(handle)
+        st = @sw_navpreload[handle.to_i] || {}
+        {'enabled' => st.fetch(:enabled, false), 'headerValue' => st.fetch(:header, 'true')}
+      end
+
+      # Update the state for a worker handle. A nil `enabled` / `header` leaves that field unchanged
+      # (enable/disable set only enabled; setHeaderValue sets only the header — the JS side has already
+      # validated the header value and String()-ified it). The InvalidStateError "no active worker"
+      # gate lives in the JS manager (a null handle never reaches here).
+      def nav_preload_set(handle, enabled, header)
+        st = (@sw_navpreload[handle.to_i] ||= {})
+        st[:enabled] = !!enabled unless enabled.nil?
+        st[:header]  = header.to_s unless header.nil?
+        nil
+      end
+
+      # Whether the registration whose active worker controls `url` has navigation preload enabled —
+      # gates the parallel preload request during a navigation.
+      def nav_preload_enabled?(handle)
+        handle && @sw_navpreload.dig(handle.to_i, :enabled) ? true : false
+      end
+
       def sw_unregister_scope(scope)
         @sw_registrations.delete(scope.to_s)
         nil
@@ -3950,6 +3985,23 @@ module Capybara
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
+        # Navigation Preload: when the controlling registration has it enabled, issue the parallel
+        # preload request NOW (main thread, before dispatching the event) and hand the response to the
+        # SW as `event.preloadResponse`. GET only (the feature does not support other methods). The SW
+        # that serves `respondWith(event.preloadResponse)` echoes this response back — the server is hit
+        # exactly once. (EARNED GAP: if the SW instead FALLS THROUGH, this method returns nil and the
+        # caller re-fetches from the network — a second hit; the spec reuses the preload response for
+        # the fall-through. No vendored subtest enables preload then falls through.)
+        preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(handle)
+          navigation_preload_response(
+            url,
+            referrer_source,
+            referrer_policy,
+            site_seed,
+            origin_null,
+            nav_preload_state(handle)['headerValue']
+          )
+        end
         # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
         # via `event.request.text()`); the Content-Type the form's enctype implies rides its headers.
         headers = {'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'}
@@ -3978,7 +4030,10 @@ module Capybara
           # by the network hops before the SW intercepted the final URL.
           initiator:           url_origin(referrer_source),
           siteSeed:            site_seed,
-          originNull:          origin_null
+          originNull:          origin_null,
+          # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler
+          # as `event.preloadResponse`.
+          preloadResponse:     preload
         )
         w[:inbox] << {kind: 'fetch', req:, fetch_id:}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
@@ -4041,10 +4096,11 @@ module Capybara
         # Drop any navigation scope mirrored to this now-dead worker so a later navigation
         # doesn't route to it (it falls through to the network instead).
         @sw_registrations.reject! {|_scope, h| h == handle.to_i }
+        @sw_navpreload.delete(handle.to_i)
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
       end
@@ -4927,6 +4983,7 @@ module Capybara
         @sw_fetch_wait_deadline   = nil
         @sw_msg_wait_deadline     = nil
         @sw_registrations.clear
+        @sw_navpreload       = {}
         @sw_pending_claims   = []
         @sw_clients          = {}
         @sw_realm_controller = {}
@@ -6742,19 +6799,14 @@ module Capybara
         end
         initiator = frame_realm_url(realm_id)
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
-        env = Rack::MockRequest.env_for(get_url, method: 'GET')
-        navigation_request_headers(
-          env,
+        status, headers, resp_body = dispatch_navigation_request(
+          get_url,
           method:          'GET',
-          initiator_url:   initiator,
-          target:          get_url,
-          dest:            'iframe',
+          initiator:       initiator,
           referrer_policy: frame_document_referrer_policy(realm_id),
-          site_override:   site,
+          site:            site,
           origin_null:     origin_null
         )
-        status, headers, resp_body = dispatch_rack_or_http(get_url, env, method: 'GET')
-        merge_set_cookie(headers, get_url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against(loc, get_url)
           resp_body.close if resp_body.respond_to?(:close)
@@ -6797,26 +6849,22 @@ module Capybara
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
           return
         end
-        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
-        env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
-        env['CONTENT_LENGTH'] = body.bytesize.to_s
         # The initiator is the FRAME's own document (still alive — the rebuild is below), not the
         # top document `current_browsing_context_url` returns for a non-entered frame. A form POST
         # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
         # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
         initiator = frame_realm_url(realm_id)
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
-        navigation_request_headers(
-          env,
+        status, headers, resp_body = dispatch_navigation_request(
+          url,
           method:          'POST',
-          initiator_url:   initiator,
-          target:          url.to_s,
-          dest:            'iframe',
+          initiator:       initiator,
           referrer_policy: frame_document_referrer_policy(realm_id),
-          site_override:   site,
-          origin_null:     origin_null
+          site:            site,
+          origin_null:     origin_null,
+          body:            body,
+          content_type:    content_type
         )
-        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
@@ -7547,6 +7595,62 @@ module Capybara
         env['HTTP_SEC_FETCH_MODE'] = 'navigate'
         env['HTTP_SEC_FETCH_DEST'] = dest.to_s
         env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
+      end
+
+      # Build + dispatch a navigation request (a frame/document load) — the shared core of the GET
+      # self-nav, the POST self-nav, and the navigation-preload request, so all three send the SAME
+      # Referer / Origin / Fetch-Metadata (dest 'iframe') and can't silently diverge. `site` is the
+      # caller's already-widened Sec-Fetch-Site (threaded across the redirect chain it owns);
+      # `extra_headers` carries any request-specific CGI header (the preload marker). Returns
+      # [status, headers, resp_body] — the caller handles redirects / reload / the preload wire.
+      def dispatch_navigation_request(url, method:, initiator:, referrer_policy:, site:, origin_null:, body: nil, content_type: nil, extra_headers: nil)
+        env = Rack::MockRequest.env_for(url, method: method, input: body || '')
+        if content_type
+          env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
+          env['CONTENT_LENGTH'] = body.to_s.bytesize.to_s
+        end
+        navigation_request_headers(
+          env,
+          method:          method,
+          initiator_url:   initiator,
+          target:          url.to_s,
+          dest:            'iframe',
+          referrer_policy: referrer_policy,
+          site_override:   site,
+          origin_null:     origin_null
+        )
+        extra_headers&.each {|k, v| env[k] = v }
+        status, headers, resp_body = dispatch_rack_or_http(url, env, method: method, body: body)
+        merge_set_cookie(headers, url)
+        [status, headers, resp_body]
+      end
+
+      # The Navigation Preload request: a parallel GET the browser issues for a navigation whose
+      # controlling SW has preload enabled, exposed to the SW as `event.preloadResponse`. It IS a
+      # navigation request (dest 'iframe', mode 'navigate', the frame's Referer / Sec-Fetch-Site — so
+      # the server sees exactly what a no-SW navigation would) plus the `Service-Worker-Navigation-
+      # Preload` header carrying the registration's header value. The SW intercepts the FINAL URL (a
+      # pre-SW network redirect already happened + widened `site_seed`), so this is a single hop — no
+      # redirect loop. Returns the response wire hash for the fetch-event JSON, or nil on a hard error.
+      def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value)
+        site = widen_sec_fetch_site(site_seed, sec_fetch_site(referrer_source, url))
+        status, headers, resp_body = dispatch_navigation_request(
+          url,
+          method:          'GET',
+          initiator:       referrer_source,
+          referrer_policy: referrer_policy,
+          site:            site,
+          origin_null:     origin_null,
+          extra_headers:   {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
+        )
+        {
+          'status'     => status,
+          'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
+          'headers'    => headers.to_h,
+          'body_b64'   => Base64.strict_encode64(read_rack_body(resp_body))
+        }
+      rescue StandardError
+        nil
       end
 
       # Fetch-Metadata `Sec-Fetch-Site`: the relationship of a request's INITIATOR to its target.

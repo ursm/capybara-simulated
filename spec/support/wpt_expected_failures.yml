@@ -1215,38 +1215,11 @@ service-workers/service-worker/multiple-update.https.html:
 service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
-service-workers/service-worker/navigation-headers.https.html:
-- GET Navigation, cross-site with navpreload service worker sets correct origin and
-  referer headers.
-- GET Navigation, cross-site with navpreload service worker sets correct sec-fetch
-  headers.
-- GET Navigation, same-origin with cross-site redirect and navpreload service worker
-  sets correct sec-fetch headers.
-- GET Navigation, same-origin with cross-site redirect, same-origin redirect, and
-  navpreload service worker sets correct sec-fetch headers.
-- GET Navigation, same-origin with navpreload service worker sets correct origin and
-  referer headers.
-- GET Navigation, same-origin with navpreload service worker sets correct sec-fetch
-  headers.
-- GET Navigation, same-origin with same-site redirect and navpreload service worker
-  sets correct sec-fetch headers.
-- GET Navigation, same-site with navpreload service worker sets correct origin and
-  referer headers.
-- GET Navigation, same-site with navpreload service worker sets correct sec-fetch
-  headers.
-service-workers/service-worker/navigation-preload/chunked-encoding.https.html:
-- Navigation Preload must work with chunked encoding.
 service-workers/service-worker/navigation-preload/content-encoding.https.html:
 - Navigation Preload must work with content encoding.
-service-workers/service-worker/navigation-preload/empty-preload-response-body.https.html:
-- Navigation Preload empty response body.
 service-workers/service-worker/navigation-preload/get-state.https.html:
-- getState
 - getState from a worker
 - no active worker
-service-workers/service-worker/navigation-preload/navigationPreload.https.html:
-- The navigationPreload attribute must return service worker registration's NavigationPreloadManager
-  object.
 service-workers/service-worker/navigation-preload/redirect.https.html:
 - Navigation Preload no-location redirect response with body.
 - Navigation Preload no-location redirect response.
@@ -1256,11 +1229,6 @@ service-workers/service-worker/navigation-preload/request-headers.https.html:
 - Navigation Preload request headers.
 service-workers/service-worker/navigation-preload/resource-timing.https.html:
 - Navigation Preload Resource Timing.
-service-workers/service-worker/navigation-preload/samesite-cookies.https.html:
-- Navigation Preload for same site cookies (Lax).
-- Navigation Preload for same site cookies (None).
-- Navigation Preload for same site cookies (Strict).
-- Set up a service worker for navigation preload tests.
 service-workers/service-worker/navigation-redirect-resolution.https.html:
 - test relative opaqueredirect
 - test relative opaqueredirect with CacheStorage

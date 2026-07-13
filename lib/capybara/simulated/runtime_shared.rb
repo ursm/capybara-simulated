@@ -152,6 +152,11 @@ module Capybara
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
         '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
+        # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
+        # worker handle — reached identically from the client (registration.active._handle) and the
+        # worker (__csimWorkerHandle). Get returns {enabled, headerValue}; set leaves a nil field as-is.
+        '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0]) },
+        '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
         '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
