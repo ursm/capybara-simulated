@@ -3946,7 +3946,7 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, method: 'GET', body_b64: '', content_type: nil)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -3966,10 +3966,11 @@ module Capybara
           isHistoryNavigation: is_history,
           # A reload navigation revalidates (cache mode 'no-cache'); a fresh/history load is 'default'.
           cache:               is_reload ? 'no-cache' : 'default',
-          # The navigation's referrer is the initiating document (the frame's parent), resolved
-          # under its referrer policy — the document default absent a meta/header (strict-origin-
-          # when-cross-origin), so a same-origin nav keeps the full URL.
-          referrer:            compute_referrer(nil, referrer_source, url.to_s).to_s
+          # The navigation's referrer is the initiating document, resolved under ITS Referrer-Policy
+          # (the document default absent a meta/header — strict-origin-when-cross-origin — so a
+          # same-origin nav keeps the full URL). A SW that re-issues the request
+          # (`fetch(event.request)`) computes Sec-Fetch-Site / Origin against this referrer's origin.
+          referrer:            compute_referrer(referrer_policy, referrer_source, url.to_s).to_s
         )
         w[:inbox] << {kind: 'fetch', req:, fetch_id:}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
@@ -5701,6 +5702,9 @@ module Capybara
         # (form submission) or a nil-mode internal caller gets a plain readable response.
         doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil
         crossed          = false
+        # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
+        # (like the navigation path), computed vs the request's referrer-source origin below.
+        sec_site         = nil
         # A request is "credentialed" (cookies + the credentialed CORS check) only in
         # `include` mode; `same-origin` (default) and `omit` are uncredentialed for the
         # CORS check, while the cookie decision below distinguishes all three.
@@ -5745,6 +5749,13 @@ module Capybara
         # document URL ("client"); an empty referrer means no-referrer (compute_referrer
         # maps a blank source to nil).
         ref_source = referrer.nil? ? @current_url : referrer
+        # The request's INITIATOR origin for Sec-Fetch-Site — captured ONCE (loop-invariant), before
+        # the per-hop referrer reassignment (5927 below) degrades ref_source, and independent of
+        # Referrer-Policy: the initiator is the referrer's origin (a SW's `fetch(event.request)`
+        # carries the navigating frame's origin here, so a cross-origin passthrough is same-/cross-site
+        # correctly), falling back to the document origin when the referrer was policy-emptied — never
+        # 'none' for a request that has a real initiator.
+        sec_initiator = url_origin(ref_source) || url_origin(@current_url)
         (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -5846,6 +5857,19 @@ module Capybara
           # cross-origin redirect the origin is the opaque "null".
           if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
             env['HTTP_ORIGIN'] = effective_origin
+          end
+          # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set;
+          # the nil-mode internal callers — ESM / asset GET / beacon — are left alone). Sec-Fetch-Site
+          # widens across the redirect chain vs the loop-invariant `sec_initiator` (see above). -Mode
+          # is the request mode (a SW's `fetch(event.request)` re-issues a 'navigate'-mode request,
+          # `new Request(…,{mode})` a 'same-origin' one); -Dest is 'empty' for a script-initiated fetch
+          # — the only navigate-mode path here (a navigation emits its own 'iframe'/'document' dest +
+          # -User via navigation_request_headers, never reaching rack_fetch).
+          if cors_mode
+            sec_site = widen_sec_fetch_site(sec_site, sec_fetch_site(sec_initiator, target))
+            env['HTTP_SEC_FETCH_SITE'] = sec_site
+            env['HTTP_SEC_FETCH_MODE'] = cors_mode
+            env['HTTP_SEC_FETCH_DEST'] = 'empty'
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
@@ -6692,7 +6716,8 @@ module Capybara
         invalidate_find_cache
         # A controlled navigation goes to the SW's fetch event first (mode 'navigate'); respondWith
         # serves the document, a network error fails it, nil falls through to the network GET below.
-        if (sw = service_worker_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history))
+        if (sw = service_worker_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
+                                                          referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id)))
           return if sw['networkError']
 
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
@@ -6745,7 +6770,8 @@ module Capybara
         # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
         # POST — the SW reads the body via event.request.text()); respondWith serves the document,
         # a network error fails it, nil falls through to the network POST below.
-        if (sw = service_worker_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history))
+        if (sw = service_worker_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
+                                                      referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id)))
           return if sw['networkError']
 
           tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
