@@ -1307,13 +1307,6 @@ service-workers/service-worker/navigation-headers.https.html:
   origin and referer headers.
 - GET Navigation, same-site with service worker that changes the request sets correct
   sec-fetch headers.
-- POST Navigation, cross-site with fallback service worker sets correct origin and
-  referer headers.
-- POST Navigation, cross-site with fallback service worker sets correct sec-fetch
-  headers.
-- POST Navigation, cross-site with no service worker sets correct origin and referer
-  headers.
-- POST Navigation, cross-site with no service worker sets correct sec-fetch headers.
 - POST Navigation, cross-site with passthrough service worker sets correct origin
   and referer headers.
 - POST Navigation, cross-site with passthrough service worker sets correct sec-fetch
@@ -1338,13 +1331,6 @@ service-workers/service-worker/navigation-headers.https.html:
   no service worker sets correct origin and referer headers.
 - POST Navigation, same-origin with cross-site redirect, same-origin redirect, and
   passthrough service worker sets correct origin and referer headers.
-- POST Navigation, same-origin with fallback service worker sets correct origin and
-  referer headers.
-- POST Navigation, same-origin with fallback service worker sets correct sec-fetch
-  headers.
-- POST Navigation, same-origin with no service worker sets correct origin and referer
-  headers.
-- POST Navigation, same-origin with no service worker sets correct sec-fetch headers.
 - POST Navigation, same-origin with passthrough service worker sets correct origin
   and referer headers.
 - POST Navigation, same-origin with passthrough service worker sets correct sec-fetch
@@ -1361,12 +1347,6 @@ service-workers/service-worker/navigation-headers.https.html:
   origin and referer headers.
 - POST Navigation, same-origin with service worker that changes the request sets correct
   sec-fetch headers.
-- POST Navigation, same-site with fallback service worker sets correct origin and
-  referer headers.
-- POST Navigation, same-site with fallback service worker sets correct sec-fetch headers.
-- POST Navigation, same-site with no service worker sets correct origin and referer
-  headers.
-- POST Navigation, same-site with no service worker sets correct sec-fetch headers.
 - POST Navigation, same-site with passthrough service worker sets correct origin and
   referer headers.
 - POST Navigation, same-site with passthrough service worker sets correct sec-fetch

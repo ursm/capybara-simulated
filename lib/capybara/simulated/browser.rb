@@ -4972,26 +4972,11 @@ module Capybara
       # host's last two dot-labels — correct for the single-label public suffixes our
       # in-process hosts use (web-platform.test / not-web-platform.test / *.com); a
       # full Public Suffix List isn't warranted here.
+      # This document's partition "site" (scheme + registrable domain) for Blob-URL / storage
+      # partitioning. A blob: document derives from its inner origin; data:/about: (no host) →
+      # '' (an opaque origin, never same-partition with a real one). See registrable_site.
       def blob_partition_site
-        # A blob: document's location is `blob:<innerURL>` (e.g.
-        # `blob:https://host:port/uuid`) — strip the prefix so the site derives from
-        # the inner origin, not the opaque blob: scheme. data:/about: have no host →
-        # '' (an opaque origin, never same-partition with a real one).
-        u = URI.parse(@current_url.to_s.sub(/\Ablob:/, ''))
-        host = u.host.to_s
-        return '' if host.empty?
-        labels = host.split('.')
-        # An IP literal (v4 dotted / v6 bracketed) or a ≤2-label host IS its own
-        # registrable domain; otherwise approximate eTLD+1 as the last two labels
-        # (no Public Suffix List — correct for the single-label TLDs our hosts use).
-        regd = if host.start_with?('[') || host.match?(/\A\d+(\.\d+){3}\z/) || labels.length <= 2
-          host
-        else
-          labels.last(2).join('.')
-        end
-        "#{u.scheme}://#{regd}"
-      rescue URI::Error
-        ''
+        registrable_site(@current_url) || ''
       end
 
       # WHATWG URL "domain to ASCII" — the JS tr46 stub delegates non-ASCII / xn--
@@ -6559,6 +6544,15 @@ module Capybara
       rescue StandardError
         nil
       end
+      # A frame document's referrer policy (its last valid `<meta name="referrer">`), read from
+      # the live realm to compute a self-navigation's Referer under the initiating document's
+      # policy. '' when the realm is gone / has no meta → the platform default applies.
+      def frame_document_referrer_policy(realm_id)
+        return '' unless @runtime.frame_realm_alive?(realm_id)
+        @runtime.realm_call(realm_id, '__csimDocumentReferrerPolicy').to_s
+      rescue StandardError
+        ''
+      end
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
         @runtime.realm_call(realm_id, '__csimCaptureFormState')
@@ -6707,7 +6701,18 @@ module Capybara
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: current_browsing_context_url)
+        # The initiator is the FRAME's own document (still alive — the rebuild is below), not the
+        # top document `current_browsing_context_url` returns for a non-entered frame. A form POST
+        # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
+        # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
+        navigation_request_headers(
+          env,
+          method:          'POST',
+          initiator_url:   frame_realm_url(realm_id),
+          target:          url.to_s,
+          dest:            'iframe',
+          referrer_policy: frame_document_referrer_policy(realm_id)
+        )
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -7411,6 +7416,55 @@ module Capybara
         else
           env['HTTP_COOKIE'] = ck
         end
+      end
+
+      # Referer / Origin / Fetch-Metadata for a NAVIGATION request (a document load — form
+      # submit, location set, link activation). Unlike a fetch/XHR (which carries a per-request
+      # policy through rack_fetch), a navigation's request headers derive from the INITIATING
+      # document: its Referrer-Policy (compute_referrer), its origin (an `Origin` header — sent
+      # only on an unsafe method, i.e. a form POST, never a GET/HEAD navigation), and the
+      # Fetch-Metadata triple. `dest` is 'document' for a top-level nav, 'iframe' for a subframe.
+      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, referrer_policy: nil, user_activated: false)
+        apply_default_request_env(env, referer: compute_referrer(referrer_policy, initiator_url, target))
+        # Origin is appended to every non-GET/HEAD request (a form POST carries it; a GET navigation
+        # does not). From a KNOWN initiating document it's that document's origin serialization, or
+        # the literal 'null' when that origin is opaque (an about:blank / data: frame) — matching the
+        # fetch path's `effective_origin` convention. Omitted only when the initiator is unknown (a
+        # disposed realm → nil url).
+        if initiator_url && !initiator_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
+          env['HTTP_ORIGIN'] = url_origin(initiator_url) || 'null'
+        end
+        env['HTTP_SEC_FETCH_SITE'] = sec_fetch_site(initiator_url, target)
+        env['HTTP_SEC_FETCH_MODE'] = 'navigate'
+        env['HTTP_SEC_FETCH_DEST'] = dest.to_s
+        env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
+      end
+
+      # Fetch-Metadata `Sec-Fetch-Site`: the relationship of a request's INITIATOR to its target.
+      # no initiator (a direct address-bar load) → 'none'; same (scheme,host,port) → 'same-origin';
+      # same registrable site (eTLD+1) → 'same-site'; else → 'cross-site'.
+      def sec_fetch_site(initiator_url, target_url)
+        io = url_origin(initiator_url)
+        return 'none' if io.nil?
+        return 'same-origin' if io == url_origin(target_url)
+        is = registrable_site(initiator_url)
+        ts = registrable_site(target_url)
+        is && ts && is == ts ? 'same-site' : 'cross-site'
+      end
+
+      # scheme + registrable domain (approx eTLD+1) of a URL — the "site" a Sec-Fetch-Site /
+      # same-site comparison uses. Last-two-labels approximation (no Public Suffix List — correct
+      # for the single-label TLDs our hosts use); an IP literal / ≤2-label host is its own site.
+      # A `blob:` URL derives from its inner origin. nil for a hostless / non-http(s) URL.
+      def registrable_site(url)
+        u = URI.parse(url.to_s.sub(/\Ablob:/, ''))
+        host = u.host.to_s
+        return nil if host.empty? || !u.scheme&.match?(/\Ahttps?\z/i)
+        labels = host.split('.')
+        regd = host.start_with?('[') || host.match?(/\A\d+(\.\d+){3}\z/) || labels.length <= 2 ? host : labels.last(2).join('.')
+        "#{u.scheme}://#{regd}"
+      rescue URI::Error
+        nil
       end
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
