@@ -444,8 +444,20 @@ module Capybara
       # keeps the new realm's `parent`/`top` wired to the owning realm. The
       # Browser then re-points the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type)
-        dispose_frame_realm(old_id)
+        # A re-navigated document discards its child browsing contexts, so dispose the old realm's
+        # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
+        # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
+        # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
+        # a descendant frame's realm would otherwise linger and its contentWindow stay live.
+        dispose_frame_realm_tree(old_id)
         create_frame_realm(ctx, url, body, content_type, parent_id)
+      end
+
+      # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
+      # parent's child-realm set is consistent as each level is torn down.
+      def dispose_frame_realm_tree(id)
+        frame_realm_parents.select {|_child, parent| parent == id }.each_key {|child| dispose_frame_realm_tree(child) }
+        dispose_frame_realm(id)
       end
 
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
@@ -456,7 +468,9 @@ module Capybara
       # the window after navigating it; a stable WindowProxy is future work.)
       def reload_window_realm(old_id, url, body, content_type)
         meta = window_realm_meta[old_id] || {}
-        dispose_frame_realm(old_id)
+        # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
+        # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
+        dispose_frame_realm_tree(old_id)
         create_window_realm(url, body, content_type, opener_id: meta[:opener_id], window_name: meta[:window_name])
       end
 
