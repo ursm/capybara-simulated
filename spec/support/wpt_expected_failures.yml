@@ -47,9 +47,6 @@ css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
 - Removing non-existing property or setting invalid value on CSS declaration block
   shouldn't queue mutation record
-css/cssom/css-style-reparse.html:
-- style.innerHTML modification
-- style.textContent modification
 css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
