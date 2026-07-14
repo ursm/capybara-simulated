@@ -26,7 +26,6 @@ css/cssom/at-namespace.html:
 css/cssom/base-uri.html:
 - KeyframeEffect constructor
 - KeyframeEffect.setKeyframes
-- setProperty
 css/cssom/computed-style-001.html:
 - relative_property_values
 css/cssom/computed-style-002.html:
