@@ -58,7 +58,18 @@ module WptRunner
   # Frame cap: FRAME_MS × DRAIN_MAX_STEPS (≈ 10.2 s) lands just past testharness's
   # 10 s harness timeout, which self-completes a still-running normal file first.
   DRAIN_MAX_STEPS    = 640
-  DRAIN_IDLE_BAIL    = 2    # consecutive no-progress frames → idle → force-timeout
+  # Consecutive no-progress frames → idle → force-timeout. Only ever reached while the harness is
+  # still PENDING (the loop breaks the instant `__wptResults` is set), so this bounds "how long a
+  # pending-but-apparently-idle page waits before we force testharness's timeout". It must clear the
+  # longest INVISIBLE completion chain: a promise_test resolving off a cross-isolate SW message
+  # (body → test.done → cleanup=unregister/terminate-worker → next test) progresses over several
+  # frames via microtasks + worker-thread wall time with NO DOM / timer / async-channel footprint, so
+  # the progress detector can't see it. Under CPU load that chain takes ~4 frames; at the old value of
+  # 2 the runner force-timeouted a promise_test one round-trip from completing (postmessage.https
+  # transferable-ArrayBuffer subtests flaked [TIMEOUT] under load — see settle_drain memory). 12 gives
+  # margin without materially slowing a genuinely-idle page's force-timeout (12 × FRAME_MS ≈ 190 ms,
+  # still far below testharness's 10 s harness timeout and the DRAIN_MAX_STEPS cap).
+  DRAIN_IDLE_BAIL    = 12
   # A frame with no rAF / async / due-now work still counts as PROGRESS (resets the
   # idle-bail) while a timer is parked within this horizon — a `step_timeout`-style
   # wait the test is deliberately sitting on (e.g. confirming a `scrollend` does NOT
