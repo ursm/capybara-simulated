@@ -7647,7 +7647,10 @@ module Capybara
           'status'     => status,
           'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
           'headers'    => headers.to_h,
-          'body_b64'   => Base64.strict_encode64(read_rack_body(resp_body))
+          # The UA transparently decodes a Content-Encoding'd body (gzip/deflate) before the SW's
+          # `event.preloadResponse.text()` sees it — the header stays, the bytes are inflated (as the
+          # regular fetch path does).
+          'body_b64'   => Base64.strict_encode64(decode_content_encoding(read_rack_body(resp_body), headers))
         }
       rescue StandardError
         nil

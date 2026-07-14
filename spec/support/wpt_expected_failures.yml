@@ -1215,10 +1215,7 @@ service-workers/service-worker/multiple-update.https.html:
 service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
-service-workers/service-worker/navigation-preload/content-encoding.https.html:
-- Navigation Preload must work with content encoding.
 service-workers/service-worker/navigation-preload/get-state.https.html:
-- getState from a worker
 - no active worker
 service-workers/service-worker/navigation-preload/redirect.https.html:
 - Navigation Preload no-location redirect response with body.
