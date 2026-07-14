@@ -21,27 +21,6 @@ css/cssom/CSSStyleSheet-constructable.html:
 - Stylesheet constructed on iframe cannot be used in the main Document
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
-css/cssom/HTMLLinkElement-disabled-001.html:
-- "<link disabled> prevents the stylesheet from being in document.styleSheets (from
-  parser)"
-- HTMLLinkElement.disabled reflects the <link disabled> attribute, and behaves consistently
-css/cssom/HTMLLinkElement-disabled-002.html:
-- HTMLLinkElement.disabled reflects the <link disabled> attribute, and behaves consistently,
-  when the sheet is an alternate
-css/cssom/HTMLLinkElement-disabled-003.html:
-- HTMLLinkElement.disabled's explicitly enabled state persists when disconnected and
-  connected again
-css/cssom/HTMLLinkElement-disabled-004.html:
-- HTMLLinkElement.disabled's explicitly enabled state doesn't persist on clones
-css/cssom/HTMLLinkElement-disabled-005.html:
-- HTMLLinkElement.disabled's explicitly enabled state persists regardless of rel
-css/cssom/HTMLLinkElement-disabled-006.html:
-- HTMLLinkElement.disabled setter does nothing if the attribute isn't present already.
-css/cssom/HTMLLinkElement-disabled-007.html:
-- HTMLLinkElement.disabled setter sets the explicitly enabled state if toggled back
-  and forth.
-css/cssom/HTMLLinkElement-load-event.html:
-- Link element load event doesn't block the parser.
 css/cssom/at-namespace.html:
 - 'CSS Test: @namespace in CSSOM is not severely broken'
 css/cssom/base-uri.html:
