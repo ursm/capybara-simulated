@@ -288,6 +288,9 @@ module Capybara
         @current_realm_id             = nil
         @frame_stack                  = []
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        # The first find of a navigation observes the current DOM without a pre-tick (see
+        # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
+        @pre_tick_armed               = false
         @polling_grace                = nil
         @last_polled_gen              = nil
         @idle_settle_polls            = 0
@@ -834,6 +837,9 @@ module Capybara
 
       def find_with_timer_fallback(kind, arg, ctx)
         tick_real_time if timer_wait_elapsed?
+        # After the first find of a navigation, a later find IS Capybara retrying — arm the pre-tick
+        # so subsequent polls advance the clock (a timer-driven element / removal the test awaits).
+        @pre_tick_armed = true
         result = cached_find(kind, arg, ctx) { yield }
         # An empty result is the wait-for-it case: Capybara is retrying for
         # an element that hasn't appeared yet. Re-tick so the next poll
@@ -867,8 +873,20 @@ module Capybara
       # this above one Ruby boundary so a single visit+find pair
       # doesn't accidentally tick.
       FIND_PRE_TICK_MIN_S = 0.05
+      # Whether a find should advance the clock BEFORE reading the DOM. The FIRST find after a
+      # navigation observes the current (pre-timer) DOM unconditionally — the "query the DOM before
+      # advancing pending timers" contract — so it never pre-ticks; only a LATER find (Capybara
+      # retrying because the element wasn't there yet) does, gated on the tick FREQUENCY. Anchoring
+      # the first-find exemption on a flag (not the wall clock) keeps it deterministic: a >50 ms wall
+      # gap between the navigation and the first find under full-suite load must NOT fire a parked
+      # setTimeout(0) the page just scheduled (smoke_spec "queries the current DOM …").
+      # NOTE: the same first-find contract after a USER ACTION (click/fill) is still gated only on the
+      # 50 ms wall clock — @pre_tick_armed is disarmed by reset_timer_state (navigation) alone. Actions
+      # keep the wall gate because the post-action pre-tick timing is tuned against the debounce-
+      # between-actions app cases (Avo actions_spec:464); no action-path flake has surfaced there.
       def timer_wait_elapsed?
-        @timers_active &&
+        @pre_tick_armed &&
+          @timers_active &&
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
       end
 
@@ -2586,6 +2604,9 @@ module Capybara
         @last_polled_gen    = nil
         @idle_settle_polls  = 0
         @ff_transient_polls = 0
+        # Disarm the find pre-tick so the FIRST find after this navigation reads the current DOM
+        # without advancing timers (see timer_wait_elapsed?), independent of wall-clock timing.
+        @pre_tick_armed     = false
         @context_gen       += 1
       end
 
