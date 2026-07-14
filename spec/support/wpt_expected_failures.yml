@@ -16,8 +16,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-css/cssom/CSSStyleSheet-constructable-baseURL.html:
-- Constructing sheet with invalid base URL throws a NotAllowedError
 css/cssom/CSSStyleSheet-constructable.html:
 - CSSStyleSheet.replaceSync should not trigger any loads from @import rules
 - Stylesheet constructed on iframe cannot be used in the main Document
@@ -44,10 +42,6 @@ css/cssom/HTMLLinkElement-disabled-007.html:
   and forth.
 css/cssom/HTMLLinkElement-load-event.html:
 - Link element load event doesn't block the parser.
-css/cssom/HTMLStyleElement-load-event.html:
-- style elements fire load events properly
-css/cssom/MutationObserver-style.html:
-- Updating style property with the same value does not trigger an observation callback
 css/cssom/at-namespace.html:
 - 'CSS Test: @namespace in CSSOM is not severely broken'
 css/cssom/base-uri.html:
@@ -88,12 +82,6 @@ css/cssom/cssstyledeclaration-csstext.html:
 css/cssom/cssstyledeclaration-mutationrecord-002.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
-css/cssom/cssstyledeclaration-mutationrecord-003.html:
-- CSSStyleDeclaration.removeProperty doesn't queue a mutation record when not actually
-  removed, invoked from setPropertyValue
-css/cssom/cssstyledeclaration-mutationrecord-004.html:
-- CSSStyleDeclaration.removeProperty doesn't queue a mutation record when not actually
-  removed
 css/cssom/cssstyledeclaration-mutationrecord-005.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
