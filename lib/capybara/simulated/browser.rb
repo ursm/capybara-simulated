@@ -3268,6 +3268,10 @@ module Capybara
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
         env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
+        # The opening handshake always carries the initiating document's origin (the UA owns this
+        # header) — server handlers echo it back (websockets/opening-handshake origin test).
+        doc_origin = url_origin(@current_url)
+        env['HTTP_ORIGIN'] = doc_origin if doc_origin
         list = Array(protocols).map(&:to_s).reject(&:empty?)
         env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
         env['rack.hijack?']  = true
@@ -3316,13 +3320,16 @@ module Capybara
         nil
       end
 
-      def ws_close(id, code = 1000, reason = '')
+      def ws_close(id, code = nil, reason = '')
         sock = @websocket_sockets[id.to_i] or return
         # Send the close frame and let the close HANDSHAKE complete: the server
         # replies with its own close frame, which the reader thread surfaces as
         # the `__close` event (carrying the agreed code) before tearing the
         # socket down in its `ensure`. Force teardown is `reset_websockets`'s job.
-        payload = [code.to_i].pack('n') + reason.to_s.b
+        # A nil code sends a BODYLESS close frame — `ws.close()` with no argument
+        # closes with no status, which the peer echoes and the reader reports as
+        # code 1005 (NO_STATUS), not 1000.
+        payload = code.nil? ? ''.b : [code.to_i].pack('n') + reason.to_s.b
         ws_write_frame(sock, 0x8, payload) rescue nil
         nil
       end
@@ -3364,7 +3371,10 @@ module Capybara
         queue << {id: id, type: '__open', protocol: protocol}
         loop do
           frame = ws_read_message(sock, queue, id)
-          break if frame.nil?                       # EOF
+          if frame.nil?                             # TCP closed with no close frame → abnormal
+            queue << {id: id, type: '__close', code: 1006, reason: ''}
+            break
+          end
           opcode, payload = frame
           if opcode == :close
             code   = payload.bytesize >= 2 ? payload[0, 2].unpack1('n') : 1005

@@ -301,11 +301,14 @@ module WptRunner
       when 'ports[https][0]'           then https_port
       when 'ports[https][1]'           then https_port2
       when /\Aports\[https\]\[\d+\]\z/ then https_port
-      when /\Aports\[ws\]\[\d+\]\z/    then sub_family ? SUB_WS_PORT  : '80'
-      when /\Aports\[wss\]\[\d+\]\z/   then sub_family ? SUB_WSS_PORT : '443'
+      # The WS ports are the SAME for every host (real wptserve runs ws on 8880 / wss on 8881
+      # regardless of origin), and deliberately NON-default so `WebSocket#url` keeps the port in
+      # its serialization (ws://host:80/ would elide the 80 and the url tests compare the literal).
+      when /\Aports\[ws\]\[\d+\]\z/    then SUB_WS_PORT
+      when /\Aports\[wss\]\[\d+\]\z/   then SUB_WSS_PORT
       # HTTP/2 has no separate in-process port; the `?wpt_flags=h2` websocket variant only
       # needs a valid wss port to route to the same WS server (scheme/port ignored on dispatch).
-      when /\Aports\[h2\]\[\d+\]\z/    then sub_family ? SUB_HTTPS_PORT : '443'
+      when /\Aports\[h2\]\[\d+\]\z/    then SUB_WSS_PORT
       when 'location[scheme]'          then scheme
       when 'location[host]'            then loc_host
       when 'location[port]'            then cur_port
@@ -417,54 +420,123 @@ module WptRunner
     end
   end
 
-  # `handlers/<name>_wsh.py` re-expressed natively. Each entry: `protocol` picks the
-  # subprotocol to accept from the client's requested list (nil = none), `run` services the
-  # connection. Unknown paths fall back to `echo`.
-  WS_HANDLERS = {
-    # echo_wsh.py — accept the `echo` subprotocol if offered; mirror each message back
-    # (text→text, binary→binary); on the "Goodbye" text, echo it then start the closing
-    # handshake; on a client close, echo its code + reason.
-    'echo' => {
-      protocol: ->(reqd) { reqd.include?('echo') ? 'echo' : nil },
-      run: lambda do |conn, _reqd, _query|
-        loop do
-          msg = conn.receive or break
-          case msg[0]
-          when :text
-            conn.send_text(msg[1])
-            if msg[1] == 'Goodbye'
-              conn.send_close(1000, '')
-              break
-            end
-          when :binary then conn.send_binary(msg[1])
-          when :close  then conn.send_close(msg[1], msg[2]); break
-          end
+  # echo_wsh.py — mirror each message back (text→text, binary→binary); on the "Goodbye" text,
+  # echo it then start the closing handshake; on a client close, echo its code + reason.
+  WS_ECHO = lambda do |conn, _ctx|
+    loop do
+      msg = conn.receive or break
+      case msg[0]
+      when :text
+        conn.send_text(msg[1])
+        if msg[1] == 'Goodbye'
+          conn.send_close(1000)
+          break
         end
-      end,
-    },
+      when :binary then conn.send_binary(msg[1])
+      when :close  then conn.send_close(msg[1], msg[2]); break
+      end
+    end
+  end
+
+  # echo_exit_wsh.py / echo_close_data_wsh.py — drain WITHOUT echoing; on "Goodbye" (or the
+  # client's close) start the closing handshake, echoing a client-sent code + reason.
+  WS_DRAIN_EXIT = lambda do |conn, _ctx|
+    loop do
+      msg = conn.receive or break
+      if    msg[0] == :close                       then conn.send_close(msg[1], msg[2]); break
+      elsif msg[0] == :text && msg[1] == 'Goodbye' then conn.send_close(1000); break
+      end
+    end
+  end
+
+  # `handlers/<name>_wsh.py` re-expressed natively. Each entry: `protocol` picks the subprotocol
+  # to send back (from the client's `ctx`; nil = none), `run` services the connection given
+  # `(WsConn, ctx)`. `ctx` = { requested: [subprotocols], raw_protocol: header, query: raw
+  # string, origin: }. Unknown paths fall back to `echo`.
+  WS_HANDLERS = {
+    'echo'            => {protocol: ->(c) { c[:requested].include?('echo') ? 'echo' : nil }, run: WS_ECHO},
+    'echo_exit'       => {run: WS_DRAIN_EXIT},
+    'echo_close_data' => {run: WS_DRAIN_EXIT},
+    # echo-query_wsh.py — send the raw query string once on open, then close.
+    'echo-query'      => {run: ->(conn, c) { conn.send_text(c[:query]); conn.send_close(1000) }},
+    # empty-message_wsh.py — the first message must be empty; report pass/fail, then close.
+    'empty-message'   => {run: ->(conn, _c) { m = conn.receive; conn.send_text(m && m[0] == :text && m[1] == '' ? 'pass' : 'fail'); conn.send_close(1000) }},
+    # protocol_wsh.py — accept the client's requested-protocol header verbatim and send it back.
+    'protocol'        => {protocol: ->(c) { c[:raw_protocol].empty? ? nil : c[:raw_protocol] },
+                          run: ->(conn, c) { conn.send_text(c[:raw_protocol]); conn.send_close(1000) }},
+    # protocol_array_wsh.py — accept the FIRST requested subprotocol and send it back.
+    'protocol_array'  => {protocol: ->(c) { c[:requested].first },
+                          run: ->(conn, c) { conn.send_text(c[:requested].first.to_s); conn.send_close(1000) }},
+    # handshake_protocol_wsh.py — always select `foobar` (the client rejects it unless it offered
+    # exactly that); handshake_no_protocol selects none. Both then close immediately (transfer=pass).
+    'handshake_protocol'    => {protocol: ->(_c) { 'foobar' }, run: ->(conn, _c) { conn.send_close(1000) }},
+    'handshake_no_protocol' => {protocol: ->(_c) { nil },      run: ->(conn, _c) { conn.send_close(1000) }},
+    # origin_wsh.py — accept, then send back the request's Origin (the document origin the server saw).
+    'origin'          => {run: ->(conn, c) { conn.send_text(c[:origin]); conn.send_close(1000) }},
+    # echo-cookie_wsh.py — send back the handshake's Cookie header (or "(none)").
+    'echo-cookie'     => {run: ->(conn, c) { conn.send_text(c[:cookie] || '(none)'); conn.send_close(1000) }},
+    # simple_handshake_wsh.py — accept, then immediately do a clean close with code 1001 / "PASS".
+    'simple_handshake' => {run: ->(conn, _c) { conn.send_close(1001, 'PASS') }},
+    # invalid_wsh.py — write a non-101 garbage response so the opening handshake fails.
+    'invalid'         => {raw_handshake: ->(io, _accept, _c) { io.write("FOO BAR BAZ\r\n\r\n") }},
+    # wrong_accept_key_wsh.py — a 101 with a bogus Sec-WebSocket-Accept: the client must reject it.
+    'wrong_accept_key' => {raw_handshake: lambda do |io, _accept, _c|
+      io.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+               "Sec-WebSocket-Accept: thisisawrongacceptkey\r\n\r\n")
+    end},
   }.freeze
 
   def websocket_upgrade?(env)
     env['HTTP_UPGRADE'].to_s.downcase == 'websocket' && env['rack.hijack?']
   end
 
+  # Resolve a `/<name>` path to its handler. A path with NO `handlers/<name>_wsh.py` file fails the
+  # opening handshake (nil), the way wptserve 404s an unmapped ws path (opening-handshake/006's
+  # /invalid1..3). A real handler we haven't re-expressed natively yet falls back to echo so the
+  # handshake at least completes (its own test stays allowlisted until the handler lands).
+  def ws_handler_for(name)
+    return WS_HANDLERS[name] if WS_HANDLERS.key?(name)
+    return WS_HANDLERS['echo'] if File.exist?(File.join(ROOT, 'websockets', 'handlers', "#{name}_wsh.py"))
+
+    nil
+  end
+
   # Answer a WS upgrade on the hijacked socket, then service frames on a background thread.
   # Returns a Rack triple (ignored — the connection is hijacked).
-  def websocket_serve(env, path, query)
-    io        = env['rack.hijack'].call
-    accept    = Digest::SHA1.base64digest(env['HTTP_SEC_WEBSOCKET_KEY'].to_s + WS_ACCEPT_GUID)
-    requested = env['HTTP_SEC_WEBSOCKET_PROTOCOL'].to_s.split(',').map(&:strip).reject(&:empty?)
-    name      = path.sub(%r{\A/}, '').sub(%r{\Ahandlers/}, '').sub(/_wsh\.py\z/, '')
-    handler   = WS_HANDLERS[name] || WS_HANDLERS['echo']
-    chosen    = handler[:protocol]&.call(requested)
-    resp  = +"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-    resp << "Sec-WebSocket-Accept: #{accept}\r\n"
-    resp << "Sec-WebSocket-Protocol: #{chosen}\r\n" if chosen && !chosen.empty?
-    resp << "\r\n"
-    io.write(resp)
+  def websocket_serve(env)
+    io      = env['rack.hijack'].call
+    accept  = Digest::SHA1.base64digest(env['HTTP_SEC_WEBSOCKET_KEY'].to_s + WS_ACCEPT_GUID)
+    raw     = env['HTTP_SEC_WEBSOCKET_PROTOCOL'].to_s
+    ctx     = {
+      requested:    raw.split(',').map(&:strip).reject(&:empty?),
+      raw_protocol: raw,
+      query:        env['QUERY_STRING'].to_s,
+      origin:       env['HTTP_ORIGIN'].to_s,
+      cookie:       env['HTTP_COOKIE'],
+    }
+    name    = env['PATH_INFO'].to_s.sub(%r{\A/}, '').sub(%r{\Ahandlers/}, '').sub(/_wsh\.py\z/, '')
+    handler = ws_handler_for(name)
+    if handler.nil?
+      io.close rescue nil                                       # unmapped path → fail the handshake
+      return [101, {}, []]
+    end
+    if handler[:raw_handshake]
+      handler[:raw_handshake].call(io, accept, ctx)             # handler writes its own (maybe bad) response
+    else
+      chosen = handler[:protocol]&.call(ctx)
+      resp = +"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+      resp << "Sec-WebSocket-Accept: #{accept}\r\n"
+      resp << "Sec-WebSocket-Protocol: #{chosen}\r\n" if chosen && !chosen.empty?
+      resp << "\r\n"
+      io.write(resp)
+    end
+    unless handler[:run]
+      io.close rescue nil                                       # no data phase (e.g. a rejected handshake)
+      return [101, {}, []]
+    end
     Thread.new do
       Thread.current.report_on_exception = false
-      handler[:run].call(WsConn.new(io), requested, query)
+      handler[:run].call(WsConn.new(io), ctx)
     rescue StandardError
       # connection dropped mid-frame — nothing to recover, just tear down
     ensure
@@ -482,7 +554,7 @@ module WptRunner
         # websockets/ suite's `.sub.js` builds `ws://{{host}}:{{ports[ws][0]}}/echo`; the app
         # completes the handshake and services frames on the hijacked socket.
         if WptRunner.websocket_upgrade?(env)
-          next WptRunner.websocket_serve(env, path, req.GET)
+          next WptRunner.websocket_serve(env)
         end
         # `encoding.py?label=X` — WPT's charset CGI. We don't run Python; emulate
         # its one behaviour (echo the label into a `<meta charset>`), which is
