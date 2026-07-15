@@ -94,11 +94,18 @@ const TREES = [
   'service-workers/service-worker',    // registration / lifecycle / messaging / fetch interception against
                                        // the real SW runtime; ships the FULL upstream test-helpers.sub.js
                                        // (service_worker_test & friends) plus committed local csim-* fixtures
-  'service-workers/cache-storage'      // Cache Storage API (caches/Cache) — the origin-partitioned,
+  'service-workers/cache-storage',     // Cache Storage API (caches/Cache) — the origin-partitioned,
                                        // Ruby-backed store (cache-storage.js), visible from window + SW
                                        // isolates; the pure-API slice. cache-abort (unbounded streaming
                                        // fetch) is skip-listed; cache-storage-buckets earns out (Storage
                                        // Buckets subsystem)
+  'websockets',                        // WebSocket client (RFC6455) — the same runtime Action Cable /
+                                       // Turbo Streams ride on, validated against the spec's own send /
+                                       // receive / close / close-code / protocol / binary tests. The runner
+                                       // stands up an in-process RFC6455 server (wss:// routing + native
+                                       // echo / pywebsocket-`_wsh.py` handlers); `.any.js` tests need a
+                                       // server-generated wrapper we don't run, so the legacy `.htm` slice
+                                       // is what's in scope. WebSocketStream (stream/) is .tentative → out.
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)

@@ -6,6 +6,7 @@ require 'yaml'
 require 'set'
 require 'json'
 require 'open3'
+require 'digest'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the
@@ -131,6 +132,12 @@ module WptRunner
   # the "same domain, different port" CORS scenarios actually be cross-origin.
   SUB_HTTP_PORT2  = '8001'
   SUB_HTTPS_PORT2 = '8444'
+  # WebSocket ports (`ports[ws][0]` / `ports[wss][0]`) — wptserve's defaults. The
+  # websockets `.sub.js` files build `ws://{{host}}:{{ports[ws][0]}}/echo`; the in-process
+  # app routes WS upgrades by host+path (port ignored on dispatch), so these are just the
+  # origin markers the URL carries.
+  SUB_WS_PORT     = '8880'
+  SUB_WSS_PORT    = '8881'
   SUB_ORIGIN     = "http://#{SUB_HOST}:#{SUB_HTTP_PORT}"
   # wptserve serves a `.https.*` file only over its HTTPS origin (the `.https.`
   # filename marker IS that routing): same canonical host, the https port. A test
@@ -294,6 +301,11 @@ module WptRunner
       when 'ports[https][0]'           then https_port
       when 'ports[https][1]'           then https_port2
       when /\Aports\[https\]\[\d+\]\z/ then https_port
+      when /\Aports\[ws\]\[\d+\]\z/    then sub_family ? SUB_WS_PORT  : '80'
+      when /\Aports\[wss\]\[\d+\]\z/   then sub_family ? SUB_WSS_PORT : '443'
+      # HTTP/2 has no separate in-process port; the `?wpt_flags=h2` websocket variant only
+      # needs a valid wss port to route to the same WS server (scheme/port ignored on dispatch).
+      when /\Aports\[h2\]\[\d+\]\z/    then sub_family ? SUB_HTTPS_PORT : '443'
       when 'location[scheme]'          then scheme
       when 'location[host]'            then loc_host
       when 'location[port]'            then cur_port
@@ -312,11 +324,166 @@ module WptRunner
     end
   end
 
+  # ── In-process WebSocket server (RFC6455) ───────────────────────────────
+  #
+  # The websockets/ WPT suite connects to `ws://{{host}}:{{ports[ws][0]}}/<handler>` — paths
+  # wptserve maps to `handlers/<handler>_wsh.py` pywebsocket scripts. There's no Python WS
+  # server here, so the Rack app answers the upgrade itself: it completes the RFC6455 server
+  # handshake on the hijacked socket, then runs a native handler on a background thread — the
+  # pywebsocket fixtures re-expressed in Ruby, the same way `dispatcher.py` / `encoding.py`
+  # are emulated in `app`. The browser's WebSocket client (Browser#ws_open) already speaks the
+  # client half over this same in-process socketpair; the server writes UNmasked frames and
+  # reads the client's masked ones (RFC6455 §5.3).
+  WS_ACCEPT_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+
+  # One server-side WebSocket connection over the hijacked io: message reassembly + framing.
+  class WsConn
+    def initialize(io)
+      @io = io
+    end
+
+    # Next application message, reassembling continuation frames and answering ping inline:
+    # `[:text, String]`, `[:binary, bytes]`, `[:close, code_or_nil, reason]`, or nil at EOF.
+    def receive
+      data   = +''.b
+      msg_op = nil
+      loop do
+        frame = read_frame or return nil
+        fin, opcode, payload = frame
+        case opcode
+        when 0x8
+          code   = payload.bytesize >= 2 ? payload.byteslice(0, 2).unpack1('n') : nil
+          reason = payload.bytesize > 2 ? payload.byteslice(2..).force_encoding('UTF-8') : ''
+          return [:close, code, reason]
+        when 0x9 then write_frame(0xA, payload); next   # ping → pong
+        when 0xA then next                              # pong → ignore
+        when 0x0 then data << payload                   # continuation
+        else          msg_op = opcode; data << payload  # 0x1 text / 0x2 binary
+        end
+        next unless fin
+
+        return msg_op == 0x2 ? [:binary, data] : [:text, data.force_encoding('UTF-8')]
+      end
+    end
+
+    def send_text(str)   = write_frame(0x1, str.to_s.dup.force_encoding('UTF-8').b)
+    def send_binary(b)   = write_frame(0x2, b.to_s.b)
+    def send_ping(b = '') = write_frame(0x9, b.to_s.b)
+
+    # Close handshake: an omitted code sends a bodyless close (RFC6455 §5.5.1).
+    def send_close(code = 1000, reason = '')
+      payload = code ? [code.to_i].pack('n') + reason.to_s.dup.force_encoding('UTF-8').b : ''.b
+      write_frame(0x8, payload)
+    end
+
+    private
+
+    def read_frame
+      hdr = read_n(2) or return nil
+      b0, b1 = hdr.bytes
+      fin    = (b0 & 0x80) != 0
+      opcode = b0 & 0x0f
+      masked = (b1 & 0x80) != 0
+      len    = b1 & 0x7f
+      if    len == 126 then len = (read_n(2) or return nil).unpack1('n')
+      elsif len == 127 then len = (read_n(8) or return nil).unpack1('Q>')
+      end
+      mask = masked ? (read_n(4) or return nil) : nil
+      payload = len.zero? ? ''.b : (read_n(len) or return nil)
+      payload = xor(payload, mask) if mask   # client frames are masked; unmask
+      [fin, opcode, payload]
+    end
+
+    def write_frame(opcode, payload)
+      payload = payload.to_s.b
+      len     = payload.bytesize
+      out     = [0x80 | opcode].pack('C')                       # FIN + opcode; server never masks
+      if    len < 126     then out << [len].pack('C')
+      elsif len < 65_536  then out << [126, len].pack('Cn')
+      else                     out << [127, len].pack('CQ>')
+      end
+      out << payload
+      @io.write(out)
+    end
+
+    def read_n(n)
+      buf = @io.read(n)
+      buf if buf && buf.bytesize == n
+    end
+
+    def xor(payload, key)
+      kb = key.bytes
+      payload.bytes.each_with_index.map {|byte, i| byte ^ kb[i & 3] }.pack('C*')
+    end
+  end
+
+  # `handlers/<name>_wsh.py` re-expressed natively. Each entry: `protocol` picks the
+  # subprotocol to accept from the client's requested list (nil = none), `run` services the
+  # connection. Unknown paths fall back to `echo`.
+  WS_HANDLERS = {
+    # echo_wsh.py — accept the `echo` subprotocol if offered; mirror each message back
+    # (text→text, binary→binary); on the "Goodbye" text, echo it then start the closing
+    # handshake; on a client close, echo its code + reason.
+    'echo' => {
+      protocol: ->(reqd) { reqd.include?('echo') ? 'echo' : nil },
+      run: lambda do |conn, _reqd, _query|
+        loop do
+          msg = conn.receive or break
+          case msg[0]
+          when :text
+            conn.send_text(msg[1])
+            if msg[1] == 'Goodbye'
+              conn.send_close(1000, '')
+              break
+            end
+          when :binary then conn.send_binary(msg[1])
+          when :close  then conn.send_close(msg[1], msg[2]); break
+          end
+        end
+      end,
+    },
+  }.freeze
+
+  def websocket_upgrade?(env)
+    env['HTTP_UPGRADE'].to_s.downcase == 'websocket' && env['rack.hijack?']
+  end
+
+  # Answer a WS upgrade on the hijacked socket, then service frames on a background thread.
+  # Returns a Rack triple (ignored — the connection is hijacked).
+  def websocket_serve(env, path, query)
+    io        = env['rack.hijack'].call
+    accept    = Digest::SHA1.base64digest(env['HTTP_SEC_WEBSOCKET_KEY'].to_s + WS_ACCEPT_GUID)
+    requested = env['HTTP_SEC_WEBSOCKET_PROTOCOL'].to_s.split(',').map(&:strip).reject(&:empty?)
+    name      = path.sub(%r{\A/}, '').sub(%r{\Ahandlers/}, '').sub(/_wsh\.py\z/, '')
+    handler   = WS_HANDLERS[name] || WS_HANDLERS['echo']
+    chosen    = handler[:protocol]&.call(requested)
+    resp  = +"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+    resp << "Sec-WebSocket-Accept: #{accept}\r\n"
+    resp << "Sec-WebSocket-Protocol: #{chosen}\r\n" if chosen && !chosen.empty?
+    resp << "\r\n"
+    io.write(resp)
+    Thread.new do
+      Thread.current.report_on_exception = false
+      handler[:run].call(WsConn.new(io), requested, query)
+    rescue StandardError
+      # connection dropped mid-frame — nothing to recover, just tear down
+    ensure
+      io.close rescue nil
+    end
+    [101, {}, []]
+  end
+
   def app
     @app ||= Rack::Builder.new {
       run lambda {|env|
         req  = Rack::Request.new(env)
         path = req.path_info
+        # WebSocket upgrade → the in-process RFC6455 server (see WsConn / WS_HANDLERS). The
+        # websockets/ suite's `.sub.js` builds `ws://{{host}}:{{ports[ws][0]}}/echo`; the app
+        # completes the handshake and services frames on the hijacked socket.
+        if WptRunner.websocket_upgrade?(env)
+          next WptRunner.websocket_serve(env, path, req.GET)
+        end
         # `encoding.py?label=X` — WPT's charset CGI. We don't run Python; emulate
         # its one behaviour (echo the label into a `<meta charset>`), which is
         # all the characterSet-normalization tests need. No byte decoding (the
@@ -575,7 +742,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,service-workers}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,service-workers,websockets}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
