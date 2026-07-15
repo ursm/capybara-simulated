@@ -1974,14 +1974,6 @@ websockets/cookies/third-party-cookie-accepted.https.html:
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
-websockets/interfaces/WebSocket/events/017.html:
-- 'WebSockets: this, e.target, e.currentTarget, e.eventPhase'
-- 'WebSockets: this, e.target, e.currentTarget, e.eventPhase'
-- 'WebSockets: this, e.target, e.currentTarget, e.eventPhase'
-websockets/interfaces/WebSocket/events/018.html:
-- open, message, error and close events
-- open, message, error and close events
-- open, message, error and close events
 websockets/keeping-connection-open/001.html:
 - 'WebSockets: 20s inactivity after handshake'
 - 'WebSockets: 20s inactivity after handshake'
@@ -2008,16 +2000,11 @@ websockets/unload-a-document/005.html:
 webstorage/event_basic.html:
 - localStorage mutations fire StorageEvents that are caught by the event listener
   set via window.onstorage.
-- sessionStorage mutations fire StorageEvents that are caught by the event listener
-  set via window.onstorage.
 webstorage/event_body_attribute.html:
 - localStorage mutations fire StorageEvents that are caught by the event listener
   specified as an attribute on the body.
-- sessionStorage mutations fire StorageEvents that are caught by the event listener
-  specified as an attribute on the body.
 webstorage/event_case_sensitive.html:
 - localStorage storage events fire even when only the case of the value changes.
-- sessionStorage storage events fire even when only the case of the value changes.
 webstorage/event_no_duplicates.html:
 - Clearing empty storage does not trigger event for localStorage
 - Clearing empty storage does not trigger event for sessionStorage
@@ -2025,8 +2012,6 @@ webstorage/event_no_duplicates.html:
 - Setting to same value does not trigger event for sessionStorage
 webstorage/event_setattribute.html:
 - localStorage mutations fire StorageEvents that are caught by the event listener
-  attached via setattribute.
-- sessionStorage mutations fire StorageEvents that are caught by the event listener
   attached via setattribute.
 webstorage/localstorage-about-blank-3P-iframe-opens-3P-window.partitioned.html:
 - 'StorageKey: test 3P about:blank window opened from a 3P iframe'
