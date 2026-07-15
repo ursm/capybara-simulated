@@ -1953,6 +1953,322 @@ webmessaging/without-ports/002.html:
 - resolving url with stuff in host-specific
 webmessaging/without-ports/015.html:
 - different origin
+websockets/Close-1005.any.js:
+- Create WebSocket - Close the Connection - close(1005) - see '7.1.5.  The WebSocket
+  Connection Close Code' in http://www.ietf.org/rfc/rfc6455.txt
+- Create WebSocket - Close the Connection - close(1005) - see '7.1.5.  The WebSocket
+  Connection Close Code' in http://www.ietf.org/rfc/rfc6455.txt
+- Create WebSocket - Close the Connection - close(1005) - see '7.1.5.  The WebSocket
+  Connection Close Code' in http://www.ietf.org/rfc/rfc6455.txt
+websockets/Close-2999-reason.any.js:
+- Create WebSocket - Close the Connection - close(2999, reason) - INVALID_ACCESS_ERR
+  is thrown
+- Create WebSocket - Close the Connection - close(2999, reason) - INVALID_ACCESS_ERR
+  is thrown
+- Create WebSocket - Close the Connection - close(2999, reason) - INVALID_ACCESS_ERR
+  is thrown
+websockets/Close-Reason-124Bytes.any.js:
+- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
+  - SYNTAX_ERR is thrown
+- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
+  - SYNTAX_ERR is thrown
+- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
+  - SYNTAX_ERR is thrown
+websockets/Close-delayed.any.js:
+- Create WebSocket - Close the Connection - close should not emit until handshake
+  completes - Connection should be closed
+- Create WebSocket - Close the Connection - close should not emit until handshake
+  completes - Connection should be closed
+- Create WebSocket - Close the Connection - close should not emit until handshake
+  completes - Connection should be closed
+websockets/Close-onlyReason.any.js:
+- Create WebSocket - Close the Connection - close(only reason) - INVALID_ACCESS_ERR
+  is thrown
+- Create WebSocket - Close the Connection - close(only reason) - INVALID_ACCESS_ERR
+  is thrown
+- Create WebSocket - Close the Connection - close(only reason) - INVALID_ACCESS_ERR
+  is thrown
+websockets/Create-blocked-port.any.js:
+- WebSocket blocked port test 0
+- WebSocket blocked port test 0
+- WebSocket blocked port test 0
+- WebSocket blocked port test 1
+- WebSocket blocked port test 1
+- WebSocket blocked port test 1
+- WebSocket blocked port test 10080
+- WebSocket blocked port test 10080
+- WebSocket blocked port test 10080
+- WebSocket blocked port test 101
+- WebSocket blocked port test 101
+- WebSocket blocked port test 101
+- WebSocket blocked port test 102
+- WebSocket blocked port test 102
+- WebSocket blocked port test 102
+- WebSocket blocked port test 103
+- WebSocket blocked port test 103
+- WebSocket blocked port test 103
+- WebSocket blocked port test 104
+- WebSocket blocked port test 104
+- WebSocket blocked port test 104
+- WebSocket blocked port test 109
+- WebSocket blocked port test 109
+- WebSocket blocked port test 109
+- WebSocket blocked port test 11
+- WebSocket blocked port test 11
+- WebSocket blocked port test 11
+- WebSocket blocked port test 110
+- WebSocket blocked port test 110
+- WebSocket blocked port test 110
+- WebSocket blocked port test 111
+- WebSocket blocked port test 111
+- WebSocket blocked port test 111
+- WebSocket blocked port test 113
+- WebSocket blocked port test 113
+- WebSocket blocked port test 113
+- WebSocket blocked port test 115
+- WebSocket blocked port test 115
+- WebSocket blocked port test 115
+- WebSocket blocked port test 117
+- WebSocket blocked port test 117
+- WebSocket blocked port test 117
+- WebSocket blocked port test 119
+- WebSocket blocked port test 119
+- WebSocket blocked port test 119
+- WebSocket blocked port test 123
+- WebSocket blocked port test 123
+- WebSocket blocked port test 123
+- WebSocket blocked port test 13
+- WebSocket blocked port test 13
+- WebSocket blocked port test 13
+- WebSocket blocked port test 135
+- WebSocket blocked port test 135
+- WebSocket blocked port test 135
+- WebSocket blocked port test 137
+- WebSocket blocked port test 137
+- WebSocket blocked port test 137
+- WebSocket blocked port test 139
+- WebSocket blocked port test 139
+- WebSocket blocked port test 139
+- WebSocket blocked port test 143
+- WebSocket blocked port test 143
+- WebSocket blocked port test 143
+- WebSocket blocked port test 15
+- WebSocket blocked port test 15
+- WebSocket blocked port test 15
+- WebSocket blocked port test 161
+- WebSocket blocked port test 161
+- WebSocket blocked port test 161
+- WebSocket blocked port test 17
+- WebSocket blocked port test 17
+- WebSocket blocked port test 17
+- WebSocket blocked port test 1719
+- WebSocket blocked port test 1719
+- WebSocket blocked port test 1719
+- WebSocket blocked port test 1720
+- WebSocket blocked port test 1720
+- WebSocket blocked port test 1720
+- WebSocket blocked port test 1723
+- WebSocket blocked port test 1723
+- WebSocket blocked port test 1723
+- WebSocket blocked port test 179
+- WebSocket blocked port test 179
+- WebSocket blocked port test 179
+- WebSocket blocked port test 19
+- WebSocket blocked port test 19
+- WebSocket blocked port test 19
+- WebSocket blocked port test 20
+- WebSocket blocked port test 20
+- WebSocket blocked port test 20
+- WebSocket blocked port test 2049
+- WebSocket blocked port test 2049
+- WebSocket blocked port test 2049
+- WebSocket blocked port test 21
+- WebSocket blocked port test 21
+- WebSocket blocked port test 21
+- WebSocket blocked port test 22
+- WebSocket blocked port test 22
+- WebSocket blocked port test 22
+- WebSocket blocked port test 23
+- WebSocket blocked port test 23
+- WebSocket blocked port test 23
+- WebSocket blocked port test 25
+- WebSocket blocked port test 25
+- WebSocket blocked port test 25
+- WebSocket blocked port test 3659
+- WebSocket blocked port test 3659
+- WebSocket blocked port test 3659
+- WebSocket blocked port test 37
+- WebSocket blocked port test 37
+- WebSocket blocked port test 37
+- WebSocket blocked port test 389
+- WebSocket blocked port test 389
+- WebSocket blocked port test 389
+- WebSocket blocked port test 4045
+- WebSocket blocked port test 4045
+- WebSocket blocked port test 4045
+- WebSocket blocked port test 4190
+- WebSocket blocked port test 4190
+- WebSocket blocked port test 4190
+- WebSocket blocked port test 42
+- WebSocket blocked port test 42
+- WebSocket blocked port test 42
+- WebSocket blocked port test 427
+- WebSocket blocked port test 427
+- WebSocket blocked port test 427
+- WebSocket blocked port test 43
+- WebSocket blocked port test 43
+- WebSocket blocked port test 43
+- WebSocket blocked port test 465
+- WebSocket blocked port test 465
+- WebSocket blocked port test 465
+- WebSocket blocked port test 5060
+- WebSocket blocked port test 5060
+- WebSocket blocked port test 5060
+- WebSocket blocked port test 5061
+- WebSocket blocked port test 5061
+- WebSocket blocked port test 5061
+- WebSocket blocked port test 512
+- WebSocket blocked port test 512
+- WebSocket blocked port test 512
+- WebSocket blocked port test 513
+- WebSocket blocked port test 513
+- WebSocket blocked port test 513
+- WebSocket blocked port test 514
+- WebSocket blocked port test 514
+- WebSocket blocked port test 514
+- WebSocket blocked port test 515
+- WebSocket blocked port test 515
+- WebSocket blocked port test 515
+- WebSocket blocked port test 526
+- WebSocket blocked port test 526
+- WebSocket blocked port test 526
+- WebSocket blocked port test 53
+- WebSocket blocked port test 53
+- WebSocket blocked port test 53
+- WebSocket blocked port test 530
+- WebSocket blocked port test 530
+- WebSocket blocked port test 530
+- WebSocket blocked port test 531
+- WebSocket blocked port test 531
+- WebSocket blocked port test 531
+- WebSocket blocked port test 532
+- WebSocket blocked port test 532
+- WebSocket blocked port test 532
+- WebSocket blocked port test 540
+- WebSocket blocked port test 540
+- WebSocket blocked port test 540
+- WebSocket blocked port test 548
+- WebSocket blocked port test 548
+- WebSocket blocked port test 548
+- WebSocket blocked port test 554
+- WebSocket blocked port test 554
+- WebSocket blocked port test 554
+- WebSocket blocked port test 556
+- WebSocket blocked port test 556
+- WebSocket blocked port test 556
+- WebSocket blocked port test 563
+- WebSocket blocked port test 563
+- WebSocket blocked port test 563
+- WebSocket blocked port test 587
+- WebSocket blocked port test 587
+- WebSocket blocked port test 587
+- WebSocket blocked port test 6000
+- WebSocket blocked port test 6000
+- WebSocket blocked port test 6000
+- WebSocket blocked port test 601
+- WebSocket blocked port test 601
+- WebSocket blocked port test 601
+- WebSocket blocked port test 636
+- WebSocket blocked port test 636
+- WebSocket blocked port test 636
+- WebSocket blocked port test 6566
+- WebSocket blocked port test 6566
+- WebSocket blocked port test 6566
+- WebSocket blocked port test 6665
+- WebSocket blocked port test 6665
+- WebSocket blocked port test 6665
+- WebSocket blocked port test 6666
+- WebSocket blocked port test 6666
+- WebSocket blocked port test 6666
+- WebSocket blocked port test 6667
+- WebSocket blocked port test 6667
+- WebSocket blocked port test 6667
+- WebSocket blocked port test 6668
+- WebSocket blocked port test 6668
+- WebSocket blocked port test 6668
+- WebSocket blocked port test 6669
+- WebSocket blocked port test 6669
+- WebSocket blocked port test 6669
+- WebSocket blocked port test 6679
+- WebSocket blocked port test 6679
+- WebSocket blocked port test 6679
+- WebSocket blocked port test 6697
+- WebSocket blocked port test 6697
+- WebSocket blocked port test 6697
+- WebSocket blocked port test 69
+- WebSocket blocked port test 69
+- WebSocket blocked port test 69
+- WebSocket blocked port test 7
+- WebSocket blocked port test 7
+- WebSocket blocked port test 7
+- WebSocket blocked port test 77
+- WebSocket blocked port test 77
+- WebSocket blocked port test 77
+- WebSocket blocked port test 79
+- WebSocket blocked port test 79
+- WebSocket blocked port test 79
+- WebSocket blocked port test 87
+- WebSocket blocked port test 87
+- WebSocket blocked port test 87
+- WebSocket blocked port test 9
+- WebSocket blocked port test 9
+- WebSocket blocked port test 9
+- WebSocket blocked port test 95
+- WebSocket blocked port test 95
+- WebSocket blocked port test 95
+- WebSocket blocked port test 989
+- WebSocket blocked port test 989
+- WebSocket blocked port test 989
+- WebSocket blocked port test 990
+- WebSocket blocked port test 990
+- WebSocket blocked port test 990
+- WebSocket blocked port test 993
+- WebSocket blocked port test 993
+- WebSocket blocked port test 993
+- WebSocket blocked port test 995
+- WebSocket blocked port test 995
+- WebSocket blocked port test 995
+websockets/Create-invalid-urls.any.js:
+- new WebSocket("http://www.example.com/#") should throw a "SyntaxError" DOMException
+websockets/Send-binary-blob.any.js:
+- Send binary data on a WebSocket - Blob - Connection should be closed
+- Send binary data on a WebSocket - Blob - Connection should be closed
+- Send binary data on a WebSocket - Blob - Connection should be closed
+websockets/back-forward-cache-with-closed-websocket-connection.window.js:
+- back-forward-cache-with-closed-websocket-connection
+websockets/back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide.window.js:
+- back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide
+websockets/back-forward-cache-with-open-websocket-connection.window.js:
+- back-forward-cache-with-open-websocket-connection
+websockets/close-invalid.any.js:
+- 0 on a websocket
+- 0 on a websocket
+- 0 on a websocket
+- 2**16+1000 on a websocket
+- 2**16+1000 on a websocket
+- 2**16+1000 on a websocket
+- 500 on a websocket
+- 500 on a websocket
+- 500 on a websocket
+- NaN on a websocket
+- NaN on a websocket
+- NaN on a websocket
+- String on a websocket
+- String on a websocket
+- String on a websocket
+- null on a websocket
+- null on a websocket
+- null on a websocket
 websockets/constructor/014.html:
 - 'WebSockets: serialize establish a connection'
 - 'WebSockets: serialize establish a connection'
@@ -1971,6 +2287,10 @@ websockets/cookies/006.html:
 - 'WebSockets: setting Secure cookie with document.cookie, checking ws request'
 websockets/cookies/third-party-cookie-accepted.https.html:
 - Test that third-party cookies are accepted for WebSockets.
+websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
+- close event should be fired asynchronously when WebSocket is connecting
+- close event should be fired asynchronously when WebSocket is connecting
+- close event should be fired asynchronously when WebSocket is connecting
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
@@ -1978,9 +2298,21 @@ websockets/keeping-connection-open/001.html:
 - 'WebSockets: 20s inactivity after handshake'
 - 'WebSockets: 20s inactivity after handshake'
 - 'WebSockets: 20s inactivity after handshake'
+websockets/mixed-content.https.any.js:
+- opening an insecure WebSocket in a secure context should fail
 websockets/multi-globals/message-received.html:
 - ArrayBuffer should be created in the relevant realm of the WebSocket
 - Blob should be created in the relevant realm of the WebSocket
+websockets/referrer.any.js:
+- Ensure no Referer header is included
+websockets/remove-own-iframe-during-onerror.window.js:
+- removing an iframe from within an onerror handler should work
+- removing an iframe from within an onerror handler should work
+- removing an iframe from within an onerror handler should work
+websockets/send-many-64K-messages-with-backpressure.any.js:
+- sending 50 messages of size 65536 with backpressure applied should not hang
+- sending 50 messages of size 65536 with backpressure applied should not hang
+- sending 50 messages of size 65536 with backpressure applied should not hang
 websockets/unload-a-document/001.html:
 - 'WebSockets: navigating top-level browsing context'
 - 'WebSockets: navigating top-level browsing context'
