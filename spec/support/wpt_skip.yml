@@ -172,3 +172,10 @@
   Test-helper page loaded by multi-globals/url-parsing/url-parsing.html; not a standalone test.
 "websockets/multi-globals/url-parsing/incumbent/incumbent.html": >-
   Test-helper page loaded by multi-globals/url-parsing/url-parsing.html; not a standalone test.
+
+# webstorage MANUAL tests — they require a human to drive the storage change in a second
+# tab/window and confirm; run headless they never call `done()`, so the harness times out.
+"webstorage/storage_local-manual.html": >-
+  Manual test (needs a human to open a second window and mutate storage) — never completes headless.
+"webstorage/storage_session-manual.html": >-
+  Manual test (needs a human to open a second window and mutate storage) — never completes headless.

@@ -106,6 +106,11 @@ const TREES = [
                                        // echo / pywebsocket-`_wsh.py` handlers); `.any.js` tests need a
                                        // server-generated wrapper we don't run, so the legacy `.htm` slice
                                        // is what's in scope. WebSocketStream (stream/) is .tentative → out.
+  'webstorage',                        // localStorage / sessionStorage — the Ruby-backed, origin-shared
+                                       // Web Storage areas + the cross-window `storage` event (fired at the
+                                       // OTHER same-origin documents on a change). `.window.js` API tests
+                                       // need a server-generated wrapper we don't run; the runnable slice is
+                                       // the storage-event tests. Storage partitioning earns out per rule 1.
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)

@@ -478,6 +478,10 @@ module Capybara
         # Cross-window BroadcastChannel messages from OTHER windows, delivered to
         # this window's matching channels on settle. [{name, data}] (same thread).
         @broadcast_inbox      = []
+        # Storage `storage` events queued for the OTHER same-origin documents (a change
+        # fires at every same-origin document EXCEPT the one that made it), delivered on
+        # settle. [{kind, key, old, new, url, source}] (same thread).
+        @storage_inbox        = []
       end
 
       # Worker thread polling and termination intervals — split so a
@@ -4380,7 +4384,7 @@ module Capybara
 
       # Covers both cross-window postMessage AND BroadcastChannel — the two
       # cross-window event channels share these drain/pending hooks.
-      def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty?
+      def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty? || !@storage_inbox.empty?
 
       # A BroadcastChannel message queued for delivery to this Browser's channels.
       # `source_realm_id` is the posting realm's context id within THIS isolate (0 =
@@ -4388,6 +4392,24 @@ module Capybara
       # window fanout) — a nil source matches no local realm, so it reaches every one.
       def enqueue_broadcast(name, data, source_realm_id = nil, origin = nil)
         @broadcast_inbox << {'name' => name.to_s, 'data' => data, 'source' => source_realm_id, 'origin' => origin}
+      end
+
+      # A Storage change (setItem/removeItem/clear) in realm `source_realm_id`: fire a `storage`
+      # event at every OTHER same-origin document. Within this isolate that's the other realms
+      # (main + frames — a window's documents share both storage areas); localStorage ALSO spans
+      # separate same-origin windows (the Driver shares its jar), so fan the change out to them —
+      # sessionStorage is per-browsing-context and never crosses windows.
+      def storage_changed(kind, key, old, new, url, source_realm_id)
+        enqueue_storage_event(kind, key, old, new, url, source_realm_id)
+        @driver.storage_broadcast(self, kind, key, old, new, url) if kind == 'local' && @driver.respond_to?(:storage_broadcast)
+        nil
+      end
+
+      # Queue a storage event for THIS window's documents. `source_realm_id` is the changing realm
+      # within this isolate (skipped at delivery); nil (a cross-window fan-out) matches no realm, so
+      # it reaches every one.
+      def enqueue_storage_event(kind, key, old, new, url, source_realm_id = nil)
+        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'source' => source_realm_id}
       end
 
       # Fire queued cross-window messages (postMessage + BroadcastChannel).
@@ -4413,6 +4435,23 @@ module Capybara
               @runtime.call('__csim_deliverBroadcasts', batch)
             elsif @runtime.frame_realm_alive?(target_id)
               @runtime.realm_call(target_id, '__csim_deliverBroadcasts', batch)
+            end
+          end
+          n += events.size
+        end
+        unless @storage_inbox.empty?
+          events = @storage_inbox.slice!(0, @storage_inbox.length)
+          # The `storage` event fires at every same-origin document EXCEPT the one that changed
+          # the area — deliver to the main realm (0) and every live frame realm, skipping the
+          # source realm. A nil source (a cross-window fan-out) is excluded from no realm.
+          realm_ids = @runtime.respond_to?(:frame_realm_ids) ? @runtime.frame_realm_ids : []
+          [0, *realm_ids].each do |target_id|
+            batch = events.reject {|e| e['source'] == target_id }
+            next if batch.empty?
+            if target_id.zero?
+              @runtime.call('__csim_deliverStorageEvents', batch)
+            elsif @runtime.frame_realm_alive?(target_id)
+              @runtime.realm_call(target_id, '__csim_deliverStorageEvents', batch)
             end
           end
           n += events.size

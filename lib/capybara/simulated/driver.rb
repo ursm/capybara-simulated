@@ -542,6 +542,18 @@ module Capybara
         end
       end
 
+      # A localStorage change fans out to every OTHER window (localStorage spans same-origin
+      # browsing contexts). Every window shares the Driver's one `@local_storage` jar, so all
+      # windows are same-origin peers here (cross-origin storage partitioning is a separate
+      # backlog item); a nil source realm reaches each target's every realm. sessionStorage is
+      # per-context and never reaches this path.
+      def storage_broadcast(source_browser, kind, key, old, new, url)
+        window_entries.each do |w|
+          next if w[:browser].equal?(source_browser)
+          w[:browser].enqueue_storage_event(kind, key, old, new, url, nil)
+        end
+      end
+
       def window_location(handle)        = (window_browser(handle)&.current_url).to_s
       # A cross-window property read (`win.foo` / `win.document.foo`) — read the
       # primitive off the target window's VM.
