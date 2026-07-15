@@ -76,7 +76,7 @@ module Capybara
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s); nil },
         '__getDocumentReferrer'      => ->(b, *_) { b.current_referer },
         '__csim_storageGet'          => ->(b, *a) { b.storage_get(a[0], a[1]) },
-        '__csim_storageSet'          => ->(b, *a) { b.storage_set(a[0], a[1], a[2]); nil },
+        '__csim_storageSet'          => ->(b, *a) { b.storage_set(a[0], a[1], a[2]) },
         '__csim_storageRemove'       => ->(b, *a) { b.storage_remove(a[0], a[1]); nil },
         '__csim_storageClear'        => ->(b, *a) { b.storage_clear(a[0]); nil },
         '__csim_storageKey'          => ->(b, *a) { b.storage_key(a[0], a[1]) },

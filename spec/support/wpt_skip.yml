@@ -179,3 +179,11 @@
   Manual test (needs a human to open a second window and mutate storage) — never completes headless.
 "webstorage/storage_session-manual.html": >-
   Manual test (needs a human to open a second window and mutate storage) — never completes headless.
+
+# webstorage: the two Storage-proxy enumeration tests spin past the harness timeout (the proxy's
+# ownKeys/getOwnPropertyDescriptor traps walk the store per probed key). Everything else (incl. the
+# quota + window.open tests) runs bounded now that Storage enforces a 5-MiB quota.
+"webstorage/symbol-props.window.js": >-
+  Well-known-Symbol enumeration over the Storage proxy spins past the harness timeout.
+"webstorage/storage_supported_property_names.window.js": >-
+  Supported-property-name enumeration over the Storage proxy spins past the harness timeout.

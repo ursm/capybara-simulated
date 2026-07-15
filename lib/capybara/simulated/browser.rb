@@ -7160,9 +7160,25 @@ module Capybara
       def storage_get(kind, key)
         store(kind)[key.to_s]
       end
+      # Per-area storage quota (Chrome / Firefox both cap a localStorage / sessionStorage area at
+      # ~5 MiB per origin). Without it, the WPT quota tests — which `setItem` in a `while (true)` loop
+      # until QuotaExceededError — write unbounded gigabytes and OOM the process.
+      STORAGE_QUOTA_BYTES = 5 * 1024 * 1024
+
+      # Returns true when stored, false when the (key, value) would exceed the area's quota — the JS
+      # shim turns a false into a QuotaExceededError and does NOT store (WHATWG "setItem" step). The
+      # size is summed from the store each call (localStorage is shared across same-origin windows, so
+      # a per-Browser running total would drift); replacing a key frees its old bytes first.
       def storage_set(kind, key, value)
-        store(kind)[key.to_s] = value.to_s
-        nil
+        st    = store(kind)
+        key   = key.to_s
+        value = value.to_s
+        used  = st.sum {|k, v| k.bytesize + v.bytesize }
+        used -= key.bytesize + st[key].bytesize if st.key?(key)
+        return false if used + key.bytesize + value.bytesize > STORAGE_QUOTA_BYTES
+
+        st[key] = value
+        true
       end
       def storage_remove(kind, key)
         store(kind).delete(key.to_s)

@@ -849,7 +849,7 @@ module WptRunner
   # virtual-clock timeout catches them) and needs a skip-list before it can be
   # scanned. (.tentative files auto-route to out-of-scope, so a tentative window.js
   # here self-excludes.)
-  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage}'
+  JS_TREES = '{url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage}'
 
   def test_files
     @test_files ||= begin
