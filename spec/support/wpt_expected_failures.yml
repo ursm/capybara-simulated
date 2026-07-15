@@ -1960,10 +1960,6 @@ websockets/constructor/016.html:
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
-websockets/cookies/002.html:
-- 'WebSockets: Set-Cookie in response'
-- 'WebSockets: Set-Cookie in response'
-- 'WebSockets: Set-Cookie in response'
 websockets/cookies/003.html:
 - 'WebSockets: sending HttpOnly cookies in ws request'
 - 'WebSockets: sending HttpOnly cookies in ws request'
@@ -1973,21 +1969,11 @@ websockets/cookies/005.html:
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
 websockets/cookies/006.html:
 - 'WebSockets: setting Secure cookie with document.cookie, checking ws request'
-websockets/cookies/007.html:
-- 'WebSockets: when to process set-cookie fields in ws response'
-- 'WebSockets: when to process set-cookie fields in ws response'
-- 'WebSockets: when to process set-cookie fields in ws response'
-websockets/cookies/cross-origin-cookie-set.html:
-- Cookie should be set
 websockets/cookies/third-party-cookie-accepted.https.html:
 - Test that third-party cookies are accepted for WebSockets.
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
-websockets/interfaces/WebSocket/events/015.html:
-- 'WebSockets: instanceof on events'
-- 'WebSockets: instanceof on events'
-- 'WebSockets: instanceof on events'
 websockets/interfaces/WebSocket/events/017.html:
 - 'WebSockets: this, e.target, e.currentTarget, e.eventPhase'
 - 'WebSockets: this, e.target, e.currentTarget, e.eventPhase'

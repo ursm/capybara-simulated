@@ -3291,7 +3291,7 @@ module Capybara
         queue  = @websocket_queue
         @websocket_threads[id] = Thread.new do
           Thread.current.report_on_exception = false
-          run_websocket_reader(id, csim_io, accept, queue)
+          run_websocket_reader(id, csim_io, accept, queue, target)
         end
         id
       rescue StandardError => e
@@ -3340,7 +3340,15 @@ module Capybara
         return 0 if @websocket_threads.empty? && @websocket_queue.empty?
         events = drain_queue(@websocket_queue)
         return 0 if events.empty?
-        @runtime.call('__csim_deliverWebSocketEvents', events)
+        # `__setcookie` is handled Ruby-side (store the handshake cookie in the jar) and NOT
+        # forwarded to JS; the reader queues it before `__open`, so document.cookie sees it in onopen.
+        js_events = events.reject do |e|
+          if e[:type] == '__setcookie'
+            merge_set_cookie({'set-cookie' => e[:cookies]}, e[:url])
+            true
+          end
+        end
+        @runtime.call('__csim_deliverWebSocketEvents', js_events) unless js_events.empty?
         events.size
       end
 
@@ -3359,12 +3367,15 @@ module Capybara
 
       # Background-thread frame reader: verify the 101 handshake, then loop
       # decoding server→client frames into queue events until close / EOF.
-      private def run_websocket_reader(id, sock, expected_accept, queue)
-        ok, protocol = ws_read_handshake(sock, expected_accept)
+      private def run_websocket_reader(id, sock, expected_accept, queue, target)
+        ok, protocol, cookies = ws_read_handshake(sock, expected_accept)
         unless ok
           queue << {id: id, type: '__error', message: 'websocket handshake failed'}
           return
         end
+        # Store any handshake-response cookies (the main thread does the store) BEFORE `open` fires,
+        # so a document.cookie read in `onopen` sees them.
+        queue << {id: id, type: '__setcookie', cookies: cookies, url: target} unless cookies.empty?
         # Carry the negotiated subprotocol — Action Cable's client closes the
         # connection in its `onopen` unless `webSocket.protocol` is one it knows
         # (`actioncable-v1-json`).
@@ -3373,6 +3384,10 @@ module Capybara
           frame = ws_read_message(sock, queue, id)
           if frame.nil?                             # TCP closed with no close frame → abnormal
             queue << {id: id, type: '__close', code: 1006, reason: ''}
+            break
+          end
+          if frame == :protocol_error               # reserved opcode / malformed frame → fail the connection
+            queue << {id: id, type: '__error', message: 'protocol error'}
             break
           end
           opcode, payload = frame
@@ -3406,9 +3421,10 @@ module Capybara
       # is set (Action Cable's client requires `actioncable-v1-json`).
       private def ws_read_handshake(sock, expected_accept)
         status = sock.gets
-        return [false, nil] unless status && status =~ %r{\AHTTP/1\.1 101}i
+        return [false, nil, []] unless status && status =~ %r{\AHTTP/1\.1 101}i
         accept_ok = false
         protocol  = nil
+        cookies   = []
         while (line = sock.gets)
           line = line.chomp
           break if line.empty?
@@ -3421,13 +3437,18 @@ module Capybara
           # JS Uint8Array — the protocol must reach JS as a real string so
           # `webSocket.protocol` compares equal to `actioncable-v1-json`.
           protocol  = RuntimeShared.utf8_text(val) if key == 'sec-websocket-protocol' && !val.empty?
+          # Cookies the server sets on the handshake response are stored in the jar (the main thread
+          # does the actual store — see deliver_websocket_events), so document.cookie / the next
+          # request's Cookie header reflect them.
+          cookies << RuntimeShared.utf8_text(val) if key == 'set-cookie' && !val.empty?
         end
-        [accept_ok, protocol]
+        [accept_ok, protocol, cookies]
       end
 
       # Read one complete message (reassembling continuation frames), handling
       # interleaved control frames inline. Returns `[opcode, payload]` (opcode
-      # 0x1 text / 0x2 binary, or `:close`), or nil on EOF.
+      # 0x1 text / 0x2 binary), `[:close, payload]`, `:protocol_error` (a reserved
+      # opcode — the connection must be failed), or nil on EOF.
       private def ws_read_message(sock, queue, id)
         data       = +''.b
         msg_opcode = nil
@@ -3460,7 +3481,8 @@ module Capybara
           when 0x9 then ws_write_frame(sock, 0xA, payload); next   # ping → pong
           when 0xA then next                                       # pong → ignore
           when 0x0 then data << payload                            # continuation
-          else          msg_opcode = opcode; data << payload       # 0x1 text / 0x2 binary
+          when 0x1, 0x2 then msg_opcode = opcode; data << payload  # text / binary
+          else return :protocol_error                              # reserved opcode (0x3-7, 0xB-F) → fail
           end
           return [msg_opcode || opcode, data] if fin
         end

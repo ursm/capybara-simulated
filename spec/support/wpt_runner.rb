@@ -372,6 +372,9 @@ module WptRunner
     def send_text(str)   = write_frame(0x1, str.to_s.dup.force_encoding('UTF-8').b)
     def send_binary(b)   = write_frame(0x2, b.to_s.b)
     def send_ping(b = '') = write_frame(0x9, b.to_s.b)
+    # Write bytes to the socket WITHOUT framing them — echo_raw injects the client's payload as raw
+    # frame bytes to exercise the client's frame parser.
+    def write_raw(bytes) = @io.write(bytes.to_s.b)
 
     # Close handshake: an omitted code sends a bodyless close (RFC6455 §5.5.1).
     def send_close(code = 1000, reason = '')
@@ -457,8 +460,10 @@ module WptRunner
     'echo'            => {protocol: ->(c) { c[:requested].include?('echo') ? 'echo' : nil }, run: WS_ECHO},
     'echo_exit'       => {run: WS_DRAIN_EXIT},
     'echo_close_data' => {run: WS_DRAIN_EXIT},
-    # echo-query_wsh.py — send the raw query string once on open, then close.
+    # echo-query_wsh.py — send the raw query string once on open, then close. (`_v13` is the same
+    # handler under a pywebsocket protocol-version marker.)
     'echo-query'      => {run: ->(conn, c) { conn.send_text(c[:query]); conn.send_close(1000) }},
+    'echo-query_v13'  => {run: ->(conn, c) { conn.send_text(c[:query]); conn.send_close(1000) }},
     # empty-message_wsh.py — the first message must be empty; report pass/fail, then close.
     'empty-message'   => {run: ->(conn, _c) { m = conn.receive; conn.send_text(m && m[0] == :text && m[1] == '' ? 'pass' : 'fail'); conn.send_close(1000) }},
     # protocol_wsh.py — accept the client's requested-protocol header verbatim and send it back.
@@ -475,6 +480,22 @@ module WptRunner
     'origin'          => {run: ->(conn, c) { conn.send_text(c[:origin]); conn.send_close(1000) }},
     # echo-cookie_wsh.py — send back the handshake's Cookie header (or "(none)").
     'echo-cookie'     => {run: ->(conn, c) { conn.send_text(c[:cookie] || '(none)'); conn.send_close(1000) }},
+    # set-cookie_wsh.py — set a cookie via a handshake-response header, then keep the connection
+    # open until the client closes. (The HttpOnly variant, set-cookie_http, is deliberately NOT
+    # handled here: modelling HttpOnly means hiding the cookie from document.cookie while still
+    # sending it on requests — a core cookie-jar change with app-suite blast radius. Until that
+    # lands, set-cookie_http falls back to echo so it doesn't leak an HttpOnly cookie into
+    # document.cookie; cookies/005 stays allowlisted.)
+    'set-cookie'      => {extra_headers: ->(c) { ["Set-Cookie: ws_test_#{c[:query]}=test; Path=/"] }, run: WS_DRAIN_EXIT},
+    # echo_raw_wsh.py — write each received message's payload back as RAW bytes (unframed), so the
+    # payload IS interpreted as frames by the client; stop on the "exit" message.
+    'echo_raw'        => {run: lambda do |conn, _c|
+      loop do
+        msg = conn.receive or break
+        break if msg[0] == :close || msg[1] == 'exit' || msg[1] == 'exit'.b
+        conn.write_raw(msg[1])
+      end
+    end},
     # simple_handshake_wsh.py — accept, then immediately do a clean close with code 1001 / "PASS".
     'simple_handshake' => {run: ->(conn, _c) { conn.send_close(1001, 'PASS') }},
     # invalid_wsh.py — write a non-101 garbage response so the opening handshake fails.
@@ -527,6 +548,7 @@ module WptRunner
       resp = +"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
       resp << "Sec-WebSocket-Accept: #{accept}\r\n"
       resp << "Sec-WebSocket-Protocol: #{chosen}\r\n" if chosen && !chosen.empty?
+      Array(handler[:extra_headers]&.call(ctx)).each {|h| resp << "#{h}\r\n" }
       resp << "\r\n"
       io.write(resp)
     end
