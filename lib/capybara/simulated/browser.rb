@@ -344,6 +344,13 @@ module Capybara
         @websocket_sockets    = {}   # id → csim's socket end (main thread owns this hash)
         @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
         @websocket_queue      = Thread::Queue.new
+        @websocket_queue_head = nil   # one-slot buffer for an event hold_for_ws_close parked ahead of the queue
+        # In-flight `ws.close()` handshakes: hold the virtual clock until the reader surfaces the
+        # server's echoed close frame (a `__close` event) so a test awaiting `onclose` can't have
+        # its virtual-timeout outrun that real off-thread reply. Counted in ws_close, cleared as
+        # deliver_websocket_events delivers each terminal event. See hold_for_ws_close.
+        @ws_close_pending       = 0
+        @ws_close_wait_deadline = nil
         # All frame writes (the reader thread's pong replies + the main thread's
         # send/close) go through one socket; serialise them so two threads can't
         # interleave bytes into a corrupt frame.
@@ -2377,6 +2384,17 @@ module Capybara
         end
         @sw_fetch_wait_deadline = nil unless @sw_fetch_pending.positive?
 
+        # Same interlude for an in-flight `ws.close()` handshake: the reader thread surfaces the
+        # server's echoed close frame as `__close` — real off-thread work the JS event-loop probe
+        # can't see. Advancing the clock now would let a test's virtual-timeout ("onclose should
+        # fire") outrun it. Block briefly on the WS queue (GVL released, like settle) so the reader
+        # runs, deliver at the current instant WITHOUT advancing time, then keep pumping. Bounded by
+        # a deadline so a peer that never replies (→ EOF 1006) can't wedge the drain.
+        if @ws_close_pending.positive? && (held = hold_for_ws_close(turns))
+          return held
+        end
+        @ws_close_wait_deadline = nil unless @ws_close_pending.positive?
+
         # Same interlude for a pending SW message swack / broadcast ack — but WITHOUT holding
         # the clock. Its reply is the same kind of cross-isolate transfer completed on the worker
         # thread (a `worker.postMessage(view, [view.buffer])` reply zero-copies via transferIn),
@@ -2396,7 +2414,9 @@ module Capybara
         probe = dom_call('__csimEventLoopProbe')
         {
           'raf'        => !!probe['raf'],
-          'async'      => !!probe['async'],
+          # A live WS reader counts as async so the drain loop yields the GVL to it each frame — see
+          # websocket_reader_active?. Without it a binary echo can be starved past the idle-bail.
+          'async'      => !!probe['async'] || websocket_reader_active?,
           # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
           # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
           # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
@@ -2424,6 +2444,36 @@ module Capybara
         return nil unless reply_ready || Process.clock_gettime(Process::CLOCK_MONOTONIC) < @sw_fetch_wait_deadline
 
         held_progressed = reply_ready && step_and_drain_progressed(@runtime.run_loop_step(0))
+        probe = dom_call('__csimEventLoopProbe')
+        {
+          'raf'        => !!probe['raf'],
+          'async'      => true,
+          'next_timer' => probe['nextTimer'].to_f,
+          'progressed' => turns > 1 || held_progressed
+        }
+      end
+
+      # Hold the virtual clock while a `ws.close()` handshake completes. Mirrors hold_for_sw_fetch,
+      # but the reply arrives on the WS queue (the reader thread), not the worker outbox: park
+      # briefly on that queue (GVL released, so the reader runs) and, once a frame is ready, deliver
+      # it at the current instant (`run_loop_step(0)` → deliver_websocket_events clears the counter)
+      # WITHOUT advancing time. Returns the frame-probe hash to hold; nil only once the deadline is
+      # spent with nothing delivered, so the caller falls through to phase 2 and the clock resumes.
+      private def hold_for_ws_close(turns)
+        @ws_close_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        if @websocket_queue_head.nil? && @websocket_queue.empty? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < @ws_close_wait_deadline
+          # Pop one event to block until the reader produces something, then park it in the one-slot
+          # HEAD buffer — NOT pushed back onto the tail, which would reorder it behind anything the
+          # reader enqueued in the meantime. deliver_websocket_events drains the head first. Mirrors
+          # park_worker_reply.
+          @websocket_queue_head = pop_with_timeout(@websocket_queue, WORKER_POLL_INTERVAL)
+        end
+        ready = !@websocket_queue_head.nil? || !@websocket_queue.empty?
+        # A delivered frame refreshes the budget so the NEXT close in a sequence waits afresh.
+        @ws_close_wait_deadline = nil if ready
+        return nil unless ready || Process.clock_gettime(Process::CLOCK_MONOTONIC) < @ws_close_wait_deadline
+
+        held_progressed = ready && step_and_drain_progressed(@runtime.run_loop_step(0))
         probe = dom_call('__csimEventLoopProbe')
         {
           'raf'        => !!probe['raf'],
@@ -3335,14 +3385,33 @@ module Capybara
         # code 1005 (NO_STATUS), not 1000.
         payload = code.nil? ? ''.b : [code.to_i].pack('n') + reason.to_s.b
         ws_write_frame(sock, 0x8, payload) rescue nil
+        # A close handshake is now in flight — hold the clock until the reader's `__close` lands
+        # (bounded by the deadline in hold_for_ws_close if the peer never replies → EOF 1006).
+        @ws_close_pending += 1
         nil
       end
 
-      def websocket_pending? = !@websocket_queue.empty?
+      # Pending WS work = queued reader events OR an in-flight `ws.close()` whose `__close` hasn't
+      # landed yet. Counting the latter keeps every advance path (settle, tick_real_time, and
+      # crucially horizon_fast_forward_step, which would otherwise jump straight to a test's pending
+      # timeout timer) from racing past the close handshake before hold_for_ws_close delivers it.
+      def websocket_pending? = !@websocket_queue_head.nil? || !@websocket_queue.empty? || @ws_close_pending.positive?
+
+      # A live reader thread = an open WS connection whose server may still surface an echo / push /
+      # close frame off-thread — pending async work the JS event-loop probe can't see. The event-loop
+      # frame reports it as `async` so the WPT drain loop yields the GVL each frame (its
+      # `sleep(0.001) if async`), feeding the reader instead of spinning it into starvation — a
+      # binary echo that only lands AFTER the idle-bail is exactly the flake this prevents. Zero-alloc
+      # on the common no-WS path (the `empty?` short-circuit); a handful of threads otherwise.
+      def websocket_reader_active? = !@websocket_threads.empty? && @websocket_threads.each_value.any?(&:alive?)
 
       def deliver_websocket_events
-        return 0 if @websocket_threads.empty? && @websocket_queue.empty?
-        events = drain_queue(@websocket_queue)
+        return 0 if @websocket_threads.empty? && @websocket_queue_head.nil? && @websocket_queue.empty?
+        # The head slot (parked by hold_for_ws_close) is delivered ahead of the queue to preserve
+        # reader order.
+        events = [@websocket_queue_head].compact
+        @websocket_queue_head = nil
+        events.concat(drain_queue(@websocket_queue))
         return 0 if events.empty?
         # `__setcookie` is handled Ruby-side (store the handshake cookie in the jar) and NOT
         # forwarded to JS; the reader queues it before `__open`, so document.cookie sees it in onopen.
@@ -3353,6 +3422,10 @@ module Capybara
           end
         end
         @runtime.call('__csim_deliverWebSocketEvents', js_events) unless js_events.empty?
+        # A terminal event (`__close` / `__error`) completes a close handshake — release the clock
+        # hold. Clamp: a server-INITIATED close arrives without a matching ws_close increment.
+        terminals = events.count {|e| e[:type] == '__close' || e[:type] == '__error' }
+        @ws_close_pending = [@ws_close_pending - terminals, 0].max if terminals.positive?
         events.size
       end
 
@@ -3367,6 +3440,9 @@ module Capybara
         @websocket_sockets.clear
         @websocket_app_sockets.clear
         @websocket_queue.clear
+        @websocket_queue_head   = nil
+        @ws_close_pending       = 0
+        @ws_close_wait_deadline = nil
       end
 
       # Background-thread frame reader: verify the 101 handshake, then loop

@@ -140,8 +140,47 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in loading error CSSOM Stylesheets
 css/cssom/ttwf-cssom-doc-ext-load-count.html:
 - stylesheet.css should be unloaded and styleSheets.length === 0
+dom/events/AddEventListenerOptions-passive.any.js:
+- Supports passive option on addEventListener only
+dom/events/AddEventListenerOptions-signal.any.js:
+- Aborting from a listener does not call future listeners
+- Passing an AbortSignal to addEventListener options should allow removing a listener
+- Passing an AbortSignal to addEventListener works with the capture flag
+- Passing an AbortSignal to addEventListener works with the once flag
+- Passing an AbortSignal to multiple listeners
+- Passing null as the signal should throw
+- Passing null as the signal should throw (listener is also null)
+dom/events/Event-constructors.any.js:
+- Event-constructors 1
+dom/events/Event-isTrusted.any.js:
+- Event-isTrusted
+dom/events/event-global-extra.window.js:
+- Listener from a different global
+- window.event and element from another document
+- window.event and moving an element post-dispatch
+- window.event should not be affected by nodes moving post-dispatch
+dom/events/relatedTarget.window.js:
+- Reset targets before activation behavior
+- Reset targets on early return
+- Retarget a shadow-tree relatedTarget
+dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
+- Custom element reactions follow script execution
+dom/nodes/NodeList-live-mutations.window.js:
+- 'NodeList live mutations: NodeList ownPropertyNames'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
+dom/nodes/adoption.window.js:
+- appendChild() and DocumentFragment
+- appendChild() and DocumentFragment with host
+- appendChild() and ShadowRoot
+dom/nodes/attributes-namednodemap-cross-document.window.js:
+- Moving an attribute between documents
+- Replacing an attribute across documents
+dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
+- 'Insertion steps: load event fires synchronously *after* iframe DOM insertion, as
+  part of the iframe element''s insertion steps'
+dom/nodes/moveBefore/iframe-document-preserve.window.js:
+- window.frames ordering does not change due to moveBefore()
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -2294,10 +2333,6 @@ websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
-websockets/keeping-connection-open/001.html:
-- 'WebSockets: 20s inactivity after handshake'
-- 'WebSockets: 20s inactivity after handshake'
-- 'WebSockets: 20s inactivity after handshake'
 websockets/mixed-content.https.any.js:
 - opening an insecure WebSocket in a secure context should fail
 websockets/multi-globals/message-received.html:

@@ -4908,6 +4908,1121 @@ dom/nodes/moveBefore/selection-preserve.html:
 - name: moveBefore should not reset selection with preceding text
   reason: Builds a text Selection from a pointer drag across rendered pixel coordinates
     — needs visual hit-testing + caret/selection geometry (deliberately unmodeled).
+dom/observable/tentative/crashtests/observable-gc.any.js:
+- name: 'every(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'first(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'forEach(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'last(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): does not crash on observable being GCed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/crashtests/observable-takeUntil-toArray.any.js:
+- name: takeUntil correctly passes error on inner observable to outer observables
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-catch.any.js:
+- name: 'catch(): Abort order between outer AbortSignal and inner CatchHandler subscriber''s
+    AbortSignal'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): CatchHandler can return a Promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): CatchHandler can return an empty iterable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): CatchHandler emits an error if the value returned is not convertible
+    to an Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): CatchHandler returns an Observable that throws immediately on subscription'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): Errors thrown in the catch() callback are sent to the consumer''s
+    error handler'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): Handle errors from source and flatten to a new Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): Returns an Observable that is a pass-through for next()/complete()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'catch(): should handle returning an async iterable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-constructor.any.js:
+- name: Aborting a subscription should stop emitting values
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Calling subscribe should never throw an error synchronously, initializer throws
+    error
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Calling subscribe should never throw an error synchronously, subscriber pushes
+    error
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Completing or nexting a subscriber after an error does nothing
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors pushed by initializer function after subscriber is closed by error
+    are reported
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors pushed to the subscriber that are not handled by the subscription are
+    reported to the global
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors thrown by initializer function after subscriber is closed by completion
+    are reported
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors thrown by initializer function after subscriber is closed by error
+    are reported
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors thrown in the initializer that are not handled by the subscription
+    are reported to the global
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Multiple subscriptions share the same producer and teardown runs only after
+    last subscription abort
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: New subscription after complete creates new producer
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Observable constructor
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Observable constructor calls initializer on subscribe
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Observable error path called synchronously
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Observable should error if initializer throws
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Producer-initiated unsubscription in a downstream Observable fires abort events
+    before each teardown, in downstream->upstream order
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscribe with just a function as the next handler
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber active is readonly
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber complete() will set active to false, and abort signal
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber interface is not constructible
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber iterates over a snapshot of its internal observers
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber must have receiver
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber next & error must recieve argument
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber signal is readonly
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber#complete() cannot re-entrantly invoke itself
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber#error() cannot re-entrantly invoke itself
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber#error() value is stored as Subscriber's AbortSignal's reason
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber#signal is not the same AbortSignal as the one passed into `subscribe()`
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription does not emit values after completion
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription does not emit values after error
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription is inactive after complete()
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription is inactive after error()
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription is inactive when aborted signal is passed in
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscription reports errors that are pushed after subscriber is closed by
+    completion
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardown runs after last unsubscribe regardless of unsubscription order
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardown should be called when subscription is aborted
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns are called in downstream->upstream order on consumer-initiated unsubscription
+    with pre-aborted Signal
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns are called in upstream->downstream order on consumer-initiated unsubscription
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns should be called synchronously during addTeardown() if the subscription
+    is inactive
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns should be called when subscription is closed by completion
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns should be called when subscription is closed by subscriber pushing
+    an error
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Teardowns should be called when subscription is closed by subscriber throwing
+    error
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Unsubscription lifecycle
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: subscribe() can be called with no arguments
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-constructor.window.js:
+- name: Cannot subscribe to an Observable in a detached document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: No observer handlers can be invoked in detached document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Observable from EventTarget does not get notified for events in detached documents
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Subscriber.error() does not "report the exception" even when an `error()`
+    handler is not present, when it is invoked in a detached document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-drop.any.js:
+- name: 'drop(): A drop amount of 0 simply mirrors the source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Observable passes through completions from source observable even
+    before drop count is met'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Observable passes through errors from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Observable passes through errors from source observable even before
+    drop count is met'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Observable should skip the first n values from the source observable,
+    then pass through the rest of the values and completion'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Passing negative value wraps to maximum value '
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'drop(): Unsubscribing from the Observable returned by drop() also unsubscribes
+    from the source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-event-target.any.js:
+- name: Aborting the subscription should stop the emission of events
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: EventTarget Observables can multicast subscriptions for event handling
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: EventTarget.when() returns an Observable
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-event-target.window.js:
+- name: EventTarget Observables can be 'passive'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: EventTarget Observables can listen for events in the capturing or bubbling
+    phase
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-every.any.js:
+- name: 'every(): Abort the subscription to the source if the predicate does not pass'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Index is passed into the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Lifecycle checks when all values pass the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Lifecycle checks when any value fails the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Promise resolves to false if any value fails the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Promise resolves to true if all values pass the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Rejects with a DOMException if the source Observable is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Rejects with any error emitted from the source observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Rejects with any error thrown from the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'every(): Resolves with true if the observable completes without emitting
+    a value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-filter.any.js:
+- name: 'filter(): Errors thrown in filter predicate are emitted to Observer error()
+    handler'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'filter(): Index is passed correctly to predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'filter(): Passes complete() through from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'filter(): Passes error() through from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'filter(): Returned Observable filters out results based on predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'filter(): Upon source completion, source Observable teardown sequence happens
+    after downstream filter complete() is called'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-finally.any.js:
+- name: 'finally(): Callback handler fires BEFORE the source observable completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Callback handler fires BEFORE the source observable errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Callback is run before next inner subscription in flatMap()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Callback is run before next inner subscription in switchMap()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Callback is run if consumer aborts the subscription'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Errors thrown in the finally handler (during Subscriber#complete())
+    are reported to the global immediately'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Errors thrown in the finally handler (during Subscriber#error())
+    are reported to the global immediately'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Handlers run in composition order'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Mirrors all values and completions from source'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'finally(): Mirrors all values and errors from the source'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-find.any.js:
+- name: 'find(): Passes the index of the value to the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): Promise rejects with any error thrown from the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): Promise rejects with the error emitted from the source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): Promise resolves with the first value that passes the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): Promise resolves with undefined if no value passes the predicate'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'find(): Rejects with AbortError when the signal is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-first.any.js:
+- name: 'first(): Aborting a signal rejects the Promise with an AbortError DOMException'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'first(): Lifecycle'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'first(): Promise rejects with RangeError when source Observable completes
+    without emitting any values'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'first(): Promise rejects with the error emitted from the source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'first(): Promise resolves with the first value from the source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-flatMap.any.js:
+- name: 'flatMap(): Flattens simple source Observable properly'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): Outer Subscription synchronously becomes inactive when an ''inner''
+    Observable emits an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): Outer Subscription synchronously becomes inactive when an ''inner''
+    Observable throws an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): Returned Observable passes through source Observable errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): result Observable does not complete after source Observable completes
+    while there are still queued inner Observables to process Observables all complete'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): result Observable does not complete until source and inner Observables
+    all complete'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'flatMap(): source and inner active Observables are both unsubscribed from
+    once the outer subscription signal is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-forEach.any.js:
+- name: Errors pushed by Observable reject the returned promise
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors thrown by Observable reject the returned promise
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Errors thrown in the visitor callback reject the promise and unsubscribe from
+    the source
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: forEach visitor callback rejection microtask ordering
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: forEach() promise resolves with undefined
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'forEach(): Visitor callback called synchronously for each value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-forEach.window.js:
+- name: forEach()'s internal observer's next steps do not crash in a detached document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: forEach()'s internal observer's next steps do not crash when visitor callback
+    detaches the document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-from.any.js:
+- name: Invalid async iterator protocol error is surfaced before Subscriber#signal
+    is consulted
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Invalid iterator protocol error is surfaced before Subscriber#signal is consulted
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: No error is reported when aborting a subscription to a sync iterator that
+    has no `return()` implementation
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Abort after complete does NOT call IteratorRecord#return()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Aborting an async iterable subscription stops subsequent next() calls,
+    but old next() Promise reactions are web-observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Aborting async iterable midway through iteration both stops iteration
+    and invokes `IteratorRecord#return()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Aborting sync iterable midway through iteration both stops iteration
+    and invokes `IteratorRecord#return()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async generator finally block run when Observable errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async generator finally block run when subscription is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async generator finally block runs when Observable completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async iterable protocol null, converts as iterator'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async iterable: `Iterator#return()` must return an Object, or a Promise
+    rejects asynchronously'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Async iterable: error thrown from IteratorRecord#return() is wrapped
+    in rejected Promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Asynchronous generator conversion: can only be used once'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Asynchronous iterable conversion'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Asynchronous iterable conversion, with synchronous iterable fallback'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Asynchronous iterable multiple in-flight subscriptions'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Converts Promise to Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Converts rejected Promise to Observable. No `unhandledrejection`
+    event when error is handled by subscription'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Errors thrown in Symbol.asyncIterator() are propagated synchronously'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Errors thrown in async iterator''s next() GETTER are propagated in
+    a microtask'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Errors thrown in async iterator''s next() are propagated in a microtask'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Failed conversions'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Generator finally block run when Observable completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Generator finally block run when Observable errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Generator finally block runs when subscription is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Given an array'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Given an observable, it returns that exact observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Iterable converts to Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Observable that implements @@iterator protocol gets converted as
+    an Observable, not iterator'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Observable.from() is a function'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Promise that implements @@iterator protocol gets converted as an
+    iterable, not Promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Promise whose [Symbol.iterator] returns null converts as Promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Promise-wrapping semantics of IteratorResult interface'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Rejections not handled by subscription are reported to the global,
+    and still not sent as an unhandledrejection event'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Rethrows the error when Converting an object whose @@iterator method
+    *getter* throws an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Subscribing to an iterable Observable with an aborted signal does
+    not call next()'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Sync iterable multiple in-flight subscriptions'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Sync iterable: `Iterator#return()` must return an Object, or an error
+    is thrown'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): Sync iterable: error thrown from IteratorRecord#return() can be synchronously
+    caught'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): When iterable conversion aborts the subscription, next() is never
+    called'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] is not cached'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] next() throws error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] not callable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] not callable AFTER SUBSCRIBE throws'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] returns null AFTER SUBSCRIBE throws'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] side-effects (many observables)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'from(): [Symbol.iterator] side-effects (one observable)'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-inspect.any.js:
+- name: 'inspect(): Error handler does not stop error from being reported to the global,
+    when subscriber does not pass error handler'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Errors thrown from inspect()''s abort() handler are caught and
+    reported to the global, because the subscription is already closed by the time
+    the handler runs'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Errors thrown in subscribe() Inspector handler subscribe handler
+    are caught and sent to error callback'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Inspector abort() handler is not called if the source completes
+    before the result is unsubscribed from'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): ObserverCallback passed in'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Provides a pre-subscription subscribe callback'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Provides a way to tap into the moment a source observable is unsubscribed
+    from'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Provides a way to tap into the values and completions of the source
+    observable using an observer'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Provides a way to tap into the values and errors of the source
+    observable using an observer. Errors are passed through'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Throwing an error in the next handler function in do should be
+    caught and sent to the error callback of the result observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Throwing an error in the observer complete handler is caught and
+    sent to the error callback of the result observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Throwing an error in the observer error handler in inspect() is
+    caught and sent to the error callback of the result observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'inspect(): Throwing an error in the observer next handler is caught and sent
+    to the error callback of the result observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-last.any.js:
+- name: 'last(): Aborting a signal rejects the Promise with an AbortError DOMException'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'last(): Lifecycle'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'last(): Promise rejects with RangeError when source Observable completes
+    without emitting any values'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'last(): Promise rejects with emitted error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'last(): Promise resolves to last value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-map.any.js:
+- name: 'map(): Map observable unsubscription causes source Observable unsubscription.
+    Mapper Observer''s complete()/error() are not called'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'map(): Mapper errors are emitted to Observer error() handler'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'map(): Maps values correctly'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'map(): Passes complete() through from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'map(): Passes error() through from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'map(): Upon source completion, source Observable teardown sequence happens
+    before downstream mapper complete() is called'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-map.window.js:
+- name: map()'s internal observer's next steps do not crash in a detached document
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-reduce.any.js:
+- name: 'reduce(): Errors thrown in reducer reject the promise and abort the source'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): Reduces the values for different objects'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): Reduces the values of the Observable, starting with the initial
+    seed value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): Reject with an AbortError if the subscription is aborted before
+    the source completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): Rejects if the source observable emits an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): Seeds with the first value of the source, if no initial value is
+    provided'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): When source is empty, AND no seed value is provided, the promise
+    rejects with a TypeError'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'reduce(): When source is empty, promise resolves with initial value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-some.any.js:
+- name: observable-some
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: observable-some 1
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): The return promise rejects with a DOMException if the signal is aborted'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): The returned promise rejects with an error if the predicate errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): The returned promise rejects with an error if the source observable
+    errors'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): The returned promise resolves as false if the source observable completes
+    without emitting a value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'some(): subscriber is inactive after the first value that passes the predicate,
+    because the source was unsubscribed from'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-switchMap.any.js:
+- name: 'switchMap(): result does not complete when the source observable completes,
+    if the inner observable is still active'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'switchMap(): result emits an error if Mapper callback throws an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'switchMap(): result emits an error if the inner observable emits an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'switchMap(): result emits an error if the source observable emits an error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'switchMap(): result subscribes to one inner observable at a time, unsubscribing
+    from the previous active one when a new one replaces it'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'switchMap(): should unsubscribe in the correct order when user aborts the
+    subscription'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-take.any.js:
+- name: 'take(): Forwards complete()s that happen before the take count is met, and
+    unsubscribes from source Observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'take(): Negative count is treated as maximum value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'take(): No crash when take(1) unsubscribes from its source when next() is
+    called, and the Subscriber iterates over the rest of the Observables'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'take(): Should forward errors from the source observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'take(): Takes the first N values from the source observable, then completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'take(): take(0) should not subscribe to the source observable, and should
+    return an observable that immediately completes'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-takeUntil.any.js:
+- name: takeUntil subscribes to notifier
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: takeUntil subscribes to source Observable and mirrors it uninterrupted
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: takeUntil() mirrors the source Observable until its first next() value
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: takeUntil()'s AbortSignal unsubscribes from notifier & source observable
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: notifier calls `Subscriber#error()` twice; second goes to global
+    error handler'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: notifier error() unsubscribes from notifier'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: notifier next() unsubscribes from notifier'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: notifier next() unsubscribes from notifier & source observable'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: notifier throw Error unsubscribes from notifier'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: source is uninterrupted when notifier completes, even synchronously'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: source never subscribed to when notifier synchronously emits a
+    value'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil: source never subscribed to when notifier synchronously emits error'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-takeUntil.window.js:
+- name: 'takeUntil(): Source and notifier internal observers do not crash in a detached
+    document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'takeUntil(): notifier Observable detaches document before source Observable
+    would be subscribed to'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+dom/observable/tentative/observable-toArray.any.js:
+- name: Operator Promise abort ordering
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): Aborting the passed-in signal rejects the returned promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): Subscribing with an aborted signal returns an immediately rejected
+    promise'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): basic next/complete'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): complete() resolves promise; subsequent error()s report the exceptions'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'toArray(): first error() rejects promise; subsequent error()s report the
+    exceptions'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 dom/processing-instruction-attributes.html:
 - name: 'Distinct attribute name (source: html-dom): ABC and abc'
   reason: "[WICG] declarative-partial-updates (ProcessingInstruction attributes) —
