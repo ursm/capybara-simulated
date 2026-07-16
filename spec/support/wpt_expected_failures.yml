@@ -898,7 +898,6 @@ custom-elements/form-associated/ElementInternals-setFormValue.html:
 - Newline normalization - \r\n in value (formdata)
 - Newline normalization - \r\n in value (urlencoded)
 - Single value - Non-empty name exists
-- setFormValue with an empty FormData should submit nothing
 custom-elements/form-associated/ElementInternals-validation.html:
 - '"anchor" argument of setValidity()'
 - Custom control affects :valid :invalid for FORM and FIELDSET
@@ -911,16 +910,8 @@ custom-elements/form-associated/ElementInternals-validation.html:
 - willValidate after upgrade
 custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
-custom-elements/form-associated/fieldset-elements.html:
-- Form associated custom elements should work with fieldset.elements
 custom-elements/form-associated/focusability.html:
 - Focusability of form-associated custom elements
-custom-elements/form-associated/form-associated-callback.html:
-- Associate by parser, customized at element creation
-- Disassociation
-- Parsed, connected, then upgraded
-- Updating "form" content attribute
-- Updating "id" attribute of form element
 custom-elements/form-associated/form-disabled-callback.html:
 - A disabled form-associated custom element should not submit an entry for it
 - Adding/removing disabled content attribute
@@ -934,12 +925,6 @@ custom-elements/form-associated/form-disabled-callback.html:
 - Toggling "disabled" attribute on a custom element inside disabled <fieldset> does
   not trigger a callback
 - Upgrading an element with disabled content attribute
-custom-elements/form-associated/form-elements-namedItem.html:
-- Form associated custom elements should work with document.forms.elements.namedItem()
-- Form associated custom elements should work with document.forms.elements.namedItem()
-  after updating the name attribute
-- Form associated custom elements should work with document.forms.elements.namedItem()
-  after upgrading
 custom-elements/form-associated/form-reset-callback.html:
 - Clicking a reset button invokes formResetCallback in a microtask
 - form.reset() should trigger formResetCallback
@@ -1024,7 +1009,6 @@ custom-elements/parser/parser-uses-constructed-element.html:
 - HTML parser must use the returned value of the custom element constructor instead
   using the one created in super() call
 custom-elements/parser/parser-uses-registry-of-owner-document.html:
-- HTML parser must use the registry of the content document inside an iframe
 - HTML parser must use the registry of window.document in a document created by document.implementation.createXHTMLDocument()
 custom-elements/parser/serializing-html-fragments-customized-builtins.html:
 - '"is" value should be serialized even for an undefined element'
@@ -1167,19 +1151,12 @@ custom-elements/reactions/DOMTokenList.html:
 - the stringifier of DOMTokenList must enqueue an attributeChanged reaction when the
   setter is called with the original value of the attribute
 custom-elements/reactions/Document.html:
-- body on Document must enqueue disconnectedCallback when removing a custom element
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
 - open on Document must enqueue disconnectedCallback when removing a custom element
 - title on Document must enqueue disconnectedCallback when removing a custom element
 - write on Document must enqueue disconnectedCallback when removing a custom element
 - writeln on Document must enqueue disconnectedCallback when removing a custom element
-custom-elements/reactions/Element.html:
-- innerHTML on Element must enqueue a attributeChanged reaction for a newly constructed
-  custom element
-- innerHTML on Element must enqueue a connected reaction for a newly constructed custom
-  element
-- innerHTML on Element must enqueue a disconnected reaction
 custom-elements/reactions/HTMLAnchorElement.html:
 - text on HTMLAnchorElement must enqueue disconnectedCallback when removing a custom
   element
@@ -1197,32 +1174,10 @@ custom-elements/reactions/HTMLOutputElement.html:
 custom-elements/reactions/HTMLTableElement.html:
 - caption on HTMLTableElement must enqueue connectedCallback when inserting a custom
   element
-- caption on HTMLTableElement must enqueue disconnectedCallback when removing a custom
-  element
-- deleteCaption() on HTMLTableElement must enqueue disconnectedCallback when removing
-  a custom element
-- deleteRow() on HTMLTableElement must enqueue disconnectedCallback when removing
-  a custom element
-- deleteTFoot() on HTMLTableElement must enqueue disconnectedCallback when removing
-  a custom element
-- deleteTHead() on HTMLTableElement must enqueue disconnectedCallback when removing
-  a custom element
 - tFoot on HTMLTableElement must enqueue connectedCallback when inserting a custom
-  element
-- tFoot on HTMLTableElement must enqueue disconnectedCallback when removing a custom
   element
 - tHead on HTMLTableElement must enqueue connectedCallback when inserting a custom
   element
-- tHead on HTMLTableElement must enqueue disconnectedCallback when removing a custom
-  element
-custom-elements/reactions/HTMLTableRowElement.html:
-- deleteCell() on HTMLTableRowElement must enqueue disconnectedCallback when removing
-  a custom element
-custom-elements/reactions/HTMLTableSectionElement.html:
-- deleteRow() on HTMLTableSectionElement on tfoot must enqueue disconnectedCallback
-  when removing a custom element
-- deleteRow() on HTMLTableSectionElement on thead must enqueue disconnectedCallback
-  when removing a custom element
 custom-elements/reactions/HTMLTitleElement.html:
 - text on HTMLTitleElement must enqueue disconnectedCallback when removing a custom
   element
