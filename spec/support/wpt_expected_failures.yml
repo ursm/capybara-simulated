@@ -864,12 +864,8 @@ custom-elements/cross-realm-callback-report-exception.html:
 - constructor
 - disconnectedCallback
 custom-elements/custom-element-reaction-queue.html:
-- Mutating a undefined custom element while upgrading a custom element must not enqueue
-  or invoke reactions on the mutated element
 - Mutating another custom element inside adopted callback must invoke all pending
   callbacks on the mutated element
-- Upgrading a custom element must invoke attributeChangedCallback and connectedCallback
-  before start upgrading another element
 - Upgrading a custom element must not invoke attributeChangedCallback for the attribute
   that is changed during upgrading
 - Upgrading a custom element must not invoke disconnectedCallback if the element is
@@ -2475,53 +2471,29 @@ custom-elements/throw-on-dynamic-markup-insertion-counter-reactions.html:
 - document.writeln of another document must not throw an InvalidStateError when processing
   custom element reactions for a synchronous constructed custom element
 custom-elements/upgrading.html:
-- '"define" in the document of an iframe must enqueue a custom element upgrade reaction
-  on a connected unresolved custom element'
-- '"define" in the document of an iframe must not enqueue a custom element upgrade
-  reaction on a disconnected unresolved custom element'
-- Creating an element in a cloned document and adopting back to a document with browsing
-  context must enqueue a custom element upgrade reaction
 - Creating an element in a cloned document and inserting into the document must not
   enqueue a custom element upgrade reaction
 - Creating an element in a cloned document must not enqueue a custom element upgrade
   reaction because the document does not have a browsing context
-- Creating an element in a document created by createHTMLDocument and adopting back
-  to a document with browsing context must enqueue a custom element upgrade reaction
 - Creating an element in a document created by createHTMLDocument and inserting into
   the document must not enqueue a custom element upgrade reaction
 - Creating an element in a document created by createHTMLDocument must not enqueue
   a custom element upgrade reaction because the document does not have a browsing
   context
-- Creating an element in a new document and adopting back to a document with browsing
-  context must enqueue a custom element upgrade reaction
-- Creating an element in a new document and inserting into the document must not enqueue
-  a custom element upgrade reaction
-- Creating an element in an HTML document created by createDocument and adopting back
-  to a document with browsing context must enqueue a custom element upgrade reaction
 - Creating an element in an HTML document created by createDocument and inserting
   into the document must not enqueue a custom element upgrade reaction
 - Creating an element in an HTML document created by createDocument must not enqueue
   a custom element upgrade reaction because the document does not have a browsing
   context
-- Creating an element in an HTML document fetched by XHR and adopting back to a document
-  with browsing context must enqueue a custom element upgrade reaction
-- Creating an element in an HTML document fetched by XHR and inserting into the document
-  must not enqueue a custom element upgrade reaction
-- Creating an element in the document of the template elements and adopting back to
-  a document with browsing context must enqueue a custom element upgrade reaction
 - Creating an element in the document of the template elements and inserting into
   the document must not enqueue a custom element upgrade reaction
 - Creating an element in the document of the template elements must not enqueue a
   custom element upgrade reaction because the document does not have a browsing context
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
-- Inserting an unresolved custom element into the document of an iframe must enqueue
-  a custom element upgrade reaction
 custom-elements/upgrading/Document-importNode-customized-builtins.html:
 - 'built-in: document.importNode() should import "undefined" custom elements successfully'
 - 'built-in: document.importNode() should import custom elements successfully'
-custom-elements/upgrading/Document-importNode.html:
-- 'autonomous: document.importNode() should import "undefined" custom elements successfully'
 custom-elements/upgrading/Node-cloneNode-customized-builtins.html:
 - Node.prototype.cloneNode(false) must be able to clone as a customized built-in element
   when it has an inconsistent "is" attribute
@@ -2554,9 +2526,6 @@ custom-elements/upgrading/upgrade-custom-element-error-event.html:
   global'
 custom-elements/upgrading/upgrading-enqueue-reactions.html:
 - Upgrading a custom element must enqueue attributeChangedCallback before connectedCallback
-- Upgrading a custom element must enqueue attributeChangedCallback on each attribute
-- Upgrading a custom element must enqueue connectedCallback if the element in the
-  document
 - Upgrading a custom element must not invoke attributeChangedCallback and connectedCallback
   when the element failed to upgrade
 - Upgrading a custom element not must enqueue attributeChangedCallback on unobserved
