@@ -60,6 +60,14 @@ const TREES = [
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
                                        // earned out-of-scope in wpt_out_of_scope.yml)
+  'custom-elements',                   // customElements.define / upgrade / reactions (connected /
+                                       // disconnected / adopted / attributeChanged) / form-associated CE +
+                                       // ElementInternals — the custom-element lifecycle Turbo
+                                       // (`<turbo-frame>` / `<turbo-stream>`) and every Web Component app
+                                       // (Lit / Shoelace) ride on; the driver already models CE (sync
+                                       // upgrade, attributeChangedCallback, reactions), so this validates
+                                       // and hardens the contract FrameRedirector depends on. DOM/JS
+                                       // surface, no layout.
   'xhr',                               // XMLHttpRequest — responseType / FormData upload / progress events /
                                        // timeout / abort / responseURL / headers — the request surface
                                        // Turbo / Rails-UJS / jQuery hammer; data API, no layout
@@ -103,14 +111,14 @@ const TREES = [
                                        // Turbo Streams ride on, validated against the spec's own send /
                                        // receive / close / close-code / protocol / binary tests. The runner
                                        // stands up an in-process RFC6455 server (wss:// routing + native
-                                       // echo / pywebsocket-`_wsh.py` handlers); `.any.js` tests need a
-                                       // server-generated wrapper we don't run, so the legacy `.htm` slice
-                                       // is what's in scope. WebSocketStream (stream/) is .tentative → out.
+                                       // echo / pywebsocket-`_wsh.py` handlers); both the legacy `.htm`
+                                       // slice and the modern `.any.js` (via JS_TREES) are in scope.
+                                       // WebSocketStream (stream/) is .tentative → out.
   'webstorage',                        // localStorage / sessionStorage — the Ruby-backed, origin-shared
                                        // Web Storage areas + the cross-window `storage` event (fired at the
-                                       // OTHER same-origin documents on a change). `.window.js` API tests
-                                       // need a server-generated wrapper we don't run; the runnable slice is
-                                       // the storage-event tests. Storage partitioning earns out per rule 1.
+                                       // OTHER same-origin documents on a change). Both the storage-event
+                                       // `.html` tests and the `.window.js` API tests (via JS_TREES) are in
+                                       // scope. Storage partitioning earns out per rule 1.
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)

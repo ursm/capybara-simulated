@@ -829,14 +829,16 @@ module WptRunner
   # Top-level trees + the narrow html/ subtrees we vendor: the event-loop oracle
   # (timers + microtask-queuing) and the forms semantics surface (form
   # submission / constraint validation / input / select / textarea / labels —
-  # the form-driven slice every app suite exercises), plus css/cssom (the pure-API
+  # the form-driven slice every app suite exercises) + custom-elements (the CE
+  # lifecycle — define / upgrade / reactions / form-associated — that Turbo and Web
+  # Component apps ride on), plus css/cssom (the pure-API
   # CSSOM object model, backed by our css-tree cascade engine — css/cssom-view is
   # the layout-dependent tree and is deliberately not vendored). service-workers holds
   # the vendored service-worker tree (registration / lifecycle / messaging / fetch
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,service-workers,websockets,webstorage}'
+  TREES = '{dom,domparsing,url,encoding,shadow-dom,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,css/cssom,html/canvas/element,service-workers,websockets,webstorage}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -849,7 +851,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets}'
+  JS_TREES = '{dom,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets}'
 
   def test_files
     @test_files ||= begin
