@@ -914,23 +914,10 @@ custom-elements/form-associated/focusability.html:
 - Focusability of form-associated custom elements
 custom-elements/form-associated/form-disabled-callback.html:
 - A disabled form-associated custom element should not submit an entry for it
-- Adding/removing disabled content attribute
-- Callback triggered during a clone operation, with disabled state provided by ancestor
-- Callback triggered during a clone/append operation, with disabled state provided
-  by ancestor
 - Disabled attribute affects focus-capability
 - Relationship with FIELDSET
-- Toggling "disabled" attribute on a <fieldset> does not trigger a callback on disabled
-  custom element descendant
-- Toggling "disabled" attribute on a custom element inside disabled <fieldset> does
-  not trigger a callback
-- Upgrading an element with disabled content attribute
 custom-elements/form-associated/form-reset-callback.html:
 - Clicking a reset button invokes formResetCallback in a microtask
-- form.reset() should trigger formResetCallback
-- 'form.reset(): formResetCallback is called synchronously at the end of form reset,
-  with custom element reaction timing, *after* built-in form control reset algorithms
-  run.'
 custom-elements/form-associated/label-delegatesFocus.html:
 - Clicking on a label for a form associated custom element with delegatesFocus should
   focus the custom element's focus delegate.
