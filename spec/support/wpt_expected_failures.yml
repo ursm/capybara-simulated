@@ -345,98 +345,30 @@ custom-elements/HTMLElement-constructor.html:
 - HTMLElement constructor must throw a TypeError when NewTarget is equal to itself
   via a Proxy object
 custom-elements/adopted-callback.html:
-- Inserting a custom element into a cloned document must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to a cloned
-  document must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to a document
-  created by createHTMLDocument must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to a new document
-  must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to an HTML document
-  created by createDocument must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to an HTML document
-  fetched by XHR must enqueue and invoke adoptedCallback
 - Inserting a custom element into a detached shadow tree that belongs to the document
   of an iframe must enqueue and invoke adoptedCallback
 - Inserting a custom element into a detached shadow tree that belongs to the document
   of the template elements must enqueue and invoke adoptedCallback
-- Inserting a custom element into a document created by createHTMLDocument must enqueue
-  and invoke adoptedCallback
-- Inserting a custom element into a new document must enqueue and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in a cloned document must enqueue
-  and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in a document created by createHTMLDocument
-  must enqueue and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in a new document must enqueue and
-  invoke adoptedCallback
-- Inserting a custom element into a shadow tree in an HTML document created by createDocument
-  must enqueue and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in an HTML document fetched by XHR
-  must enqueue and invoke adoptedCallback
 - Inserting a custom element into a shadow tree in the document of an iframe must
   enqueue and invoke adoptedCallback
 - Inserting a custom element into a shadow tree in the document of the template elements
   must enqueue and invoke adoptedCallback
-- Inserting a custom element into an HTML document created by createDocument must
-  enqueue and invoke adoptedCallback
-- Inserting a custom element into an HTML document fetched by XHR must enqueue and
-  invoke adoptedCallback
 - Inserting a custom element into the document of an iframe must enqueue and invoke
   adoptedCallback
 - Inserting a custom element into the document of the template elements must enqueue
   and invoke adoptedCallback
-- Inserting an ancestor of custom element into a cloned document must enqueue and
-  invoke adoptedCallback
-- Inserting an ancestor of custom element into a document created by createHTMLDocument
-  must enqueue and invoke adoptedCallback
-- Inserting an ancestor of custom element into a new document must enqueue and invoke
-  adoptedCallback
-- Inserting an ancestor of custom element into an HTML document created by createDocument
-  must enqueue and invoke adoptedCallback
-- Inserting an ancestor of custom element into an HTML document fetched by XHR must
-  enqueue and invoke adoptedCallback
 - Inserting an ancestor of custom element into the document of an iframe must enqueue
   and invoke adoptedCallback
 - Inserting an ancestor of custom element into the document of the template elements
-  must enqueue and invoke adoptedCallback
-- Inserting the shadow host of a custom element into a cloned document must enqueue
-  and invoke adoptedCallback
-- Inserting the shadow host of a custom element into a document created by createHTMLDocument
-  must enqueue and invoke adoptedCallback
-- Inserting the shadow host of a custom element into a new document must enqueue and
-  invoke adoptedCallback
-- Inserting the shadow host of a custom element into an HTML document created by createDocument
-  must enqueue and invoke adoptedCallback
-- Inserting the shadow host of a custom element into an HTML document fetched by XHR
   must enqueue and invoke adoptedCallback
 - Inserting the shadow host of a custom element into the document of an iframe must
   enqueue and invoke adoptedCallback
 - Inserting the shadow host of a custom element into the document of the template
   elements must enqueue and invoke adoptedCallback
-- Moving a custom element from the owner document into a cloned document must enqueue
-  and invoke adoptedCallback
-- Moving a custom element from the owner document into a document created by createHTMLDocument
-  must enqueue and invoke adoptedCallback
-- Moving a custom element from the owner document into a new document must enqueue
-  and invoke adoptedCallback
-- Moving a custom element from the owner document into an HTML document created by
-  createDocument must enqueue and invoke adoptedCallback
-- Moving a custom element from the owner document into an HTML document fetched by
-  XHR must enqueue and invoke adoptedCallback
 - Moving a custom element from the owner document into the document of an iframe must
   enqueue and invoke adoptedCallback
 - Moving a custom element from the owner document into the document of the template
   elements must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into a cloned document
-  must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into a document created
-  by createHTMLDocument must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into a new document
-  must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into an HTML document
-  created by createDocument must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into an HTML document
-  fetched by XHR must enqueue and invoke adoptedCallback
 - Moving an ancestor of custom element from the owner document into the document of
   an iframe must enqueue and invoke adoptedCallback
 - Moving an ancestor of custom element from the owner document into the document of
@@ -453,16 +385,6 @@ custom-elements/adopted-callback.html:
   an HTML document fetched by XHR must enqueue and invoke adoptedCallback
 - Moving the <template>'s content of a custom element from the owner document into
   the document of an iframe must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into a cloned
-  document must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into a document
-  created by createHTMLDocument must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into a new document
-  must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into an HTML
-  document created by createDocument must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into an HTML
-  document fetched by XHR must enqueue and invoke adoptedCallback
 - Moving the shadow host of a custom element from the owner document into the document
   of an iframe must enqueue and invoke adoptedCallback
 - Moving the shadow host of a custom element from the owner document into the document
@@ -1240,13 +1162,6 @@ custom-elements/reactions/CSSStyleDeclaration.html:
   adds the observed style attribute
 - cssFloat on CSSStyleDeclaration must not enqueue an attributeChanged reaction when
   it adds the style attribute but the style attribute is not observed
-custom-elements/reactions/ChildNode.html:
-- after on ChildNode must enqueue a disconnected reaction, an adopted reaction, and
-  a connected reaction when the custom element was in another document
-- before on ChildNode must enqueue a disconnected reaction, an adopted reaction, and
-  a connected reaction when the custom element was in another document
-- replaceWith on ChildNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
 custom-elements/reactions/DOMStringMap.html:
 - setter on DOMStringMap must enqueue an attributeChanged reaction when mutating the
   value of an observed data attribute to the same value
@@ -1256,12 +1171,9 @@ custom-elements/reactions/DOMTokenList.html:
 - the stringifier of DOMTokenList must enqueue an attributeChanged reaction when the
   setter is called with the original value of the attribute
 custom-elements/reactions/Document.html:
-- adoptNode on Document must enqueue an adopted reaction when importing a custom element
 - body on Document must enqueue disconnectedCallback when removing a custom element
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
-- importNode on Document must not construct a new custom element when importing a
-  custom element into a window-less document
 - open on Document must enqueue disconnectedCallback when removing a custom element
 - title on Document must enqueue disconnectedCallback when removing a custom element
 - write on Document must enqueue disconnectedCallback when removing a custom element
@@ -1272,8 +1184,6 @@ custom-elements/reactions/Element.html:
 - innerHTML on Element must enqueue a connected reaction for a newly constructed custom
   element
 - innerHTML on Element must enqueue a disconnected reaction
-- insertAdjacentElement on Element must enqueue a disconnected reaction, an adopted
-  reaction, and a connected reaction when the custom element was in another document
 custom-elements/reactions/HTMLAnchorElement.html:
 - text on HTMLAnchorElement must enqueue disconnectedCallback when removing a custom
   element
@@ -1321,23 +1231,12 @@ custom-elements/reactions/HTMLTitleElement.html:
 - text on HTMLTitleElement must enqueue disconnectedCallback when removing a custom
   element
 custom-elements/reactions/Node.html:
-- appendChild on ChildNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
 - cloneNode on Node must enqueue an attributeChanged reaction when cloning an element
   only for observed attributes
 - cloneNode on Node must enqueue an attributeChanged reaction when cloning an element
   with an observed attribute
 - cloneNode on Node must not enqueue an attributeChanged reaction when cloning an
   element with an unobserved attribute
-- insertBefore on ChildNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
-- replaceChild on ChildNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
-custom-elements/reactions/ParentNode.html:
-- append on ParentNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
-- prepend on ParentNode must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
 custom-elements/reactions/Range.html:
 - cloneContents on Range must enqueue an attributeChanged reaction when cloning an
   element only for observed attributes
@@ -1346,10 +1245,6 @@ custom-elements/reactions/Range.html:
 - cloneContents on Range must not enqueue an attributeChanged reaction when cloning
   an element with an unobserved attribute
 - createContextualFragment on Range must construct a custom element
-- insertNode on Range must enqueue a disconnected reaction, an adopted reaction, and
-  a connected reaction when the custom element was in another document
-- surroundContents on Range must enqueue a disconnected reaction, an adopted reaction,
-  and a connected reaction when the custom element was in another document
 custom-elements/reactions/Selection.html:
 - deleteFromDocument on Selection must enqueue a disconnected reaction
 custom-elements/reactions/ShadowRoot.html:
