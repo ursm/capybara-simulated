@@ -2471,20 +2471,6 @@ custom-elements/throw-on-dynamic-markup-insertion-counter-reactions.html:
 - document.writeln of another document must not throw an InvalidStateError when processing
   custom element reactions for a synchronous constructed custom element
 custom-elements/upgrading.html:
-- Creating an element in a cloned document and inserting into the document must not
-  enqueue a custom element upgrade reaction
-- Creating an element in a cloned document must not enqueue a custom element upgrade
-  reaction because the document does not have a browsing context
-- Creating an element in a document created by createHTMLDocument and inserting into
-  the document must not enqueue a custom element upgrade reaction
-- Creating an element in a document created by createHTMLDocument must not enqueue
-  a custom element upgrade reaction because the document does not have a browsing
-  context
-- Creating an element in an HTML document created by createDocument and inserting
-  into the document must not enqueue a custom element upgrade reaction
-- Creating an element in an HTML document created by createDocument must not enqueue
-  a custom element upgrade reaction because the document does not have a browsing
-  context
 - Creating an element in the document of the template elements and inserting into
   the document must not enqueue a custom element upgrade reaction
 - Creating an element in the document of the template elements must not enqueue a
