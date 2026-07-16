@@ -2251,23 +2251,9 @@ custom-elements/registries/valid-custom-element-names.html:
   string: "a`-element"'
 custom-elements/state/ElementInternals-states.html:
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
-custom-elements/state/state-css-selector-nth-of.html:
-- state selector has influence on nth-of when state is applied
-- style is invalided on clear()
-custom-elements/state/state-css-selector-shadow-dom.html:
-- state selector has influence when state is applied
-custom-elements/state/state-css-selector.html:
-- state selector has influence when state is applied
-- state selector influences has() when state is applied
-- state selector influences siblings when state is applied
-- states added multiple times counts as one
-- style is invalided on clear()
 custom-elements/state/state-pseudo-class.html:
-- ":state() parsing passes"
+- ":state() parsing failures"
 - ":state(foo) and ::part()"
-- ":state(foo) and :host()"
-- ":state(foo) and other pseudo classes"
-- ":state(foo) in simple cases"
 - ":state(foo) serialization"
 custom-elements/throw-on-dynamic-markup-insertion-counter-construct-xml-parser.xhtml:
 - document.close() must throw an InvalidStateError when synchronously constructing
