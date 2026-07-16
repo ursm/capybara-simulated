@@ -146,74 +146,9 @@ custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongl
 - connectedCallback
 - disconnectedCallback
 custom-elements/CustomElementRegistry-getName.html:
-- customElements.getName must return null when the registry does not contain an entry
-  with the given constructor
+- customElements.getName must throw when the element interface is not a constructor
 - customElements.getName returns the name of the entry with the given constructor
   when there is a matching entry.
-- customElements.getName returns the name of the entry with the given customized built
-  in constructor when there is a matching entry.
-custom-elements/CustomElementRegistry.html:
-- A promise returned by customElements.whenDefined must be resolved by "define"
-- 'Custom Elements: CustomElementRegistry interface'
-- CustomElementRegistry interface must have define as a method
-- CustomElementRegistry interface must have get as a method
-- customElements.define must check IsConstructor on the constructor before checking
-  the element definition is running flag
-- customElements.define must define an instantiatable custom element
-- customElements.define must get "observedAttributes" property on the constructor
-  prototype when "attributeChangedCallback" is present
-- customElements.define must get "prototype", "disabledFeatures", and "formAssociated"
-  property of the constructor
-- customElements.define must get callbacks of the constructor prototype
-- customElements.define must get four additional callbacks on the prototype if formAssociated
-  is converted to true
-- customElements.define must not throw when defining another custom element in a different
-  global object during Get(constructor, "prototype")
-- customElements.define must rethrow an exception thrown while converting a callback
-  value to Function callback type
-- customElements.define must rethrow an exception thrown while converting the value
-  of disabledFeatures to sequence<DOMString>
-- customElements.define must rethrow an exception thrown while converting the value
-  of observedAttributes to sequence<DOMString>
-- customElements.define must rethrow an exception thrown while getting "prototype"
-  property of the constructor
-- customElements.define must rethrow an exception thrown while getting additional
-  formAssociated callbacks on the constructor prototype
-- customElements.define must rethrow an exception thrown while getting callbacks on
-  the constructor prototype
-- customElements.define must rethrow an exception thrown while getting disabledFeatures
-  on the constructor prototype
-- customElements.define must rethrow an exception thrown while getting formAssociated
-  on the constructor prototype
-- customElements.define must rethrow an exception thrown while getting observedAttributes
-  on the constructor prototype
-- customElements.define must rethrow an exception thrown while iterating over disabledFeatures
-  to sequence<DOMString>
-- customElements.define must rethrow an exception thrown while iterating over observedAttributes
-  to sequence<DOMString>
-- customElements.define must rethrow an exception thrown while retrieving Symbol.iterator
-  on disabledFeatures
-- customElements.define must rethrow an exception thrown while retrieving Symbol.iterator
-  on observedAttributes
-- customElements.define must throw a NotSupportedError when element definition is
-  running flag is set
-- customElements.define must throw a NotSupportedError when there is already a custom
-  element with the same class
-- customElements.define must throw when "prototype" property of the constructor is
-  not an object
-- customElements.define must throw when the element interface is not a constructor
-- customElements.define must throw when there is already a custom element of the same
-  name
-- customElements.define must throw with an invalid name
-- customElements.define must upgrade elements in the shadow-including tree order
-- customElements.define must validate the custom element name before checking the
-  element definition is running flag
-- customElements.define unset the element definition is running flag before upgrading
-  custom elements
-- customElements.whenDefined must return a rejected promise when the given name is
-  not a valid custom element name
-- customElements.whenDefined must return the same promise each time invoked for a
-  valid custom element name which has not been defined
 custom-elements/Document-createElement-customized-builtins.html:
 - document.createElement must create an instance of autonomous custom elements when
   it has is attribute
@@ -222,7 +157,6 @@ custom-elements/Document-createElement-customized-builtins.html:
 - document.createElement with unknown "is" value should create "undefined" state element
 - document.createElement()'s second argument is to be ignored when it's a string
 custom-elements/Document-createElement.html:
-- document.createElement must create an instance of custom elements
 - document.createElement must report a NotSupportedError when a Comment child is added
   during construction
 - document.createElement must report a NotSupportedError when a Text child is added
@@ -271,6 +205,7 @@ custom-elements/Document-createElement.html:
   a DOM node
 - document.createElement must report an exception thrown by a custom element constructor
 custom-elements/Document-createElementNS-customized-builtins.html:
+- 'builtin: document.createElementNS should create custom elements with prefixes.'
 - document.createElementNS()'s third argument is to be ignored when it's a string
 custom-elements/Document-createElementNS.html:
 - 'autonomous: document.createElementNS should not create HTMLUnknownElement for a
@@ -394,10 +329,6 @@ custom-elements/ElementInternals-role.html:
 - Applies parent/child relationship of "table"/"rowgroup" via Element Internals
 - Applies parent/child relationship of "tablist"/"tab" via Element Internals
 - Applies parent/child relationship of "tree"/"treeitem" via Element Internals
-custom-elements/HTMLElement-attachInternals.html:
-- If a custom element definition for the local name of the element has disable internals
-  flag, throw a NotSupportedError
-- Successful attachInternals() and the second call.
 custom-elements/HTMLElement-constructor-customized-builtins.html:
 - HTMLElement constructor must not get .prototype until it finishes its extends sanity
   checks, calling proxy constructor directly
@@ -407,15 +338,8 @@ custom-elements/HTMLElement-constructor.html:
 - Custom element constructor must throw TypeError when it does not extend HTMLElement
 - Custom element constructor must throw TypeError when it does not extend the proper
   element interface
-- HTMLElement constructor must allow subclassing a custom element
-- HTMLElement constructor must allow subclassing an user-defined subclass of HTMLElement
-- HTMLElement constructor must infer the tag name from the element interface
 - HTMLElement constructor must not get .prototype until it finishes its registration  sanity
   checks, calling via Reflect
-- HTMLElement constructor must only get .prototype once, calling proxy constructor
-  directly
-- HTMLElement constructor must only get .prototype once, calling proxy constructor
-  via Reflect
 - HTMLElement constructor must throw TypeError when it has not been defined by customElements.define
 - HTMLElement constructor must throw a TypeError when NewTarget is equal to itself
 - HTMLElement constructor must throw a TypeError when NewTarget is equal to itself
@@ -954,7 +878,12 @@ custom-elements/custom-element-reaction-queue.html:
   element is connected during upgrading
 custom-elements/customized-built-in-constructor-exceptions.html:
 - Appending children in customized built-in constructor should work
+- Make sure customized <input> element doesnt crash
 - Make sure customized <input> element that sets attributes doesnt crash
+- Throwing exception in customized built-in constructor should not crash and should
+  return correct element type (form)
+- Throwing exception in customized built-in constructor should not crash and should
+  return correct element type (video)
 custom-elements/disconnected-callbacks.html:
 - Removing a custom element from a shadow tree in the document of an iframe must enqueue
   and invoke disconnectedCallback
@@ -995,25 +924,12 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
   in its custom element reaction queue must not result in connectedCallback getting
   invoked before the removal completes
 - Setting an observed attribute on an element with attributeChangedCallback while
-  it has a connectedCallback in its custom element reaction queue must not result
-  in connectedCallback getting invoked before the attribute change completes
-- Setting an observed attribute on an element with attributeChangedCallback while
   it has a connectedCallback in its custom element reaction queue must result in connectedCallback
   getting invoked before the attribute change completes
-custom-elements/form-associated/ElementInternals-NotSupportedError.html:
-- Form-related operations and attributes should throw NotSupportedErrors for non-form-associated
-  custom elements.
-custom-elements/form-associated/ElementInternals-form.html:
-- ElementInternals.form should throws NotSupportedError if the target element is not
-  a form-associated custom element
 custom-elements/form-associated/ElementInternals-labels.html:
-- ElementInternals.labels should throw NotSupportedError if the target element is
-  not a form-associated custom element
 - LABEL association
 - LABEL click
 custom-elements/form-associated/ElementInternals-setFormValue.html:
-- ElementInternals.setFormValue() should throw NotSupportedError if the target element
-  is not a form-associated custom element
 - Multiple values - name content attribute is ignored
 - Newline normalization - \n in FormData filename (formdata)
 - Newline normalization - \n in FormData filename (urlencoded)
@@ -1070,17 +986,11 @@ custom-elements/form-associated/ElementInternals-validation.html:
 - Custom control affects :valid :invalid for FORM and FIELDSET
 - Custom control affects validation at the owner form
 - checkValidity()
-- checkValidity() should throw NotSupportedError if the target element is not a form-associated
-  custom element
 - reportValidity()
-- reportValidity() should throw NotSupportedError if the target element is not a form-associated
-  custom element
 - validity and setValidity()
 - validity.customError should be false if not explicitly set via setValidity()
 - willValidate
 - willValidate after upgrade
-- willValidate should throw NotSupportedError if the target element is not a form-associated
-  custom element
 custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
 custom-elements/form-associated/fieldset-elements.html:
@@ -1176,7 +1086,6 @@ custom-elements/parser/parser-constructs-custom-elements-with-is.html:
 - HTML parser must create a defined autonomous custom element when customElements.define
   comes before HTML parser creation
 custom-elements/parser/parser-constructs-custom-elements.html:
-- HTML parser must NOT create a custom element before customElements.define is called
 - HTML parser must create a defined custom element before executing inline scripts
 custom-elements/parser/parser-fallsback-to-unknown-element.html:
 - HTML parser must create a fallback HTMLUnknownElement when a custom element constructor
@@ -1197,12 +1106,7 @@ custom-elements/parser/parser-uses-constructed-element.html:
 - HTML parser must use the returned value of the custom element constructor instead
   using the one created in super() call
 custom-elements/parser/parser-uses-registry-of-owner-document.html:
-- HTML parser must not instantiate a custom element defined inside an frame in frame
-  element's owner document
-- HTML parser must not instantiate custom elements inside template elements
-- HTML parser must not use the registry of the owner element's document inside an
-  iframe
-- HTML parser must use the registry of window.document in a document created by DOMParser
+- HTML parser must use the registry of the content document inside an iframe
 - HTML parser must use the registry of window.document in a document created by document.implementation.createXHTMLDocument()
 custom-elements/parser/serializing-html-fragments-customized-builtins.html:
 - '"is" value should be serialized even for an undefined element'
@@ -1217,46 +1121,29 @@ custom-elements/pseudo-class-defined-customized-builtins.html:
 - <abbr is="my-abbr"> should not be :defined
 - <abbr is="my-abbr"> should not be :defined
 - <p is=""> should not be :defined
-- <p is=""> should not be :defined
-- Upgraded createElement("abbr", is:"my-abbr") should be :defined
 - Upgraded createElement("abbr", is:"my-abbr") should be :defined
 - Upgraded createElementNS("http://www.w3.org/1999/xhtml", "abbr", is:"my-abbr") should
   be :defined
-- Upgraded createElementNS("http://www.w3.org/1999/xhtml", "abbr", is:"my-abbr") should
-  be :defined
-- 'Without browsing context: createElement("abbr", is:"my-abbr") should not be :defined'
 - 'Without browsing context: createElement("abbr", is:"my-abbr") should not be :defined'
 - 'Without browsing context: createElement("p", is:"") should not be :defined'
-- 'Without browsing context: createElement("p", is:"") should not be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "abbr",
-  is:"my-abbr") should not be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "abbr",
   is:"my-abbr") should not be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "p",
   is:"") should not be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "p",
-  is:"") should not be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "abbr",
-  is:"my-abbr") should be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "abbr",
   is:"my-abbr") should be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "p", is:"")
   should be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "p", is:"")
-  should be :defined'
 - createElement("abbr", is:"my-abbr") should not be :defined
 - createElement("abbr", is:"my-abbr") should not be :defined
-- createElement("p", is:"") should not be :defined
 - createElement("p", is:"") should not be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "abbr", is:"my-abbr") should not
   be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "abbr", is:"my-abbr") should not
   be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "p", is:"") should not be :defined
-- createElementNS("http://www.w3.org/1999/xhtml", "p", is:"") should not be :defined
 - createElementNS("http://www.w3.org/2000/svg", "abbr", is:"my-abbr") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "abbr", is:"my-abbr") should be :defined
-- createElementNS("http://www.w3.org/2000/svg", "p", is:"") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "p", is:"") should be :defined
 custom-elements/pseudo-class-defined.html:
 - "<a-a> should not be :defined"
@@ -1264,19 +1151,12 @@ custom-elements/pseudo-class-defined.html:
 - "<div> should be :defined"
 - "<div> should be :defined"
 - "<font-face> should be :defined"
-- "<font-face> should be :defined"
-- Upgraded createElement("a-a") should be :defined
 - Upgraded createElement("a-a") should be :defined
 - Upgraded createElementNS("http://www.w3.org/1999/xhtml", "a-a") should be :defined
-- Upgraded createElementNS("http://www.w3.org/1999/xhtml", "a-a") should be :defined
-- 'Without browsing context: createElement("a-a") should not be :defined'
 - 'Without browsing context: createElement("a-a") should not be :defined'
 - 'Without browsing context: createElement("div") should be :defined'
 - 'Without browsing context: createElement("div") should be :defined'
 - 'Without browsing context: createElement("font-face") should be :defined'
-- 'Without browsing context: createElement("font-face") should be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "a-a")
-  should not be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "a-a")
   should not be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "div")
@@ -1284,10 +1164,6 @@ custom-elements/pseudo-class-defined.html:
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "div")
   should be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "font-face")
-  should be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/1999/xhtml", "font-face")
-  should be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "a-a")
   should be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "a-a")
   should be :defined'
@@ -1297,25 +1173,20 @@ custom-elements/pseudo-class-defined.html:
   should be :defined'
 - 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "font-face")
   should be :defined'
-- 'Without browsing context: createElementNS("http://www.w3.org/2000/svg", "font-face")
-  should be :defined'
 - createElement("a-a") should not be :defined
 - createElement("a-a") should not be :defined
 - createElement("div") should be :defined
 - createElement("div") should be :defined
-- createElement("font-face") should be :defined
 - createElement("font-face") should be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "a-a") should not be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "a-a") should not be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "div") should be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "div") should be :defined
 - createElementNS("http://www.w3.org/1999/xhtml", "font-face") should be :defined
-- createElementNS("http://www.w3.org/1999/xhtml", "font-face") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "a-a") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "a-a") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "div") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "div") should be :defined
-- createElementNS("http://www.w3.org/2000/svg", "font-face") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "font-face") should be :defined
 - this.matches(:defined) should not match during an upgrade
 custom-elements/range-and-constructors.html:
@@ -1938,7 +1809,6 @@ custom-elements/registries/Construct.html:
 - A constructor with only a scoped custom element registry definition should fail
   upon construction
 custom-elements/registries/CustomElementRegistry-define.html:
-- Create a CustomElementRegistry not identically equal to window.customElements
 - Defining an element in a scoped global registry does not add a definition to the
   global registry
 - Defining an element in the global registry does not add a definition to a scoped
@@ -1963,7 +1833,6 @@ custom-elements/registries/CustomElementRegistry-multi-register.html:
 - Non-global registries still reject duplicate registrations of the same constructor
 - Same constructor can be registered to different registries
 custom-elements/registries/CustomElementRegistry-upgrade.html:
-- upgrade is a function on both global and scoped CustomElementRegistry
 - upgrade is a no-op when called on a shadow root with no association
 - upgrade is a no-op when called on an element associated with a different registry
 - upgrade should not upgrade a candidate element not associated with a registry
@@ -2115,13 +1984,6 @@ custom-elements/registries/constructor-reentry-with-different-definition.html:
 - Re-entry via upgrade before calling super()
 custom-elements/registries/define-customized-builtins.html:
 - If extends is a-, should throw a NotSupportedError
-- If extends is a-.-_, should throw a NotSupportedError
-- If extends is a-0123456789, should throw a NotSupportedError
-- If extends is a-a, should throw a NotSupportedError
-- If extends is a-漢字, should throw a NotSupportedError
-- "If extends is a-\U0002000B, should throw a NotSupportedError"
-- If extends is aa-, should throw a NotSupportedError
-- If extends is aa-a, should throw a NotSupportedError
 - If extends is bgsound, should throw a NotSupportedError
 - If extends is blink, should throw a NotSupportedError
 - If extends is elementnametobeunknownelement, should throw a NotSupportedError
@@ -2130,75 +1992,13 @@ custom-elements/registries/define-customized-builtins.html:
 - If extends is nextid, should throw a NotSupportedError
 - If extends is spacer, should throw a NotSupportedError
 custom-elements/registries/define.html:
-- 'Element names: defining an element named  should throw a SyntaxError'
-- 'Element names: defining an element named - should throw a SyntaxError'
-- 'Element names: defining an element named 0- should throw a SyntaxError'
-- 'Element names: defining an element named A should throw a SyntaxError'
-- 'Element names: defining an element named A- should throw a SyntaxError'
-- 'Element names: defining an element named A-a should throw a SyntaxError'
-- 'Element names: defining an element named a should throw a SyntaxError'
-- 'Element names: defining an element named a-A should throw a SyntaxError'
-- 'Element names: defining an element named a-Z should throw a SyntaxError'
-- 'Element names: defining an element named annotation-xml should throw a SyntaxError'
-- 'Element names: defining an element named color-profile should throw a SyntaxError'
-- 'Element names: defining an element named font-face should throw a SyntaxError'
-- 'Element names: defining an element named font-face-format should throw a SyntaxError'
-- 'Element names: defining an element named font-face-name should throw a SyntaxError'
-- 'Element names: defining an element named font-face-src should throw a SyntaxError'
-- 'Element names: defining an element named font-face-uri should throw a SyntaxError'
-- 'Element names: defining an element named input should throw a SyntaxError'
-- 'Element names: defining an element named missing-glyph should throw a SyntaxError'
-- 'Element names: defining an element named mycustomelement should throw a SyntaxError'
-- 'Element names: defining an element named null should throw a SyntaxError'
-- 'Element names: defining an element named undefined should throw a SyntaxError'
-- If Type(constructor.prototype) is string, should throw a TypeError
-- If Type(constructor.prototype) is undefined, should throw a TypeError
-- If constructor is arrow function, should throw a TypeError
-- If constructor is method, should throw a TypeError
-- If constructor is null, should throw a TypeError
-- If constructor is object, should throw a TypeError
-- If constructor is string, should throw a TypeError
-- If constructor.prototype throws, should rethrow
-- If constructor.prototype.adoptedCallback is integer, should throw a TypeError
-- If constructor.prototype.adoptedCallback is null, should throw a TypeError
-- If constructor.prototype.adoptedCallback is object, should throw a TypeError
-- If constructor.prototype.adoptedCallback throws, should rethrow
-- If constructor.prototype.attributeChangedCallback is integer, should throw a TypeError
-- If constructor.prototype.attributeChangedCallback is null, should throw a TypeError
-- If constructor.prototype.attributeChangedCallback is object, should throw a TypeError
-- If constructor.prototype.attributeChangedCallback throws, should rethrow
-- If constructor.prototype.connectedCallback is integer, should throw a TypeError
-- If constructor.prototype.connectedCallback is null, should throw a TypeError
-- If constructor.prototype.connectedCallback is object, should throw a TypeError
-- If constructor.prototype.connectedCallback throws, should rethrow
-- If constructor.prototype.disconnectedCallback is integer, should throw a TypeError
-- If constructor.prototype.disconnectedCallback is null, should throw a TypeError
-- If constructor.prototype.disconnectedCallback is object, should throw a TypeError
-- If constructor.prototype.disconnectedCallback throws, should rethrow
-- If the constructor is already defined, should throw a NotSupportedError
-- If the name is already defined, should throw a NotSupportedError
+- 'Element names: defining an element named a-a× should succeed'
+- 'Element names: defining an element named a-a　 should succeed'
+- "Element names: defining an element named a-a\U000F0000 should succeed"
 custom-elements/registries/element-mutation-null-registry-removal.html:
 - An element's null customElementRegistry should not mutate after removal from a declarative
   shadow root with shadowrootcustomelementregistry.
 custom-elements/registries/element-mutation.html:
-- A freshly created element should preserve global registry after append into and
-  removal from a scoped shadow root.
-- A freshly created element should preserve global registry after appendChild into
-  and removal from a scoped shadow root.
-- A freshly created element should preserve global registry after prepend into and
-  removal from a scoped shadow root.
-- A freshly created element should preserve global registry when run append between
-  scoped shadow roots.
-- A freshly created element should preserve global registry when run appendChild between
-  scoped shadow roots.
-- A freshly created element should preserve global registry when run prepend between
-  scoped shadow roots.
-- An element with global registry should not change its registry when run append into
-  a shadow tree with scoped registry.
-- An element with global registry should not change its registry when run appendChild
-  into a shadow tree with scoped registry.
-- An element with global registry should not change its registry when run prepend
-  into a shadow tree with scoped registry.
 - An element with scoped registry should not change its registry when run append into
   another shadow tree with different scoped registry.
 - An element with scoped registry should not change its registry when run append out
@@ -2285,24 +2085,12 @@ custom-elements/registries/scoped-registry-define-upgrade-criteria.html:
 - Adding definition to scoped registry affects associated shadow roots in all iframes
 - Adding definition to scoped registry affects associated shadow roots in other frame
   trees
-- Adding definition to scoped registry should affect all associated shadow roots
 - Adding definition to scoped registry should not affect document tree scope
 - Adding definition to scoped registry should not affect shadow roots using other
   registries
-- Adding definition to scoped registry should not upgrade disconnected elements
-- Adding definition to scoped registry should not upgrade nodes in constructed documents
-- Adding definition to scoped registry should not upgrade nodes in detached frames
-- Adding definition to scoped registry should upgrade nodes associated with the registry.
-- Adding definition to scoped registry should upgrade nodes even after the node is
-  moved into a separate shadow tree.
-- Adding definition to scoped registry should upgrade nodes even after the node is
-  moved to a separate shadow tree using a different registry.
 custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Elements in the "owner" window of a scoped registry are not always upgraded first
 - Upgrade in association order across documents, then tree order in each document
-- Upgrade in shadow-including tree order across tree scopes
-- Upgrade in tree order in the same tree scope
-- Upgrade order does not depend on shadow root attach order
 - Upgrade order is affected by shadow tree adoption across documents
 - Upgrade order is not affected by DOM order between child frames
 custom-elements/registries/scoped-registry-initialize-upgrades.html:
@@ -2329,11 +2117,62 @@ custom-elements/registries/scoped-registry-initialize-upgrades.html:
   in tree order'
 - 'XHTMLDocument: CustomElementRegistry.prototype.initialize should upgrade the element
   given to the first argument'
+custom-elements/registries/scoped-registry-initialize.html:
+- 'Document: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'Document: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'Document: customElementRegistry of an unknown element created with a document without
+  a browsing context uses null regsitry by default'
+- 'Document: customElementRegistry of an unknown element created with an explicit
+  customElementRegistry argument should return the registry'
+- 'Document: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'Document: customElementRegistry of an upgrade candidate connected to a document
+  without a browsing context uses null regsitry by default'
+- 'Document: customElementRegistry of an upgrade candidate created with a document
+  without a browsing context uses null regsitry by default'
+- 'Document: customElementRegistry of an upgrade candidate created with an explicit
+  customElementRegistry argument should return the registry'
+- 'Document: customElementRegistry of document and an upgrade candidate after calling
+  CustomElementRegistry.prototype.initialize should return the registry'
+- 'HTMLDocument: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'HTMLDocument: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'HTMLDocument: customElementRegistry of an unknown element created with a document
+  without a browsing context uses null regsitry by default'
+- 'HTMLDocument: customElementRegistry of an unknown element created with an explicit
+  customElementRegistry argument should return the registry'
+- 'HTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'HTMLDocument: customElementRegistry of an upgrade candidate connected to a document
+  without a browsing context uses null regsitry by default'
+- 'HTMLDocument: customElementRegistry of an upgrade candidate created with a document
+  without a browsing context uses null regsitry by default'
+- 'HTMLDocument: customElementRegistry of an upgrade candidate created with an explicit
+  customElementRegistry argument should return the registry'
+- 'HTMLDocument: customElementRegistry of document and an upgrade candidate after
+  calling CustomElementRegistry.prototype.initialize should return the registry'
+- 'XHTMLDocument: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'XHTMLDocument: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'XHTMLDocument: customElementRegistry of an unknown element created with a document
+  without a browsing context uses null regsitry by default'
+- 'XHTMLDocument: customElementRegistry of an unknown element created with an explicit
+  customElementRegistry argument should return the registry'
+- 'XHTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
+  should return the registry'
+- 'XHTMLDocument: customElementRegistry of an upgrade candidate connected to a document
+  without a browsing context uses null regsitry by default'
+- 'XHTMLDocument: customElementRegistry of an upgrade candidate created with a document
+  without a browsing context uses null regsitry by default'
+- 'XHTMLDocument: customElementRegistry of an upgrade candidate created with an explicit
+  customElementRegistry argument should return the registry'
+- 'XHTMLDocument: customElementRegistry of document and an upgrade candidate after
+  calling CustomElementRegistry.prototype.initialize should return the registry'
 custom-elements/registries/scoped-registry-registry-define-get-etc.html:
-- Custom element registries with a registered custom element resolve the class in
-  their whenDefined method
-- Custom element registries with a registered custom element return the class in their
-  get method, and the name in their getName method
 - Scoped Custom element registries allow registering name that exists in global registry
 - Scoped Custom element registries do not inherit names or classes from the global
   registry
@@ -2355,2327 +2194,176 @@ custom-elements/registries/template.window.js:
 - shadowRootCustomElementRegistry reflects as string
 custom-elements/registries/upgrade.html:
 - Elements inside a template contents DocumentFragment node
-- Two elements as children of the upgraded node
-- Two elements as descendants of the upgraded node
 - Two elements as shadow-including descendants (and not descendants) of the upgraded
   node
-- Upgrading an element directly (example from the spec)
 custom-elements/registries/valid-custom-element-names.html:
-- "Invalid custom element name: code points: [0,0,45,101,108,101,109,101,110,116],
-  string: \"\0\0-element\""
-- "Invalid custom element name: code points: [0,0], string: \"\0\0\""
-- "Invalid custom element name: code points: [0,1,45,101,108,101,109,101,110,116],
-  string: \"\0\x01-element\""
-- "Invalid custom element name: code points: [0,10,45,101,108,101,109,101,110,116],
-  string: \"\0\n-element\""
-- "Invalid custom element name: code points: [0,100,45,101,108,101,109,101,110,116],
-  string: \"\0d-element\""
-- "Invalid custom element name: code points: [0,100], string: \"\0d\""
-- "Invalid custom element name: code points: [0,101,45,101,108,101,109,101,110,116],
-  string: \"\0e-element\""
-- "Invalid custom element name: code points: [0,101], string: \"\0e\""
-- "Invalid custom element name: code points: [0,102,45,101,108,101,109,101,110,116],
-  string: \"\0f-element\""
-- "Invalid custom element name: code points: [0,102], string: \"\0f\""
-- "Invalid custom element name: code points: [0,103,45,101,108,101,109,101,110,116],
-  string: \"\0g-element\""
-- "Invalid custom element name: code points: [0,103], string: \"\0g\""
-- "Invalid custom element name: code points: [0,104,45,101,108,101,109,101,110,116],
-  string: \"\0h-element\""
-- "Invalid custom element name: code points: [0,104], string: \"\0h\""
-- "Invalid custom element name: code points: [0,105,45,101,108,101,109,101,110,116],
-  string: \"\0i-element\""
-- "Invalid custom element name: code points: [0,105], string: \"\0i\""
-- "Invalid custom element name: code points: [0,106,45,101,108,101,109,101,110,116],
-  string: \"\0j-element\""
-- "Invalid custom element name: code points: [0,106], string: \"\0j\""
-- "Invalid custom element name: code points: [0,107,45,101,108,101,109,101,110,116],
-  string: \"\0k-element\""
-- "Invalid custom element name: code points: [0,107], string: \"\0k\""
-- "Invalid custom element name: code points: [0,108,45,101,108,101,109,101,110,116],
-  string: \"\0l-element\""
-- "Invalid custom element name: code points: [0,108], string: \"\0l\""
-- "Invalid custom element name: code points: [0,109,45,101,108,101,109,101,110,116],
-  string: \"\0m-element\""
-- "Invalid custom element name: code points: [0,109], string: \"\0m\""
-- "Invalid custom element name: code points: [0,10], string: \"\0\n\""
-- "Invalid custom element name: code points: [0,11,45,101,108,101,109,101,110,116],
-  string: \"\0\v-element\""
-- "Invalid custom element name: code points: [0,110,45,101,108,101,109,101,110,116],
-  string: \"\0n-element\""
-- "Invalid custom element name: code points: [0,110], string: \"\0n\""
-- "Invalid custom element name: code points: [0,111,45,101,108,101,109,101,110,116],
-  string: \"\0o-element\""
-- "Invalid custom element name: code points: [0,111], string: \"\0o\""
-- "Invalid custom element name: code points: [0,112,45,101,108,101,109,101,110,116],
-  string: \"\0p-element\""
-- "Invalid custom element name: code points: [0,112], string: \"\0p\""
-- "Invalid custom element name: code points: [0,113,45,101,108,101,109,101,110,116],
-  string: \"\0q-element\""
-- "Invalid custom element name: code points: [0,113], string: \"\0q\""
-- "Invalid custom element name: code points: [0,114,45,101,108,101,109,101,110,116],
-  string: \"\0r-element\""
-- "Invalid custom element name: code points: [0,114], string: \"\0r\""
-- "Invalid custom element name: code points: [0,115,45,101,108,101,109,101,110,116],
-  string: \"\0s-element\""
-- "Invalid custom element name: code points: [0,115], string: \"\0s\""
-- "Invalid custom element name: code points: [0,116,45,101,108,101,109,101,110,116],
-  string: \"\0t-element\""
-- "Invalid custom element name: code points: [0,116], string: \"\0t\""
-- "Invalid custom element name: code points: [0,117,45,101,108,101,109,101,110,116],
-  string: \"\0u-element\""
-- "Invalid custom element name: code points: [0,117], string: \"\0u\""
-- "Invalid custom element name: code points: [0,118,45,101,108,101,109,101,110,116],
-  string: \"\0v-element\""
-- "Invalid custom element name: code points: [0,118], string: \"\0v\""
-- "Invalid custom element name: code points: [0,119,45,101,108,101,109,101,110,116],
-  string: \"\0w-element\""
-- "Invalid custom element name: code points: [0,119], string: \"\0w\""
-- "Invalid custom element name: code points: [0,11], string: \"\0\v\""
-- "Invalid custom element name: code points: [0,12,45,101,108,101,109,101,110,116],
-  string: \"\0\f-element\""
-- "Invalid custom element name: code points: [0,120,45,101,108,101,109,101,110,116],
-  string: \"\0x-element\""
-- "Invalid custom element name: code points: [0,120], string: \"\0x\""
-- "Invalid custom element name: code points: [0,121,45,101,108,101,109,101,110,116],
-  string: \"\0y-element\""
-- "Invalid custom element name: code points: [0,121], string: \"\0y\""
-- "Invalid custom element name: code points: [0,122,45,101,108,101,109,101,110,116],
-  string: \"\0z-element\""
-- "Invalid custom element name: code points: [0,122], string: \"\0z\""
-- "Invalid custom element name: code points: [0,123,45,101,108,101,109,101,110,116],
-  string: \"\0{-element\""
-- "Invalid custom element name: code points: [0,123], string: \"\0{\""
-- "Invalid custom element name: code points: [0,124,45,101,108,101,109,101,110,116],
-  string: \"\0|-element\""
-- "Invalid custom element name: code points: [0,124], string: \"\0|\""
-- "Invalid custom element name: code points: [0,125,45,101,108,101,109,101,110,116],
-  string: \"\0}-element\""
-- "Invalid custom element name: code points: [0,125], string: \"\0}\""
-- "Invalid custom element name: code points: [0,126,45,101,108,101,109,101,110,116],
-  string: \"\0~-element\""
-- "Invalid custom element name: code points: [0,126], string: \"\0~\""
-- "Invalid custom element name: code points: [0,127,45,101,108,101,109,101,110,116],
-  string: \"\0\x7F-element\""
-- "Invalid custom element name: code points: [0,127345,45,101,108,101,109,101,110,116],
-  string: \"\0\U0001F171-element\""
-- "Invalid custom element name: code points: [0,127345], string: \"\0\U0001F171\""
-- "Invalid custom element name: code points: [0,127382,45,101,108,101,109,101,110,116],
-  string: \"\0\U0001F196-element\""
-- "Invalid custom element name: code points: [0,127382], string: \"\0\U0001F196\""
-- "Invalid custom element name: code points: [0,127], string: \"\0\x7F\""
-- "Invalid custom element name: code points: [0,12], string: \"\0\f\""
-- "Invalid custom element name: code points: [0,13,45,101,108,101,109,101,110,116],
-  string: \"\0\r-element\""
-- "Invalid custom element name: code points: [0,13], string: \"\0\r\""
-- "Invalid custom element name: code points: [0,14,45,101,108,101,109,101,110,116],
-  string: \"\0\x0E-element\""
-- "Invalid custom element name: code points: [0,14], string: \"\0\x0E\""
-- "Invalid custom element name: code points: [0,15,45,101,108,101,109,101,110,116],
-  string: \"\0\x0F-element\""
-- "Invalid custom element name: code points: [0,15], string: \"\0\x0F\""
-- "Invalid custom element name: code points: [0,16,45,101,108,101,109,101,110,116],
-  string: \"\0\x10-element\""
-- "Invalid custom element name: code points: [0,16], string: \"\0\x10\""
-- "Invalid custom element name: code points: [0,17,45,101,108,101,109,101,110,116],
-  string: \"\0\x11-element\""
-- "Invalid custom element name: code points: [0,17], string: \"\0\x11\""
-- "Invalid custom element name: code points: [0,18,45,101,108,101,109,101,110,116],
-  string: \"\0\x12-element\""
-- "Invalid custom element name: code points: [0,18], string: \"\0\x12\""
-- "Invalid custom element name: code points: [0,19,45,101,108,101,109,101,110,116],
-  string: \"\0\x13-element\""
-- "Invalid custom element name: code points: [0,19], string: \"\0\x13\""
-- "Invalid custom element name: code points: [0,1], string: \"\0\x01\""
-- "Invalid custom element name: code points: [0,2,45,101,108,101,109,101,110,116],
-  string: \"\0\x02-element\""
-- "Invalid custom element name: code points: [0,20,45,101,108,101,109,101,110,116],
-  string: \"\0\x14-element\""
-- "Invalid custom element name: code points: [0,20], string: \"\0\x14\""
-- "Invalid custom element name: code points: [0,21,45,101,108,101,109,101,110,116],
-  string: \"\0\x15-element\""
-- "Invalid custom element name: code points: [0,21], string: \"\0\x15\""
-- "Invalid custom element name: code points: [0,22,45,101,108,101,109,101,110,116],
-  string: \"\0\x16-element\""
-- "Invalid custom element name: code points: [0,22], string: \"\0\x16\""
-- "Invalid custom element name: code points: [0,23,45,101,108,101,109,101,110,116],
-  string: \"\0\x17-element\""
-- "Invalid custom element name: code points: [0,23], string: \"\0\x17\""
-- "Invalid custom element name: code points: [0,24,45,101,108,101,109,101,110,116],
-  string: \"\0\x18-element\""
-- "Invalid custom element name: code points: [0,24], string: \"\0\x18\""
-- "Invalid custom element name: code points: [0,25,45,101,108,101,109,101,110,116],
-  string: \"\0\x19-element\""
-- "Invalid custom element name: code points: [0,25], string: \"\0\x19\""
-- "Invalid custom element name: code points: [0,26,45,101,108,101,109,101,110,116],
-  string: \"\0\x1A-element\""
-- "Invalid custom element name: code points: [0,26], string: \"\0\x1A\""
-- "Invalid custom element name: code points: [0,27,45,101,108,101,109,101,110,116],
-  string: \"\0\e-element\""
-- "Invalid custom element name: code points: [0,27], string: \"\0\e\""
-- "Invalid custom element name: code points: [0,28,45,101,108,101,109,101,110,116],
-  string: \"\0\x1C-element\""
-- "Invalid custom element name: code points: [0,28], string: \"\0\x1C\""
-- "Invalid custom element name: code points: [0,29,45,101,108,101,109,101,110,116],
-  string: \"\0\x1D-element\""
-- "Invalid custom element name: code points: [0,29], string: \"\0\x1D\""
-- "Invalid custom element name: code points: [0,2], string: \"\0\x02\""
-- "Invalid custom element name: code points: [0,3,45,101,108,101,109,101,110,116],
-  string: \"\0\x03-element\""
-- "Invalid custom element name: code points: [0,30,45,101,108,101,109,101,110,116],
-  string: \"\0\x1E-element\""
-- "Invalid custom element name: code points: [0,30], string: \"\0\x1E\""
-- "Invalid custom element name: code points: [0,31,45,101,108,101,109,101,110,116],
-  string: \"\0\x1F-element\""
-- "Invalid custom element name: code points: [0,31], string: \"\0\x1F\""
-- "Invalid custom element name: code points: [0,32,45,101,108,101,109,101,110,116],
-  string: \"\0 -element\""
-- "Invalid custom element name: code points: [0,32], string: \"\0 \""
-- "Invalid custom element name: code points: [0,33,45,101,108,101,109,101,110,116],
-  string: \"\0!-element\""
-- "Invalid custom element name: code points: [0,33], string: \"\0!\""
-- "Invalid custom element name: code points: [0,34,45,101,108,101,109,101,110,116],
-  string: \"\0\"-element\""
-- "Invalid custom element name: code points: [0,34], string: \"\0\"\""
-- "Invalid custom element name: code points: [0,35,45,101,108,101,109,101,110,116],
-  string: \"\0#-element\""
-- "Invalid custom element name: code points: [0,35], string: \"\0#\""
-- "Invalid custom element name: code points: [0,36,45,101,108,101,109,101,110,116],
-  string: \"\0$-element\""
-- "Invalid custom element name: code points: [0,36], string: \"\0$\""
-- "Invalid custom element name: code points: [0,37,45,101,108,101,109,101,110,116],
-  string: \"\0%-element\""
-- "Invalid custom element name: code points: [0,37], string: \"\0%\""
-- "Invalid custom element name: code points: [0,38,45,101,108,101,109,101,110,116],
-  string: \"\0&-element\""
-- "Invalid custom element name: code points: [0,38], string: \"\0&\""
-- "Invalid custom element name: code points: [0,39,45,101,108,101,109,101,110,116],
-  string: \"\0'-element\""
-- "Invalid custom element name: code points: [0,39], string: \"\0'\""
-- "Invalid custom element name: code points: [0,3], string: \"\0\x03\""
-- "Invalid custom element name: code points: [0,4,45,101,108,101,109,101,110,116],
-  string: \"\0\x04-element\""
-- "Invalid custom element name: code points: [0,40,45,101,108,101,109,101,110,116],
-  string: \"\0(-element\""
-- "Invalid custom element name: code points: [0,40], string: \"\0(\""
-- "Invalid custom element name: code points: [0,41,45,101,108,101,109,101,110,116],
-  string: \"\0)-element\""
-- "Invalid custom element name: code points: [0,41], string: \"\0)\""
-- "Invalid custom element name: code points: [0,42,45,101,108,101,109,101,110,116],
-  string: \"\0*-element\""
-- "Invalid custom element name: code points: [0,42], string: \"\0*\""
-- "Invalid custom element name: code points: [0,43,45,101,108,101,109,101,110,116],
-  string: \"\0+-element\""
-- "Invalid custom element name: code points: [0,43], string: \"\0+\""
-- "Invalid custom element name: code points: [0,44,45,101,108,101,109,101,110,116],
-  string: \"\0,-element\""
-- "Invalid custom element name: code points: [0,44], string: \"\0,\""
-- "Invalid custom element name: code points: [0,45,0], string: \"\0-\0\""
-- "Invalid custom element name: code points: [0,45,100], string: \"\0-d\""
-- "Invalid custom element name: code points: [0,45,101,108,101,109,101,110,116], string:
-  \"\0-element\""
-- "Invalid custom element name: code points: [0,45,101], string: \"\0-e\""
-- "Invalid custom element name: code points: [0,45,102], string: \"\0-f\""
-- "Invalid custom element name: code points: [0,45,103], string: \"\0-g\""
-- "Invalid custom element name: code points: [0,45,104], string: \"\0-h\""
-- "Invalid custom element name: code points: [0,45,105], string: \"\0-i\""
-- "Invalid custom element name: code points: [0,45,106], string: \"\0-j\""
-- "Invalid custom element name: code points: [0,45,107], string: \"\0-k\""
-- "Invalid custom element name: code points: [0,45,108], string: \"\0-l\""
-- "Invalid custom element name: code points: [0,45,109], string: \"\0-m\""
-- "Invalid custom element name: code points: [0,45,10], string: \"\0-\n\""
-- "Invalid custom element name: code points: [0,45,110], string: \"\0-n\""
-- "Invalid custom element name: code points: [0,45,111], string: \"\0-o\""
-- "Invalid custom element name: code points: [0,45,112], string: \"\0-p\""
-- "Invalid custom element name: code points: [0,45,113], string: \"\0-q\""
-- "Invalid custom element name: code points: [0,45,114], string: \"\0-r\""
-- "Invalid custom element name: code points: [0,45,115], string: \"\0-s\""
-- "Invalid custom element name: code points: [0,45,116], string: \"\0-t\""
-- "Invalid custom element name: code points: [0,45,117], string: \"\0-u\""
-- "Invalid custom element name: code points: [0,45,118], string: \"\0-v\""
-- "Invalid custom element name: code points: [0,45,119], string: \"\0-w\""
-- "Invalid custom element name: code points: [0,45,11], string: \"\0-\v\""
-- "Invalid custom element name: code points: [0,45,120], string: \"\0-x\""
-- "Invalid custom element name: code points: [0,45,121], string: \"\0-y\""
-- "Invalid custom element name: code points: [0,45,122], string: \"\0-z\""
-- "Invalid custom element name: code points: [0,45,123], string: \"\0-{\""
-- "Invalid custom element name: code points: [0,45,124], string: \"\0-|\""
-- "Invalid custom element name: code points: [0,45,125], string: \"\0-}\""
-- "Invalid custom element name: code points: [0,45,126], string: \"\0-~\""
-- "Invalid custom element name: code points: [0,45,127345], string: \"\0-\U0001F171\""
-- "Invalid custom element name: code points: [0,45,127382], string: \"\0-\U0001F196\""
-- "Invalid custom element name: code points: [0,45,127], string: \"\0-\x7F\""
-- "Invalid custom element name: code points: [0,45,12], string: \"\0-\f\""
-- "Invalid custom element name: code points: [0,45,13], string: \"\0-\r\""
-- "Invalid custom element name: code points: [0,45,14], string: \"\0-\x0E\""
-- "Invalid custom element name: code points: [0,45,15], string: \"\0-\x0F\""
-- "Invalid custom element name: code points: [0,45,16], string: \"\0-\x10\""
-- "Invalid custom element name: code points: [0,45,17], string: \"\0-\x11\""
-- "Invalid custom element name: code points: [0,45,18], string: \"\0-\x12\""
-- "Invalid custom element name: code points: [0,45,19], string: \"\0-\x13\""
-- "Invalid custom element name: code points: [0,45,1], string: \"\0-\x01\""
-- "Invalid custom element name: code points: [0,45,20], string: \"\0-\x14\""
-- "Invalid custom element name: code points: [0,45,21], string: \"\0-\x15\""
-- "Invalid custom element name: code points: [0,45,22], string: \"\0-\x16\""
-- "Invalid custom element name: code points: [0,45,23], string: \"\0-\x17\""
-- "Invalid custom element name: code points: [0,45,24], string: \"\0-\x18\""
-- "Invalid custom element name: code points: [0,45,25], string: \"\0-\x19\""
-- "Invalid custom element name: code points: [0,45,26], string: \"\0-\x1A\""
-- "Invalid custom element name: code points: [0,45,27], string: \"\0-\e\""
-- "Invalid custom element name: code points: [0,45,28], string: \"\0-\x1C\""
-- "Invalid custom element name: code points: [0,45,29], string: \"\0-\x1D\""
-- "Invalid custom element name: code points: [0,45,2], string: \"\0-\x02\""
-- "Invalid custom element name: code points: [0,45,30], string: \"\0-\x1E\""
-- "Invalid custom element name: code points: [0,45,31], string: \"\0-\x1F\""
-- "Invalid custom element name: code points: [0,45,32], string: \"\0- \""
-- "Invalid custom element name: code points: [0,45,33], string: \"\0-!\""
-- "Invalid custom element name: code points: [0,45,34], string: \"\0-\"\""
-- "Invalid custom element name: code points: [0,45,35], string: \"\0-#\""
-- "Invalid custom element name: code points: [0,45,36], string: \"\0-$\""
-- "Invalid custom element name: code points: [0,45,37], string: \"\0-%\""
-- "Invalid custom element name: code points: [0,45,38], string: \"\0-&\""
-- "Invalid custom element name: code points: [0,45,39], string: \"\0-'\""
-- "Invalid custom element name: code points: [0,45,3], string: \"\0-\x03\""
-- "Invalid custom element name: code points: [0,45,40], string: \"\0-(\""
-- "Invalid custom element name: code points: [0,45,41], string: \"\0-)\""
-- "Invalid custom element name: code points: [0,45,42], string: \"\0-*\""
-- "Invalid custom element name: code points: [0,45,43], string: \"\0-+\""
-- "Invalid custom element name: code points: [0,45,44], string: \"\0-,\""
-- "Invalid custom element name: code points: [0,45,45,101,108,101,109,101,110,116],
-  string: \"\0--element\""
-- "Invalid custom element name: code points: [0,45,45], string: \"\0--\""
-- "Invalid custom element name: code points: [0,45,46], string: \"\0-.\""
-- "Invalid custom element name: code points: [0,45,47], string: \"\0-/\""
-- "Invalid custom element name: code points: [0,45,48], string: \"\0-0\""
-- "Invalid custom element name: code points: [0,45,49], string: \"\0-1\""
-- "Invalid custom element name: code points: [0,45,4], string: \"\0-\x04\""
-- "Invalid custom element name: code points: [0,45,50], string: \"\0-2\""
-- "Invalid custom element name: code points: [0,45,51], string: \"\0-3\""
-- "Invalid custom element name: code points: [0,45,52], string: \"\0-4\""
-- "Invalid custom element name: code points: [0,45,53], string: \"\0-5\""
-- "Invalid custom element name: code points: [0,45,54], string: \"\0-6\""
-- "Invalid custom element name: code points: [0,45,55], string: \"\0-7\""
-- "Invalid custom element name: code points: [0,45,56], string: \"\0-8\""
-- "Invalid custom element name: code points: [0,45,57], string: \"\0-9\""
-- "Invalid custom element name: code points: [0,45,58], string: \"\0-:\""
-- "Invalid custom element name: code points: [0,45,59], string: \"\0-;\""
-- "Invalid custom element name: code points: [0,45,5], string: \"\0-\x05\""
-- "Invalid custom element name: code points: [0,45,60], string: \"\0-<\""
-- "Invalid custom element name: code points: [0,45,61], string: \"\0-=\""
-- "Invalid custom element name: code points: [0,45,62], string: \"\0->\""
-- "Invalid custom element name: code points: [0,45,63], string: \"\0-?\""
-- "Invalid custom element name: code points: [0,45,64], string: \"\0-@\""
-- "Invalid custom element name: code points: [0,45,65536], string: \"\0-\U00010000\""
-- "Invalid custom element name: code points: [0,45,65], string: \"\0-A\""
-- "Invalid custom element name: code points: [0,45,66], string: \"\0-B\""
-- "Invalid custom element name: code points: [0,45,67], string: \"\0-C\""
-- "Invalid custom element name: code points: [0,45,68], string: \"\0-D\""
-- "Invalid custom element name: code points: [0,45,69], string: \"\0-E\""
-- "Invalid custom element name: code points: [0,45,6], string: \"\0-\x06\""
-- "Invalid custom element name: code points: [0,45,70], string: \"\0-F\""
-- "Invalid custom element name: code points: [0,45,71], string: \"\0-G\""
-- "Invalid custom element name: code points: [0,45,72], string: \"\0-H\""
-- "Invalid custom element name: code points: [0,45,73], string: \"\0-I\""
-- "Invalid custom element name: code points: [0,45,74], string: \"\0-J\""
-- "Invalid custom element name: code points: [0,45,75], string: \"\0-K\""
-- "Invalid custom element name: code points: [0,45,76], string: \"\0-L\""
-- "Invalid custom element name: code points: [0,45,77], string: \"\0-M\""
-- "Invalid custom element name: code points: [0,45,78], string: \"\0-N\""
-- "Invalid custom element name: code points: [0,45,79], string: \"\0-O\""
-- "Invalid custom element name: code points: [0,45,7], string: \"\0-\a\""
-- "Invalid custom element name: code points: [0,45,80], string: \"\0-P\""
-- "Invalid custom element name: code points: [0,45,81], string: \"\0-Q\""
-- "Invalid custom element name: code points: [0,45,82], string: \"\0-R\""
-- "Invalid custom element name: code points: [0,45,83], string: \"\0-S\""
-- "Invalid custom element name: code points: [0,45,84], string: \"\0-T\""
-- "Invalid custom element name: code points: [0,45,85], string: \"\0-U\""
-- "Invalid custom element name: code points: [0,45,86], string: \"\0-V\""
-- "Invalid custom element name: code points: [0,45,87], string: \"\0-W\""
-- "Invalid custom element name: code points: [0,45,88], string: \"\0-X\""
-- "Invalid custom element name: code points: [0,45,89], string: \"\0-Y\""
-- "Invalid custom element name: code points: [0,45,8], string: \"\0-\b\""
-- "Invalid custom element name: code points: [0,45,90], string: \"\0-Z\""
-- "Invalid custom element name: code points: [0,45,91], string: \"\0-[\""
-- "Invalid custom element name: code points: [0,45,92], string: \"\0-\\\""
-- "Invalid custom element name: code points: [0,45,93], string: \"\0-]\""
-- "Invalid custom element name: code points: [0,45,94], string: \"\0-^\""
-- "Invalid custom element name: code points: [0,45,95], string: \"\0-_\""
-- "Invalid custom element name: code points: [0,45,96], string: \"\0-`\""
-- "Invalid custom element name: code points: [0,45,97], string: \"\0-a\""
-- "Invalid custom element name: code points: [0,45,98], string: \"\0-b\""
-- "Invalid custom element name: code points: [0,45,99], string: \"\0-c\""
-- "Invalid custom element name: code points: [0,45,9], string: \"\0-\t\""
-- "Invalid custom element name: code points: [0,45], string: \"\0-\""
-- "Invalid custom element name: code points: [0,46,45,101,108,101,109,101,110,116],
-  string: \"\0.-element\""
-- "Invalid custom element name: code points: [0,46], string: \"\0.\""
-- "Invalid custom element name: code points: [0,47,45,101,108,101,109,101,110,116],
-  string: \"\0/-element\""
-- "Invalid custom element name: code points: [0,47], string: \"\0/\""
-- "Invalid custom element name: code points: [0,48,45,101,108,101,109,101,110,116],
-  string: \"\00-element\""
-- "Invalid custom element name: code points: [0,48], string: \"\00\""
-- "Invalid custom element name: code points: [0,49,45,101,108,101,109,101,110,116],
-  string: \"\01-element\""
-- "Invalid custom element name: code points: [0,49], string: \"\01\""
-- "Invalid custom element name: code points: [0,4], string: \"\0\x04\""
-- "Invalid custom element name: code points: [0,5,45,101,108,101,109,101,110,116],
-  string: \"\0\x05-element\""
-- "Invalid custom element name: code points: [0,50,45,101,108,101,109,101,110,116],
-  string: \"\02-element\""
-- "Invalid custom element name: code points: [0,50], string: \"\02\""
-- "Invalid custom element name: code points: [0,51,45,101,108,101,109,101,110,116],
-  string: \"\03-element\""
-- "Invalid custom element name: code points: [0,51], string: \"\03\""
-- "Invalid custom element name: code points: [0,52,45,101,108,101,109,101,110,116],
-  string: \"\04-element\""
-- "Invalid custom element name: code points: [0,52], string: \"\04\""
-- "Invalid custom element name: code points: [0,53,45,101,108,101,109,101,110,116],
-  string: \"\05-element\""
-- "Invalid custom element name: code points: [0,53], string: \"\05\""
-- "Invalid custom element name: code points: [0,54,45,101,108,101,109,101,110,116],
-  string: \"\06-element\""
-- "Invalid custom element name: code points: [0,54], string: \"\06\""
-- "Invalid custom element name: code points: [0,55,45,101,108,101,109,101,110,116],
-  string: \"\07-element\""
-- "Invalid custom element name: code points: [0,55], string: \"\07\""
-- "Invalid custom element name: code points: [0,56,45,101,108,101,109,101,110,116],
-  string: \"\08-element\""
-- "Invalid custom element name: code points: [0,56], string: \"\08\""
-- "Invalid custom element name: code points: [0,57,45,101,108,101,109,101,110,116],
-  string: \"\09-element\""
-- "Invalid custom element name: code points: [0,57], string: \"\09\""
-- "Invalid custom element name: code points: [0,58,45,101,108,101,109,101,110,116],
-  string: \"\0:-element\""
-- "Invalid custom element name: code points: [0,58], string: \"\0:\""
-- "Invalid custom element name: code points: [0,59,45,101,108,101,109,101,110,116],
-  string: \"\0;-element\""
-- "Invalid custom element name: code points: [0,59], string: \"\0;\""
-- "Invalid custom element name: code points: [0,5], string: \"\0\x05\""
-- "Invalid custom element name: code points: [0,6,45,101,108,101,109,101,110,116],
-  string: \"\0\x06-element\""
-- "Invalid custom element name: code points: [0,60,45,101,108,101,109,101,110,116],
-  string: \"\0<-element\""
-- "Invalid custom element name: code points: [0,60], string: \"\0<\""
-- "Invalid custom element name: code points: [0,61,45,101,108,101,109,101,110,116],
-  string: \"\0=-element\""
-- "Invalid custom element name: code points: [0,61], string: \"\0=\""
-- "Invalid custom element name: code points: [0,62,45,101,108,101,109,101,110,116],
-  string: \"\0>-element\""
-- "Invalid custom element name: code points: [0,62], string: \"\0>\""
-- "Invalid custom element name: code points: [0,63,45,101,108,101,109,101,110,116],
-  string: \"\0?-element\""
-- "Invalid custom element name: code points: [0,63], string: \"\0?\""
-- "Invalid custom element name: code points: [0,64,45,101,108,101,109,101,110,116],
-  string: \"\0@-element\""
-- "Invalid custom element name: code points: [0,64], string: \"\0@\""
-- "Invalid custom element name: code points: [0,65,45,101,108,101,109,101,110,116],
-  string: \"\0A-element\""
-- "Invalid custom element name: code points: [0,65536,45,101,108,101,109,101,110,116],
-  string: \"\0\U00010000-element\""
-- "Invalid custom element name: code points: [0,65536], string: \"\0\U00010000\""
-- "Invalid custom element name: code points: [0,65], string: \"\0A\""
-- "Invalid custom element name: code points: [0,66,45,101,108,101,109,101,110,116],
-  string: \"\0B-element\""
-- "Invalid custom element name: code points: [0,66], string: \"\0B\""
-- "Invalid custom element name: code points: [0,67,45,101,108,101,109,101,110,116],
-  string: \"\0C-element\""
-- "Invalid custom element name: code points: [0,67], string: \"\0C\""
-- "Invalid custom element name: code points: [0,68,45,101,108,101,109,101,110,116],
-  string: \"\0D-element\""
-- "Invalid custom element name: code points: [0,68], string: \"\0D\""
-- "Invalid custom element name: code points: [0,69,45,101,108,101,109,101,110,116],
-  string: \"\0E-element\""
-- "Invalid custom element name: code points: [0,69], string: \"\0E\""
-- "Invalid custom element name: code points: [0,6], string: \"\0\x06\""
-- "Invalid custom element name: code points: [0,7,45,101,108,101,109,101,110,116],
-  string: \"\0\a-element\""
-- "Invalid custom element name: code points: [0,70,45,101,108,101,109,101,110,116],
-  string: \"\0F-element\""
-- "Invalid custom element name: code points: [0,70], string: \"\0F\""
-- "Invalid custom element name: code points: [0,71,45,101,108,101,109,101,110,116],
-  string: \"\0G-element\""
-- "Invalid custom element name: code points: [0,71], string: \"\0G\""
-- "Invalid custom element name: code points: [0,72,45,101,108,101,109,101,110,116],
-  string: \"\0H-element\""
-- "Invalid custom element name: code points: [0,72], string: \"\0H\""
-- "Invalid custom element name: code points: [0,73,45,101,108,101,109,101,110,116],
-  string: \"\0I-element\""
-- "Invalid custom element name: code points: [0,73], string: \"\0I\""
-- "Invalid custom element name: code points: [0,74,45,101,108,101,109,101,110,116],
-  string: \"\0J-element\""
-- "Invalid custom element name: code points: [0,74], string: \"\0J\""
-- "Invalid custom element name: code points: [0,75,45,101,108,101,109,101,110,116],
-  string: \"\0K-element\""
-- "Invalid custom element name: code points: [0,75], string: \"\0K\""
-- "Invalid custom element name: code points: [0,76,45,101,108,101,109,101,110,116],
-  string: \"\0L-element\""
-- "Invalid custom element name: code points: [0,76], string: \"\0L\""
-- "Invalid custom element name: code points: [0,77,45,101,108,101,109,101,110,116],
-  string: \"\0M-element\""
-- "Invalid custom element name: code points: [0,77], string: \"\0M\""
-- "Invalid custom element name: code points: [0,78,45,101,108,101,109,101,110,116],
-  string: \"\0N-element\""
-- "Invalid custom element name: code points: [0,78], string: \"\0N\""
-- "Invalid custom element name: code points: [0,79,45,101,108,101,109,101,110,116],
-  string: \"\0O-element\""
-- "Invalid custom element name: code points: [0,79], string: \"\0O\""
-- "Invalid custom element name: code points: [0,7], string: \"\0\a\""
-- "Invalid custom element name: code points: [0,8,45,101,108,101,109,101,110,116],
-  string: \"\0\b-element\""
-- "Invalid custom element name: code points: [0,80,45,101,108,101,109,101,110,116],
-  string: \"\0P-element\""
-- "Invalid custom element name: code points: [0,80], string: \"\0P\""
-- "Invalid custom element name: code points: [0,81,45,101,108,101,109,101,110,116],
-  string: \"\0Q-element\""
-- "Invalid custom element name: code points: [0,81], string: \"\0Q\""
-- "Invalid custom element name: code points: [0,82,45,101,108,101,109,101,110,116],
-  string: \"\0R-element\""
-- "Invalid custom element name: code points: [0,82], string: \"\0R\""
-- "Invalid custom element name: code points: [0,83,45,101,108,101,109,101,110,116],
-  string: \"\0S-element\""
-- "Invalid custom element name: code points: [0,83], string: \"\0S\""
-- "Invalid custom element name: code points: [0,84,45,101,108,101,109,101,110,116],
-  string: \"\0T-element\""
-- "Invalid custom element name: code points: [0,84], string: \"\0T\""
-- "Invalid custom element name: code points: [0,85,45,101,108,101,109,101,110,116],
-  string: \"\0U-element\""
-- "Invalid custom element name: code points: [0,85], string: \"\0U\""
-- "Invalid custom element name: code points: [0,86,45,101,108,101,109,101,110,116],
-  string: \"\0V-element\""
-- "Invalid custom element name: code points: [0,86], string: \"\0V\""
-- "Invalid custom element name: code points: [0,87,45,101,108,101,109,101,110,116],
-  string: \"\0W-element\""
-- "Invalid custom element name: code points: [0,87], string: \"\0W\""
-- "Invalid custom element name: code points: [0,88,45,101,108,101,109,101,110,116],
-  string: \"\0X-element\""
-- "Invalid custom element name: code points: [0,88], string: \"\0X\""
-- "Invalid custom element name: code points: [0,89,45,101,108,101,109,101,110,116],
-  string: \"\0Y-element\""
-- "Invalid custom element name: code points: [0,89], string: \"\0Y\""
-- "Invalid custom element name: code points: [0,8], string: \"\0\b\""
-- "Invalid custom element name: code points: [0,9,45,101,108,101,109,101,110,116],
-  string: \"\0\t-element\""
-- "Invalid custom element name: code points: [0,90,45,101,108,101,109,101,110,116],
-  string: \"\0Z-element\""
-- "Invalid custom element name: code points: [0,90], string: \"\0Z\""
-- "Invalid custom element name: code points: [0,91,45,101,108,101,109,101,110,116],
-  string: \"\0[-element\""
-- "Invalid custom element name: code points: [0,91], string: \"\0[\""
-- "Invalid custom element name: code points: [0,92,45,101,108,101,109,101,110,116],
-  string: \"\0\\-element\""
-- "Invalid custom element name: code points: [0,92], string: \"\0\\\""
-- "Invalid custom element name: code points: [0,93,45,101,108,101,109,101,110,116],
-  string: \"\0]-element\""
-- "Invalid custom element name: code points: [0,93], string: \"\0]\""
-- "Invalid custom element name: code points: [0,94,45,101,108,101,109,101,110,116],
-  string: \"\0^-element\""
-- "Invalid custom element name: code points: [0,94], string: \"\0^\""
-- "Invalid custom element name: code points: [0,95,45,101,108,101,109,101,110,116],
-  string: \"\0_-element\""
-- "Invalid custom element name: code points: [0,95], string: \"\0_\""
-- "Invalid custom element name: code points: [0,96,45,101,108,101,109,101,110,116],
-  string: \"\0`-element\""
-- "Invalid custom element name: code points: [0,96], string: \"\0`\""
-- "Invalid custom element name: code points: [0,97,45,101,108,101,109,101,110,116],
-  string: \"\0a-element\""
-- "Invalid custom element name: code points: [0,97], string: \"\0a\""
-- "Invalid custom element name: code points: [0,98,45,101,108,101,109,101,110,116],
-  string: \"\0b-element\""
-- "Invalid custom element name: code points: [0,98], string: \"\0b\""
-- "Invalid custom element name: code points: [0,99,45,101,108,101,109,101,110,116],
-  string: \"\0c-element\""
-- "Invalid custom element name: code points: [0,99], string: \"\0c\""
-- "Invalid custom element name: code points: [0,9], string: \"\0\t\""
-- "Invalid custom element name: code points: [0], string: \"\0\""
-- "Invalid custom element name: code points: [1,45,101,108,101,109,101,110,116], string:
-  \"\x01-element\""
-- |-
-  Invalid custom element name: code points: [10,45,101,108,101,109,101,110,116], string: "
-  -element"
-- 'Invalid custom element name: code points: [100], string: "d"'
-- 'Invalid custom element name: code points: [101], string: "e"'
-- 'Invalid custom element name: code points: [102,111,110,116,45,102,97,99,101,45,102,111,114,109,97,116],
-  string: "font-face-format"'
-- 'Invalid custom element name: code points: [102,111,110,116,45,102,97,99,101,45,110,97,109,101],
-  string: "font-face-name"'
-- 'Invalid custom element name: code points: [102,111,110,116,45,102,97,99,101,45,115,114,99],
-  string: "font-face-src"'
-- 'Invalid custom element name: code points: [102,111,110,116,45,102,97,99,101,45,117,114,105],
-  string: "font-face-uri"'
-- 'Invalid custom element name: code points: [102,111,110,116,45,102,97,99,101], string:
-  "font-face"'
-- 'Invalid custom element name: code points: [102], string: "f"'
-- 'Invalid custom element name: code points: [103], string: "g"'
-- 'Invalid custom element name: code points: [104], string: "h"'
-- 'Invalid custom element name: code points: [105], string: "i"'
-- 'Invalid custom element name: code points: [106], string: "j"'
-- 'Invalid custom element name: code points: [107], string: "k"'
-- 'Invalid custom element name: code points: [108], string: "l"'
-- 'Invalid custom element name: code points: [109,105,115,115,105,110,103,45,103,108,121,112,104],
-  string: "missing-glyph"'
-- 'Invalid custom element name: code points: [109], string: "m"'
-- |-
-  Invalid custom element name: code points: [10], string: "
-  "
-- "Invalid custom element name: code points: [11,45,101,108,101,109,101,110,116],
-  string: \"\v-element\""
-- 'Invalid custom element name: code points: [110], string: "n"'
-- 'Invalid custom element name: code points: [111], string: "o"'
-- 'Invalid custom element name: code points: [112], string: "p"'
-- 'Invalid custom element name: code points: [113], string: "q"'
-- 'Invalid custom element name: code points: [114], string: "r"'
-- 'Invalid custom element name: code points: [115], string: "s"'
-- 'Invalid custom element name: code points: [116], string: "t"'
-- 'Invalid custom element name: code points: [117], string: "u"'
-- 'Invalid custom element name: code points: [118], string: "v"'
-- 'Invalid custom element name: code points: [119], string: "w"'
-- "Invalid custom element name: code points: [11], string: \"\v\""
-- "Invalid custom element name: code points: [12,45,101,108,101,109,101,110,116],
-  string: \"\f-element\""
-- 'Invalid custom element name: code points: [120], string: "x"'
-- 'Invalid custom element name: code points: [121], string: "y"'
-- 'Invalid custom element name: code points: [122], string: "z"'
-- 'Invalid custom element name: code points: [123,45,101,108,101,109,101,110,116],
-  string: "{-element"'
-- 'Invalid custom element name: code points: [123], string: "{"'
-- 'Invalid custom element name: code points: [124,45,101,108,101,109,101,110,116],
-  string: "|-element"'
-- 'Invalid custom element name: code points: [124], string: "|"'
-- 'Invalid custom element name: code points: [125,45,101,108,101,109,101,110,116],
-  string: "}-element"'
-- 'Invalid custom element name: code points: [125], string: "}"'
-- 'Invalid custom element name: code points: [126,45,101,108,101,109,101,110,116],
-  string: "~-element"'
-- 'Invalid custom element name: code points: [126], string: "~"'
-- "Invalid custom element name: code points: [127,45,101,108,101,109,101,110,116],
-  string: \"\x7F-element\""
-- "Invalid custom element name: code points: [127345,45,101,108,101,109,101,110,116],
-  string: \"\U0001F171-element\""
-- "Invalid custom element name: code points: [127345], string: \"\U0001F171\""
-- "Invalid custom element name: code points: [127382,45,101,108,101,109,101,110,116],
-  string: \"\U0001F196-element\""
-- "Invalid custom element name: code points: [127382], string: \"\U0001F196\""
-- "Invalid custom element name: code points: [127], string: \"\x7F\""
-- "Invalid custom element name: code points: [12], string: \"\f\""
-- "Invalid custom element name: code points: [13,45,101,108,101,109,101,110,116],
-  string: \"\r-element\""
-- "Invalid custom element name: code points: [13], string: \"\r\""
-- "Invalid custom element name: code points: [14,45,101,108,101,109,101,110,116],
-  string: \"\x0E-element\""
-- "Invalid custom element name: code points: [14], string: \"\x0E\""
-- "Invalid custom element name: code points: [15,45,101,108,101,109,101,110,116],
-  string: \"\x0F-element\""
-- "Invalid custom element name: code points: [15], string: \"\x0F\""
-- "Invalid custom element name: code points: [16,45,101,108,101,109,101,110,116],
-  string: \"\x10-element\""
-- "Invalid custom element name: code points: [16], string: \"\x10\""
-- "Invalid custom element name: code points: [17,45,101,108,101,109,101,110,116],
-  string: \"\x11-element\""
-- "Invalid custom element name: code points: [17], string: \"\x11\""
-- "Invalid custom element name: code points: [18,45,101,108,101,109,101,110,116],
-  string: \"\x12-element\""
-- "Invalid custom element name: code points: [18], string: \"\x12\""
-- "Invalid custom element name: code points: [19,45,101,108,101,109,101,110,116],
-  string: \"\x13-element\""
-- "Invalid custom element name: code points: [19], string: \"\x13\""
-- "Invalid custom element name: code points: [1], string: \"\x01\""
-- "Invalid custom element name: code points: [2,45,101,108,101,109,101,110,116], string:
-  \"\x02-element\""
-- "Invalid custom element name: code points: [20,45,101,108,101,109,101,110,116],
-  string: \"\x14-element\""
-- "Invalid custom element name: code points: [20], string: \"\x14\""
-- "Invalid custom element name: code points: [21,45,101,108,101,109,101,110,116],
-  string: \"\x15-element\""
-- "Invalid custom element name: code points: [21], string: \"\x15\""
-- "Invalid custom element name: code points: [22,45,101,108,101,109,101,110,116],
-  string: \"\x16-element\""
-- "Invalid custom element name: code points: [22], string: \"\x16\""
-- "Invalid custom element name: code points: [23,45,101,108,101,109,101,110,116],
-  string: \"\x17-element\""
-- "Invalid custom element name: code points: [23], string: \"\x17\""
-- "Invalid custom element name: code points: [24,45,101,108,101,109,101,110,116],
-  string: \"\x18-element\""
-- "Invalid custom element name: code points: [24], string: \"\x18\""
-- "Invalid custom element name: code points: [25,45,101,108,101,109,101,110,116],
-  string: \"\x19-element\""
-- "Invalid custom element name: code points: [25], string: \"\x19\""
-- "Invalid custom element name: code points: [26,45,101,108,101,109,101,110,116],
-  string: \"\x1A-element\""
-- "Invalid custom element name: code points: [26], string: \"\x1A\""
-- "Invalid custom element name: code points: [27,45,101,108,101,109,101,110,116],
-  string: \"\e-element\""
-- "Invalid custom element name: code points: [27], string: \"\e\""
-- "Invalid custom element name: code points: [28,45,101,108,101,109,101,110,116],
-  string: \"\x1C-element\""
-- "Invalid custom element name: code points: [28], string: \"\x1C\""
-- "Invalid custom element name: code points: [29,45,101,108,101,109,101,110,116],
-  string: \"\x1D-element\""
-- "Invalid custom element name: code points: [29], string: \"\x1D\""
-- "Invalid custom element name: code points: [2], string: \"\x02\""
-- "Invalid custom element name: code points: [3,45,101,108,101,109,101,110,116], string:
-  \"\x03-element\""
-- "Invalid custom element name: code points: [30,45,101,108,101,109,101,110,116],
-  string: \"\x1E-element\""
-- "Invalid custom element name: code points: [30], string: \"\x1E\""
-- "Invalid custom element name: code points: [31,45,101,108,101,109,101,110,116],
-  string: \"\x1F-element\""
-- "Invalid custom element name: code points: [31], string: \"\x1F\""
-- "Invalid custom element name: code points: [32,0,45,101,108,101,109,101,110,116],
-  string: \" \0-element\""
-- "Invalid custom element name: code points: [32,0], string: \" \0\""
-- "Invalid custom element name: code points: [32,1,45,101,108,101,109,101,110,116],
-  string: \" \x01-element\""
-- "Invalid custom element name: code points: [32,10,45,101,108,101,109,101,110,116],
-  string: \" \n-element\""
-- 'Invalid custom element name: code points: [32,100,45,101,108,101,109,101,110,116],
-  string: " d-element"'
-- 'Invalid custom element name: code points: [32,100], string: " d"'
-- 'Invalid custom element name: code points: [32,101,45,101,108,101,109,101,110,116],
-  string: " e-element"'
-- 'Invalid custom element name: code points: [32,101], string: " e"'
-- 'Invalid custom element name: code points: [32,102,45,101,108,101,109,101,110,116],
-  string: " f-element"'
-- 'Invalid custom element name: code points: [32,102], string: " f"'
-- 'Invalid custom element name: code points: [32,103,45,101,108,101,109,101,110,116],
-  string: " g-element"'
-- 'Invalid custom element name: code points: [32,103], string: " g"'
-- 'Invalid custom element name: code points: [32,104,45,101,108,101,109,101,110,116],
-  string: " h-element"'
-- 'Invalid custom element name: code points: [32,104], string: " h"'
-- 'Invalid custom element name: code points: [32,105,45,101,108,101,109,101,110,116],
-  string: " i-element"'
-- 'Invalid custom element name: code points: [32,105], string: " i"'
-- 'Invalid custom element name: code points: [32,106,45,101,108,101,109,101,110,116],
-  string: " j-element"'
-- 'Invalid custom element name: code points: [32,106], string: " j"'
-- 'Invalid custom element name: code points: [32,107,45,101,108,101,109,101,110,116],
-  string: " k-element"'
-- 'Invalid custom element name: code points: [32,107], string: " k"'
-- 'Invalid custom element name: code points: [32,108,45,101,108,101,109,101,110,116],
-  string: " l-element"'
-- 'Invalid custom element name: code points: [32,108], string: " l"'
-- 'Invalid custom element name: code points: [32,109,45,101,108,101,109,101,110,116],
-  string: " m-element"'
-- 'Invalid custom element name: code points: [32,109], string: " m"'
-- "Invalid custom element name: code points: [32,10], string: \" \n\""
-- "Invalid custom element name: code points: [32,11,45,101,108,101,109,101,110,116],
-  string: \" \v-element\""
-- 'Invalid custom element name: code points: [32,110,45,101,108,101,109,101,110,116],
-  string: " n-element"'
-- 'Invalid custom element name: code points: [32,110], string: " n"'
-- 'Invalid custom element name: code points: [32,111,45,101,108,101,109,101,110,116],
-  string: " o-element"'
-- 'Invalid custom element name: code points: [32,111], string: " o"'
-- 'Invalid custom element name: code points: [32,112,45,101,108,101,109,101,110,116],
-  string: " p-element"'
-- 'Invalid custom element name: code points: [32,112], string: " p"'
-- 'Invalid custom element name: code points: [32,113,45,101,108,101,109,101,110,116],
-  string: " q-element"'
-- 'Invalid custom element name: code points: [32,113], string: " q"'
-- 'Invalid custom element name: code points: [32,114,45,101,108,101,109,101,110,116],
-  string: " r-element"'
-- 'Invalid custom element name: code points: [32,114], string: " r"'
-- 'Invalid custom element name: code points: [32,115,45,101,108,101,109,101,110,116],
-  string: " s-element"'
-- 'Invalid custom element name: code points: [32,115], string: " s"'
-- 'Invalid custom element name: code points: [32,116,45,101,108,101,109,101,110,116],
-  string: " t-element"'
-- 'Invalid custom element name: code points: [32,116], string: " t"'
-- 'Invalid custom element name: code points: [32,117,45,101,108,101,109,101,110,116],
-  string: " u-element"'
-- 'Invalid custom element name: code points: [32,117], string: " u"'
-- 'Invalid custom element name: code points: [32,118,45,101,108,101,109,101,110,116],
-  string: " v-element"'
-- 'Invalid custom element name: code points: [32,118], string: " v"'
-- 'Invalid custom element name: code points: [32,119,45,101,108,101,109,101,110,116],
-  string: " w-element"'
-- 'Invalid custom element name: code points: [32,119], string: " w"'
-- "Invalid custom element name: code points: [32,11], string: \" \v\""
-- "Invalid custom element name: code points: [32,12,45,101,108,101,109,101,110,116],
-  string: \" \f-element\""
-- 'Invalid custom element name: code points: [32,120,45,101,108,101,109,101,110,116],
-  string: " x-element"'
-- 'Invalid custom element name: code points: [32,120], string: " x"'
-- 'Invalid custom element name: code points: [32,121,45,101,108,101,109,101,110,116],
-  string: " y-element"'
-- 'Invalid custom element name: code points: [32,121], string: " y"'
-- 'Invalid custom element name: code points: [32,122,45,101,108,101,109,101,110,116],
-  string: " z-element"'
-- 'Invalid custom element name: code points: [32,122], string: " z"'
-- 'Invalid custom element name: code points: [32,123,45,101,108,101,109,101,110,116],
-  string: " {-element"'
-- 'Invalid custom element name: code points: [32,123], string: " {"'
-- 'Invalid custom element name: code points: [32,124,45,101,108,101,109,101,110,116],
-  string: " |-element"'
-- 'Invalid custom element name: code points: [32,124], string: " |"'
-- 'Invalid custom element name: code points: [32,125,45,101,108,101,109,101,110,116],
-  string: " }-element"'
-- 'Invalid custom element name: code points: [32,125], string: " }"'
-- 'Invalid custom element name: code points: [32,126,45,101,108,101,109,101,110,116],
-  string: " ~-element"'
-- 'Invalid custom element name: code points: [32,126], string: " ~"'
-- "Invalid custom element name: code points: [32,127,45,101,108,101,109,101,110,116],
-  string: \" \x7F-element\""
-- "Invalid custom element name: code points: [32,127345,45,101,108,101,109,101,110,116],
-  string: \" \U0001F171-element\""
-- "Invalid custom element name: code points: [32,127345], string: \" \U0001F171\""
-- "Invalid custom element name: code points: [32,127382,45,101,108,101,109,101,110,116],
-  string: \" \U0001F196-element\""
-- "Invalid custom element name: code points: [32,127382], string: \" \U0001F196\""
-- "Invalid custom element name: code points: [32,127], string: \" \x7F\""
-- "Invalid custom element name: code points: [32,12], string: \" \f\""
-- "Invalid custom element name: code points: [32,13,45,101,108,101,109,101,110,116],
-  string: \" \r-element\""
-- "Invalid custom element name: code points: [32,13], string: \" \r\""
-- "Invalid custom element name: code points: [32,14,45,101,108,101,109,101,110,116],
-  string: \" \x0E-element\""
-- "Invalid custom element name: code points: [32,14], string: \" \x0E\""
-- "Invalid custom element name: code points: [32,15,45,101,108,101,109,101,110,116],
-  string: \" \x0F-element\""
-- "Invalid custom element name: code points: [32,15], string: \" \x0F\""
-- "Invalid custom element name: code points: [32,16,45,101,108,101,109,101,110,116],
-  string: \" \x10-element\""
-- "Invalid custom element name: code points: [32,16], string: \" \x10\""
-- "Invalid custom element name: code points: [32,17,45,101,108,101,109,101,110,116],
-  string: \" \x11-element\""
-- "Invalid custom element name: code points: [32,17], string: \" \x11\""
-- "Invalid custom element name: code points: [32,18,45,101,108,101,109,101,110,116],
-  string: \" \x12-element\""
-- "Invalid custom element name: code points: [32,18], string: \" \x12\""
-- "Invalid custom element name: code points: [32,19,45,101,108,101,109,101,110,116],
-  string: \" \x13-element\""
-- "Invalid custom element name: code points: [32,19], string: \" \x13\""
-- "Invalid custom element name: code points: [32,1], string: \" \x01\""
-- "Invalid custom element name: code points: [32,2,45,101,108,101,109,101,110,116],
-  string: \" \x02-element\""
-- "Invalid custom element name: code points: [32,20,45,101,108,101,109,101,110,116],
-  string: \" \x14-element\""
-- "Invalid custom element name: code points: [32,20], string: \" \x14\""
-- "Invalid custom element name: code points: [32,21,45,101,108,101,109,101,110,116],
-  string: \" \x15-element\""
-- "Invalid custom element name: code points: [32,21], string: \" \x15\""
-- "Invalid custom element name: code points: [32,22,45,101,108,101,109,101,110,116],
-  string: \" \x16-element\""
-- "Invalid custom element name: code points: [32,22], string: \" \x16\""
-- "Invalid custom element name: code points: [32,23,45,101,108,101,109,101,110,116],
-  string: \" \x17-element\""
-- "Invalid custom element name: code points: [32,23], string: \" \x17\""
-- "Invalid custom element name: code points: [32,24,45,101,108,101,109,101,110,116],
-  string: \" \x18-element\""
-- "Invalid custom element name: code points: [32,24], string: \" \x18\""
-- "Invalid custom element name: code points: [32,25,45,101,108,101,109,101,110,116],
-  string: \" \x19-element\""
-- "Invalid custom element name: code points: [32,25], string: \" \x19\""
-- "Invalid custom element name: code points: [32,26,45,101,108,101,109,101,110,116],
-  string: \" \x1A-element\""
-- "Invalid custom element name: code points: [32,26], string: \" \x1A\""
-- "Invalid custom element name: code points: [32,27,45,101,108,101,109,101,110,116],
-  string: \" \e-element\""
-- "Invalid custom element name: code points: [32,27], string: \" \e\""
-- "Invalid custom element name: code points: [32,28,45,101,108,101,109,101,110,116],
-  string: \" \x1C-element\""
-- "Invalid custom element name: code points: [32,28], string: \" \x1C\""
-- "Invalid custom element name: code points: [32,29,45,101,108,101,109,101,110,116],
-  string: \" \x1D-element\""
-- "Invalid custom element name: code points: [32,29], string: \" \x1D\""
-- "Invalid custom element name: code points: [32,2], string: \" \x02\""
-- "Invalid custom element name: code points: [32,3,45,101,108,101,109,101,110,116],
-  string: \" \x03-element\""
-- "Invalid custom element name: code points: [32,30,45,101,108,101,109,101,110,116],
-  string: \" \x1E-element\""
-- "Invalid custom element name: code points: [32,30], string: \" \x1E\""
-- "Invalid custom element name: code points: [32,31,45,101,108,101,109,101,110,116],
-  string: \" \x1F-element\""
-- "Invalid custom element name: code points: [32,31], string: \" \x1F\""
-- 'Invalid custom element name: code points: [32,32,45,101,108,101,109,101,110,116],
-  string: "  -element"'
-- 'Invalid custom element name: code points: [32,32], string: "  "'
-- 'Invalid custom element name: code points: [32,33,45,101,108,101,109,101,110,116],
-  string: " !-element"'
-- 'Invalid custom element name: code points: [32,33], string: " !"'
-- 'Invalid custom element name: code points: [32,34,45,101,108,101,109,101,110,116],
-  string: " "-element"'
-- 'Invalid custom element name: code points: [32,34], string: " ""'
-- 'Invalid custom element name: code points: [32,35,45,101,108,101,109,101,110,116],
-  string: " #-element"'
-- 'Invalid custom element name: code points: [32,35], string: " #"'
-- 'Invalid custom element name: code points: [32,36,45,101,108,101,109,101,110,116],
-  string: " $-element"'
-- 'Invalid custom element name: code points: [32,36], string: " $"'
-- 'Invalid custom element name: code points: [32,37,45,101,108,101,109,101,110,116],
-  string: " %-element"'
-- 'Invalid custom element name: code points: [32,37], string: " %"'
-- 'Invalid custom element name: code points: [32,38,45,101,108,101,109,101,110,116],
-  string: " &-element"'
-- 'Invalid custom element name: code points: [32,38], string: " &"'
-- 'Invalid custom element name: code points: [32,39,45,101,108,101,109,101,110,116],
-  string: " ''-element"'
-- 'Invalid custom element name: code points: [32,39], string: " ''"'
-- "Invalid custom element name: code points: [32,3], string: \" \x03\""
-- "Invalid custom element name: code points: [32,4,45,101,108,101,109,101,110,116],
-  string: \" \x04-element\""
-- 'Invalid custom element name: code points: [32,40,45,101,108,101,109,101,110,116],
-  string: " (-element"'
-- 'Invalid custom element name: code points: [32,40], string: " ("'
-- 'Invalid custom element name: code points: [32,41,45,101,108,101,109,101,110,116],
-  string: " )-element"'
-- 'Invalid custom element name: code points: [32,41], string: " )"'
-- 'Invalid custom element name: code points: [32,42,45,101,108,101,109,101,110,116],
-  string: " *-element"'
-- 'Invalid custom element name: code points: [32,42], string: " *"'
-- 'Invalid custom element name: code points: [32,43,45,101,108,101,109,101,110,116],
-  string: " +-element"'
-- 'Invalid custom element name: code points: [32,43], string: " +"'
-- 'Invalid custom element name: code points: [32,44,45,101,108,101,109,101,110,116],
-  string: " ,-element"'
-- 'Invalid custom element name: code points: [32,44], string: " ,"'
-- "Invalid custom element name: code points: [32,45,0], string: \" -\0\""
-- 'Invalid custom element name: code points: [32,45,100], string: " -d"'
-- 'Invalid custom element name: code points: [32,45,101,108,101,109,101,110,116],
-  string: " -element"'
-- 'Invalid custom element name: code points: [32,45,101], string: " -e"'
-- 'Invalid custom element name: code points: [32,45,102], string: " -f"'
-- 'Invalid custom element name: code points: [32,45,103], string: " -g"'
-- 'Invalid custom element name: code points: [32,45,104], string: " -h"'
-- 'Invalid custom element name: code points: [32,45,105], string: " -i"'
-- 'Invalid custom element name: code points: [32,45,106], string: " -j"'
-- 'Invalid custom element name: code points: [32,45,107], string: " -k"'
-- 'Invalid custom element name: code points: [32,45,108], string: " -l"'
-- 'Invalid custom element name: code points: [32,45,109], string: " -m"'
-- |-
-  Invalid custom element name: code points: [32,45,10], string: " -
-  "
-- 'Invalid custom element name: code points: [32,45,110], string: " -n"'
-- 'Invalid custom element name: code points: [32,45,111], string: " -o"'
-- 'Invalid custom element name: code points: [32,45,112], string: " -p"'
-- 'Invalid custom element name: code points: [32,45,113], string: " -q"'
-- 'Invalid custom element name: code points: [32,45,114], string: " -r"'
-- 'Invalid custom element name: code points: [32,45,115], string: " -s"'
-- 'Invalid custom element name: code points: [32,45,116], string: " -t"'
-- 'Invalid custom element name: code points: [32,45,117], string: " -u"'
-- 'Invalid custom element name: code points: [32,45,118], string: " -v"'
-- 'Invalid custom element name: code points: [32,45,119], string: " -w"'
-- "Invalid custom element name: code points: [32,45,11], string: \" -\v\""
-- 'Invalid custom element name: code points: [32,45,120], string: " -x"'
-- 'Invalid custom element name: code points: [32,45,121], string: " -y"'
-- 'Invalid custom element name: code points: [32,45,122], string: " -z"'
-- 'Invalid custom element name: code points: [32,45,123], string: " -{"'
-- 'Invalid custom element name: code points: [32,45,124], string: " -|"'
-- 'Invalid custom element name: code points: [32,45,125], string: " -}"'
-- 'Invalid custom element name: code points: [32,45,126], string: " -~"'
-- "Invalid custom element name: code points: [32,45,127345], string: \" -\U0001F171\""
-- "Invalid custom element name: code points: [32,45,127382], string: \" -\U0001F196\""
-- "Invalid custom element name: code points: [32,45,127], string: \" -\x7F\""
-- "Invalid custom element name: code points: [32,45,12], string: \" -\f\""
-- "Invalid custom element name: code points: [32,45,13], string: \" -\r\""
-- "Invalid custom element name: code points: [32,45,14], string: \" -\x0E\""
-- "Invalid custom element name: code points: [32,45,15], string: \" -\x0F\""
-- "Invalid custom element name: code points: [32,45,16], string: \" -\x10\""
-- "Invalid custom element name: code points: [32,45,17], string: \" -\x11\""
-- "Invalid custom element name: code points: [32,45,18], string: \" -\x12\""
-- "Invalid custom element name: code points: [32,45,19], string: \" -\x13\""
-- "Invalid custom element name: code points: [32,45,1], string: \" -\x01\""
-- "Invalid custom element name: code points: [32,45,20], string: \" -\x14\""
-- "Invalid custom element name: code points: [32,45,21], string: \" -\x15\""
-- "Invalid custom element name: code points: [32,45,22], string: \" -\x16\""
-- "Invalid custom element name: code points: [32,45,23], string: \" -\x17\""
-- "Invalid custom element name: code points: [32,45,24], string: \" -\x18\""
-- "Invalid custom element name: code points: [32,45,25], string: \" -\x19\""
-- "Invalid custom element name: code points: [32,45,26], string: \" -\x1A\""
-- "Invalid custom element name: code points: [32,45,27], string: \" -\e\""
-- "Invalid custom element name: code points: [32,45,28], string: \" -\x1C\""
-- "Invalid custom element name: code points: [32,45,29], string: \" -\x1D\""
-- "Invalid custom element name: code points: [32,45,2], string: \" -\x02\""
-- "Invalid custom element name: code points: [32,45,30], string: \" -\x1E\""
-- "Invalid custom element name: code points: [32,45,31], string: \" -\x1F\""
-- 'Invalid custom element name: code points: [32,45,32], string: " - "'
-- 'Invalid custom element name: code points: [32,45,33], string: " -!"'
-- 'Invalid custom element name: code points: [32,45,34], string: " -""'
-- 'Invalid custom element name: code points: [32,45,35], string: " -#"'
-- 'Invalid custom element name: code points: [32,45,36], string: " -$"'
-- 'Invalid custom element name: code points: [32,45,37], string: " -%"'
-- 'Invalid custom element name: code points: [32,45,38], string: " -&"'
-- 'Invalid custom element name: code points: [32,45,39], string: " -''"'
-- "Invalid custom element name: code points: [32,45,3], string: \" -\x03\""
-- 'Invalid custom element name: code points: [32,45,40], string: " -("'
-- 'Invalid custom element name: code points: [32,45,41], string: " -)"'
-- 'Invalid custom element name: code points: [32,45,42], string: " -*"'
-- 'Invalid custom element name: code points: [32,45,43], string: " -+"'
-- 'Invalid custom element name: code points: [32,45,44], string: " -,"'
-- 'Invalid custom element name: code points: [32,45,45,101,108,101,109,101,110,116],
-  string: " --element"'
-- 'Invalid custom element name: code points: [32,45,45], string: " --"'
-- 'Invalid custom element name: code points: [32,45,46], string: " -."'
-- 'Invalid custom element name: code points: [32,45,47], string: " -/"'
-- 'Invalid custom element name: code points: [32,45,48], string: " -0"'
-- 'Invalid custom element name: code points: [32,45,49], string: " -1"'
-- "Invalid custom element name: code points: [32,45,4], string: \" -\x04\""
-- 'Invalid custom element name: code points: [32,45,50], string: " -2"'
-- 'Invalid custom element name: code points: [32,45,51], string: " -3"'
-- 'Invalid custom element name: code points: [32,45,52], string: " -4"'
-- 'Invalid custom element name: code points: [32,45,53], string: " -5"'
-- 'Invalid custom element name: code points: [32,45,54], string: " -6"'
-- 'Invalid custom element name: code points: [32,45,55], string: " -7"'
-- 'Invalid custom element name: code points: [32,45,56], string: " -8"'
-- 'Invalid custom element name: code points: [32,45,57], string: " -9"'
-- 'Invalid custom element name: code points: [32,45,58], string: " -:"'
-- 'Invalid custom element name: code points: [32,45,59], string: " -;"'
-- "Invalid custom element name: code points: [32,45,5], string: \" -\x05\""
-- 'Invalid custom element name: code points: [32,45,60], string: " -<"'
-- 'Invalid custom element name: code points: [32,45,61], string: " -="'
-- 'Invalid custom element name: code points: [32,45,62], string: " ->"'
-- 'Invalid custom element name: code points: [32,45,63], string: " -?"'
-- 'Invalid custom element name: code points: [32,45,64], string: " -@"'
-- "Invalid custom element name: code points: [32,45,65536], string: \" -\U00010000\""
-- 'Invalid custom element name: code points: [32,45,65], string: " -A"'
-- 'Invalid custom element name: code points: [32,45,66], string: " -B"'
-- 'Invalid custom element name: code points: [32,45,67], string: " -C"'
-- 'Invalid custom element name: code points: [32,45,68], string: " -D"'
-- 'Invalid custom element name: code points: [32,45,69], string: " -E"'
-- "Invalid custom element name: code points: [32,45,6], string: \" -\x06\""
-- 'Invalid custom element name: code points: [32,45,70], string: " -F"'
-- 'Invalid custom element name: code points: [32,45,71], string: " -G"'
-- 'Invalid custom element name: code points: [32,45,72], string: " -H"'
-- 'Invalid custom element name: code points: [32,45,73], string: " -I"'
-- 'Invalid custom element name: code points: [32,45,74], string: " -J"'
-- 'Invalid custom element name: code points: [32,45,75], string: " -K"'
-- 'Invalid custom element name: code points: [32,45,76], string: " -L"'
-- 'Invalid custom element name: code points: [32,45,77], string: " -M"'
-- 'Invalid custom element name: code points: [32,45,78], string: " -N"'
-- 'Invalid custom element name: code points: [32,45,79], string: " -O"'
-- "Invalid custom element name: code points: [32,45,7], string: \" -\a\""
-- 'Invalid custom element name: code points: [32,45,80], string: " -P"'
-- 'Invalid custom element name: code points: [32,45,81], string: " -Q"'
-- 'Invalid custom element name: code points: [32,45,82], string: " -R"'
-- 'Invalid custom element name: code points: [32,45,83], string: " -S"'
-- 'Invalid custom element name: code points: [32,45,84], string: " -T"'
-- 'Invalid custom element name: code points: [32,45,85], string: " -U"'
-- 'Invalid custom element name: code points: [32,45,86], string: " -V"'
-- 'Invalid custom element name: code points: [32,45,87], string: " -W"'
-- 'Invalid custom element name: code points: [32,45,88], string: " -X"'
-- 'Invalid custom element name: code points: [32,45,89], string: " -Y"'
-- "Invalid custom element name: code points: [32,45,8], string: \" -\b\""
-- 'Invalid custom element name: code points: [32,45,90], string: " -Z"'
-- 'Invalid custom element name: code points: [32,45,91], string: " -["'
-- 'Invalid custom element name: code points: [32,45,92], string: " -\"'
-- 'Invalid custom element name: code points: [32,45,93], string: " -]"'
-- 'Invalid custom element name: code points: [32,45,94], string: " -^"'
-- 'Invalid custom element name: code points: [32,45,95], string: " -_"'
-- 'Invalid custom element name: code points: [32,45,96], string: " -`"'
-- 'Invalid custom element name: code points: [32,45,97], string: " -a"'
-- 'Invalid custom element name: code points: [32,45,98], string: " -b"'
-- 'Invalid custom element name: code points: [32,45,99], string: " -c"'
-- "Invalid custom element name: code points: [32,45,9], string: \" -\t\""
-- 'Invalid custom element name: code points: [32,45], string: " -"'
-- 'Invalid custom element name: code points: [32,46,45,101,108,101,109,101,110,116],
-  string: " .-element"'
-- 'Invalid custom element name: code points: [32,46], string: " ."'
-- 'Invalid custom element name: code points: [32,47,45,101,108,101,109,101,110,116],
-  string: " /-element"'
-- 'Invalid custom element name: code points: [32,47], string: " /"'
-- 'Invalid custom element name: code points: [32,48,45,101,108,101,109,101,110,116],
-  string: " 0-element"'
-- 'Invalid custom element name: code points: [32,48], string: " 0"'
-- 'Invalid custom element name: code points: [32,49,45,101,108,101,109,101,110,116],
-  string: " 1-element"'
-- 'Invalid custom element name: code points: [32,49], string: " 1"'
-- "Invalid custom element name: code points: [32,4], string: \" \x04\""
-- "Invalid custom element name: code points: [32,5,45,101,108,101,109,101,110,116],
-  string: \" \x05-element\""
-- 'Invalid custom element name: code points: [32,50,45,101,108,101,109,101,110,116],
-  string: " 2-element"'
-- 'Invalid custom element name: code points: [32,50], string: " 2"'
-- 'Invalid custom element name: code points: [32,51,45,101,108,101,109,101,110,116],
-  string: " 3-element"'
-- 'Invalid custom element name: code points: [32,51], string: " 3"'
-- 'Invalid custom element name: code points: [32,52,45,101,108,101,109,101,110,116],
-  string: " 4-element"'
-- 'Invalid custom element name: code points: [32,52], string: " 4"'
-- 'Invalid custom element name: code points: [32,53,45,101,108,101,109,101,110,116],
-  string: " 5-element"'
-- 'Invalid custom element name: code points: [32,53], string: " 5"'
-- 'Invalid custom element name: code points: [32,54,45,101,108,101,109,101,110,116],
-  string: " 6-element"'
-- 'Invalid custom element name: code points: [32,54], string: " 6"'
-- 'Invalid custom element name: code points: [32,55,45,101,108,101,109,101,110,116],
-  string: " 7-element"'
-- 'Invalid custom element name: code points: [32,55], string: " 7"'
-- 'Invalid custom element name: code points: [32,56,45,101,108,101,109,101,110,116],
-  string: " 8-element"'
-- 'Invalid custom element name: code points: [32,56], string: " 8"'
-- 'Invalid custom element name: code points: [32,57,45,101,108,101,109,101,110,116],
-  string: " 9-element"'
-- 'Invalid custom element name: code points: [32,57], string: " 9"'
-- 'Invalid custom element name: code points: [32,58,45,101,108,101,109,101,110,116],
-  string: " :-element"'
-- 'Invalid custom element name: code points: [32,58], string: " :"'
-- 'Invalid custom element name: code points: [32,59,45,101,108,101,109,101,110,116],
-  string: " ;-element"'
-- 'Invalid custom element name: code points: [32,59], string: " ;"'
-- "Invalid custom element name: code points: [32,5], string: \" \x05\""
-- "Invalid custom element name: code points: [32,6,45,101,108,101,109,101,110,116],
-  string: \" \x06-element\""
-- 'Invalid custom element name: code points: [32,60,45,101,108,101,109,101,110,116],
-  string: " <-element"'
-- 'Invalid custom element name: code points: [32,60], string: " <"'
-- 'Invalid custom element name: code points: [32,61,45,101,108,101,109,101,110,116],
-  string: " =-element"'
-- 'Invalid custom element name: code points: [32,61], string: " ="'
-- 'Invalid custom element name: code points: [32,62,45,101,108,101,109,101,110,116],
-  string: " >-element"'
-- 'Invalid custom element name: code points: [32,62], string: " >"'
-- 'Invalid custom element name: code points: [32,63,45,101,108,101,109,101,110,116],
-  string: " ?-element"'
-- 'Invalid custom element name: code points: [32,63], string: " ?"'
-- 'Invalid custom element name: code points: [32,64,45,101,108,101,109,101,110,116],
-  string: " @-element"'
-- 'Invalid custom element name: code points: [32,64], string: " @"'
-- 'Invalid custom element name: code points: [32,65,45,101,108,101,109,101,110,116],
-  string: " A-element"'
-- "Invalid custom element name: code points: [32,65536,45,101,108,101,109,101,110,116],
-  string: \" \U00010000-element\""
-- "Invalid custom element name: code points: [32,65536], string: \" \U00010000\""
-- 'Invalid custom element name: code points: [32,65], string: " A"'
-- 'Invalid custom element name: code points: [32,66,45,101,108,101,109,101,110,116],
-  string: " B-element"'
-- 'Invalid custom element name: code points: [32,66], string: " B"'
-- 'Invalid custom element name: code points: [32,67,45,101,108,101,109,101,110,116],
-  string: " C-element"'
-- 'Invalid custom element name: code points: [32,67], string: " C"'
-- 'Invalid custom element name: code points: [32,68,45,101,108,101,109,101,110,116],
-  string: " D-element"'
-- 'Invalid custom element name: code points: [32,68], string: " D"'
-- 'Invalid custom element name: code points: [32,69,45,101,108,101,109,101,110,116],
-  string: " E-element"'
-- 'Invalid custom element name: code points: [32,69], string: " E"'
-- "Invalid custom element name: code points: [32,6], string: \" \x06\""
-- "Invalid custom element name: code points: [32,7,45,101,108,101,109,101,110,116],
-  string: \" \a-element\""
-- 'Invalid custom element name: code points: [32,70,45,101,108,101,109,101,110,116],
-  string: " F-element"'
-- 'Invalid custom element name: code points: [32,70], string: " F"'
-- 'Invalid custom element name: code points: [32,71,45,101,108,101,109,101,110,116],
-  string: " G-element"'
-- 'Invalid custom element name: code points: [32,71], string: " G"'
-- 'Invalid custom element name: code points: [32,72,45,101,108,101,109,101,110,116],
-  string: " H-element"'
-- 'Invalid custom element name: code points: [32,72], string: " H"'
-- 'Invalid custom element name: code points: [32,73,45,101,108,101,109,101,110,116],
-  string: " I-element"'
-- 'Invalid custom element name: code points: [32,73], string: " I"'
-- 'Invalid custom element name: code points: [32,74,45,101,108,101,109,101,110,116],
-  string: " J-element"'
-- 'Invalid custom element name: code points: [32,74], string: " J"'
-- 'Invalid custom element name: code points: [32,75,45,101,108,101,109,101,110,116],
-  string: " K-element"'
-- 'Invalid custom element name: code points: [32,75], string: " K"'
-- 'Invalid custom element name: code points: [32,76,45,101,108,101,109,101,110,116],
-  string: " L-element"'
-- 'Invalid custom element name: code points: [32,76], string: " L"'
-- 'Invalid custom element name: code points: [32,77,45,101,108,101,109,101,110,116],
-  string: " M-element"'
-- 'Invalid custom element name: code points: [32,77], string: " M"'
-- 'Invalid custom element name: code points: [32,78,45,101,108,101,109,101,110,116],
-  string: " N-element"'
-- 'Invalid custom element name: code points: [32,78], string: " N"'
-- 'Invalid custom element name: code points: [32,79,45,101,108,101,109,101,110,116],
-  string: " O-element"'
-- 'Invalid custom element name: code points: [32,79], string: " O"'
-- "Invalid custom element name: code points: [32,7], string: \" \a\""
-- "Invalid custom element name: code points: [32,8,45,101,108,101,109,101,110,116],
-  string: \" \b-element\""
-- 'Invalid custom element name: code points: [32,80,45,101,108,101,109,101,110,116],
-  string: " P-element"'
-- 'Invalid custom element name: code points: [32,80], string: " P"'
-- 'Invalid custom element name: code points: [32,81,45,101,108,101,109,101,110,116],
-  string: " Q-element"'
-- 'Invalid custom element name: code points: [32,81], string: " Q"'
-- 'Invalid custom element name: code points: [32,82,45,101,108,101,109,101,110,116],
-  string: " R-element"'
-- 'Invalid custom element name: code points: [32,82], string: " R"'
-- 'Invalid custom element name: code points: [32,83,45,101,108,101,109,101,110,116],
-  string: " S-element"'
-- 'Invalid custom element name: code points: [32,83], string: " S"'
-- 'Invalid custom element name: code points: [32,84,45,101,108,101,109,101,110,116],
-  string: " T-element"'
-- 'Invalid custom element name: code points: [32,84], string: " T"'
-- 'Invalid custom element name: code points: [32,85,45,101,108,101,109,101,110,116],
-  string: " U-element"'
-- 'Invalid custom element name: code points: [32,85], string: " U"'
-- 'Invalid custom element name: code points: [32,86,45,101,108,101,109,101,110,116],
-  string: " V-element"'
-- 'Invalid custom element name: code points: [32,86], string: " V"'
-- 'Invalid custom element name: code points: [32,87,45,101,108,101,109,101,110,116],
-  string: " W-element"'
-- 'Invalid custom element name: code points: [32,87], string: " W"'
-- 'Invalid custom element name: code points: [32,88,45,101,108,101,109,101,110,116],
-  string: " X-element"'
-- 'Invalid custom element name: code points: [32,88], string: " X"'
-- 'Invalid custom element name: code points: [32,89,45,101,108,101,109,101,110,116],
-  string: " Y-element"'
-- 'Invalid custom element name: code points: [32,89], string: " Y"'
-- "Invalid custom element name: code points: [32,8], string: \" \b\""
-- "Invalid custom element name: code points: [32,9,45,101,108,101,109,101,110,116],
-  string: \" \t-element\""
-- 'Invalid custom element name: code points: [32,90,45,101,108,101,109,101,110,116],
-  string: " Z-element"'
-- 'Invalid custom element name: code points: [32,90], string: " Z"'
-- 'Invalid custom element name: code points: [32,91,45,101,108,101,109,101,110,116],
-  string: " [-element"'
-- 'Invalid custom element name: code points: [32,91], string: " ["'
-- 'Invalid custom element name: code points: [32,92,45,101,108,101,109,101,110,116],
-  string: " \-element"'
-- 'Invalid custom element name: code points: [32,92], string: " \"'
-- 'Invalid custom element name: code points: [32,93,45,101,108,101,109,101,110,116],
-  string: " ]-element"'
-- 'Invalid custom element name: code points: [32,93], string: " ]"'
-- 'Invalid custom element name: code points: [32,94,45,101,108,101,109,101,110,116],
-  string: " ^-element"'
-- 'Invalid custom element name: code points: [32,94], string: " ^"'
-- 'Invalid custom element name: code points: [32,95,45,101,108,101,109,101,110,116],
-  string: " _-element"'
-- 'Invalid custom element name: code points: [32,95], string: " _"'
-- 'Invalid custom element name: code points: [32,96,45,101,108,101,109,101,110,116],
-  string: " `-element"'
-- 'Invalid custom element name: code points: [32,96], string: " `"'
-- 'Invalid custom element name: code points: [32,97,45,101,108,101,109,101,110,116],
-  string: " a-element"'
-- 'Invalid custom element name: code points: [32,97], string: " a"'
-- 'Invalid custom element name: code points: [32,98,45,101,108,101,109,101,110,116],
-  string: " b-element"'
-- 'Invalid custom element name: code points: [32,98], string: " b"'
-- 'Invalid custom element name: code points: [32,99,45,101,108,101,109,101,110,116],
-  string: " c-element"'
-- 'Invalid custom element name: code points: [32,99], string: " c"'
-- "Invalid custom element name: code points: [32,9], string: \" \t\""
-- 'Invalid custom element name: code points: [32], string: " "'
-- 'Invalid custom element name: code points: [33,45,101,108,101,109,101,110,116],
-  string: "!-element"'
-- 'Invalid custom element name: code points: [33], string: "!"'
-- 'Invalid custom element name: code points: [34,45,101,108,101,109,101,110,116],
-  string: ""-element"'
-- 'Invalid custom element name: code points: [34], string: """'
-- 'Invalid custom element name: code points: [35,45,101,108,101,109,101,110,116],
-  string: "#-element"'
-- 'Invalid custom element name: code points: [35], string: "#"'
-- 'Invalid custom element name: code points: [36,45,101,108,101,109,101,110,116],
-  string: "$-element"'
-- 'Invalid custom element name: code points: [36], string: "$"'
-- 'Invalid custom element name: code points: [37,45,101,108,101,109,101,110,116],
-  string: "%-element"'
-- 'Invalid custom element name: code points: [37], string: "%"'
-- 'Invalid custom element name: code points: [38,45,101,108,101,109,101,110,116],
-  string: "&-element"'
-- 'Invalid custom element name: code points: [38], string: "&"'
-- 'Invalid custom element name: code points: [39,45,101,108,101,109,101,110,116],
-  string: "''-element"'
-- 'Invalid custom element name: code points: [39], string: "''"'
-- "Invalid custom element name: code points: [3], string: \"\x03\""
-- "Invalid custom element name: code points: [4,45,101,108,101,109,101,110,116], string:
-  \"\x04-element\""
-- 'Invalid custom element name: code points: [40,45,101,108,101,109,101,110,116],
-  string: "(-element"'
-- 'Invalid custom element name: code points: [40], string: "("'
-- 'Invalid custom element name: code points: [41,45,101,108,101,109,101,110,116],
-  string: ")-element"'
-- 'Invalid custom element name: code points: [41], string: ")"'
-- 'Invalid custom element name: code points: [42,45,101,108,101,109,101,110,116],
-  string: "*-element"'
-- 'Invalid custom element name: code points: [42], string: "*"'
-- 'Invalid custom element name: code points: [43,45,101,108,101,109,101,110,116],
-  string: "+-element"'
-- 'Invalid custom element name: code points: [43], string: "+"'
-- 'Invalid custom element name: code points: [44,45,101,108,101,109,101,110,116],
-  string: ",-element"'
-- 'Invalid custom element name: code points: [44], string: ","'
-- "Invalid custom element name: code points: [45,0], string: \"-\0\""
-- 'Invalid custom element name: code points: [45,100], string: "-d"'
-- 'Invalid custom element name: code points: [45,101], string: "-e"'
-- 'Invalid custom element name: code points: [45,102], string: "-f"'
-- 'Invalid custom element name: code points: [45,103], string: "-g"'
-- 'Invalid custom element name: code points: [45,104], string: "-h"'
-- 'Invalid custom element name: code points: [45,105], string: "-i"'
-- 'Invalid custom element name: code points: [45,106], string: "-j"'
-- 'Invalid custom element name: code points: [45,107], string: "-k"'
-- 'Invalid custom element name: code points: [45,108], string: "-l"'
-- 'Invalid custom element name: code points: [45,109], string: "-m"'
-- |-
-  Invalid custom element name: code points: [45,10], string: "-
-  "
-- 'Invalid custom element name: code points: [45,110], string: "-n"'
-- 'Invalid custom element name: code points: [45,111], string: "-o"'
-- 'Invalid custom element name: code points: [45,112], string: "-p"'
-- 'Invalid custom element name: code points: [45,113], string: "-q"'
-- 'Invalid custom element name: code points: [45,114], string: "-r"'
-- 'Invalid custom element name: code points: [45,115], string: "-s"'
-- 'Invalid custom element name: code points: [45,116], string: "-t"'
-- 'Invalid custom element name: code points: [45,117], string: "-u"'
-- 'Invalid custom element name: code points: [45,118], string: "-v"'
-- 'Invalid custom element name: code points: [45,119], string: "-w"'
-- "Invalid custom element name: code points: [45,11], string: \"-\v\""
-- 'Invalid custom element name: code points: [45,120], string: "-x"'
-- 'Invalid custom element name: code points: [45,121], string: "-y"'
-- 'Invalid custom element name: code points: [45,122], string: "-z"'
-- 'Invalid custom element name: code points: [45,123], string: "-{"'
-- 'Invalid custom element name: code points: [45,124], string: "-|"'
-- 'Invalid custom element name: code points: [45,125], string: "-}"'
-- 'Invalid custom element name: code points: [45,126], string: "-~"'
-- "Invalid custom element name: code points: [45,127345], string: \"-\U0001F171\""
-- "Invalid custom element name: code points: [45,127382], string: \"-\U0001F196\""
-- "Invalid custom element name: code points: [45,127], string: \"-\x7F\""
-- "Invalid custom element name: code points: [45,12], string: \"-\f\""
-- "Invalid custom element name: code points: [45,13], string: \"-\r\""
-- "Invalid custom element name: code points: [45,14], string: \"-\x0E\""
-- "Invalid custom element name: code points: [45,15], string: \"-\x0F\""
-- "Invalid custom element name: code points: [45,16], string: \"-\x10\""
-- "Invalid custom element name: code points: [45,17], string: \"-\x11\""
-- "Invalid custom element name: code points: [45,18], string: \"-\x12\""
-- "Invalid custom element name: code points: [45,19], string: \"-\x13\""
-- "Invalid custom element name: code points: [45,1], string: \"-\x01\""
-- "Invalid custom element name: code points: [45,20], string: \"-\x14\""
-- "Invalid custom element name: code points: [45,21], string: \"-\x15\""
-- "Invalid custom element name: code points: [45,22], string: \"-\x16\""
-- "Invalid custom element name: code points: [45,23], string: \"-\x17\""
-- "Invalid custom element name: code points: [45,24], string: \"-\x18\""
-- "Invalid custom element name: code points: [45,25], string: \"-\x19\""
-- "Invalid custom element name: code points: [45,26], string: \"-\x1A\""
-- "Invalid custom element name: code points: [45,27], string: \"-\e\""
-- "Invalid custom element name: code points: [45,28], string: \"-\x1C\""
-- "Invalid custom element name: code points: [45,29], string: \"-\x1D\""
-- "Invalid custom element name: code points: [45,2], string: \"-\x02\""
-- "Invalid custom element name: code points: [45,30], string: \"-\x1E\""
-- "Invalid custom element name: code points: [45,31], string: \"-\x1F\""
-- 'Invalid custom element name: code points: [45,32], string: "- "'
-- 'Invalid custom element name: code points: [45,33], string: "-!"'
-- 'Invalid custom element name: code points: [45,34], string: "-""'
-- 'Invalid custom element name: code points: [45,35], string: "-#"'
-- 'Invalid custom element name: code points: [45,36], string: "-$"'
-- 'Invalid custom element name: code points: [45,37], string: "-%"'
-- 'Invalid custom element name: code points: [45,38], string: "-&"'
-- 'Invalid custom element name: code points: [45,39], string: "-''"'
-- "Invalid custom element name: code points: [45,3], string: \"-\x03\""
-- 'Invalid custom element name: code points: [45,40], string: "-("'
-- 'Invalid custom element name: code points: [45,41], string: "-)"'
-- 'Invalid custom element name: code points: [45,42], string: "-*"'
-- 'Invalid custom element name: code points: [45,43], string: "-+"'
-- 'Invalid custom element name: code points: [45,44], string: "-,"'
-- 'Invalid custom element name: code points: [45,45,101,108,101,109,101,110,116],
-  string: "--element"'
-- 'Invalid custom element name: code points: [45,45], string: "--"'
-- 'Invalid custom element name: code points: [45,46], string: "-."'
-- 'Invalid custom element name: code points: [45,47], string: "-/"'
-- 'Invalid custom element name: code points: [45,48], string: "-0"'
-- 'Invalid custom element name: code points: [45,49], string: "-1"'
-- "Invalid custom element name: code points: [45,4], string: \"-\x04\""
-- 'Invalid custom element name: code points: [45,50], string: "-2"'
-- 'Invalid custom element name: code points: [45,51], string: "-3"'
-- 'Invalid custom element name: code points: [45,52], string: "-4"'
-- 'Invalid custom element name: code points: [45,53], string: "-5"'
-- 'Invalid custom element name: code points: [45,54], string: "-6"'
-- 'Invalid custom element name: code points: [45,55], string: "-7"'
-- 'Invalid custom element name: code points: [45,56], string: "-8"'
-- 'Invalid custom element name: code points: [45,57], string: "-9"'
-- 'Invalid custom element name: code points: [45,58], string: "-:"'
-- 'Invalid custom element name: code points: [45,59], string: "-;"'
-- "Invalid custom element name: code points: [45,5], string: \"-\x05\""
-- 'Invalid custom element name: code points: [45,60], string: "-<"'
-- 'Invalid custom element name: code points: [45,61], string: "-="'
-- 'Invalid custom element name: code points: [45,62], string: "->"'
-- 'Invalid custom element name: code points: [45,63], string: "-?"'
-- 'Invalid custom element name: code points: [45,64], string: "-@"'
-- "Invalid custom element name: code points: [45,65536], string: \"-\U00010000\""
-- 'Invalid custom element name: code points: [45,65], string: "-A"'
-- 'Invalid custom element name: code points: [45,66], string: "-B"'
-- 'Invalid custom element name: code points: [45,67], string: "-C"'
-- 'Invalid custom element name: code points: [45,68], string: "-D"'
-- 'Invalid custom element name: code points: [45,69], string: "-E"'
-- "Invalid custom element name: code points: [45,6], string: \"-\x06\""
-- 'Invalid custom element name: code points: [45,70], string: "-F"'
-- 'Invalid custom element name: code points: [45,71], string: "-G"'
-- 'Invalid custom element name: code points: [45,72], string: "-H"'
-- 'Invalid custom element name: code points: [45,73], string: "-I"'
-- 'Invalid custom element name: code points: [45,74], string: "-J"'
-- 'Invalid custom element name: code points: [45,75], string: "-K"'
-- 'Invalid custom element name: code points: [45,76], string: "-L"'
-- 'Invalid custom element name: code points: [45,77], string: "-M"'
-- 'Invalid custom element name: code points: [45,78], string: "-N"'
-- 'Invalid custom element name: code points: [45,79], string: "-O"'
-- "Invalid custom element name: code points: [45,7], string: \"-\a\""
-- 'Invalid custom element name: code points: [45,80], string: "-P"'
-- 'Invalid custom element name: code points: [45,81], string: "-Q"'
-- 'Invalid custom element name: code points: [45,82], string: "-R"'
-- 'Invalid custom element name: code points: [45,83], string: "-S"'
-- 'Invalid custom element name: code points: [45,84], string: "-T"'
-- 'Invalid custom element name: code points: [45,85], string: "-U"'
-- 'Invalid custom element name: code points: [45,86], string: "-V"'
-- 'Invalid custom element name: code points: [45,87], string: "-W"'
-- 'Invalid custom element name: code points: [45,88], string: "-X"'
-- 'Invalid custom element name: code points: [45,89], string: "-Y"'
-- "Invalid custom element name: code points: [45,8], string: \"-\b\""
-- 'Invalid custom element name: code points: [45,90], string: "-Z"'
-- 'Invalid custom element name: code points: [45,91], string: "-["'
-- 'Invalid custom element name: code points: [45,92], string: "-\"'
-- 'Invalid custom element name: code points: [45,93], string: "-]"'
-- 'Invalid custom element name: code points: [45,94], string: "-^"'
-- 'Invalid custom element name: code points: [45,95], string: "-_"'
-- 'Invalid custom element name: code points: [45,96], string: "-`"'
-- 'Invalid custom element name: code points: [45,97], string: "-a"'
-- 'Invalid custom element name: code points: [45,98], string: "-b"'
-- 'Invalid custom element name: code points: [45,99], string: "-c"'
-- "Invalid custom element name: code points: [45,9], string: \"-\t\""
-- 'Invalid custom element name: code points: [45], string: "-"'
-- 'Invalid custom element name: code points: [46,45,101,108,101,109,101,110,116],
-  string: ".-element"'
-- 'Invalid custom element name: code points: [46], string: "."'
-- 'Invalid custom element name: code points: [47,45,101,108,101,109,101,110,116],
-  string: "/-element"'
-- 'Invalid custom element name: code points: [47], string: "/"'
-- 'Invalid custom element name: code points: [48,45,101,108,101,109,101,110,116],
-  string: "0-element"'
-- 'Invalid custom element name: code points: [48], string: "0"'
-- 'Invalid custom element name: code points: [49,45,101,108,101,109,101,110,116],
-  string: "1-element"'
-- 'Invalid custom element name: code points: [49], string: "1"'
-- "Invalid custom element name: code points: [4], string: \"\x04\""
-- "Invalid custom element name: code points: [5,45,101,108,101,109,101,110,116], string:
-  \"\x05-element\""
-- 'Invalid custom element name: code points: [50,45,101,108,101,109,101,110,116],
-  string: "2-element"'
-- 'Invalid custom element name: code points: [50], string: "2"'
-- 'Invalid custom element name: code points: [51,45,101,108,101,109,101,110,116],
-  string: "3-element"'
-- 'Invalid custom element name: code points: [51], string: "3"'
-- 'Invalid custom element name: code points: [52,45,101,108,101,109,101,110,116],
-  string: "4-element"'
-- 'Invalid custom element name: code points: [52], string: "4"'
-- 'Invalid custom element name: code points: [53,45,101,108,101,109,101,110,116],
-  string: "5-element"'
-- 'Invalid custom element name: code points: [53], string: "5"'
-- 'Invalid custom element name: code points: [54,45,101,108,101,109,101,110,116],
-  string: "6-element"'
-- 'Invalid custom element name: code points: [54], string: "6"'
-- 'Invalid custom element name: code points: [55,45,101,108,101,109,101,110,116],
-  string: "7-element"'
-- 'Invalid custom element name: code points: [55], string: "7"'
-- 'Invalid custom element name: code points: [56,45,101,108,101,109,101,110,116],
-  string: "8-element"'
-- 'Invalid custom element name: code points: [56], string: "8"'
-- 'Invalid custom element name: code points: [57,45,101,108,101,109,101,110,116],
-  string: "9-element"'
-- 'Invalid custom element name: code points: [57], string: "9"'
-- 'Invalid custom element name: code points: [58,45,101,108,101,109,101,110,116],
-  string: ":-element"'
-- 'Invalid custom element name: code points: [58], string: ":"'
-- 'Invalid custom element name: code points: [59,45,101,108,101,109,101,110,116],
-  string: ";-element"'
-- 'Invalid custom element name: code points: [59], string: ";"'
-- "Invalid custom element name: code points: [5], string: \"\x05\""
-- "Invalid custom element name: code points: [6,45,101,108,101,109,101,110,116], string:
-  \"\x06-element\""
-- 'Invalid custom element name: code points: [60,45,101,108,101,109,101,110,116],
-  string: "<-element"'
-- 'Invalid custom element name: code points: [60], string: "<"'
-- 'Invalid custom element name: code points: [61,45,101,108,101,109,101,110,116],
-  string: "=-element"'
-- 'Invalid custom element name: code points: [61], string: "="'
-- 'Invalid custom element name: code points: [62,45,101,108,101,109,101,110,116],
-  string: ">-element"'
-- 'Invalid custom element name: code points: [62], string: ">"'
-- 'Invalid custom element name: code points: [63,45,101,108,101,109,101,110,116],
-  string: "?-element"'
-- 'Invalid custom element name: code points: [63], string: "?"'
-- 'Invalid custom element name: code points: [64,45,101,108,101,109,101,110,116],
-  string: "@-element"'
-- 'Invalid custom element name: code points: [64], string: "@"'
-- "Invalid custom element name: code points: [65,0,45,101,108,101,109,101,110,116],
-  string: \"A\0-element\""
-- "Invalid custom element name: code points: [65,0], string: \"A\0\""
-- "Invalid custom element name: code points: [65,1,45,101,108,101,109,101,110,116],
-  string: \"A\x01-element\""
-- |-
-  Invalid custom element name: code points: [65,10,45,101,108,101,109,101,110,116], string: "A
-  -element"
-- 'Invalid custom element name: code points: [65,100,45,101,108,101,109,101,110,116],
-  string: "Ad-element"'
-- 'Invalid custom element name: code points: [65,100], string: "Ad"'
-- 'Invalid custom element name: code points: [65,101,45,101,108,101,109,101,110,116],
-  string: "Ae-element"'
-- 'Invalid custom element name: code points: [65,101], string: "Ae"'
-- 'Invalid custom element name: code points: [65,102,45,101,108,101,109,101,110,116],
-  string: "Af-element"'
-- 'Invalid custom element name: code points: [65,102], string: "Af"'
-- 'Invalid custom element name: code points: [65,103,45,101,108,101,109,101,110,116],
-  string: "Ag-element"'
-- 'Invalid custom element name: code points: [65,103], string: "Ag"'
-- 'Invalid custom element name: code points: [65,104,45,101,108,101,109,101,110,116],
-  string: "Ah-element"'
-- 'Invalid custom element name: code points: [65,104], string: "Ah"'
-- 'Invalid custom element name: code points: [65,105,45,101,108,101,109,101,110,116],
-  string: "Ai-element"'
-- 'Invalid custom element name: code points: [65,105], string: "Ai"'
-- 'Invalid custom element name: code points: [65,106,45,101,108,101,109,101,110,116],
-  string: "Aj-element"'
-- 'Invalid custom element name: code points: [65,106], string: "Aj"'
-- 'Invalid custom element name: code points: [65,107,45,101,108,101,109,101,110,116],
-  string: "Ak-element"'
-- 'Invalid custom element name: code points: [65,107], string: "Ak"'
-- 'Invalid custom element name: code points: [65,108,45,101,108,101,109,101,110,116],
-  string: "Al-element"'
-- 'Invalid custom element name: code points: [65,108], string: "Al"'
-- 'Invalid custom element name: code points: [65,109,45,101,108,101,109,101,110,116],
-  string: "Am-element"'
-- 'Invalid custom element name: code points: [65,109], string: "Am"'
-- |-
-  Invalid custom element name: code points: [65,10], string: "A
-  "
-- "Invalid custom element name: code points: [65,11,45,101,108,101,109,101,110,116],
-  string: \"A\v-element\""
-- 'Invalid custom element name: code points: [65,110,45,101,108,101,109,101,110,116],
-  string: "An-element"'
-- 'Invalid custom element name: code points: [65,110], string: "An"'
-- 'Invalid custom element name: code points: [65,111,45,101,108,101,109,101,110,116],
-  string: "Ao-element"'
-- 'Invalid custom element name: code points: [65,111], string: "Ao"'
-- 'Invalid custom element name: code points: [65,112,45,101,108,101,109,101,110,116],
-  string: "Ap-element"'
-- 'Invalid custom element name: code points: [65,112], string: "Ap"'
-- 'Invalid custom element name: code points: [65,113,45,101,108,101,109,101,110,116],
-  string: "Aq-element"'
-- 'Invalid custom element name: code points: [65,113], string: "Aq"'
-- 'Invalid custom element name: code points: [65,114,45,101,108,101,109,101,110,116],
-  string: "Ar-element"'
-- 'Invalid custom element name: code points: [65,114], string: "Ar"'
-- 'Invalid custom element name: code points: [65,115,45,101,108,101,109,101,110,116],
-  string: "As-element"'
-- 'Invalid custom element name: code points: [65,115], string: "As"'
-- 'Invalid custom element name: code points: [65,116,45,101,108,101,109,101,110,116],
-  string: "At-element"'
-- 'Invalid custom element name: code points: [65,116], string: "At"'
-- 'Invalid custom element name: code points: [65,117,45,101,108,101,109,101,110,116],
-  string: "Au-element"'
-- 'Invalid custom element name: code points: [65,117], string: "Au"'
-- 'Invalid custom element name: code points: [65,118,45,101,108,101,109,101,110,116],
-  string: "Av-element"'
-- 'Invalid custom element name: code points: [65,118], string: "Av"'
-- 'Invalid custom element name: code points: [65,119,45,101,108,101,109,101,110,116],
-  string: "Aw-element"'
-- 'Invalid custom element name: code points: [65,119], string: "Aw"'
-- "Invalid custom element name: code points: [65,11], string: \"A\v\""
-- "Invalid custom element name: code points: [65,12,45,101,108,101,109,101,110,116],
-  string: \"A\f-element\""
-- 'Invalid custom element name: code points: [65,120,45,101,108,101,109,101,110,116],
-  string: "Ax-element"'
-- 'Invalid custom element name: code points: [65,120], string: "Ax"'
-- 'Invalid custom element name: code points: [65,121,45,101,108,101,109,101,110,116],
-  string: "Ay-element"'
-- 'Invalid custom element name: code points: [65,121], string: "Ay"'
-- 'Invalid custom element name: code points: [65,122,45,101,108,101,109,101,110,116],
-  string: "Az-element"'
-- 'Invalid custom element name: code points: [65,122], string: "Az"'
-- 'Invalid custom element name: code points: [65,123,45,101,108,101,109,101,110,116],
-  string: "A{-element"'
-- 'Invalid custom element name: code points: [65,123], string: "A{"'
-- 'Invalid custom element name: code points: [65,124,45,101,108,101,109,101,110,116],
-  string: "A|-element"'
-- 'Invalid custom element name: code points: [65,124], string: "A|"'
-- 'Invalid custom element name: code points: [65,125,45,101,108,101,109,101,110,116],
-  string: "A}-element"'
-- 'Invalid custom element name: code points: [65,125], string: "A}"'
-- 'Invalid custom element name: code points: [65,126,45,101,108,101,109,101,110,116],
-  string: "A~-element"'
-- 'Invalid custom element name: code points: [65,126], string: "A~"'
-- "Invalid custom element name: code points: [65,127,45,101,108,101,109,101,110,116],
-  string: \"A\x7F-element\""
-- "Invalid custom element name: code points: [65,127345,45,101,108,101,109,101,110,116],
-  string: \"A\U0001F171-element\""
-- "Invalid custom element name: code points: [65,127345], string: \"A\U0001F171\""
-- "Invalid custom element name: code points: [65,127382,45,101,108,101,109,101,110,116],
-  string: \"A\U0001F196-element\""
-- "Invalid custom element name: code points: [65,127382], string: \"A\U0001F196\""
-- "Invalid custom element name: code points: [65,127], string: \"A\x7F\""
-- "Invalid custom element name: code points: [65,12], string: \"A\f\""
-- "Invalid custom element name: code points: [65,13,45,101,108,101,109,101,110,116],
-  string: \"A\r-element\""
-- "Invalid custom element name: code points: [65,13], string: \"A\r\""
-- "Invalid custom element name: code points: [65,14,45,101,108,101,109,101,110,116],
-  string: \"A\x0E-element\""
-- "Invalid custom element name: code points: [65,14], string: \"A\x0E\""
-- "Invalid custom element name: code points: [65,15,45,101,108,101,109,101,110,116],
-  string: \"A\x0F-element\""
-- "Invalid custom element name: code points: [65,15], string: \"A\x0F\""
-- "Invalid custom element name: code points: [65,16,45,101,108,101,109,101,110,116],
-  string: \"A\x10-element\""
-- "Invalid custom element name: code points: [65,16], string: \"A\x10\""
-- "Invalid custom element name: code points: [65,17,45,101,108,101,109,101,110,116],
-  string: \"A\x11-element\""
-- "Invalid custom element name: code points: [65,17], string: \"A\x11\""
-- "Invalid custom element name: code points: [65,18,45,101,108,101,109,101,110,116],
-  string: \"A\x12-element\""
-- "Invalid custom element name: code points: [65,18], string: \"A\x12\""
-- "Invalid custom element name: code points: [65,19,45,101,108,101,109,101,110,116],
-  string: \"A\x13-element\""
-- "Invalid custom element name: code points: [65,19], string: \"A\x13\""
-- "Invalid custom element name: code points: [65,1], string: \"A\x01\""
-- "Invalid custom element name: code points: [65,2,45,101,108,101,109,101,110,116],
-  string: \"A\x02-element\""
-- "Invalid custom element name: code points: [65,20,45,101,108,101,109,101,110,116],
-  string: \"A\x14-element\""
-- "Invalid custom element name: code points: [65,20], string: \"A\x14\""
-- "Invalid custom element name: code points: [65,21,45,101,108,101,109,101,110,116],
-  string: \"A\x15-element\""
-- "Invalid custom element name: code points: [65,21], string: \"A\x15\""
-- "Invalid custom element name: code points: [65,22,45,101,108,101,109,101,110,116],
-  string: \"A\x16-element\""
-- "Invalid custom element name: code points: [65,22], string: \"A\x16\""
-- "Invalid custom element name: code points: [65,23,45,101,108,101,109,101,110,116],
-  string: \"A\x17-element\""
-- "Invalid custom element name: code points: [65,23], string: \"A\x17\""
-- "Invalid custom element name: code points: [65,24,45,101,108,101,109,101,110,116],
-  string: \"A\x18-element\""
-- "Invalid custom element name: code points: [65,24], string: \"A\x18\""
-- "Invalid custom element name: code points: [65,25,45,101,108,101,109,101,110,116],
-  string: \"A\x19-element\""
-- "Invalid custom element name: code points: [65,25], string: \"A\x19\""
-- "Invalid custom element name: code points: [65,26,45,101,108,101,109,101,110,116],
-  string: \"A\x1A-element\""
-- "Invalid custom element name: code points: [65,26], string: \"A\x1A\""
-- "Invalid custom element name: code points: [65,27,45,101,108,101,109,101,110,116],
-  string: \"A\e-element\""
-- "Invalid custom element name: code points: [65,27], string: \"A\e\""
-- "Invalid custom element name: code points: [65,28,45,101,108,101,109,101,110,116],
-  string: \"A\x1C-element\""
-- "Invalid custom element name: code points: [65,28], string: \"A\x1C\""
-- "Invalid custom element name: code points: [65,29,45,101,108,101,109,101,110,116],
-  string: \"A\x1D-element\""
-- "Invalid custom element name: code points: [65,29], string: \"A\x1D\""
-- "Invalid custom element name: code points: [65,2], string: \"A\x02\""
-- "Invalid custom element name: code points: [65,3,45,101,108,101,109,101,110,116],
-  string: \"A\x03-element\""
-- "Invalid custom element name: code points: [65,30,45,101,108,101,109,101,110,116],
-  string: \"A\x1E-element\""
-- "Invalid custom element name: code points: [65,30], string: \"A\x1E\""
-- "Invalid custom element name: code points: [65,31,45,101,108,101,109,101,110,116],
-  string: \"A\x1F-element\""
-- "Invalid custom element name: code points: [65,31], string: \"A\x1F\""
-- 'Invalid custom element name: code points: [65,32,45,101,108,101,109,101,110,116],
-  string: "A -element"'
-- 'Invalid custom element name: code points: [65,32], string: "A "'
-- 'Invalid custom element name: code points: [65,33,45,101,108,101,109,101,110,116],
-  string: "A!-element"'
-- 'Invalid custom element name: code points: [65,33], string: "A!"'
-- 'Invalid custom element name: code points: [65,34,45,101,108,101,109,101,110,116],
-  string: "A"-element"'
-- 'Invalid custom element name: code points: [65,34], string: "A""'
-- 'Invalid custom element name: code points: [65,35,45,101,108,101,109,101,110,116],
-  string: "A#-element"'
-- 'Invalid custom element name: code points: [65,35], string: "A#"'
-- 'Invalid custom element name: code points: [65,36,45,101,108,101,109,101,110,116],
-  string: "A$-element"'
-- 'Invalid custom element name: code points: [65,36], string: "A$"'
-- 'Invalid custom element name: code points: [65,37,45,101,108,101,109,101,110,116],
-  string: "A%-element"'
-- 'Invalid custom element name: code points: [65,37], string: "A%"'
-- 'Invalid custom element name: code points: [65,38,45,101,108,101,109,101,110,116],
-  string: "A&-element"'
-- 'Invalid custom element name: code points: [65,38], string: "A&"'
-- 'Invalid custom element name: code points: [65,39,45,101,108,101,109,101,110,116],
-  string: "A''-element"'
-- 'Invalid custom element name: code points: [65,39], string: "A''"'
-- "Invalid custom element name: code points: [65,3], string: \"A\x03\""
-- "Invalid custom element name: code points: [65,4,45,101,108,101,109,101,110,116],
-  string: \"A\x04-element\""
-- 'Invalid custom element name: code points: [65,40,45,101,108,101,109,101,110,116],
-  string: "A(-element"'
-- 'Invalid custom element name: code points: [65,40], string: "A("'
-- 'Invalid custom element name: code points: [65,41,45,101,108,101,109,101,110,116],
-  string: "A)-element"'
-- 'Invalid custom element name: code points: [65,41], string: "A)"'
-- 'Invalid custom element name: code points: [65,42,45,101,108,101,109,101,110,116],
-  string: "A*-element"'
-- 'Invalid custom element name: code points: [65,42], string: "A*"'
-- 'Invalid custom element name: code points: [65,43,45,101,108,101,109,101,110,116],
-  string: "A+-element"'
-- 'Invalid custom element name: code points: [65,43], string: "A+"'
-- 'Invalid custom element name: code points: [65,44,45,101,108,101,109,101,110,116],
-  string: "A,-element"'
-- 'Invalid custom element name: code points: [65,44], string: "A,"'
-- "Invalid custom element name: code points: [65,45,0], string: \"A-\0\""
-- 'Invalid custom element name: code points: [65,45,100], string: "A-d"'
-- 'Invalid custom element name: code points: [65,45,101,108,101,109,101,110,116],
-  string: "A-element"'
-- 'Invalid custom element name: code points: [65,45,101], string: "A-e"'
-- 'Invalid custom element name: code points: [65,45,102], string: "A-f"'
-- 'Invalid custom element name: code points: [65,45,103], string: "A-g"'
-- 'Invalid custom element name: code points: [65,45,104], string: "A-h"'
-- 'Invalid custom element name: code points: [65,45,105], string: "A-i"'
-- 'Invalid custom element name: code points: [65,45,106], string: "A-j"'
-- 'Invalid custom element name: code points: [65,45,107], string: "A-k"'
-- 'Invalid custom element name: code points: [65,45,108], string: "A-l"'
-- 'Invalid custom element name: code points: [65,45,109], string: "A-m"'
-- |-
-  Invalid custom element name: code points: [65,45,10], string: "A-
-  "
-- 'Invalid custom element name: code points: [65,45,110], string: "A-n"'
-- 'Invalid custom element name: code points: [65,45,111], string: "A-o"'
-- 'Invalid custom element name: code points: [65,45,112], string: "A-p"'
-- 'Invalid custom element name: code points: [65,45,113], string: "A-q"'
-- 'Invalid custom element name: code points: [65,45,114], string: "A-r"'
-- 'Invalid custom element name: code points: [65,45,115], string: "A-s"'
-- 'Invalid custom element name: code points: [65,45,116], string: "A-t"'
-- 'Invalid custom element name: code points: [65,45,117], string: "A-u"'
-- 'Invalid custom element name: code points: [65,45,118], string: "A-v"'
-- 'Invalid custom element name: code points: [65,45,119], string: "A-w"'
-- "Invalid custom element name: code points: [65,45,11], string: \"A-\v\""
-- 'Invalid custom element name: code points: [65,45,120], string: "A-x"'
-- 'Invalid custom element name: code points: [65,45,121], string: "A-y"'
-- 'Invalid custom element name: code points: [65,45,122], string: "A-z"'
-- 'Invalid custom element name: code points: [65,45,123], string: "A-{"'
-- 'Invalid custom element name: code points: [65,45,124], string: "A-|"'
-- 'Invalid custom element name: code points: [65,45,125], string: "A-}"'
-- 'Invalid custom element name: code points: [65,45,126], string: "A-~"'
-- "Invalid custom element name: code points: [65,45,127345], string: \"A-\U0001F171\""
-- "Invalid custom element name: code points: [65,45,127382], string: \"A-\U0001F196\""
-- "Invalid custom element name: code points: [65,45,127], string: \"A-\x7F\""
-- "Invalid custom element name: code points: [65,45,12], string: \"A-\f\""
-- "Invalid custom element name: code points: [65,45,13], string: \"A-\r\""
-- "Invalid custom element name: code points: [65,45,14], string: \"A-\x0E\""
-- "Invalid custom element name: code points: [65,45,15], string: \"A-\x0F\""
-- "Invalid custom element name: code points: [65,45,16], string: \"A-\x10\""
-- "Invalid custom element name: code points: [65,45,17], string: \"A-\x11\""
-- "Invalid custom element name: code points: [65,45,18], string: \"A-\x12\""
-- "Invalid custom element name: code points: [65,45,19], string: \"A-\x13\""
-- "Invalid custom element name: code points: [65,45,1], string: \"A-\x01\""
-- "Invalid custom element name: code points: [65,45,20], string: \"A-\x14\""
-- "Invalid custom element name: code points: [65,45,21], string: \"A-\x15\""
-- "Invalid custom element name: code points: [65,45,22], string: \"A-\x16\""
-- "Invalid custom element name: code points: [65,45,23], string: \"A-\x17\""
-- "Invalid custom element name: code points: [65,45,24], string: \"A-\x18\""
-- "Invalid custom element name: code points: [65,45,25], string: \"A-\x19\""
-- "Invalid custom element name: code points: [65,45,26], string: \"A-\x1A\""
-- "Invalid custom element name: code points: [65,45,27], string: \"A-\e\""
-- "Invalid custom element name: code points: [65,45,28], string: \"A-\x1C\""
-- "Invalid custom element name: code points: [65,45,29], string: \"A-\x1D\""
-- "Invalid custom element name: code points: [65,45,2], string: \"A-\x02\""
-- "Invalid custom element name: code points: [65,45,30], string: \"A-\x1E\""
-- "Invalid custom element name: code points: [65,45,31], string: \"A-\x1F\""
-- 'Invalid custom element name: code points: [65,45,32], string: "A- "'
-- 'Invalid custom element name: code points: [65,45,33], string: "A-!"'
-- 'Invalid custom element name: code points: [65,45,34], string: "A-""'
-- 'Invalid custom element name: code points: [65,45,35], string: "A-#"'
-- 'Invalid custom element name: code points: [65,45,36], string: "A-$"'
-- 'Invalid custom element name: code points: [65,45,37], string: "A-%"'
-- 'Invalid custom element name: code points: [65,45,38], string: "A-&"'
-- 'Invalid custom element name: code points: [65,45,39], string: "A-''"'
-- "Invalid custom element name: code points: [65,45,3], string: \"A-\x03\""
-- 'Invalid custom element name: code points: [65,45,40], string: "A-("'
-- 'Invalid custom element name: code points: [65,45,41], string: "A-)"'
-- 'Invalid custom element name: code points: [65,45,42], string: "A-*"'
-- 'Invalid custom element name: code points: [65,45,43], string: "A-+"'
-- 'Invalid custom element name: code points: [65,45,44], string: "A-,"'
-- 'Invalid custom element name: code points: [65,45,45,101,108,101,109,101,110,116],
-  string: "A--element"'
-- 'Invalid custom element name: code points: [65,45,45], string: "A--"'
-- 'Invalid custom element name: code points: [65,45,46], string: "A-."'
-- 'Invalid custom element name: code points: [65,45,47], string: "A-/"'
-- 'Invalid custom element name: code points: [65,45,48], string: "A-0"'
-- 'Invalid custom element name: code points: [65,45,49], string: "A-1"'
-- "Invalid custom element name: code points: [65,45,4], string: \"A-\x04\""
-- 'Invalid custom element name: code points: [65,45,50], string: "A-2"'
-- 'Invalid custom element name: code points: [65,45,51], string: "A-3"'
-- 'Invalid custom element name: code points: [65,45,52], string: "A-4"'
-- 'Invalid custom element name: code points: [65,45,53], string: "A-5"'
-- 'Invalid custom element name: code points: [65,45,54], string: "A-6"'
-- 'Invalid custom element name: code points: [65,45,55], string: "A-7"'
-- 'Invalid custom element name: code points: [65,45,56], string: "A-8"'
-- 'Invalid custom element name: code points: [65,45,57], string: "A-9"'
-- 'Invalid custom element name: code points: [65,45,58], string: "A-:"'
-- 'Invalid custom element name: code points: [65,45,59], string: "A-;"'
-- "Invalid custom element name: code points: [65,45,5], string: \"A-\x05\""
-- 'Invalid custom element name: code points: [65,45,60], string: "A-<"'
-- 'Invalid custom element name: code points: [65,45,61], string: "A-="'
-- 'Invalid custom element name: code points: [65,45,62], string: "A->"'
-- 'Invalid custom element name: code points: [65,45,63], string: "A-?"'
-- 'Invalid custom element name: code points: [65,45,64], string: "A-@"'
-- "Invalid custom element name: code points: [65,45,65536], string: \"A-\U00010000\""
-- 'Invalid custom element name: code points: [65,45,65], string: "A-A"'
-- 'Invalid custom element name: code points: [65,45,66], string: "A-B"'
-- 'Invalid custom element name: code points: [65,45,67], string: "A-C"'
-- 'Invalid custom element name: code points: [65,45,68], string: "A-D"'
-- 'Invalid custom element name: code points: [65,45,69], string: "A-E"'
-- "Invalid custom element name: code points: [65,45,6], string: \"A-\x06\""
-- 'Invalid custom element name: code points: [65,45,70], string: "A-F"'
-- 'Invalid custom element name: code points: [65,45,71], string: "A-G"'
-- 'Invalid custom element name: code points: [65,45,72], string: "A-H"'
-- 'Invalid custom element name: code points: [65,45,73], string: "A-I"'
-- 'Invalid custom element name: code points: [65,45,74], string: "A-J"'
-- 'Invalid custom element name: code points: [65,45,75], string: "A-K"'
-- 'Invalid custom element name: code points: [65,45,76], string: "A-L"'
-- 'Invalid custom element name: code points: [65,45,77], string: "A-M"'
-- 'Invalid custom element name: code points: [65,45,78], string: "A-N"'
-- 'Invalid custom element name: code points: [65,45,79], string: "A-O"'
-- "Invalid custom element name: code points: [65,45,7], string: \"A-\a\""
-- 'Invalid custom element name: code points: [65,45,80], string: "A-P"'
-- 'Invalid custom element name: code points: [65,45,81], string: "A-Q"'
-- 'Invalid custom element name: code points: [65,45,82], string: "A-R"'
-- 'Invalid custom element name: code points: [65,45,83], string: "A-S"'
-- 'Invalid custom element name: code points: [65,45,84], string: "A-T"'
-- 'Invalid custom element name: code points: [65,45,85], string: "A-U"'
-- 'Invalid custom element name: code points: [65,45,86], string: "A-V"'
-- 'Invalid custom element name: code points: [65,45,87], string: "A-W"'
-- 'Invalid custom element name: code points: [65,45,88], string: "A-X"'
-- 'Invalid custom element name: code points: [65,45,89], string: "A-Y"'
-- "Invalid custom element name: code points: [65,45,8], string: \"A-\b\""
-- 'Invalid custom element name: code points: [65,45,90], string: "A-Z"'
-- 'Invalid custom element name: code points: [65,45,91], string: "A-["'
-- 'Invalid custom element name: code points: [65,45,92], string: "A-\"'
-- 'Invalid custom element name: code points: [65,45,93], string: "A-]"'
-- 'Invalid custom element name: code points: [65,45,94], string: "A-^"'
-- 'Invalid custom element name: code points: [65,45,95], string: "A-_"'
-- 'Invalid custom element name: code points: [65,45,96], string: "A-`"'
-- 'Invalid custom element name: code points: [65,45,97], string: "A-a"'
-- 'Invalid custom element name: code points: [65,45,98], string: "A-b"'
-- 'Invalid custom element name: code points: [65,45,99], string: "A-c"'
-- "Invalid custom element name: code points: [65,45,9], string: \"A-\t\""
-- 'Invalid custom element name: code points: [65,45], string: "A-"'
-- 'Invalid custom element name: code points: [65,46,45,101,108,101,109,101,110,116],
-  string: "A.-element"'
-- 'Invalid custom element name: code points: [65,46], string: "A."'
-- 'Invalid custom element name: code points: [65,47,45,101,108,101,109,101,110,116],
-  string: "A/-element"'
-- 'Invalid custom element name: code points: [65,47], string: "A/"'
-- 'Invalid custom element name: code points: [65,48,45,101,108,101,109,101,110,116],
-  string: "A0-element"'
-- 'Invalid custom element name: code points: [65,48], string: "A0"'
-- 'Invalid custom element name: code points: [65,49,45,101,108,101,109,101,110,116],
-  string: "A1-element"'
-- 'Invalid custom element name: code points: [65,49], string: "A1"'
-- "Invalid custom element name: code points: [65,4], string: \"A\x04\""
-- "Invalid custom element name: code points: [65,5,45,101,108,101,109,101,110,116],
-  string: \"A\x05-element\""
-- 'Invalid custom element name: code points: [65,50,45,101,108,101,109,101,110,116],
-  string: "A2-element"'
-- 'Invalid custom element name: code points: [65,50], string: "A2"'
-- 'Invalid custom element name: code points: [65,51,45,101,108,101,109,101,110,116],
-  string: "A3-element"'
-- 'Invalid custom element name: code points: [65,51], string: "A3"'
-- 'Invalid custom element name: code points: [65,52,45,101,108,101,109,101,110,116],
-  string: "A4-element"'
-- 'Invalid custom element name: code points: [65,52], string: "A4"'
-- 'Invalid custom element name: code points: [65,53,45,101,108,101,109,101,110,116],
-  string: "A5-element"'
-- 'Invalid custom element name: code points: [65,53], string: "A5"'
-- 'Invalid custom element name: code points: [65,54,45,101,108,101,109,101,110,116],
-  string: "A6-element"'
-- 'Invalid custom element name: code points: [65,54], string: "A6"'
-- 'Invalid custom element name: code points: [65,55,45,101,108,101,109,101,110,116],
-  string: "A7-element"'
-- 'Invalid custom element name: code points: [65,55], string: "A7"'
-- 'Invalid custom element name: code points: [65,56,45,101,108,101,109,101,110,116],
-  string: "A8-element"'
-- 'Invalid custom element name: code points: [65,56], string: "A8"'
-- 'Invalid custom element name: code points: [65,57,45,101,108,101,109,101,110,116],
-  string: "A9-element"'
-- 'Invalid custom element name: code points: [65,57], string: "A9"'
-- 'Invalid custom element name: code points: [65,58,45,101,108,101,109,101,110,116],
-  string: "A:-element"'
-- 'Invalid custom element name: code points: [65,58], string: "A:"'
-- 'Invalid custom element name: code points: [65,59,45,101,108,101,109,101,110,116],
-  string: "A;-element"'
-- 'Invalid custom element name: code points: [65,59], string: "A;"'
-- "Invalid custom element name: code points: [65,5], string: \"A\x05\""
-- "Invalid custom element name: code points: [65,6,45,101,108,101,109,101,110,116],
-  string: \"A\x06-element\""
-- 'Invalid custom element name: code points: [65,60,45,101,108,101,109,101,110,116],
-  string: "A<-element"'
-- 'Invalid custom element name: code points: [65,60], string: "A<"'
-- 'Invalid custom element name: code points: [65,61,45,101,108,101,109,101,110,116],
-  string: "A=-element"'
-- 'Invalid custom element name: code points: [65,61], string: "A="'
-- 'Invalid custom element name: code points: [65,62,45,101,108,101,109,101,110,116],
-  string: "A>-element"'
-- 'Invalid custom element name: code points: [65,62], string: "A>"'
-- 'Invalid custom element name: code points: [65,63,45,101,108,101,109,101,110,116],
-  string: "A?-element"'
-- 'Invalid custom element name: code points: [65,63], string: "A?"'
-- 'Invalid custom element name: code points: [65,64,45,101,108,101,109,101,110,116],
-  string: "A@-element"'
-- 'Invalid custom element name: code points: [65,64], string: "A@"'
-- 'Invalid custom element name: code points: [65,65,45,101,108,101,109,101,110,116],
-  string: "AA-element"'
-- "Invalid custom element name: code points: [65,65536,45,101,108,101,109,101,110,116],
-  string: \"A\U00010000-element\""
-- "Invalid custom element name: code points: [65,65536], string: \"A\U00010000\""
-- 'Invalid custom element name: code points: [65,65], string: "AA"'
-- 'Invalid custom element name: code points: [65,66,45,101,108,101,109,101,110,116],
-  string: "AB-element"'
-- 'Invalid custom element name: code points: [65,66], string: "AB"'
-- 'Invalid custom element name: code points: [65,67,45,101,108,101,109,101,110,116],
-  string: "AC-element"'
-- 'Invalid custom element name: code points: [65,67], string: "AC"'
-- 'Invalid custom element name: code points: [65,68,45,101,108,101,109,101,110,116],
-  string: "AD-element"'
-- 'Invalid custom element name: code points: [65,68], string: "AD"'
-- 'Invalid custom element name: code points: [65,69,45,101,108,101,109,101,110,116],
-  string: "AE-element"'
-- 'Invalid custom element name: code points: [65,69], string: "AE"'
-- "Invalid custom element name: code points: [65,6], string: \"A\x06\""
-- "Invalid custom element name: code points: [65,7,45,101,108,101,109,101,110,116],
-  string: \"A\a-element\""
-- 'Invalid custom element name: code points: [65,70,45,101,108,101,109,101,110,116],
-  string: "AF-element"'
-- 'Invalid custom element name: code points: [65,70], string: "AF"'
-- 'Invalid custom element name: code points: [65,71,45,101,108,101,109,101,110,116],
-  string: "AG-element"'
-- 'Invalid custom element name: code points: [65,71], string: "AG"'
-- 'Invalid custom element name: code points: [65,72,45,101,108,101,109,101,110,116],
-  string: "AH-element"'
-- 'Invalid custom element name: code points: [65,72], string: "AH"'
-- 'Invalid custom element name: code points: [65,73,45,101,108,101,109,101,110,116],
-  string: "AI-element"'
-- 'Invalid custom element name: code points: [65,73], string: "AI"'
-- 'Invalid custom element name: code points: [65,74,45,101,108,101,109,101,110,116],
-  string: "AJ-element"'
-- 'Invalid custom element name: code points: [65,74], string: "AJ"'
-- 'Invalid custom element name: code points: [65,75,45,101,108,101,109,101,110,116],
-  string: "AK-element"'
-- 'Invalid custom element name: code points: [65,75], string: "AK"'
-- 'Invalid custom element name: code points: [65,76,45,101,108,101,109,101,110,116],
-  string: "AL-element"'
-- 'Invalid custom element name: code points: [65,76], string: "AL"'
-- 'Invalid custom element name: code points: [65,77,45,101,108,101,109,101,110,116],
-  string: "AM-element"'
-- 'Invalid custom element name: code points: [65,77], string: "AM"'
-- 'Invalid custom element name: code points: [65,78,45,101,108,101,109,101,110,116],
-  string: "AN-element"'
-- 'Invalid custom element name: code points: [65,78], string: "AN"'
-- 'Invalid custom element name: code points: [65,79,45,101,108,101,109,101,110,116],
-  string: "AO-element"'
-- 'Invalid custom element name: code points: [65,79], string: "AO"'
-- "Invalid custom element name: code points: [65,7], string: \"A\a\""
-- "Invalid custom element name: code points: [65,8,45,101,108,101,109,101,110,116],
-  string: \"A\b-element\""
-- 'Invalid custom element name: code points: [65,80,45,101,108,101,109,101,110,116],
-  string: "AP-element"'
-- 'Invalid custom element name: code points: [65,80], string: "AP"'
-- 'Invalid custom element name: code points: [65,81,45,101,108,101,109,101,110,116],
-  string: "AQ-element"'
-- 'Invalid custom element name: code points: [65,81], string: "AQ"'
-- 'Invalid custom element name: code points: [65,82,45,101,108,101,109,101,110,116],
-  string: "AR-element"'
-- 'Invalid custom element name: code points: [65,82], string: "AR"'
-- 'Invalid custom element name: code points: [65,83,45,101,108,101,109,101,110,116],
-  string: "AS-element"'
-- 'Invalid custom element name: code points: [65,83], string: "AS"'
-- 'Invalid custom element name: code points: [65,84,45,101,108,101,109,101,110,116],
-  string: "AT-element"'
-- 'Invalid custom element name: code points: [65,84], string: "AT"'
-- 'Invalid custom element name: code points: [65,85,45,101,108,101,109,101,110,116],
-  string: "AU-element"'
-- 'Invalid custom element name: code points: [65,85], string: "AU"'
-- 'Invalid custom element name: code points: [65,86,45,101,108,101,109,101,110,116],
-  string: "AV-element"'
-- 'Invalid custom element name: code points: [65,86], string: "AV"'
-- 'Invalid custom element name: code points: [65,87,45,101,108,101,109,101,110,116],
-  string: "AW-element"'
-- 'Invalid custom element name: code points: [65,87], string: "AW"'
-- 'Invalid custom element name: code points: [65,88,45,101,108,101,109,101,110,116],
-  string: "AX-element"'
-- 'Invalid custom element name: code points: [65,88], string: "AX"'
-- 'Invalid custom element name: code points: [65,89,45,101,108,101,109,101,110,116],
-  string: "AY-element"'
-- 'Invalid custom element name: code points: [65,89], string: "AY"'
-- "Invalid custom element name: code points: [65,8], string: \"A\b\""
-- "Invalid custom element name: code points: [65,9,45,101,108,101,109,101,110,116],
-  string: \"A\t-element\""
-- 'Invalid custom element name: code points: [65,90,45,101,108,101,109,101,110,116],
-  string: "AZ-element"'
-- 'Invalid custom element name: code points: [65,90], string: "AZ"'
-- 'Invalid custom element name: code points: [65,91,45,101,108,101,109,101,110,116],
-  string: "A[-element"'
-- 'Invalid custom element name: code points: [65,91], string: "A["'
-- 'Invalid custom element name: code points: [65,92,45,101,108,101,109,101,110,116],
-  string: "A\-element"'
-- 'Invalid custom element name: code points: [65,92], string: "A\"'
-- 'Invalid custom element name: code points: [65,93,45,101,108,101,109,101,110,116],
-  string: "A]-element"'
-- 'Invalid custom element name: code points: [65,93], string: "A]"'
-- 'Invalid custom element name: code points: [65,94,45,101,108,101,109,101,110,116],
-  string: "A^-element"'
-- 'Invalid custom element name: code points: [65,94], string: "A^"'
-- 'Invalid custom element name: code points: [65,95,45,101,108,101,109,101,110,116],
-  string: "A_-element"'
-- 'Invalid custom element name: code points: [65,95], string: "A_"'
-- 'Invalid custom element name: code points: [65,96,45,101,108,101,109,101,110,116],
-  string: "A`-element"'
-- 'Invalid custom element name: code points: [65,96], string: "A`"'
-- 'Invalid custom element name: code points: [65,97,45,101,108,101,109,101,110,116],
-  string: "Aa-element"'
-- 'Invalid custom element name: code points: [65,97], string: "Aa"'
-- 'Invalid custom element name: code points: [65,98,45,101,108,101,109,101,110,116],
-  string: "Ab-element"'
-- 'Invalid custom element name: code points: [65,98], string: "Ab"'
-- 'Invalid custom element name: code points: [65,99,45,101,108,101,109,101,110,116],
-  string: "Ac-element"'
-- 'Invalid custom element name: code points: [65,99], string: "Ac"'
-- "Invalid custom element name: code points: [65,9], string: \"A\t\""
-- "Invalid custom element name: code points: [65536,45,101,108,101,109,101,110,116],
-  string: \"\U00010000-element\""
-- "Invalid custom element name: code points: [65536], string: \"\U00010000\""
-- 'Invalid custom element name: code points: [65], string: "A"'
-- 'Invalid custom element name: code points: [66,45,101,108,101,109,101,110,116],
-  string: "B-element"'
-- 'Invalid custom element name: code points: [66], string: "B"'
-- 'Invalid custom element name: code points: [67,45,101,108,101,109,101,110,116],
-  string: "C-element"'
-- 'Invalid custom element name: code points: [67], string: "C"'
-- 'Invalid custom element name: code points: [68,45,101,108,101,109,101,110,116],
-  string: "D-element"'
-- 'Invalid custom element name: code points: [68], string: "D"'
-- 'Invalid custom element name: code points: [69,45,101,108,101,109,101,110,116],
-  string: "E-element"'
-- 'Invalid custom element name: code points: [69], string: "E"'
-- "Invalid custom element name: code points: [6], string: \"\x06\""
-- "Invalid custom element name: code points: [7,45,101,108,101,109,101,110,116], string:
-  \"\a-element\""
-- 'Invalid custom element name: code points: [70,45,101,108,101,109,101,110,116],
-  string: "F-element"'
-- 'Invalid custom element name: code points: [70], string: "F"'
-- 'Invalid custom element name: code points: [71,45,101,108,101,109,101,110,116],
-  string: "G-element"'
-- 'Invalid custom element name: code points: [71], string: "G"'
-- 'Invalid custom element name: code points: [72,45,101,108,101,109,101,110,116],
-  string: "H-element"'
-- 'Invalid custom element name: code points: [72], string: "H"'
-- 'Invalid custom element name: code points: [73,45,101,108,101,109,101,110,116],
-  string: "I-element"'
-- 'Invalid custom element name: code points: [73], string: "I"'
-- 'Invalid custom element name: code points: [74,45,101,108,101,109,101,110,116],
-  string: "J-element"'
-- 'Invalid custom element name: code points: [74], string: "J"'
-- 'Invalid custom element name: code points: [75,45,101,108,101,109,101,110,116],
-  string: "K-element"'
-- 'Invalid custom element name: code points: [75], string: "K"'
-- 'Invalid custom element name: code points: [76,45,101,108,101,109,101,110,116],
-  string: "L-element"'
-- 'Invalid custom element name: code points: [76], string: "L"'
-- 'Invalid custom element name: code points: [77,45,101,108,101,109,101,110,116],
-  string: "M-element"'
-- 'Invalid custom element name: code points: [77], string: "M"'
-- 'Invalid custom element name: code points: [78,45,101,108,101,109,101,110,116],
-  string: "N-element"'
-- 'Invalid custom element name: code points: [78], string: "N"'
-- 'Invalid custom element name: code points: [79,45,101,108,101,109,101,110,116],
-  string: "O-element"'
-- 'Invalid custom element name: code points: [79], string: "O"'
-- "Invalid custom element name: code points: [7], string: \"\a\""
-- "Invalid custom element name: code points: [8,45,101,108,101,109,101,110,116], string:
-  \"\b-element\""
-- 'Invalid custom element name: code points: [80,45,101,108,101,109,101,110,116],
-  string: "P-element"'
-- 'Invalid custom element name: code points: [80], string: "P"'
-- 'Invalid custom element name: code points: [81,45,101,108,101,109,101,110,116],
-  string: "Q-element"'
-- 'Invalid custom element name: code points: [81], string: "Q"'
-- 'Invalid custom element name: code points: [82,45,101,108,101,109,101,110,116],
-  string: "R-element"'
-- 'Invalid custom element name: code points: [82], string: "R"'
-- 'Invalid custom element name: code points: [83,45,101,108,101,109,101,110,116],
-  string: "S-element"'
-- 'Invalid custom element name: code points: [83], string: "S"'
-- 'Invalid custom element name: code points: [84,45,101,108,101,109,101,110,116],
-  string: "T-element"'
-- 'Invalid custom element name: code points: [84], string: "T"'
-- 'Invalid custom element name: code points: [85,45,101,108,101,109,101,110,116],
-  string: "U-element"'
-- 'Invalid custom element name: code points: [85], string: "U"'
-- 'Invalid custom element name: code points: [86,45,101,108,101,109,101,110,116],
-  string: "V-element"'
-- 'Invalid custom element name: code points: [86], string: "V"'
-- 'Invalid custom element name: code points: [87,45,101,108,101,109,101,110,116],
-  string: "W-element"'
-- 'Invalid custom element name: code points: [87], string: "W"'
-- 'Invalid custom element name: code points: [88,45,101,108,101,109,101,110,116],
-  string: "X-element"'
-- 'Invalid custom element name: code points: [88], string: "X"'
-- 'Invalid custom element name: code points: [89,45,101,108,101,109,101,110,116],
-  string: "Y-element"'
-- 'Invalid custom element name: code points: [89], string: "Y"'
-- "Invalid custom element name: code points: [8], string: \"\b\""
-- "Invalid custom element name: code points: [9,45,101,108,101,109,101,110,116], string:
-  \"\t-element\""
-- 'Invalid custom element name: code points: [90,45,101,108,101,109,101,110,116],
-  string: "Z-element"'
-- 'Invalid custom element name: code points: [90], string: "Z"'
-- 'Invalid custom element name: code points: [91,45,101,108,101,109,101,110,116],
-  string: "[-element"'
-- 'Invalid custom element name: code points: [91], string: "["'
-- 'Invalid custom element name: code points: [92,45,101,108,101,109,101,110,116],
-  string: "\-element"'
-- 'Invalid custom element name: code points: [92], string: "\"'
-- 'Invalid custom element name: code points: [93,45,101,108,101,109,101,110,116],
-  string: "]-element"'
-- 'Invalid custom element name: code points: [93], string: "]"'
-- 'Invalid custom element name: code points: [94,45,101,108,101,109,101,110,116],
-  string: "^-element"'
-- 'Invalid custom element name: code points: [94], string: "^"'
-- 'Invalid custom element name: code points: [95,45,101,108,101,109,101,110,116],
-  string: "_-element"'
-- 'Invalid custom element name: code points: [95], string: "_"'
-- 'Invalid custom element name: code points: [96,45,101,108,101,109,101,110,116],
-  string: "`-element"'
-- 'Invalid custom element name: code points: [96], string: "`"'
-- "Invalid custom element name: code points: [97,0,45,101,108,101,109,101,110,116],
-  string: \"a\0-element\""
-- "Invalid custom element name: code points: [97,0], string: \"a\0\""
-- |-
-  Invalid custom element name: code points: [97,10,45,101,108,101,109,101,110,116], string: "a
-  -element"
-- 'Invalid custom element name: code points: [97,100], string: "ad"'
-- 'Invalid custom element name: code points: [97,101], string: "ae"'
-- 'Invalid custom element name: code points: [97,102], string: "af"'
-- 'Invalid custom element name: code points: [97,103], string: "ag"'
-- 'Invalid custom element name: code points: [97,104], string: "ah"'
-- 'Invalid custom element name: code points: [97,105], string: "ai"'
-- 'Invalid custom element name: code points: [97,106], string: "aj"'
-- 'Invalid custom element name: code points: [97,107], string: "ak"'
-- 'Invalid custom element name: code points: [97,108], string: "al"'
-- 'Invalid custom element name: code points: [97,109], string: "am"'
-- |-
-  Invalid custom element name: code points: [97,10], string: "a
-  "
-- 'Invalid custom element name: code points: [97,110,110,111,116,97,116,105,111,110,45,120,109,108],
-  string: "annotation-xml"'
-- 'Invalid custom element name: code points: [97,110], string: "an"'
-- 'Invalid custom element name: code points: [97,111], string: "ao"'
-- 'Invalid custom element name: code points: [97,112], string: "ap"'
-- 'Invalid custom element name: code points: [97,113], string: "aq"'
-- 'Invalid custom element name: code points: [97,114], string: "ar"'
-- 'Invalid custom element name: code points: [97,115], string: "as"'
-- 'Invalid custom element name: code points: [97,116], string: "at"'
-- 'Invalid custom element name: code points: [97,117], string: "au"'
-- 'Invalid custom element name: code points: [97,118], string: "av"'
-- 'Invalid custom element name: code points: [97,119], string: "aw"'
-- "Invalid custom element name: code points: [97,11], string: \"a\v\""
-- "Invalid custom element name: code points: [97,12,45,101,108,101,109,101,110,116],
-  string: \"a\f-element\""
-- 'Invalid custom element name: code points: [97,120], string: "ax"'
-- 'Invalid custom element name: code points: [97,121], string: "ay"'
-- 'Invalid custom element name: code points: [97,122], string: "az"'
-- 'Invalid custom element name: code points: [97,123], string: "a{"'
-- 'Invalid custom element name: code points: [97,124], string: "a|"'
-- 'Invalid custom element name: code points: [97,125], string: "a}"'
-- 'Invalid custom element name: code points: [97,126], string: "a~"'
-- "Invalid custom element name: code points: [97,127345], string: \"a\U0001F171\""
-- "Invalid custom element name: code points: [97,127382], string: \"a\U0001F196\""
-- "Invalid custom element name: code points: [97,127], string: \"a\x7F\""
-- "Invalid custom element name: code points: [97,12], string: \"a\f\""
-- "Invalid custom element name: code points: [97,13,45,101,108,101,109,101,110,116],
-  string: \"a\r-element\""
-- "Invalid custom element name: code points: [97,13], string: \"a\r\""
-- "Invalid custom element name: code points: [97,14], string: \"a\x0E\""
-- "Invalid custom element name: code points: [97,15], string: \"a\x0F\""
-- "Invalid custom element name: code points: [97,16], string: \"a\x10\""
-- "Invalid custom element name: code points: [97,17], string: \"a\x11\""
-- "Invalid custom element name: code points: [97,18], string: \"a\x12\""
-- "Invalid custom element name: code points: [97,19], string: \"a\x13\""
-- "Invalid custom element name: code points: [97,1], string: \"a\x01\""
-- "Invalid custom element name: code points: [97,20], string: \"a\x14\""
-- "Invalid custom element name: code points: [97,21], string: \"a\x15\""
-- "Invalid custom element name: code points: [97,22], string: \"a\x16\""
-- "Invalid custom element name: code points: [97,23], string: \"a\x17\""
-- "Invalid custom element name: code points: [97,24], string: \"a\x18\""
-- "Invalid custom element name: code points: [97,25], string: \"a\x19\""
-- "Invalid custom element name: code points: [97,26], string: \"a\x1A\""
-- "Invalid custom element name: code points: [97,27], string: \"a\e\""
-- "Invalid custom element name: code points: [97,28], string: \"a\x1C\""
-- "Invalid custom element name: code points: [97,29], string: \"a\x1D\""
-- "Invalid custom element name: code points: [97,2], string: \"a\x02\""
-- "Invalid custom element name: code points: [97,30], string: \"a\x1E\""
-- "Invalid custom element name: code points: [97,31], string: \"a\x1F\""
-- 'Invalid custom element name: code points: [97,32,45,101,108,101,109,101,110,116],
-  string: "a -element"'
-- 'Invalid custom element name: code points: [97,32], string: "a "'
-- 'Invalid custom element name: code points: [97,33], string: "a!"'
-- 'Invalid custom element name: code points: [97,34], string: "a""'
-- 'Invalid custom element name: code points: [97,35], string: "a#"'
-- 'Invalid custom element name: code points: [97,36], string: "a$"'
-- 'Invalid custom element name: code points: [97,37], string: "a%"'
-- 'Invalid custom element name: code points: [97,38], string: "a&"'
-- 'Invalid custom element name: code points: [97,39], string: "a''"'
-- "Invalid custom element name: code points: [97,3], string: \"a\x03\""
-- 'Invalid custom element name: code points: [97,40], string: "a("'
-- 'Invalid custom element name: code points: [97,41], string: "a)"'
-- 'Invalid custom element name: code points: [97,42], string: "a*"'
-- 'Invalid custom element name: code points: [97,43], string: "a+"'
-- 'Invalid custom element name: code points: [97,44], string: "a,"'
-- "Invalid custom element name: code points: [97,45,0], string: \"a-\0\""
-- |-
-  Invalid custom element name: code points: [97,45,10], string: "a-
-  "
-- "Invalid custom element name: code points: [97,45,12], string: \"a-\f\""
-- "Invalid custom element name: code points: [97,45,13], string: \"a-\r\""
-- 'Invalid custom element name: code points: [97,45,32], string: "a- "'
-- 'Invalid custom element name: code points: [97,45,47], string: "a-/"'
-- 'Invalid custom element name: code points: [97,45,62], string: "a->"'
-- 'Invalid custom element name: code points: [97,45,65], string: "a-A"'
-- 'Invalid custom element name: code points: [97,45,66], string: "a-B"'
-- 'Invalid custom element name: code points: [97,45,67], string: "a-C"'
-- 'Invalid custom element name: code points: [97,45,68], string: "a-D"'
-- 'Invalid custom element name: code points: [97,45,69], string: "a-E"'
-- 'Invalid custom element name: code points: [97,45,70], string: "a-F"'
-- 'Invalid custom element name: code points: [97,45,71], string: "a-G"'
-- 'Invalid custom element name: code points: [97,45,72], string: "a-H"'
-- 'Invalid custom element name: code points: [97,45,73], string: "a-I"'
-- 'Invalid custom element name: code points: [97,45,74], string: "a-J"'
-- 'Invalid custom element name: code points: [97,45,75], string: "a-K"'
-- 'Invalid custom element name: code points: [97,45,76], string: "a-L"'
-- 'Invalid custom element name: code points: [97,45,77], string: "a-M"'
-- 'Invalid custom element name: code points: [97,45,78], string: "a-N"'
-- 'Invalid custom element name: code points: [97,45,79], string: "a-O"'
-- 'Invalid custom element name: code points: [97,45,80], string: "a-P"'
-- 'Invalid custom element name: code points: [97,45,81], string: "a-Q"'
-- 'Invalid custom element name: code points: [97,45,82], string: "a-R"'
-- 'Invalid custom element name: code points: [97,45,83], string: "a-S"'
-- 'Invalid custom element name: code points: [97,45,84], string: "a-T"'
-- 'Invalid custom element name: code points: [97,45,85], string: "a-U"'
-- 'Invalid custom element name: code points: [97,45,86], string: "a-V"'
-- 'Invalid custom element name: code points: [97,45,87], string: "a-W"'
-- 'Invalid custom element name: code points: [97,45,88], string: "a-X"'
-- 'Invalid custom element name: code points: [97,45,89], string: "a-Y"'
-- 'Invalid custom element name: code points: [97,45,90], string: "a-Z"'
-- "Invalid custom element name: code points: [97,45,9], string: \"a-\t\""
-- 'Invalid custom element name: code points: [97,46], string: "a."'
-- 'Invalid custom element name: code points: [97,47,45,101,108,101,109,101,110,116],
-  string: "a/-element"'
-- 'Invalid custom element name: code points: [97,47], string: "a/"'
-- 'Invalid custom element name: code points: [97,48], string: "a0"'
-- 'Invalid custom element name: code points: [97,49], string: "a1"'
-- "Invalid custom element name: code points: [97,4], string: \"a\x04\""
-- 'Invalid custom element name: code points: [97,50], string: "a2"'
-- 'Invalid custom element name: code points: [97,51], string: "a3"'
-- 'Invalid custom element name: code points: [97,52], string: "a4"'
-- 'Invalid custom element name: code points: [97,53], string: "a5"'
-- 'Invalid custom element name: code points: [97,54], string: "a6"'
-- 'Invalid custom element name: code points: [97,55], string: "a7"'
-- 'Invalid custom element name: code points: [97,56], string: "a8"'
-- 'Invalid custom element name: code points: [97,57], string: "a9"'
-- 'Invalid custom element name: code points: [97,58], string: "a:"'
-- 'Invalid custom element name: code points: [97,59], string: "a;"'
-- "Invalid custom element name: code points: [97,5], string: \"a\x05\""
-- 'Invalid custom element name: code points: [97,60], string: "a<"'
-- 'Invalid custom element name: code points: [97,61], string: "a="'
-- 'Invalid custom element name: code points: [97,62,45,101,108,101,109,101,110,116],
-  string: "a>-element"'
-- 'Invalid custom element name: code points: [97,62], string: "a>"'
-- 'Invalid custom element name: code points: [97,63], string: "a?"'
-- 'Invalid custom element name: code points: [97,64], string: "a@"'
-- 'Invalid custom element name: code points: [97,65,45,101,108,101,109,101,110,116],
-  string: "aA-element"'
-- "Invalid custom element name: code points: [97,65536], string: \"a\U00010000\""
-- 'Invalid custom element name: code points: [97,65], string: "aA"'
-- 'Invalid custom element name: code points: [97,66,45,101,108,101,109,101,110,116],
-  string: "aB-element"'
-- 'Invalid custom element name: code points: [97,66], string: "aB"'
-- 'Invalid custom element name: code points: [97,67,45,101,108,101,109,101,110,116],
-  string: "aC-element"'
-- 'Invalid custom element name: code points: [97,67], string: "aC"'
-- 'Invalid custom element name: code points: [97,68,45,101,108,101,109,101,110,116],
-  string: "aD-element"'
-- 'Invalid custom element name: code points: [97,68], string: "aD"'
-- 'Invalid custom element name: code points: [97,69,45,101,108,101,109,101,110,116],
-  string: "aE-element"'
-- 'Invalid custom element name: code points: [97,69], string: "aE"'
-- "Invalid custom element name: code points: [97,6], string: \"a\x06\""
-- 'Invalid custom element name: code points: [97,70,45,101,108,101,109,101,110,116],
-  string: "aF-element"'
-- 'Invalid custom element name: code points: [97,70], string: "aF"'
-- 'Invalid custom element name: code points: [97,71,45,101,108,101,109,101,110,116],
-  string: "aG-element"'
-- 'Invalid custom element name: code points: [97,71], string: "aG"'
-- 'Invalid custom element name: code points: [97,72,45,101,108,101,109,101,110,116],
-  string: "aH-element"'
-- 'Invalid custom element name: code points: [97,72], string: "aH"'
-- 'Invalid custom element name: code points: [97,73,45,101,108,101,109,101,110,116],
-  string: "aI-element"'
-- 'Invalid custom element name: code points: [97,73], string: "aI"'
-- 'Invalid custom element name: code points: [97,74,45,101,108,101,109,101,110,116],
-  string: "aJ-element"'
-- 'Invalid custom element name: code points: [97,74], string: "aJ"'
-- 'Invalid custom element name: code points: [97,75,45,101,108,101,109,101,110,116],
-  string: "aK-element"'
-- 'Invalid custom element name: code points: [97,75], string: "aK"'
-- 'Invalid custom element name: code points: [97,76,45,101,108,101,109,101,110,116],
-  string: "aL-element"'
-- 'Invalid custom element name: code points: [97,76], string: "aL"'
-- 'Invalid custom element name: code points: [97,77,45,101,108,101,109,101,110,116],
-  string: "aM-element"'
-- 'Invalid custom element name: code points: [97,77], string: "aM"'
-- 'Invalid custom element name: code points: [97,78,45,101,108,101,109,101,110,116],
-  string: "aN-element"'
-- 'Invalid custom element name: code points: [97,78], string: "aN"'
-- 'Invalid custom element name: code points: [97,79,45,101,108,101,109,101,110,116],
-  string: "aO-element"'
-- 'Invalid custom element name: code points: [97,79], string: "aO"'
-- "Invalid custom element name: code points: [97,7], string: \"a\a\""
-- 'Invalid custom element name: code points: [97,80,45,101,108,101,109,101,110,116],
-  string: "aP-element"'
-- 'Invalid custom element name: code points: [97,80], string: "aP"'
-- 'Invalid custom element name: code points: [97,81,45,101,108,101,109,101,110,116],
-  string: "aQ-element"'
-- 'Invalid custom element name: code points: [97,81], string: "aQ"'
-- 'Invalid custom element name: code points: [97,82,45,101,108,101,109,101,110,116],
-  string: "aR-element"'
-- 'Invalid custom element name: code points: [97,82], string: "aR"'
-- 'Invalid custom element name: code points: [97,83,45,101,108,101,109,101,110,116],
-  string: "aS-element"'
-- 'Invalid custom element name: code points: [97,83], string: "aS"'
-- 'Invalid custom element name: code points: [97,84,45,101,108,101,109,101,110,116],
-  string: "aT-element"'
-- 'Invalid custom element name: code points: [97,84], string: "aT"'
-- 'Invalid custom element name: code points: [97,85,45,101,108,101,109,101,110,116],
-  string: "aU-element"'
-- 'Invalid custom element name: code points: [97,85], string: "aU"'
-- 'Invalid custom element name: code points: [97,86,45,101,108,101,109,101,110,116],
-  string: "aV-element"'
-- 'Invalid custom element name: code points: [97,86], string: "aV"'
-- 'Invalid custom element name: code points: [97,87,45,101,108,101,109,101,110,116],
-  string: "aW-element"'
-- 'Invalid custom element name: code points: [97,87], string: "aW"'
-- 'Invalid custom element name: code points: [97,88,45,101,108,101,109,101,110,116],
-  string: "aX-element"'
-- 'Invalid custom element name: code points: [97,88], string: "aX"'
-- 'Invalid custom element name: code points: [97,89,45,101,108,101,109,101,110,116],
-  string: "aY-element"'
-- 'Invalid custom element name: code points: [97,89], string: "aY"'
-- "Invalid custom element name: code points: [97,8], string: \"a\b\""
-- "Invalid custom element name: code points: [97,9,45,101,108,101,109,101,110,116],
-  string: \"a\t-element\""
-- 'Invalid custom element name: code points: [97,90,45,101,108,101,109,101,110,116],
-  string: "aZ-element"'
-- 'Invalid custom element name: code points: [97,90], string: "aZ"'
-- 'Invalid custom element name: code points: [97,91], string: "a["'
-- 'Invalid custom element name: code points: [97,92], string: "a\"'
-- 'Invalid custom element name: code points: [97,93], string: "a]"'
-- 'Invalid custom element name: code points: [97,94], string: "a^"'
-- 'Invalid custom element name: code points: [97,95], string: "a_"'
-- 'Invalid custom element name: code points: [97,96], string: "a`"'
-- 'Invalid custom element name: code points: [97,97], string: "aa"'
-- 'Invalid custom element name: code points: [97,98], string: "ab"'
-- 'Invalid custom element name: code points: [97,99], string: "ac"'
-- "Invalid custom element name: code points: [97,9], string: \"a\t\""
-- 'Invalid custom element name: code points: [97], string: "a"'
-- 'Invalid custom element name: code points: [98], string: "b"'
-- 'Invalid custom element name: code points: [99,111,108,111,114,45,112,114,111,102,105,108,101],
-  string: "color-profile"'
-- 'Invalid custom element name: code points: [99], string: "c"'
-- "Invalid custom element name: code points: [9], string: \"\t\""
-- 'Invalid custom element name: code points: [], string: ""'
+- "Valid custom element name: code points: [97,1,45,101,108,101,109,101,110,116],
+  string: \"a\x01-element\""
+- "Valid custom element name: code points: [97,11,45,101,108,101,109,101,110,116],
+  string: \"a\v-element\""
+- 'Valid custom element name: code points: [97,123,45,101,108,101,109,101,110,116],
+  string: "a{-element"'
+- 'Valid custom element name: code points: [97,124,45,101,108,101,109,101,110,116],
+  string: "a|-element"'
+- 'Valid custom element name: code points: [97,125,45,101,108,101,109,101,110,116],
+  string: "a}-element"'
+- 'Valid custom element name: code points: [97,126,45,101,108,101,109,101,110,116],
+  string: "a~-element"'
+- "Valid custom element name: code points: [97,127,45,101,108,101,109,101,110,116],
+  string: \"a\x7F-element\""
+- "Valid custom element name: code points: [97,14,45,101,108,101,109,101,110,116],
+  string: \"a\x0E-element\""
+- "Valid custom element name: code points: [97,15,45,101,108,101,109,101,110,116],
+  string: \"a\x0F-element\""
+- "Valid custom element name: code points: [97,16,45,101,108,101,109,101,110,116],
+  string: \"a\x10-element\""
+- "Valid custom element name: code points: [97,17,45,101,108,101,109,101,110,116],
+  string: \"a\x11-element\""
+- "Valid custom element name: code points: [97,18,45,101,108,101,109,101,110,116],
+  string: \"a\x12-element\""
+- "Valid custom element name: code points: [97,19,45,101,108,101,109,101,110,116],
+  string: \"a\x13-element\""
+- "Valid custom element name: code points: [97,2,45,101,108,101,109,101,110,116],
+  string: \"a\x02-element\""
+- "Valid custom element name: code points: [97,20,45,101,108,101,109,101,110,116],
+  string: \"a\x14-element\""
+- "Valid custom element name: code points: [97,21,45,101,108,101,109,101,110,116],
+  string: \"a\x15-element\""
+- "Valid custom element name: code points: [97,22,45,101,108,101,109,101,110,116],
+  string: \"a\x16-element\""
+- "Valid custom element name: code points: [97,23,45,101,108,101,109,101,110,116],
+  string: \"a\x17-element\""
+- "Valid custom element name: code points: [97,24,45,101,108,101,109,101,110,116],
+  string: \"a\x18-element\""
+- "Valid custom element name: code points: [97,25,45,101,108,101,109,101,110,116],
+  string: \"a\x19-element\""
+- "Valid custom element name: code points: [97,26,45,101,108,101,109,101,110,116],
+  string: \"a\x1A-element\""
+- "Valid custom element name: code points: [97,27,45,101,108,101,109,101,110,116],
+  string: \"a\e-element\""
+- "Valid custom element name: code points: [97,28,45,101,108,101,109,101,110,116],
+  string: \"a\x1C-element\""
+- "Valid custom element name: code points: [97,29,45,101,108,101,109,101,110,116],
+  string: \"a\x1D-element\""
+- "Valid custom element name: code points: [97,3,45,101,108,101,109,101,110,116],
+  string: \"a\x03-element\""
+- "Valid custom element name: code points: [97,30,45,101,108,101,109,101,110,116],
+  string: \"a\x1E-element\""
+- "Valid custom element name: code points: [97,31,45,101,108,101,109,101,110,116],
+  string: \"a\x1F-element\""
+- 'Valid custom element name: code points: [97,33,45,101,108,101,109,101,110,116],
+  string: "a!-element"'
+- 'Valid custom element name: code points: [97,34,45,101,108,101,109,101,110,116],
+  string: "a"-element"'
+- 'Valid custom element name: code points: [97,35,45,101,108,101,109,101,110,116],
+  string: "a#-element"'
+- 'Valid custom element name: code points: [97,36,45,101,108,101,109,101,110,116],
+  string: "a$-element"'
+- 'Valid custom element name: code points: [97,37,45,101,108,101,109,101,110,116],
+  string: "a%-element"'
+- 'Valid custom element name: code points: [97,38,45,101,108,101,109,101,110,116],
+  string: "a&-element"'
+- 'Valid custom element name: code points: [97,39,45,101,108,101,109,101,110,116],
+  string: "a''-element"'
+- "Valid custom element name: code points: [97,4,45,101,108,101,109,101,110,116],
+  string: \"a\x04-element\""
+- 'Valid custom element name: code points: [97,40,45,101,108,101,109,101,110,116],
+  string: "a(-element"'
+- 'Valid custom element name: code points: [97,41,45,101,108,101,109,101,110,116],
+  string: "a)-element"'
+- 'Valid custom element name: code points: [97,42,45,101,108,101,109,101,110,116],
+  string: "a*-element"'
+- 'Valid custom element name: code points: [97,43,45,101,108,101,109,101,110,116],
+  string: "a+-element"'
+- 'Valid custom element name: code points: [97,44,45,101,108,101,109,101,110,116],
+  string: "a,-element"'
+- "Valid custom element name: code points: [97,45,11], string: \"a-\v\""
+- 'Valid custom element name: code points: [97,45,123], string: "a-{"'
+- 'Valid custom element name: code points: [97,45,124], string: "a-|"'
+- 'Valid custom element name: code points: [97,45,125], string: "a-}"'
+- 'Valid custom element name: code points: [97,45,126], string: "a-~"'
+- "Valid custom element name: code points: [97,45,127], string: \"a-\x7F\""
+- "Valid custom element name: code points: [97,45,14], string: \"a-\x0E\""
+- "Valid custom element name: code points: [97,45,15], string: \"a-\x0F\""
+- "Valid custom element name: code points: [97,45,16], string: \"a-\x10\""
+- "Valid custom element name: code points: [97,45,17], string: \"a-\x11\""
+- "Valid custom element name: code points: [97,45,18], string: \"a-\x12\""
+- "Valid custom element name: code points: [97,45,19], string: \"a-\x13\""
+- "Valid custom element name: code points: [97,45,1], string: \"a-\x01\""
+- "Valid custom element name: code points: [97,45,20], string: \"a-\x14\""
+- "Valid custom element name: code points: [97,45,21], string: \"a-\x15\""
+- "Valid custom element name: code points: [97,45,22], string: \"a-\x16\""
+- "Valid custom element name: code points: [97,45,23], string: \"a-\x17\""
+- "Valid custom element name: code points: [97,45,24], string: \"a-\x18\""
+- "Valid custom element name: code points: [97,45,25], string: \"a-\x19\""
+- "Valid custom element name: code points: [97,45,26], string: \"a-\x1A\""
+- "Valid custom element name: code points: [97,45,27], string: \"a-\e\""
+- "Valid custom element name: code points: [97,45,28], string: \"a-\x1C\""
+- "Valid custom element name: code points: [97,45,29], string: \"a-\x1D\""
+- "Valid custom element name: code points: [97,45,2], string: \"a-\x02\""
+- "Valid custom element name: code points: [97,45,30], string: \"a-\x1E\""
+- "Valid custom element name: code points: [97,45,31], string: \"a-\x1F\""
+- 'Valid custom element name: code points: [97,45,33], string: "a-!"'
+- 'Valid custom element name: code points: [97,45,34], string: "a-""'
+- 'Valid custom element name: code points: [97,45,35], string: "a-#"'
+- 'Valid custom element name: code points: [97,45,36], string: "a-$"'
+- 'Valid custom element name: code points: [97,45,37], string: "a-%"'
+- 'Valid custom element name: code points: [97,45,38], string: "a-&"'
+- 'Valid custom element name: code points: [97,45,39], string: "a-''"'
+- "Valid custom element name: code points: [97,45,3], string: \"a-\x03\""
+- 'Valid custom element name: code points: [97,45,40], string: "a-("'
+- 'Valid custom element name: code points: [97,45,41], string: "a-)"'
+- 'Valid custom element name: code points: [97,45,42], string: "a-*"'
+- 'Valid custom element name: code points: [97,45,43], string: "a-+"'
+- 'Valid custom element name: code points: [97,45,44], string: "a-,"'
+- "Valid custom element name: code points: [97,45,4], string: \"a-\x04\""
+- 'Valid custom element name: code points: [97,45,58], string: "a-:"'
+- 'Valid custom element name: code points: [97,45,59], string: "a-;"'
+- "Valid custom element name: code points: [97,45,5], string: \"a-\x05\""
+- 'Valid custom element name: code points: [97,45,60], string: "a-<"'
+- 'Valid custom element name: code points: [97,45,61], string: "a-="'
+- 'Valid custom element name: code points: [97,45,63], string: "a-?"'
+- 'Valid custom element name: code points: [97,45,64], string: "a-@"'
+- "Valid custom element name: code points: [97,45,6], string: \"a-\x06\""
+- "Valid custom element name: code points: [97,45,7], string: \"a-\a\""
+- "Valid custom element name: code points: [97,45,8], string: \"a-\b\""
+- 'Valid custom element name: code points: [97,45,91], string: "a-["'
+- 'Valid custom element name: code points: [97,45,92], string: "a-\"'
+- 'Valid custom element name: code points: [97,45,93], string: "a-]"'
+- 'Valid custom element name: code points: [97,45,94], string: "a-^"'
+- 'Valid custom element name: code points: [97,45,96], string: "a-`"'
+- "Valid custom element name: code points: [97,5,45,101,108,101,109,101,110,116],
+  string: \"a\x05-element\""
+- 'Valid custom element name: code points: [97,58,45,101,108,101,109,101,110,116],
+  string: "a:-element"'
+- 'Valid custom element name: code points: [97,59,45,101,108,101,109,101,110,116],
+  string: "a;-element"'
+- "Valid custom element name: code points: [97,6,45,101,108,101,109,101,110,116],
+  string: \"a\x06-element\""
+- 'Valid custom element name: code points: [97,60,45,101,108,101,109,101,110,116],
+  string: "a<-element"'
+- 'Valid custom element name: code points: [97,61,45,101,108,101,109,101,110,116],
+  string: "a=-element"'
+- 'Valid custom element name: code points: [97,63,45,101,108,101,109,101,110,116],
+  string: "a?-element"'
+- 'Valid custom element name: code points: [97,64,45,101,108,101,109,101,110,116],
+  string: "a@-element"'
+- "Valid custom element name: code points: [97,7,45,101,108,101,109,101,110,116],
+  string: \"a\a-element\""
+- "Valid custom element name: code points: [97,8,45,101,108,101,109,101,110,116],
+  string: \"a\b-element\""
+- 'Valid custom element name: code points: [97,91,45,101,108,101,109,101,110,116],
+  string: "a[-element"'
+- 'Valid custom element name: code points: [97,92,45,101,108,101,109,101,110,116],
+  string: "a\-element"'
+- 'Valid custom element name: code points: [97,93,45,101,108,101,109,101,110,116],
+  string: "a]-element"'
+- 'Valid custom element name: code points: [97,94,45,101,108,101,109,101,110,116],
+  string: "a^-element"'
+- 'Valid custom element name: code points: [97,96,45,101,108,101,109,101,110,116],
+  string: "a`-element"'
 custom-elements/state/ElementInternals-states.html:
-- 'CustomStateSet behavior of ElementInternals.states: Exceptions'
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
-- 'CustomStateSet behavior of ElementInternals.states: Modifications'
-- Updating a CustomStateSet while iterating it should work
 custom-elements/state/state-css-selector-nth-of.html:
 - state selector has influence on nth-of when state is applied
 - style is invalided on clear()
@@ -4791,10 +2479,6 @@ custom-elements/upgrading.html:
   on a connected unresolved custom element'
 - '"define" in the document of an iframe must not enqueue a custom element upgrade
   reaction on a disconnected unresolved custom element'
-- Adopting (and leaving disconnceted) an unresolved custom element into the document
-  of an iframe must not enqueue a custom element upgrade reaction
-- Adopting and inserting an unresolved custom element into the document of an iframe
-  must enqueue a custom element upgrade reaction
 - Creating an element in a cloned document and adopting back to a document with browsing
   context must enqueue a custom element upgrade reaction
 - Creating an element in a cloned document and inserting into the document must not
@@ -4823,8 +2507,6 @@ custom-elements/upgrading.html:
   with browsing context must enqueue a custom element upgrade reaction
 - Creating an element in an HTML document fetched by XHR and inserting into the document
   must not enqueue a custom element upgrade reaction
-- Creating an element in the document of an iframe must not enqueue a custom element
-  upgrade reaction if there is no matching definition
 - Creating an element in the document of the template elements and adopting back to
   a document with browsing context must enqueue a custom element upgrade reaction
 - Creating an element in the document of the template elements and inserting into
@@ -4835,9 +2517,11 @@ custom-elements/upgrading.html:
   throw a "NotSupportedError" DOMException.
 - Inserting an unresolved custom element into the document of an iframe must enqueue
   a custom element upgrade reaction
+custom-elements/upgrading/Document-importNode-customized-builtins.html:
+- 'built-in: document.importNode() should import "undefined" custom elements successfully'
+- 'built-in: document.importNode() should import custom elements successfully'
 custom-elements/upgrading/Document-importNode.html:
 - 'autonomous: document.importNode() should import "undefined" custom elements successfully'
-- 'autonomous: document.importNode() should import custom elements successfully'
 custom-elements/upgrading/Node-cloneNode-customized-builtins.html:
 - Node.prototype.cloneNode(false) must be able to clone as a customized built-in element
   when it has an inconsistent "is" attribute
@@ -4850,6 +2534,12 @@ custom-elements/upgrading/Node-cloneNode.html:
   itself before super() call
 - Inserting an element must not try to upgrade a custom element when it had already
   failed to upgrade once
+- Node.prototype.cloneNode(false) must be able to clone a custom element
+- Node.prototype.cloneNode(false) must be able to clone a custom element inside an
+  iframe
+- Node.prototype.cloneNode(false) must be able to clone as a autonomous custom element
+  when it contains is attribute
+- Node.prototype.cloneNode(true) must be able to clone a descendent custom element
 - Node.prototype.cloneNode(true) must set parentNode, previousSibling, and nextSibling
   before upgrading custom elements
 - Upgrading a custom element must throw TypeError when the custom element's constructor
