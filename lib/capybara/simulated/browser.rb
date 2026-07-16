@@ -2679,7 +2679,7 @@ module Capybara
         method  = spec['method'].to_s.upcase
         method  = 'GET' if method.empty?
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
-        entries = entry_list.is_a?(Array) ? entry_list : entries_from_spec(spec)
+        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
@@ -2805,35 +2805,6 @@ module Capybara
         return nil if handle.nil?
         picks = @file_picks && @file_picks[handle.to_i]
         picks && picks[entry['index'].to_i]
-      end
-
-      # Build the entry list from the form's own controls, for triggers that didn't
-      # construct one in JS (the Enter implicit-submit path). Mirrors the JS FormData
-      # construction: non-file fields in tree order, then each file input's selection
-      # (one empty entry when nothing is picked). A selected File reports its
-      # host-backed source (`handle`/`index`); the older payload shape with no per-File
-      # refs falls back to the input's own handle slot.
-      def entries_from_spec(spec)
-        entries = (spec['fields'] || []).map {|pair| {'name' => pair[0].to_s, 'value' => pair[1].to_s} }
-        (spec['fileInputs'] || []).each do |fi|
-          name = fi['name'].to_s
-          refs = fi['files']
-          if refs.is_a?(Array) && !refs.empty?
-            refs.each {|ref|
-              entries << {'name' => name, 'file' => true, 'filename' => ref['name'].to_s, 'handle' => ref['handle'], 'index' => ref['index']}
-            }
-          else
-            picks = (@file_picks && @file_picks[fi['handle'].to_i]) || []
-            if picks.empty?
-              entries << {'name' => name, 'file' => true, 'filename' => '', 'handle' => nil, 'index' => nil}
-            else
-              picks.each_index {|i|
-                entries << {'name' => name, 'file' => true, 'filename' => File.basename(picks[i]), 'handle' => fi['handle'], 'index' => i}
-              }
-            end
-          end
-        end
-        entries
       end
 
       def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
@@ -6892,7 +6863,7 @@ module Capybara
         target = spec['target'].to_s
         action = spec['action'].to_s
         enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
-        entries = entry_list.is_a?(Array) ? entry_list : entries_from_spec(spec)
+        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
         # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
         get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded')
         get_url = form_get_url(action, get_query)

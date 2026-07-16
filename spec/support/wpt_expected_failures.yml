@@ -847,57 +847,6 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
 custom-elements/form-associated/ElementInternals-labels.html:
 - LABEL association
 - LABEL click
-custom-elements/form-associated/ElementInternals-setFormValue.html:
-- Multiple values - name content attribute is ignored
-- Newline normalization - \n in FormData filename (formdata)
-- Newline normalization - \n in FormData filename (urlencoded)
-- Newline normalization - \n in FormData name (formdata)
-- Newline normalization - \n in FormData name (urlencoded)
-- Newline normalization - \n in FormData value (formdata)
-- Newline normalization - \n in FormData value (urlencoded)
-- Newline normalization - \n in filename (formdata)
-- Newline normalization - \n in filename (urlencoded)
-- Newline normalization - \n in name (formdata)
-- Newline normalization - \n in name (urlencoded)
-- Newline normalization - \n in value (formdata)
-- Newline normalization - \n in value (urlencoded)
-- Newline normalization - \n\r in FormData filename (formdata)
-- Newline normalization - \n\r in FormData filename (urlencoded)
-- Newline normalization - \n\r in FormData name (formdata)
-- Newline normalization - \n\r in FormData name (urlencoded)
-- Newline normalization - \n\r in FormData value (formdata)
-- Newline normalization - \n\r in FormData value (urlencoded)
-- Newline normalization - \n\r in filename (formdata)
-- Newline normalization - \n\r in filename (urlencoded)
-- Newline normalization - \n\r in name (formdata)
-- Newline normalization - \n\r in name (urlencoded)
-- Newline normalization - \n\r in value (formdata)
-- Newline normalization - \n\r in value (urlencoded)
-- Newline normalization - \r in FormData filename (formdata)
-- Newline normalization - \r in FormData filename (urlencoded)
-- Newline normalization - \r in FormData name (formdata)
-- Newline normalization - \r in FormData name (urlencoded)
-- Newline normalization - \r in FormData value (formdata)
-- Newline normalization - \r in FormData value (urlencoded)
-- Newline normalization - \r in filename (formdata)
-- Newline normalization - \r in filename (urlencoded)
-- Newline normalization - \r in name (formdata)
-- Newline normalization - \r in name (urlencoded)
-- Newline normalization - \r in value (formdata)
-- Newline normalization - \r in value (urlencoded)
-- Newline normalization - \r\n in FormData filename (formdata)
-- Newline normalization - \r\n in FormData filename (urlencoded)
-- Newline normalization - \r\n in FormData name (formdata)
-- Newline normalization - \r\n in FormData name (urlencoded)
-- Newline normalization - \r\n in FormData value (formdata)
-- Newline normalization - \r\n in FormData value (urlencoded)
-- Newline normalization - \r\n in filename (formdata)
-- Newline normalization - \r\n in filename (urlencoded)
-- Newline normalization - \r\n in name (formdata)
-- Newline normalization - \r\n in name (urlencoded)
-- Newline normalization - \r\n in value (formdata)
-- Newline normalization - \r\n in value (urlencoded)
-- Single value - Non-empty name exists
 custom-elements/form-associated/ElementInternals-validation.html:
 - '"anchor" argument of setValidity()'
 - Custom control affects :valid :invalid for FORM and FIELDSET
@@ -913,7 +862,6 @@ custom-elements/form-associated/disabled-delegatesFocus.html:
 custom-elements/form-associated/focusability.html:
 - Focusability of form-associated custom elements
 custom-elements/form-associated/form-disabled-callback.html:
-- A disabled form-associated custom element should not submit an entry for it
 - Disabled attribute affects focus-capability
 - Relationship with FIELDSET
 custom-elements/form-associated/form-reset-callback.html:
