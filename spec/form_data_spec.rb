@@ -252,3 +252,64 @@ RSpec.describe 'named-frame form submit during parse' do
     end
   end
 end
+
+# HTML "construct the entry list" step 5.1 skips a field that is DISABLED or has a
+# `<datalist>` ancestor. "Disabled" means ACTUALLY disabled, so a `<fieldset disabled>`
+# ancestor disables its controls too — except inside that fieldset's FIRST `<legend>`.
+#
+# WPT's constructor-formelement.html contains exactly this markup (`do-not-submit-me-2`
+# in a datalist, `do-not-submit-me-6` in a disabled fieldset) but only asserts the
+# `submit-me-*` entries are present — it never asserts the negative, so it passed while
+# both were being submitted. These pin the skips directly.
+RSpec.describe 'FormData entry-list skips (datalist / disabled fieldset)' do
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!doctype html><html><body>
+          <form id="f">
+            <datalist><input name="in-datalist" value="bad"></datalist>
+            <fieldset disabled>
+              <legend><input name="in-first-legend" value="ok"></legend>
+              <input name="in-disabled-fieldset" value="bad">
+              <select name="select-in-disabled-fieldset"><option value="bad" selected></option></select>
+            </fieldset>
+            <fieldset disabled>
+              <legend></legend>
+              <legend><input name="in-second-legend" value="bad"></legend>
+            </fieldset>
+            <fieldset>
+              <input name="in-enabled-fieldset" value="ok">
+            </fieldset>
+            <input name="own-disabled" value="bad" disabled>
+            <input name="plain" value="ok">
+          </form>
+        </body></html>
+      HTML
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  def entry_names
+    session.evaluate_script(<<~JS)
+      Array.from(new FormData(document.getElementById('f'))).map((e) => e[0])
+    JS
+  end
+
+  it 'submits only the fields a real browser submits' do
+    expect(entry_names).to eq(%w[in-first-legend in-enabled-fieldset plain])
+  end
+
+  it 'skips a control inside a <datalist>' do
+    expect(entry_names).not_to include('in-datalist')
+  end
+
+  it 'skips a control disabled by a <fieldset disabled> ancestor' do
+    expect(entry_names).not_to include('in-disabled-fieldset', 'select-in-disabled-fieldset')
+  end
+
+  it "exempts the disabled fieldset's first <legend>, but not a second one" do
+    expect(entry_names).to include('in-first-legend')
+    expect(entry_names).not_to include('in-second-legend')
+  end
+end
