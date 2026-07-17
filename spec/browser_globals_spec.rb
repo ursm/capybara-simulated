@@ -210,6 +210,105 @@ RSpec.describe 'browser global surface' do
     end
   end
 
+  describe 'document.fonts (CSS Font Loading)' do
+    # FontFaceSet is an EventTarget per spec. Listening on it is unconditional in the
+    # wild — react-textarea-autosize (Mastodon's compose form) does
+    # `if (el) el.addEventListener('loadingdone', …)` on `document.fonts`, so a set that
+    # is truthy but not an EventTarget passes the guard and then throws, taking the
+    # whole React tree down with it.
+    it 'is an EventTarget and accepts the loading-family listeners' do
+      shape = session.evaluate_script(<<~JS)
+        const fonts = document.fonts;
+        ({
+          isEventTarget: fonts instanceof EventTarget,
+          addFn:         typeof fonts.addEventListener,
+          removeFn:      typeof fonts.removeEventListener,
+          dispatchFn:    typeof fonts.dispatchEvent,
+          handlers:      ['onloading', 'onloadingdone', 'onloadingerror'].every(h => h in fonts)
+        })
+      JS
+
+      expect(shape).to eq(
+        'isEventTarget' => true,
+        'addFn'         => 'function',
+        'removeFn'      => 'function',
+        'dispatchFn'    => 'function',
+        'handlers'      => true
+      )
+    end
+
+    it 'round-trips a dispatched loadingdone through both listener and on-handler' do
+      seen = session.evaluate_script(<<~JS)
+        (() => {
+          const out = [];
+          document.fonts.addEventListener('loadingdone', () => out.push('listener'));
+          document.fonts.onloadingdone = () => out.push('handler');
+          document.fonts.dispatchEvent(new Event('loadingdone'));
+          return out;
+        })()
+      JS
+
+      expect(seen).to eq(['listener', 'handler'])
+    end
+
+    it 'keeps the handlers off the instance, as own properties of the prototype' do
+      # They used to be own `null` fields on the set, so `Object.keys(document.fonts)`
+      # listed them; in a browser the set has no own keys at all.
+      shape = session.evaluate_script(<<~JS)
+        ({
+          ownKeys:    Object.keys(document.fonts),
+          enumerable: Object.getOwnPropertyDescriptor(Object.getPrototypeOf(document.fonts), 'onloadingdone').enumerable
+        })
+      JS
+
+      expect(shape).to eq('ownKeys' => [], 'enumerable' => true)
+    end
+  end
+
+  describe 'screen.orientation' do
+    # ScreenOrientation is an EventTarget per spec — same trap as document.fonts: a
+    # truthy plain object passes an `if (screen.orientation)` guard, then throws on
+    # addEventListener. A fixed viewport never rotates, so `change` never fires.
+    it 'is an EventTarget carrying the spec surface' do
+      shape = session.evaluate_script(<<~JS)
+        const o = screen.orientation;
+        ({
+          isEventTarget: o instanceof EventTarget,
+          addFn:         typeof o.addEventListener,
+          type:          o.type,
+          angle:         o.angle,
+          tag:           Object.prototype.toString.call(o),
+          onchange:      'onchange' in o,
+          unlockFn:      typeof o.unlock,
+          globalCtor:    typeof ScreenOrientation
+        })
+      JS
+
+      expect(shape).to eq(
+        'isEventTarget' => true,
+        'addFn'         => 'function',
+        'type'          => 'landscape-primary',
+        'angle'         => 0,
+        'tag'           => '[object ScreenOrientation]',
+        'onchange'      => true,
+        'unlockFn'      => 'function',
+        'globalCtor'    => 'function'
+      )
+    end
+
+    it 'rejects lock() with NotSupportedError, as headless Chrome does on a desktop profile' do
+      session.execute_script(<<~JS)
+        window.__lock = 'pending';
+        screen.orientation.lock('portrait').then(
+          () => { window.__lock = 'resolved'; },
+          (e) => { window.__lock = e.name; }
+        );
+      JS
+
+      expect(session.evaluate_script('window.__lock')).to eq('NotSupportedError')
+    end
+  end
+
   describe 'observer stubs' do
     it 'IntersectionObserver / ResizeObserver / PerformanceObserver construct cleanly and have spec methods' do
       # `unobserve` is on Intersection / Resize / Mutation observers
