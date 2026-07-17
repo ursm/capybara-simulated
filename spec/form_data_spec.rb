@@ -313,3 +313,56 @@ RSpec.describe 'FormData entry-list skips (datalist / disabled fieldset)' do
     expect(entry_names).not_to include('in-second-legend')
   end
 end
+
+# HTML's select entry step: append an entry for each option whose selectedness is true
+# AND that is not disabled. Which option is selected is settled by "ask for a reset" at
+# parse/mutation time (auto-select the first NON-disabled option, only when size is 1
+# and multiple is absent) — there is no submit-time fallback, so a select with nothing
+# selected contributes nothing.
+#
+# Every expectation below was taken from headless Chrome, not from reading the spec.
+# WPT's constructor-formelement.html has a `select-1` with disabled/selected options but
+# never asserts it, so none of this was gate-visible.
+RSpec.describe 'FormData select entries (disabled options / ask-for-a-reset)' do
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!doctype html><html><body>
+          <form id="f">
+            <select name="a-plain"><option value="a1"><option value="a2"></select>
+            <select name="b-size4" size="4"><option value="b1"><option value="b2"></select>
+            <select name="c-multi" multiple><option value="c1"><option value="c2"></select>
+            <select name="d-firstdisabled"><option value="d1" disabled><option value="d2"></select>
+            <select name="e-seldisabled"><option value="e1"><option value="e2" disabled selected></select>
+            <select name="f-optgrp"><optgroup disabled><option value="f1" selected></optgroup></select>
+            <select name="g-alldisabled"><option value="g1" disabled></select>
+            <select name="h-size1" size="1"><option value="h1"><option value="h2"></select>
+          </form>
+        </body></html>
+      HTML
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  def entries
+    session.evaluate_script('Array.from(new FormData(document.getElementById("f")))')
+  end
+
+  it 'submits exactly what Chrome submits' do
+    expect(entries).to eq([%w[a-plain a1], %w[d-firstdisabled d2], %w[h-size1 h1]])
+  end
+
+  it 'skips a selected option that is disabled, or whose optgroup is' do
+    expect(entries.map(&:first)).not_to include('e-seldisabled', 'f-optgrp')
+  end
+
+  it 'contributes nothing for a select with nothing selected (size > 1, multiple, all-disabled)' do
+    expect(entries.map(&:first)).not_to include('b-size4', 'c-multi', 'g-alldisabled')
+  end
+
+  it 'auto-selects the first non-disabled option (ask for a reset), not merely the first' do
+    expect(session.evaluate_script('document.getElementsByName("d-firstdisabled")[0].selectedIndex')).to eq(1)
+    expect(session.evaluate_script('document.getElementsByName("b-size4")[0].selectedIndex')).to eq(-1)
+  end
+end
