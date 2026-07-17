@@ -47,7 +47,7 @@ RSpec.describe 'FormData serialization' do
     expect(fd_get('placeholder')).to eq('')
   end
 
-  it 'falls back to textContent when the value attribute is missing' do
+  it 'falls back to the option text when the value attribute is missing' do
     expect(fd_get('missing-attr')).to eq('FromText')
   end
 
@@ -364,5 +364,43 @@ RSpec.describe 'FormData select entries (disabled options / ask-for-a-reset)' do
   it 'auto-selects the first non-disabled option (ask for a reset), not merely the first' do
     expect(session.evaluate_script('document.getElementsByName("d-firstdisabled")[0].selectedIndex')).to eq(1)
     expect(session.evaluate_script('document.getElementsByName("b-size4")[0].selectedIndex')).to eq(-1)
+  end
+end
+
+# An option's value is its `value` content attribute, or — when that is absent — its
+# `text` IDL: the descendant text with <script> subtrees skipped and ASCII whitespace
+# stripped and collapsed. Reading `textContent` instead submits the raw source text,
+# which leaks an inline <script>'s source into the entry and turns pretty-printed
+# markup into a value nobody typed. The IDL side lives in select_value_spec.rb.
+#
+# Every expectation below was taken from headless Chrome.
+RSpec.describe 'FormData select entries (option value falls back to the collapsed text)' do
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!doctype html><html><body>
+          <form id="f">
+            <select name="ws"><option>   Foo   Bar   </option></select>
+            <select name="nl"><option>Foo
+        Bar</option></select>
+            <select name="hasval"><option value="  keep  ">   Foo   </option></select>
+            <select name="scr"><option>A<script>var x = 1;</script>B</option></select>
+            <select name="nested"><option><b> Foo </b> <i>Bar </i></option></select>
+          </form>
+        </body></html>
+      HTML
+    end
+  }
+  let(:session) { Capybara::Session.new(:simulated, app) }
+  before { session.visit '/' }
+
+  it 'submits the stripped-and-collapsed text, keeping a value attribute verbatim' do
+    expect(session.evaluate_script('Array.from(new FormData(document.getElementById("f")))')).to eq([
+      ['ws',     'Foo Bar'],
+      ['nl',     'Foo Bar'],
+      ['hasval', '  keep  '],
+      ['scr',    'AB'],
+      ['nested', 'Foo Bar']
+    ])
   end
 end
