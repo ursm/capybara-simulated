@@ -4104,9 +4104,6 @@ webmessaging/broadcastchannel/ordering.html:
 - Messages are delivered in port creation order across multiple frames
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
-webmessaging/event.source.xorigin.sub.htm:
-- 'Test Description: Cross-origin: event.source returns the WindowProxy of the source
-  window.'
 webmessaging/message-channels/detached-iframe.window.js:
 - MessageChannel created from a detached iframe should not send messages (remove after
   create)
