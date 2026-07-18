@@ -448,6 +448,16 @@ module Capybara
         # stop waiting before the message lands. Count spawned-but-not-initialised
         # workers so the async drain holds until the initial script has run.
         @worker_initializing = 0
+        # Worker threads actively PROCESSING a plain postMessage (dequeued, not yet back at
+        # the idle poll). `@worker_in_flight` counts posted messages minus delivered replies,
+        # but one request yields MANY replies (progress updates + the final resolve), so it
+        # under-counts to 0 mid-handshake and `worker_pending?` would go false while the worker
+        # is still working — settle then breaks and abandons a multi-round protocol
+        # (Tesseract's createWorker load→loadLanguage→initialize→recognize, each a round-trip
+        # gated on a slow synchronous WASM step). The SW / broadcast message kinds have their
+        # own pending counters, so only the postMessage branch bumps this. Held under
+        # @worker_init_lock alongside @worker_initializing.
+        @worker_busy = 0
         @worker_init_lock = Mutex.new
         # Cross-isolate `blob:` store. Worker isolates can't see the
         # main scope's `__csimBlobs` Map, so we mirror bytes here and
@@ -499,6 +509,11 @@ module Capybara
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
       WORKER_TERMINATE_GRACE   = 0.05
+      # Max timer-draining rounds `drive_worker_to_quiescence` runs before yielding back
+      # to the poll loop. A message handler's async bring-up (Emscripten WASM init) settles
+      # in a handful of microtask/timer rounds; the cap only bites a worker that keeps
+      # rescheduling timers (a setInterval), which the poll loop then continues to advance.
+      WORKER_QUIESCE_MAX_ROUNDS = 256
       # Per-frame GVL yield (run_event_loop_frame) while a worker thread is alive, so it gets a clean
       # slice for cross-isolate work (transferIn / message replies) instead of being starved by the
       # phase-1 spin. 0.3ms is the empirical floor for a deterministic cross-isolate transfer reply;
@@ -513,7 +528,7 @@ module Capybara
         'fr_close' => '__csim_swFetchStreamClose',
         'fr_error' => '__csim_swFetchStreamError'
       }.freeze
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :STREAM_FRAME_FNS
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :STREAM_FRAME_FNS
 
       # `js_engine` picks the JS runtime: `:v8` (rusty_racer, fastest
       # per-spec) or `:quickjs` (quickjs.rb, smaller per-VM footprint —
@@ -4308,7 +4323,7 @@ module Capybara
         events.size
       end
 
-      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0 || @worker_init_lock.synchronize { @worker_initializing } > 0
+      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0 || @worker_init_lock.synchronize { @worker_initializing + @worker_busy } > 0
 
       # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
       # fetch_response are posted under `ensure`, so they arrive even when the worker-side
@@ -5485,6 +5500,11 @@ module Capybara
           initializing = false
           @worker_init_lock.synchronize { @worker_initializing -= 1 }
         end
+        # True while THIS thread holds a `@worker_busy` increment for a message it's
+        # mid-handling; balanced in the `ensure` so an exception between the bump and
+        # the matching decrement can't strand the counter (which would pin
+        # `worker_pending?` true forever).
+        busy_held = false
         # Tag this thread so blob URLs created by the worker's script are owned by
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
@@ -5518,6 +5538,11 @@ module Capybara
           port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
         }
         rt        = engine_class.build_worker(self, post_back, broadcast_out, sw_hooks)
+        # A worker isolate loads the same snapshot as the main realm, so its `console.*`
+        # is a no-op until `traceActive` is set (console.js). The main realm turns it on
+        # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
+        # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
+        rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval("globalThis.__csimWorkerHandle = #{handle.to_i};")
@@ -5648,20 +5673,42 @@ module Capybara
               # clears @sw_fetch_pending; no ack/counter of its own.
               rt.call('__csim_swStreamCancel', msg[:fetch_id])
             elsif msg
+              # Mark BUSY for the whole span of this postMessage handler. Unlike the SW /
+              # broadcast branches above (each tracked by its own pending counter),
+              # `@worker_in_flight` under-counts a multi-reply handshake to 0 mid-flight (one
+              # request → many progress replies + a final resolve), so `worker_pending?` would
+              # go false while the worker is still working and settle would abandon the
+              # protocol between replies. Keep it true until the handler returns.
+              @worker_init_lock.synchronize { @worker_busy += 1 }
+              busy_held = true
+              # A plain worker postMessage handler can start a multi-stage async bring-up
+              # that alternates microtasks and timers — most sharply Emscripten's WASM
+              # runtime init (addRunDependency → read the binary on a setTimeout(0) →
+              # WebAssembly.instantiate → removeRunDependency → run() → onRuntimeInitialized
+              # → the module factory's `.then`). Draining once leaves the microtask layers a
+              # fired timer queued *after the last timer* stranded, so the factory promise
+              # never settles (Tesseract hangs at "initializing tesseract"). Run the worker's
+              # own event loop to quiescence instead of a single gated tick.
               rt.call('__csim_workerOnMessage', msg)
+              drive_worker_to_quiescence(rt)
             end
-            # Drive the worker's OWN event loop each tick: a message handler OR an
-            # AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout
-            # retry, which has no inbox message) may have pending timers. Drain ~one poll
-            # interval (WorkerRuntime#drain_timers advances the worker clock a step) so
-            # they progress; worker http fetch is setTimeout(0)+__rackFetch, resolved on
-            # this thread by the drain. Gated on a PENDING timer (any, not just due-now —
-            # the clock must advance to fire a future randomDelay) so an idle
-            # message-driven worker with no timers stays lazy. Host CALLS, not string
-            # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
+            # Drive the worker's OWN event loop each tick: an AUTONOMOUS loop (the dispatcher
+            # executor-worker's receive→fetch→setTimeout retry, which has no inbox message)
+            # may have pending timers. Drain ~one poll interval (WorkerRuntime#drain_timers
+            # advances the worker clock a step) so they progress; worker http fetch is
+            # setTimeout(0)+__rackFetch, resolved on this thread by the drain. Gated on a
+            # PENDING timer (any, not just due-now — the clock must advance to fire a future
+            # randomDelay) so an idle message-driven worker with no timers stays lazy. A
+            # regular postMessage already drove itself to quiescence above (no timer left),
+            # so this is a no-op for it. Host CALLS, not string `eval`, keep the per-tick
+            # cost off the V8 compile path (rule 3).
             if rt.call('__nextTimerDelay').to_f >= 0
               rt.drain_microtasks
               rt.drain_timers
+            end
+            if busy_held
+              @worker_init_lock.synchronize { @worker_busy -= 1 }
+              busy_held = false
             end
             break if rt.call('__csimWorkerClosedRead')
           end
@@ -5669,6 +5716,9 @@ module Capybara
       rescue StandardError => e
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       ensure
+        # A raise between the busy bump and its matching decrement would strand the
+        # counter; balance it here so worker_pending? can't stick true after this thread dies.
+        @worker_init_lock.synchronize { @worker_busy -= 1 } if busy_held
         release_init.call   # guarantee the init count is released on an early raise
         rt&.dispose
       end
@@ -5715,6 +5765,24 @@ module Capybara
           Base64.decode64(payload)
         else
           CGI.unescape(payload)
+        end
+      end
+
+      # Run a worker isolate's own event loop until it goes idle: drain microtasks,
+      # then — if a timer is pending — advance the worker clock to fire it and loop, so
+      # the microtasks that timer's callback queues get drained in turn. A single
+      # `drain_microtasks; drain_timers` pair strands whatever the last-fired timer
+      # queued, which is exactly how Emscripten's WASM bring-up stalls
+      # (`removeRunDependency` runs only after the binary-read setTimeout, and its
+      # `run()` → `onRuntimeInitialized` continuation is a bare microtask with no further
+      # timer to re-trigger a gated drain). Bounded by WORKER_QUIESCE_MAX_ROUNDS so a
+      # self-perpetuating timer (setInterval) yields back to the poll loop rather than
+      # pinning the thread.
+      private def drive_worker_to_quiescence(rt)
+        WORKER_QUIESCE_MAX_ROUNDS.times do
+          rt.drain_microtasks
+          break if rt.call('__nextTimerDelay').to_f < 0
+          rt.drain_timers
         end
       end
 
