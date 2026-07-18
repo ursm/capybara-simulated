@@ -4138,16 +4138,6 @@ webmessaging/postMessage_crosssite.sub.htm:
 webmessaging/postMessage_dup_transfer_objects.htm:
 - 'Test Description: postMessage with duplicate transfer objects raises DataCloneError
   exception.'
-webmessaging/with-options/host-specific-origin.html:
-- resolving url with stuff in host-specific
-webmessaging/with-ports/002.html:
-- resolving url with stuff in host-specific
-webmessaging/with-ports/015.html:
-- different origin
-webmessaging/without-ports/002.html:
-- resolving url with stuff in host-specific
-webmessaging/without-ports/015.html:
-- different origin
 websockets/Close-1005.any.js:
 - Create WebSocket - Close the Connection - close(1005) - see '7.1.5.  The WebSocket
   Connection Close Code' in http://www.ietf.org/rfc/rfc6455.txt
