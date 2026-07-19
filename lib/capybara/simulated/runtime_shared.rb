@@ -278,6 +278,51 @@ module Capybara
           key  = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
           data = a[2].is_a?(Array) ? a[2].pack('C*') : a[2].to_s
           OpenSSL::HMAC.digest(OpenSSL::Digest.new(hash), key, data).bytes
+        },
+        # AES encrypt/decrypt — args: (cipher "aes-256-gcm", key, iv, data, aad, tagBytes).
+        # For GCM the JS side follows the WebCrypto layout (ciphertext ‖ truncated tag), so
+        # encrypt appends the tagBytes-long tag and decrypt splits it back off before
+        # verifying; a tag mismatch / bad padding raises CipherError, which the JS layer
+        # maps to OperationError. CBC/CTR pass tagBytes 0 and an empty aad.
+        '__csim_aesEncrypt' => lambda {|*a|
+          name = a[0].to_s
+          key  = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
+          iv   = a[2].is_a?(Array) ? a[2].pack('C*') : a[2].to_s
+          data = a[3].is_a?(Array) ? a[3].pack('C*') : a[3].to_s
+          aad  = a[4].is_a?(Array) ? a[4].pack('C*') : a[4].to_s
+          tagbytes = a[5].to_i
+          c = OpenSSL::Cipher.new(name)
+          c.encrypt
+          c.key = key
+          c.iv  = iv
+          if name.end_with?('-gcm')
+            c.auth_data = aad
+            ct = c.update(data) + c.final
+            (ct + c.auth_tag(tagbytes)).bytes
+          else
+            (c.update(data) + c.final).bytes
+          end
+        },
+        '__csim_aesDecrypt' => lambda {|*a|
+          name = a[0].to_s
+          key  = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
+          iv   = a[2].is_a?(Array) ? a[2].pack('C*') : a[2].to_s
+          data = a[3].is_a?(Array) ? a[3].pack('C*') : a[3].to_s
+          aad  = a[4].is_a?(Array) ? a[4].pack('C*') : a[4].to_s
+          tagbytes = a[5].to_i
+          c = OpenSSL::Cipher.new(name)
+          c.decrypt
+          c.key = key
+          c.iv  = iv
+          if name.end_with?('-gcm')
+            ct  = data[0, data.bytesize - tagbytes]
+            tag = data[data.bytesize - tagbytes, tagbytes]
+            c.auth_data = aad
+            c.auth_tag  = tag
+            (c.update(ct) + c.final).bytes
+          else
+            (c.update(data) + c.final).bytes
+          end
         }
       }.freeze
 
