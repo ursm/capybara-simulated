@@ -166,6 +166,21 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     JS
   end
 
+  # Evaluate `expr` (a JS expression given `w` = the cross-origin frame's contentWindow),
+  # returning `ok:<typeof>` or the thrown error's name.
+  def cross_window_eval(expr)
+    session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe');
+        f.src = 'http://cross.example.org/child';
+        document.body.appendChild(f);
+        const w = f.contentWindow;
+        try { return 'ok:' + (typeof (#{expr})); }
+        catch (e) { return e.name; }
+      })()
+    JS
+  end
+
   it 'throws SecurityError reading document on a cross-origin frame' do
     expect(cross_window_get('document')).to eq('SecurityError')
   end
@@ -176,6 +191,42 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     # real boolean — a separate, non-SOP gap.)
     expect(cross_window_get('postMessage')).to eq('ok:function')
     expect(cross_window_get('closed')).to start_with('ok:')
+  end
+
+  # (b) A cross-origin Location: the object itself is reachable (`location` is a
+  # cross-origin Window property), but only its `href` setter + `replace()` work —
+  # every getter (href, protocol, …) and `assign` throws SecurityError, so the URL
+  # never leaks cross-origin.
+  it 'SOP-gates a cross-origin Location to href-setter + replace only' do
+    expect(cross_window_get('location')).to eq('ok:object')     # the Location object is reachable
+    expect(cross_window_eval('w.location.replace')).to eq('ok:function')  # replace() allowed
+    expect(cross_window_eval('w.location.href')).to eq('SecurityError')   # href GETTER blocked
+    expect(cross_window_eval('w.location.protocol')).to eq('SecurityError')
+    expect(cross_window_eval('w.location.assign')).to eq('SecurityError') # assign not cross-origin
+  end
+
+  # (c) `[[Has]]` / `[[GetOwnProperty]]` are SOP-gated too, so a probe can't enumerate
+  # the same-origin surface: `'document' in frame` is false, a descriptor probe throws,
+  # and a cross-origin-safe name still answers present.
+  it 'SOP-gates has / getOwnPropertyDescriptor on a cross-origin window' do
+    expect(cross_window_eval("'document' in w")).to eq('ok:boolean')            # returns a value…
+    expect(session.evaluate_script(<<~JS)).to eq(false)                          # …and it is false
+      (function () {
+        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
+        document.body.appendChild(f); return 'document' in f.contentWindow;
+      })()
+    JS
+    expect(cross_window_eval("'postMessage' in w")).to eq('ok:boolean')
+    expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "document")')).to eq('SecurityError')
+    # A sensitive (configurable) own property name is hidden from enumeration too.
+    hidden = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
+        document.body.appendChild(f);
+        return Object.getOwnPropertyNames(f.contentWindow).includes('document');
+      })()
+    JS
+    expect(hidden).to eq(false)
   end
 
   it 'allows full access to a same-origin frame window' do
