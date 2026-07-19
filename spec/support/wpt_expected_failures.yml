@@ -4109,11 +4109,6 @@ webmessaging/message-channels/detached-iframe.window.js:
   create)
 - MessageChannel created from a detached iframe should not send messages (remove before
   create)
-webmessaging/messageerror.html:
-- The default value of onmessageerror is null
-- The onmessageerror content attribute must be compiled into the onmessageerror property
-- The onmessageerror content attribute must execute when an event is dispatched on
-  the window
 webmessaging/multi-globals/broadcastchannel-current.sub.html:
 - The current page being cross-origin must prevent the BroadcastChannel message from
   being seen
