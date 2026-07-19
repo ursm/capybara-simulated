@@ -4130,8 +4130,6 @@ webmessaging/postMessage_Document.htm:
 webmessaging/postMessage_Function.htm:
 - 'Test Description: postMessage with Function object: Throw a DataCloneError if message
   could not be cloned.'
-webmessaging/postMessage_crosssite.sub.htm:
-- cross-site windows can send transferred ArrayBuffer
 webmessaging/postMessage_dup_transfer_objects.htm:
 - 'Test Description: postMessage with duplicate transfer objects raises DataCloneError
   exception.'
