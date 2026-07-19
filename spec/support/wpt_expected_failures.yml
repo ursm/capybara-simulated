@@ -4124,15 +4124,6 @@ webmessaging/multi-globals/messageport-current.html:
 - Making the current page become non-active must prevent message transmission
 webmessaging/postMessage_CryptoKey_insecure.sub.html:
 - insecure context should not receive an object for secure contexts only
-webmessaging/postMessage_Document.htm:
-- 'Test Description: postMessage with Document object: Throw a DataCloneError if message
-  could not be cloned.'
-webmessaging/postMessage_Function.htm:
-- 'Test Description: postMessage with Function object: Throw a DataCloneError if message
-  could not be cloned.'
-webmessaging/postMessage_dup_transfer_objects.htm:
-- 'Test Description: postMessage with duplicate transfer objects raises DataCloneError
-  exception.'
 websockets/Close-1005.any.js:
 - Create WebSocket - Close the Connection - close(1005) - see '7.1.5.  The WebSocket
   Connection Close Code' in http://www.ietf.org/rfc/rfc6455.txt
