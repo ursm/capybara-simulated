@@ -259,12 +259,25 @@ module Capybara
         '__csim_utf8Decode'   => ->(*a) { a[0].pack('C*').force_encoding('UTF-8') },
         # `__csim_parseUrl` is defined in JS now (js/src/url-parse.js, backed by
         # the vendored whatwg-url) — spec-correct + no V8↔Ruby boundary per parse.
-        # Web Crypto SubtleCrypto.digest — algo is "SHA-1"/"SHA-256"/etc.
-        # JS hands us the byte array; we return the digest as bytes.
+        # Web Crypto raw primitives, backed by OpenSSL. The JS side (js/src/webcrypto.js)
+        # owns the whole SubtleCrypto contract — algorithm normalization, CryptoKey
+        # objects, usage validation, the DOMException grammar — and calls these only for
+        # the actual number-crunching. Byte arguments cross as plain Arrays (JS packs a
+        # BufferSource into one); results return as byte Arrays.
+        #
+        # digest — algo is "SHA1"/"SHA256"/… (JS strips the dash and upcases).
         '__csim_subtleDigest' => lambda {|*a|
           algo  = a[0].to_s.upcase.tr('-', '')
           bytes = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
           OpenSSL::Digest.new(algo).digest(bytes).bytes
+        },
+        # HMAC sign — args: (hash "SHA256", keyBytes, dataBytes) → mac bytes. verify is
+        # done JS-side by re-signing and comparing, so no separate host fn is needed.
+        '__csim_hmacSign' => lambda {|*a|
+          hash = a[0].to_s.upcase.tr('-', '')
+          key  = a[1].is_a?(Array) ? a[1].pack('C*') : a[1].to_s
+          data = a[2].is_a?(Array) ? a[2].pack('C*') : a[2].to_s
+          OpenSSL::HMAC.digest(OpenSSL::Digest.new(hash), key, data).bytes
         }
       }.freeze
 

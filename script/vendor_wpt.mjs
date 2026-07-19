@@ -119,6 +119,15 @@ const TREES = [
                                        // OTHER same-origin documents on a change). Both the storage-event
                                        // `.html` tests and the `.window.js` API tests (via JS_TREES) are in
                                        // scope. Storage partitioning earns out per rule 1.
+  'WebCryptoAPI',                      // SubtleCrypto — digest / sign / verify / encrypt / decrypt / importKey /
+                                       // exportKey / deriveBits / deriveKey / generateKey / wrapKey / unwrapKey,
+                                       // backed by Ruby's OpenSSL (the same host-fn model as `__csim_subtleDigest`).
+                                       // The crypto every auth stack (jose / OIDC / oidc-client-ts), Web Push
+                                       // (Mastodon: ECDH + HKDF + AES-GCM), and Signal/E2E library rides on. All
+                                       // `.https.any.js` — run via the synthesized window wrapper (JS_TREES). Data
+                                       // API, no layout. `.tentative` algorithms (Argon2 / cSHAKE / SHA-3 / Ed448
+                                       // curve448 / AES-OCB / ML-KEM) auto-route out; getPublicKey / encap_decap /
+                                       // supports are .tentative too.
 ];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
