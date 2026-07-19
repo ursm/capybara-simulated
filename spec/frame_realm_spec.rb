@@ -132,13 +132,17 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
   let(:app) {
     lambda do |env|
       if env['PATH_INFO'].include?('child')
-        # A cross-origin child reports the cross-origin-readable origins (so it can
-        # tell it is cross-origin to its top), via the always-allowed postMessage.
+        # A cross-origin child reports its OWN origin (always readable) and whether
+        # reading the TOP window's `origin` throws — `origin` is NOT a cross-origin-safe
+        # WindowProxy property, so a cross-origin child must get a SecurityError. Reported
+        # via the always-allowed postMessage.
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!doctype html><meta charset=utf-8><script>
+            function probe(fn) { try { return 'ok:' + typeof fn(); } catch (e) { return e.name; } }
             parent.postMessage(
-              'self=' + self.origin + ' top=' + top.origin + ' cross=' + (self.origin !== top.origin),
-              '*');
+              'self=' + self.origin +
+              ' topOrigin=' + probe(function () { return top.origin; }) +
+              ' parentDoc=' + probe(function () { return parent.document; }), '*');
           </script>
         HTML
       else
@@ -187,14 +191,14 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(same).to eq('doc')
   end
 
-  # NOTE: the REVERSE direction (a cross-origin child reading parent.document /
-  # top.document → SecurityError) is a follow-up. A top-level child's `parent`/
-  # `top` resolve to the MAIN realm, and frameWindowProxyFor self-shortcuts a
-  # request for the main realm to the raw global (no SOP get-trap), so the child
-  # can still reach the parent document. Closing it needs an observer-aware proxy.
-  # It is NOT needed for the cross-origin showPicker check (that compares
-  # self.origin to top.origin, and `origin` is a cross-origin-readable property).
-  it 'lets a cross-origin child read the cross-origin-safe top.origin (for self-vs-top checks)' do
+  # The REVERSE direction (child → parent/top), closed by the observer-origin-keyed SOP
+  # memo. A cross-origin child reads its OWN origin fine, but `top.origin` (not a
+  # cross-origin-safe property) and `parent.document` both throw SecurityError — the same
+  # SOP as the forward direction. Previously a stale same-origin memo (captured while the
+  # child still had its inherited about:blank origin) left these readable for the frame's
+  # life. (A cross-origin-aware API like showPicker detects the embedding via the
+  # driver-internal raw-window unwrap, not web `top.origin`.)
+  it 'gives a cross-origin child SecurityError on top.origin / parent.document, not its own origin' do
     session.evaluate_script(<<~JS)
       window.__r = 'none';
       window.addEventListener('message', (e) => { window.__r = e.data; });
@@ -209,9 +213,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
       break if r != 'none'
       sleep 0.02
     end
-    # The child sees its own origin differs from top's (so a cross-origin-aware
-    # API like showPicker can detect the cross-origin embedding).
-    expect(r).to eq('self=http://cross.example.org top=http://www.example.com cross=true')
+    expect(r).to eq('self=http://cross.example.org topOrigin=SecurityError parentDoc=SecurityError')
   end
 end
 
