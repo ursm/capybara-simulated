@@ -336,12 +336,12 @@ module Capybara
         # Re-encode a key to 'spki' (public) or 'pkcs8' (private). Asking a private key
         # for 'spki' yields its public half — how generateKey obtains the public key.
         '__csim_rsaExport' => lambda {|*a|
-          key = RuntimeShared.rsa_read(a[0])
+          key = RuntimeShared.pkey_read(a[0])
           a[1].to_s == 'spki' ? key.public_to_der.bytes : key.private_to_der.bytes
         },
         # Modulus length (bits) + public exponent (big-endian bytes) for key.algorithm.
         '__csim_rsaKeyInfo' => lambda {|*a|
-          key = RuntimeShared.rsa_read(a[0])
+          key = RuntimeShared.pkey_read(a[0])
           { 'modulusLength' => key.n.num_bits, 'publicExponent' => key.e.to_s(2).bytes }
         },
         # Build a key DER from JWK components (big-endian byte arrays). Public keys pass
@@ -357,7 +357,7 @@ module Capybara
         # sign/verify — scheme 'pkcs1' (RSASSA-PKCS1-v1_5) or 'pss' (RSA-PSS, MGF1 with
         # the same hash, saltLength in bytes). verify swallows OpenSSL errors to a false.
         '__csim_rsaSign' => lambda {|*a|
-          key  = RuntimeShared.rsa_read(a[0])
+          key  = RuntimeShared.pkey_read(a[0])
           hash = a[1].to_s
           data = crypto_bytes(a[2])
           if a[3].to_s == 'pss'
@@ -367,7 +367,7 @@ module Capybara
           end
         },
         '__csim_rsaVerify' => lambda {|*a|
-          key  = RuntimeShared.rsa_read(a[0])
+          key  = RuntimeShared.pkey_read(a[0])
           hash = a[1].to_s
           data = crypto_bytes(a[2])
           sig  = crypto_bytes(a[3])
@@ -385,18 +385,66 @@ module Capybara
         # `rsa_oaep_label` takes a HEX string, not raw bytes (OpenSSL parses it via
         # prepare_from_text), so the label crosses hex-encoded.
         '__csim_rsaEncrypt' => lambda {|*a|
-          key   = RuntimeShared.rsa_read(a[0])
+          key   = RuntimeShared.pkey_read(a[0])
           opts  = { rsa_padding_mode: 'oaep', rsa_oaep_md: a[1].to_s }
           label = crypto_bytes(a[3])
           opts[:rsa_oaep_label] = label.unpack1('H*') unless label.empty?
           key.encrypt(crypto_bytes(a[2]), opts).bytes
         },
         '__csim_rsaDecrypt' => lambda {|*a|
-          key   = RuntimeShared.rsa_read(a[0])
+          key   = RuntimeShared.pkey_read(a[0])
           opts  = { rsa_padding_mode: 'oaep', rsa_oaep_md: a[1].to_s }
           label = crypto_bytes(a[3])
           opts[:rsa_oaep_label] = label.unpack1('H*') unless label.empty?
           key.decrypt(crypto_bytes(a[2]), opts).bytes
+        },
+        # Elliptic curve (ECDSA / ECDH). The JS side passes the OpenSSL curve name
+        # ('prime256v1' / 'secp384r1' / 'secp521r1') and the field byte length so the
+        # host stays curve-agnostic. Keys cross as SPKI / PKCS#8 DER.
+        '__csim_ecGenerate' => lambda {|*a|
+          OpenSSL::PKey::EC.generate(a[0].to_s).private_to_der.bytes
+        },
+        '__csim_ecExport' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          case a[1].to_s
+          when 'spki'  then key.public_to_der.bytes
+          when 'pkcs8' then key.private_to_der.bytes
+          else key.public_key.to_octet_string(:uncompressed).bytes   # 'raw' → uncompressed point
+          end
+        },
+        '__csim_ecKeyInfo' => lambda {|*a|
+          { 'curve' => RuntimeShared.pkey_read(a[0]).group.curve_name }
+        },
+        '__csim_ecImportRaw' => lambda {|*a|
+          RuntimeShared.ec_point_spki(a[0].to_s, crypto_bytes(a[1])).bytes
+        },
+        # args: (curve, isPrivate, x, y, [d, n]). The uncompressed public point is
+        # 0x04 ‖ x ‖ y; a private key additionally carries the scalar d (padded to n).
+        '__csim_ecImportJwk' => lambda {|*a|
+          curve = a[0].to_s
+          point = "\x04".b + crypto_bytes(a[2]) + crypto_bytes(a[3])
+          if a[1]
+            RuntimeShared.ec_priv_pkcs8(curve, crypto_bytes(a[4]), point, a[5].to_i).bytes
+          else
+            RuntimeShared.ec_point_spki(curve, point).bytes
+          end
+        },
+        '__csim_ecExportJwk' => lambda {|*a|
+          RuntimeShared.ec_der_to_jwk(a[0], a[1].to_i)
+        },
+        '__csim_ecdsaSign' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          der = key.sign(OpenSSL::Digest.new(a[1].to_s), crypto_bytes(a[2]))
+          RuntimeShared.ecdsa_der_to_raw(der, a[3].to_i).bytes
+        },
+        '__csim_ecdsaVerify' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          der = RuntimeShared.ecdsa_raw_to_der(crypto_bytes(a[3]), a[4].to_i)
+          begin
+            der ? key.verify(OpenSSL::Digest.new(a[1].to_s), der, crypto_bytes(a[2])) : false
+          rescue OpenSSL::PKey::PKeyError
+            false
+          end
         }
       }.freeze
 
@@ -406,8 +454,57 @@ module Capybara
         a.is_a?(Array) ? a.pack('C*') : a.to_s
       end
 
-      def self.rsa_read(der_bytes)
+      # Parse an RSA / EC key from its DER bytes (SPKI public or PKCS#8 private —
+      # OpenSSL::PKey.read auto-detects both).
+      def self.pkey_read(der_bytes)
         OpenSSL::PKey.read(crypto_bytes(der_bytes))
+      end
+
+      # ECDSA signatures cross as the WebCrypto IEEE-P1363 form — r ‖ s, each padded to
+      # the curve's field byte length — while OpenSSL speaks DER. Convert both ways.
+      def self.ecdsa_der_to_raw(der, n)
+        asn = OpenSSL::ASN1.decode(der)
+        r = asn.value[0].value.to_s(2).rjust(n, "\x00".b)
+        s = asn.value[1].value.to_s(2).rjust(n, "\x00".b)
+        r + s
+      end
+
+      def self.ecdsa_raw_to_der(raw, n)
+        return nil unless raw.bytesize == 2 * n   # wrong length → verify fails, not raises
+        r = OpenSSL::BN.new(raw[0, n], 2)
+        s = OpenSSL::BN.new(raw[n, n], 2)
+        OpenSSL::ASN1::Sequence([OpenSSL::ASN1::Integer(r), OpenSSL::ASN1::Integer(s)]).to_der
+      end
+
+      def self.ec_algid(curve)
+        OpenSSL::ASN1::Sequence([OpenSSL::ASN1::ObjectId('id-ecPublicKey'), OpenSSL::ASN1::ObjectId(curve)])
+      end
+
+      # SPKI DER for an EC public key from its uncompressed point (0x04 ‖ x ‖ y).
+      def self.ec_point_spki(curve, point)
+        OpenSSL::ASN1::Sequence([ec_algid(curve), OpenSSL::ASN1::BitString(point)]).to_der
+      end
+
+      # PKCS#8 DER for an EC private key from the private scalar `d` and public point,
+      # via the RFC 5915 ECPrivateKey structure (OpenSSL 3 dropped component setters).
+      def self.ec_priv_pkcs8(curve, d, point, n)
+        ec_priv = OpenSSL::ASN1::Sequence([
+          OpenSSL::ASN1::Integer(1),
+          OpenSSL::ASN1::OctetString(d.rjust(n, "\x00".b)),
+          OpenSSL::ASN1::ASN1Data.new([OpenSSL::ASN1::ObjectId(curve)], 0, :CONTEXT_SPECIFIC),
+          OpenSSL::ASN1::ASN1Data.new([OpenSSL::ASN1::BitString(point)], 1, :CONTEXT_SPECIFIC)
+        ]).to_der
+        OpenSSL::ASN1::Sequence([OpenSSL::ASN1::Integer(0), ec_algid(curve), OpenSSL::ASN1::OctetString(ec_priv)]).to_der
+      end
+
+      # Explode an EC key DER into JWK coordinates (x, y, and d for a private key), each a
+      # big-endian byte Array padded to the field length; plus the OpenSSL curve name.
+      def self.ec_der_to_jwk(der_bytes, n)
+        key   = pkey_read(der_bytes)
+        point = key.public_key.to_octet_string(:uncompressed)   # 0x04 ‖ x ‖ y
+        jwk   = { 'curve' => key.group.curve_name, 'x' => point[1, n].bytes, 'y' => point[1 + n, n].bytes }
+        jwk['d'] = key.private_key.to_s(2).rjust(n, "\x00".b).bytes if key.private_key?
+        jwk
       end
 
       # Assemble an RSA key DER from JWK components. `is_private` selects between a
@@ -434,7 +531,7 @@ module Capybara
       # Explode an RSA key DER into JWK components (big-endian byte Arrays). Private keys
       # carry the full CRT set; public keys only n/e.
       def self.rsa_der_to_jwk(der_bytes)
-        key = rsa_read(der_bytes)
+        key = pkey_read(der_bytes)
         jwk = { 'n' => key.n.to_s(2).bytes, 'e' => key.e.to_s(2).bytes }
         if key.private?
           jwk.merge!(
