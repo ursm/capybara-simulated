@@ -323,8 +323,127 @@ module Capybara
           else
             (c.update(data) + c.final).bytes
           end
+        },
+        # RSA — keys cross as their DER encoding (SPKI for public, PKCS#8 for private)
+        # in a byte Array; the host re-parses per call (OpenSSL::PKey.read auto-detects).
+        # generateKey returns the private PKCS#8 DER, from which the JS side derives the
+        # public key and parameters via the export / key-info fns below.
+        '__csim_rsaGenerate' => lambda {|*a|
+          bits = a[0].to_i
+          exp  = OpenSSL::BN.new(crypto_bytes(a[1]), 2).to_i
+          OpenSSL::PKey::RSA.generate(bits, exp).private_to_der.bytes
+        },
+        # Re-encode a key to 'spki' (public) or 'pkcs8' (private). Asking a private key
+        # for 'spki' yields its public half — how generateKey obtains the public key.
+        '__csim_rsaExport' => lambda {|*a|
+          key = RuntimeShared.rsa_read(a[0])
+          a[1].to_s == 'spki' ? key.public_to_der.bytes : key.private_to_der.bytes
+        },
+        # Modulus length (bits) + public exponent (big-endian bytes) for key.algorithm.
+        '__csim_rsaKeyInfo' => lambda {|*a|
+          key = RuntimeShared.rsa_read(a[0])
+          { 'modulusLength' => key.n.num_bits, 'publicExponent' => key.e.to_s(2).bytes }
+        },
+        # Build a key DER from JWK components (big-endian byte arrays). Public keys pass
+        # only n/e; private keys pass the full CRT set. Returns SPKI / PKCS#8 DER bytes.
+        '__csim_rsaImportJwk' => lambda {|*a|
+          RuntimeShared.rsa_jwk_to_der(*a).bytes
+        },
+        # Explode a key DER into JWK components (big-endian byte arrays). Private keys
+        # include the CRT parameters; public keys carry only n/e.
+        '__csim_rsaExportJwk' => lambda {|*a|
+          RuntimeShared.rsa_der_to_jwk(a[0])
+        },
+        # sign/verify — scheme 'pkcs1' (RSASSA-PKCS1-v1_5) or 'pss' (RSA-PSS, MGF1 with
+        # the same hash, saltLength in bytes). verify swallows OpenSSL errors to a false.
+        '__csim_rsaSign' => lambda {|*a|
+          key  = RuntimeShared.rsa_read(a[0])
+          hash = a[1].to_s
+          data = crypto_bytes(a[2])
+          if a[3].to_s == 'pss'
+            key.sign_pss(hash, data, salt_length: a[4].to_i, mgf1_hash: hash).bytes
+          else
+            key.sign(hash, data).bytes
+          end
+        },
+        '__csim_rsaVerify' => lambda {|*a|
+          key  = RuntimeShared.rsa_read(a[0])
+          hash = a[1].to_s
+          data = crypto_bytes(a[2])
+          sig  = crypto_bytes(a[3])
+          begin
+            if a[4].to_s == 'pss'
+              key.verify_pss(hash, sig, data, salt_length: a[5].to_i, mgf1_hash: hash)
+            else
+              key.verify(hash, sig, data)
+            end
+          rescue OpenSSL::PKey::PKeyError
+            false
+          end
+        },
+        # RSA-OAEP encrypt/decrypt — MGF1 + OAEP with the key's hash and an optional label.
+        # `rsa_oaep_label` takes a HEX string, not raw bytes (OpenSSL parses it via
+        # prepare_from_text), so the label crosses hex-encoded.
+        '__csim_rsaEncrypt' => lambda {|*a|
+          key   = RuntimeShared.rsa_read(a[0])
+          opts  = { rsa_padding_mode: 'oaep', rsa_oaep_md: a[1].to_s }
+          label = crypto_bytes(a[3])
+          opts[:rsa_oaep_label] = label.unpack1('H*') unless label.empty?
+          key.encrypt(crypto_bytes(a[2]), opts).bytes
+        },
+        '__csim_rsaDecrypt' => lambda {|*a|
+          key   = RuntimeShared.rsa_read(a[0])
+          opts  = { rsa_padding_mode: 'oaep', rsa_oaep_md: a[1].to_s }
+          label = crypto_bytes(a[3])
+          opts[:rsa_oaep_label] = label.unpack1('H*') unless label.empty?
+          key.decrypt(crypto_bytes(a[2]), opts).bytes
         }
       }.freeze
+
+      # Pack a host-fn byte argument (a JS BufferSource crosses as an Array) into a
+      # binary String for OpenSSL.
+      def self.crypto_bytes(a)
+        a.is_a?(Array) ? a.pack('C*') : a.to_s
+      end
+
+      def self.rsa_read(der_bytes)
+        OpenSSL::PKey.read(crypto_bytes(der_bytes))
+      end
+
+      # Assemble an RSA key DER from JWK components. `is_private` selects between a
+      # public SPKI (n, e) and a private PKCS#8 with the full CRT set. Each component is
+      # a big-endian byte Array. Building the ASN.1 by hand is the OpenSSL-3-supported
+      # path (the deprecated `rsa.n = …` setters are gone).
+      def self.rsa_jwk_to_der(is_private, n, e, d = nil, p = nil, q = nil, dp = nil, dq = nil, qi = nil)
+        bn     = ->(b) { OpenSSL::BN.new(crypto_bytes(b), 2) }
+        alg_id = OpenSSL::ASN1::Sequence([OpenSSL::ASN1::ObjectId('rsaEncryption'), OpenSSL::ASN1::Null(nil)])
+        if is_private
+          pkcs1 = OpenSSL::ASN1::Sequence([
+            OpenSSL::ASN1::Integer(0),
+            OpenSSL::ASN1::Integer(bn.(n)), OpenSSL::ASN1::Integer(bn.(e)), OpenSSL::ASN1::Integer(bn.(d)),
+            OpenSSL::ASN1::Integer(bn.(p)), OpenSSL::ASN1::Integer(bn.(q)),
+            OpenSSL::ASN1::Integer(bn.(dp)), OpenSSL::ASN1::Integer(bn.(dq)), OpenSSL::ASN1::Integer(bn.(qi))
+          ]).to_der
+          OpenSSL::ASN1::Sequence([OpenSSL::ASN1::Integer(0), alg_id, OpenSSL::ASN1::OctetString(pkcs1)]).to_der
+        else
+          pkcs1 = OpenSSL::ASN1::Sequence([OpenSSL::ASN1::Integer(bn.(n)), OpenSSL::ASN1::Integer(bn.(e))]).to_der
+          OpenSSL::ASN1::Sequence([alg_id, OpenSSL::ASN1::BitString(pkcs1)]).to_der
+        end
+      end
+
+      # Explode an RSA key DER into JWK components (big-endian byte Arrays). Private keys
+      # carry the full CRT set; public keys only n/e.
+      def self.rsa_der_to_jwk(der_bytes)
+        key = rsa_read(der_bytes)
+        jwk = { 'n' => key.n.to_s(2).bytes, 'e' => key.e.to_s(2).bytes }
+        if key.private?
+          jwk.merge!(
+            'd'  => key.d.to_s(2).bytes,   'p'  => key.p.to_s(2).bytes,   'q'  => key.q.to_s(2).bytes,
+            'dp' => key.dmp1.to_s(2).bytes, 'dq' => key.dmq1.to_s(2).bytes, 'qi' => key.iqmp.to_s(2).bytes
+          )
+        end
+        jwk
+      end
 
       def self.safe_call
         yield
