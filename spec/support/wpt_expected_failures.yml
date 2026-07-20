@@ -5217,12 +5217,6 @@ service-workers/service-worker/registration-scope-module-static-import.https.htm
 - imported-module-script.js works when used as top-level
 - static imports redirecting to outside path restriction should be allowed
 - static imports to outside path restriction should be allowed
-service-workers/service-worker/registration-scope.https.html:
-- 'Scope URL is same-origin filesystem: URL'
-- 'Scope URL scheme is a data: URL'
-- 'Scope URL scheme is an ftp: URL'
-- Scope including URL-encoded backslash
-- Scope including URL-encoded slash
 service-workers/service-worker/registration-script-module.https.html:
 - Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
@@ -5233,13 +5227,6 @@ service-workers/service-worker/registration-script-module.https.html:
 - Registering script with module instantiation error
 - Registering script with module instantiation error and top-level await
 - Registering script with top-level await
-service-workers/service-worker/registration-script-url.https.html:
-- Script URL including URL-encoded backslash
-- Script URL including URL-encoded slash
-- Script URL including uppercase URL-encoded backslash
-- Script URL including uppercase URL-encoded slash
-- Script URL is a data URL
-- Script URL is a data URL and scope URL is not relative
 service-workers/service-worker/registration-script.https.html:
 - Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
@@ -5255,7 +5242,6 @@ service-workers/service-worker/registration-security-error.https.html:
 - Registration scope outside the script directory
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
-- 'Script URL is same-origin filesystem: URL'
 service-workers/service-worker/registration-updateviacache.https.html:
 - access-updateViaCache-after-unregister-all
 - access-updateViaCache-after-unregister-imports
@@ -5589,8 +5575,6 @@ service-workers/service-worker/unregister-then-register-new-script.https.html:
 - Registering a new script URL that fails to install does not resurrect unregistered
   registration
 - Registering a new script URL while an unregistered registration is in use
-service-workers/service-worker/unregister.https.html:
-- Unregister twice
 service-workers/service-worker/update-after-navigation-fetch-event.https.html:
 - Update should be triggered after a navigation (fetch event worker).
 - Update should be triggered after a navigation (network error).
