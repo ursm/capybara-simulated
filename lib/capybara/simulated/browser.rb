@@ -4161,6 +4161,10 @@ module Capybara
           # same-origin nav keeps the full URL). A SW that re-issues the request
           # (`fetch(event.request)`) computes Sec-Fetch-Site / Origin against this referrer's origin.
           referrer:            compute_referrer(referrer_policy, referrer_source, url.to_s).to_s,
+          # `event.request.referrerPolicy` reflects the RESOLVED policy: a navigation with no explicit
+          # meta/header policy uses the document default (strict-origin-when-cross-origin), never the
+          # empty string a bare Request would carry (fetch-event-referrer-policy "default referrer policy").
+          referrerPolicy:      referrer_policy.to_s.empty? ? 'strict-origin-when-cross-origin' : referrer_policy.to_s,
           # A passthrough `fetch(event.request)` re-fetch reports the navigation's OWN request
           # metadata to the server, independent of the referrer (which Referrer-Policy may reduce):
           # the initiator origin (the navigating frame's — the request's origin for the Origin
