@@ -161,6 +161,10 @@ module Capybara
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
         '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
+        # The active worker handle at an EXACT scope (0 if none), so a register() from a realm with no
+        # local registration (a different iframe registering an already-active scope) can synthesize a
+        # registration reflecting the shared active worker instead of installing a duplicate.
+        '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
         # worker handle — reached identically from the client (registration.active._handle) and the
         # worker (__csimWorkerHandle). Get returns {enabled, headerValue}; set leaves a nil field as-is.

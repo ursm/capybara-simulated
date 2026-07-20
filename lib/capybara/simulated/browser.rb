@@ -3913,6 +3913,9 @@ module Capybara
         end
       end
 
+      # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
+      def sw_active_handle_for_scope(scope) = @sw_registrations[scope.to_s].to_i
+
       # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
       # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
       # find its controlling SW even after the destination realm's JS was rebuilt.
