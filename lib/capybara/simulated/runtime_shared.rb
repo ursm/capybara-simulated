@@ -445,6 +445,19 @@ module Capybara
           rescue OpenSSL::PKey::PKeyError
             false
           end
+        },
+        # Key derivation — HKDF / PBKDF2 produce `nbytes` bytes; ECDH computes the raw
+        # shared secret (field size). The JS side truncates to the requested bit length.
+        '__csim_hkdf' => lambda {|*a|
+          OpenSSL::KDF.hkdf(crypto_bytes(a[1]), salt: crypto_bytes(a[2]), info: crypto_bytes(a[3]), length: a[4].to_i, hash: a[0].to_s).bytes
+        },
+        '__csim_pbkdf2' => lambda {|*a|
+          OpenSSL::KDF.pbkdf2_hmac(crypto_bytes(a[1]), salt: crypto_bytes(a[2]), iterations: a[3].to_i, length: a[4].to_i, hash: a[0].to_s).bytes
+        },
+        '__csim_ecdhDerive' => lambda {|*a|
+          priv = RuntimeShared.pkey_read(a[0])
+          pub  = RuntimeShared.pkey_read(a[1])
+          priv.dh_compute_key(pub.public_key).bytes
         }
       }.freeze
 
