@@ -5747,27 +5747,18 @@ webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
   Tasks enqueued on the port-message-queue of an enabled port,
     are transferred along with the port, when the transfer happens in the same task
     during which postMessage is called
-webmessaging/MessageEvent_onmessage_postMessage_infinite_loop.html:
-- onmessage calling source postMessage
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
 webmessaging/broadcastchannel/ordering.html:
 - Messages are delivered in port creation order across multiple frames
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
-webmessaging/message-channels/detached-iframe.window.js:
-- MessageChannel created from a detached iframe should not send messages (remove after
-  create)
-- MessageChannel created from a detached iframe should not send messages (remove before
-  create)
 webmessaging/multi-globals/broadcastchannel-current.sub.html:
 - The current page being cross-origin must prevent the BroadcastChannel message from
   being seen
 webmessaging/multi-globals/broadcastchannel-incumbent.sub.html:
 - The incumbent page being cross-origin must not prevent the BroadcastChannel message
   from being seen
-webmessaging/multi-globals/messageport-current.html:
-- Making the current page become non-active must prevent message transmission
 webmessaging/postMessage_CryptoKey_insecure.sub.html:
 - insecure context should not receive an object for secure contexts only
 websockets/Close-1005.any.js:
