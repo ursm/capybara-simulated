@@ -477,6 +477,49 @@ module Capybara
           c.decrypt
           c.key = key
           (c.update(crypto_bytes(a[1])) + c.final).bytes
+        },
+        # OKP curves (Ed25519 signatures / X25519 key agreement). The JS side passes the
+        # OpenSSL curve name ('ED25519' / 'X25519'); keys cross as SPKI / PKCS#8 DER, and
+        # the raw form is the 32-byte public (or private, via JWK `d`) key.
+        '__csim_okpGenerate' => lambda {|*a|
+          OpenSSL::PKey.generate_key(a[0].to_s).private_to_der.bytes
+        },
+        '__csim_okpExport' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          case a[1].to_s
+          when 'spki'  then key.public_to_der.bytes
+          when 'pkcs8' then key.private_to_der.bytes
+          else key.raw_public_key.bytes                     # 'raw' → 32-byte public key
+          end
+        },
+        '__csim_okpImportRaw' => lambda {|*a|
+          OpenSSL::PKey.new_raw_public_key(a[0].to_s, crypto_bytes(a[1])).public_to_der.bytes
+        },
+        '__csim_okpImportJwk' => lambda {|*a|
+          type = a[0].to_s
+          key  = a[1] ? OpenSSL::PKey.new_raw_private_key(type, crypto_bytes(a[3]))
+                      : OpenSSL::PKey.new_raw_public_key(type, crypto_bytes(a[2]))
+          (a[1] ? key.private_to_der : key.public_to_der).bytes
+        },
+        '__csim_okpExportJwk' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          jwk = { 'x' => key.raw_public_key.bytes }
+          jwk['d'] = key.raw_private_key.bytes if a[1]      # a[1] = the key is private
+          jwk
+        },
+        '__csim_ed25519Sign' => lambda {|*a|
+          RuntimeShared.pkey_read(a[0]).sign(nil, crypto_bytes(a[1])).bytes
+        },
+        '__csim_ed25519Verify' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[0])
+          begin
+            key.verify(nil, crypto_bytes(a[2]), crypto_bytes(a[1]))
+          rescue OpenSSL::PKey::PKeyError
+            false
+          end
+        },
+        '__csim_x25519Derive' => lambda {|*a|
+          RuntimeShared.pkey_read(a[0]).derive(RuntimeShared.pkey_read(a[1])).bytes
         }
       }.freeze
 
