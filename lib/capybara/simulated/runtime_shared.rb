@@ -116,6 +116,14 @@ module Capybara
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(a[0], a[1], a[2]); nil },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
+        # BroadcastChannel isolate-wide, creation-ordered registry (the multi-realm delivery path). A
+        # channel registers on construction / unregisters on close; `bc_post` snapshots the eligible
+        # targets at post time and queues one ordered delivery per target. Only consulted when a sibling
+        # same-isolate realm exists (`bc_siblings_exist?`); single-window pages never touch it.
+        '__csimBcRegister'           => ->(b, *a) { b.bc_register(a[0], a[1], a[2], a[3]); nil },
+        '__csimBcUnregister'         => ->(b, *a) { b.bc_unregister(a[0], a[1]); nil },
+        '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
+        '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to

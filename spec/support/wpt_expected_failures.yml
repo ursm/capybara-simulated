@@ -5749,8 +5749,6 @@ webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
     during which postMessage is called
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
-webmessaging/broadcastchannel/ordering.html:
-- Messages are delivered in port creation order across multiple frames
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
 webmessaging/multi-globals/broadcastchannel-current.sub.html:

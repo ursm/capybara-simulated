@@ -499,7 +499,19 @@ module Capybara
         # fires at every same-origin document EXCEPT the one that made it), delivered on
         # settle. [{kind, key, old, new, url, source}] (same thread).
         @storage_inbox        = []
+        # BroadcastChannel isolate-wide registry + global ordered delivery queue (the multi-realm
+        # path — see broadcast_to_windows / bc_post). `@bc_registry` is keyed by [realm_id, local_id]
+        # → {seq, name, origin_key, closed}; `@bc_seq` is the isolate-wide creation counter that
+        # orders delivery "oldest channel first"; `@bc_queue` is the FIFO of pending {realm_id,
+        # local_id, data, origin} deliveries drained in order by deliver_window_messages.
+        @bc_seq               = 0
+        @bc_registry          = {}
+        @bc_queue             = []
       end
+
+      # Max BroadcastChannel deliveries drained per `deliver_broadcast_queue` call — a safety bound on a
+      # pathological mutual re-post loop (see there). Far above any real fan-out (the ordering test is ~14).
+      BROADCAST_DRAIN_CAP      = 100_000
 
       # Worker thread polling and termination intervals — split so a
       # tuning change to one doesn't accidentally rebind the other.
@@ -2928,6 +2940,11 @@ module Capybara
         reset_websockets
         @window_inbox.clear
         @broadcast_inbox.clear
+        # The BroadcastChannel registry + ordered queue are per-page (the rebuilt VM has no live channels
+        # and restarts the realm/local id counters); a stale entry would misroute a later post.
+        @bc_registry.clear
+        @bc_queue.clear
+        @bc_seq = 0
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
@@ -2961,6 +2978,8 @@ module Capybara
         reset_websockets
         @window_inbox.clear
         @broadcast_inbox.clear
+        @bc_registry.clear
+        @bc_queue.clear
         # Dispose the JS runtime/isolate itself — for an auxiliary window this
         # Browser is the isolate's last owner, but V8Runtime registers every
         # isolate in a process-wide `@@live` set (for at_exit cleanup), which
@@ -4446,7 +4465,7 @@ module Capybara
 
       # Covers both cross-window postMessage AND BroadcastChannel — the two
       # cross-window event channels share these drain/pending hooks.
-      def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty? || !@storage_inbox.empty?
+      def window_message_pending? = !@window_inbox.empty? || !@broadcast_inbox.empty? || !@storage_inbox.empty? || !@bc_queue.empty?
 
       # A BroadcastChannel message queued for delivery to this Browser's channels.
       # `source_realm_id` is the posting realm's context id within THIS isolate (0 =
@@ -4518,6 +4537,9 @@ module Capybara
           end
           n += events.size
         end
+        # Drain the ordered BroadcastChannel queue LAST, so a `message`/`storage` handler above that
+        # re-posts (multi-realm mode → bc_post) is picked up in this same pass.
+        n += deliver_broadcast_queue unless @bc_queue.empty?
         n
       end
 
@@ -4532,26 +4554,102 @@ module Capybara
       # realm, `from_worker` nil), or from `deliver_worker_messages` for a WORKER-originated post
       # (`from_worker` = the posting worker's handle, `source_realm_id` nil).
       def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil, from_worker: nil)
-        @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
-        # Same-isolate main + frame realms. The poster already delivered to itself in-VM, so this
-        # only reaches the OTHER realms — queue whenever one exists. A WORKER post reaches realm 0
-        # and every frame (a separate isolate delivered to none in-VM). A FRAME post always reaches
-        # main realm 0 — even when the posting frame's own realm isn't yet recorded in `frame_realms`
-        # (a BroadcastChannel posted SYNCHRONOUSLY during the frame's initial script runs before the
-        # realm is registered, so `has_frames` can be false though a valid target — main — exists). A
-        # MAIN post reaches the frames only when some are registered.
+        broadcast_external(name, data, origin, from_worker: from_worker)
+        # Same-isolate main + frame realms (LEGACY single-realm / worker-inbound path — the multi-realm
+        # main-thread post goes through `bc_post`'s ordered queue instead). The poster already delivered
+        # to itself in-VM, so this only reaches the OTHER realms — queue whenever one exists. A WORKER
+        # post reaches realm 0 and every frame (a separate isolate delivered to none in-VM). A FRAME post
+        # always reaches main realm 0 — even when the posting frame's own realm isn't yet recorded in
+        # `frame_realms` (a BroadcastChannel posted SYNCHRONOUSLY during the frame's initial script runs
+        # before the realm is registered, so `has_frames` can be false though a valid target — main —
+        # exists). A MAIN post reaches the frames only when some are registered.
         has_frames = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
         from_frame = !from_worker && !source_realm_id.nil? && source_realm_id != 0
         enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker || from_frame
-        # Every WORKER is a separate isolate reached via its thread-safe inbox — deliver to each live
-        # one except the posting worker. Skip a worker whose thread has already exited (self-close /
-        # termination in flight): it will never drain its inbox, so pushing would leak. Counted in a
-        # dedicated pending tally so `settle` waits until the worker acks the delivery (a `bcack`).
+      end
+
+      # Fan a BroadcastChannel post out beyond this isolate's main-thread realms: OTHER top-level windows
+      # (separate isolates, via the Driver) and every live WORKER (separate isolate, via its thread-safe
+      # inbox, except the posting worker). Shared by the legacy `broadcast_to_windows` and the ordered
+      # `bc_post` — a same-isolate ordered post still reaches workers and other windows. `origin` here is
+      # the SCOPING origin KEY (opaque token / tuple origin), which the worker + cross-window sides match on.
+      def broadcast_external(name, data, origin, from_worker: nil)
+        @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
+        # Skip a worker whose thread has already exited (self-close / termination in flight): it will
+        # never drain its inbox, so pushing would leak. Counted in a dedicated pending tally so `settle`
+        # waits until the worker acks the delivery (a `bcack`).
         @workers.each do |h, w|
           next if h == from_worker || !w[:thread].alive?
           @worker_broadcast_pending += 1
           w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
         end
+      end
+
+      # ── BroadcastChannel isolate-wide ordered delivery (multi-realm path) ──
+      # A channel registers on construction with the isolate-wide creation counter, so delivery can be
+      # ordered "oldest channel first" across realms.
+      def bc_register(realm_id, local_id, name, origin_key)
+        @bc_seq += 1
+        @bc_registry[[realm_id.to_i, local_id.to_i]] = {seq: @bc_seq, name: name.to_s, origin_key: origin_key, closed: false}
+        nil
+      end
+
+      def bc_unregister(realm_id, local_id)
+        @bc_registry.delete([realm_id.to_i, local_id.to_i])
+        nil
+      end
+
+      # Is another same-isolate realm (a frame / same-isolate window) live? Only then does a post use the
+      # ordered registry; a single-realm page keeps the in-VM microtask path (zero behaviour change).
+      def bc_siblings_exist? = @runtime.respond_to?(:frame_realm_ids) && @runtime.frame_realm_ids.any?
+
+      # A main-thread BroadcastChannel post in multi-realm mode. Snapshot the eligible target channels
+      # (same name + origin, still open, excluding the poster) at POST TIME, ordered by creation seq, and
+      # queue one ordered delivery each — so a channel created AFTER this post (higher seq / not yet
+      # registered) never receives it, and cross-realm targets interleave with same-realm ones by
+      # creation order (broadcastchannel/ordering). Also fans out to workers + other windows.
+      def bc_post(realm_id, local_id, name, origin_key, data, origin)
+        realm_id = realm_id.to_i
+        local_id = local_id.to_i
+        name     = name.to_s
+        # Snapshot ALL matching open channels — do NOT gate on `frame_realm_alive?` here: a channel that
+        # posts SYNCHRONOUSLY during its frame's initial script (opaque-origin's data: iframes) runs in a
+        # realm not yet registered in `frame_realms`, so a same-realm sibling would be wrongly excluded.
+        # `deliver_broadcast_queue` re-checks realm liveness at delivery time (by then it's registered),
+        # and a genuinely-dead realm's stale entry just yields a skipped delivery.
+        targets  = @bc_registry.reject {|(rid, lid), e|
+          e[:closed] || e[:name] != name || e[:origin_key] != origin_key ||
+            (rid == realm_id && lid == local_id)
+        }.sort_by {|_k, e| e[:seq] }
+        # `origin` (serialized, e.g. "null") is the MessageEvent.origin the same-isolate delivery
+        # exposes; `origin_key` (e.g. "opaque:…") is the SCOPING token workers / other windows match on.
+        targets.each {|(rid, lid), _e| @bc_queue << {realm_id: rid, local_id: lid, data: data, origin: origin} }
+        broadcast_external(name, data, origin_key)
+        nil
+      end
+
+      # Drain the ordered BroadcastChannel queue, delivering one message to one channel at a time in
+      # creation order. A handler's synchronous re-post appends to `@bc_queue` (via bc_post), so the loop
+      # keeps draining those in order too — reproducing the single global task queue the spec describes.
+      # Bounded per call (like every drain loop here): a pathological mutual re-post between two realms
+      # would otherwise spin forever holding the GVL. The cap leaves any remainder queued
+      # (`window_message_pending?` keeps the loop live), so a runaway is bounded by the runner's
+      # force-timeout across frames rather than hanging uninterruptibly in one.
+      def deliver_broadcast_queue
+        n = 0
+        until @bc_queue.empty?
+          break if n >= BROADCAST_DRAIN_CAP
+          item = @bc_queue.shift
+          e = @bc_registry[[item[:realm_id], item[:local_id]]]
+          next if e.nil? || e[:closed]   # closed after being queued → gets nothing
+          if item[:realm_id].zero?
+            @runtime.call('__csim_bcDeliverOne', item[:local_id], item[:data], item[:origin])
+          elsif @runtime.frame_realm_alive?(item[:realm_id])
+            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverOne', item[:local_id], item[:data], item[:origin])
+          end
+          n += 1
+        end
+        n
       end
 
       # ── Image decode (libvips) ─────────────────────────────────────
