@@ -294,6 +294,7 @@ module Capybara
           c = OpenSSL::Cipher.new(name)
           c.encrypt
           c.key = key
+          c.iv_len = iv.bytesize if name.end_with?('-gcm')   # GCM defaults to 12; allow any length
           c.iv  = iv
           if name.end_with?('-gcm')
             c.auth_data = aad
@@ -313,6 +314,7 @@ module Capybara
           c = OpenSSL::Cipher.new(name)
           c.decrypt
           c.key = key
+          c.iv_len = iv.bytesize if name.end_with?('-gcm')
           c.iv  = iv
           if name.end_with?('-gcm')
             ct  = data[0, data.bytesize - tagbytes]
@@ -458,6 +460,23 @@ module Capybara
           priv = RuntimeShared.pkey_read(a[0])
           pub  = RuntimeShared.pkey_read(a[1])
           priv.dh_compute_key(pub.public_key).bytes
+        },
+        # AES-KW (RFC 3394 key wrap). The cipher width follows the wrapping key; OpenSSL's
+        # wrap mode supplies the default A6A6… IV. A tampered wrap raises on unwrap, which
+        # the JS layer maps to OperationError.
+        '__csim_aesKwWrap' => lambda {|*a|
+          key = crypto_bytes(a[0])
+          c = OpenSSL::Cipher.new("aes-#{key.bytesize * 8}-wrap")
+          c.encrypt
+          c.key = key
+          (c.update(crypto_bytes(a[1])) + c.final).bytes
+        },
+        '__csim_aesKwUnwrap' => lambda {|*a|
+          key = crypto_bytes(a[0])
+          c = OpenSSL::Cipher.new("aes-#{key.bytesize * 8}-wrap")
+          c.decrypt
+          c.key = key
+          (c.update(crypto_bytes(a[1])) + c.final).bytes
         }
       }.freeze
 
