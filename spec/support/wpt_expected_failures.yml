@@ -4975,9 +4975,6 @@ service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
-service-workers/service-worker/import-scripts-mime-types.https.html:
-- Importing script with bad MIME type text/plain
-- 'Importing script with no MIME type '
 service-workers/service-worker/import-scripts-redirect.https.html:
 - an imported script doesn't redirect initially, then redirects during the update
   check and the body changes
