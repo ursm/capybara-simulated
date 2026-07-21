@@ -6218,8 +6218,6 @@ webstorage/storage_string_conversion.window.js:
 - sessionStorage only stores strings
 xhr/abort-after-stop.window.js:
 - abort-after-stop
-xhr/abort-after-timeout.any.js:
-- abort-after-timeout
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
@@ -6291,10 +6289,5 @@ xhr/send-conditional-cors.htm:
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
-xhr/timeout-cors-async.htm:
-- 'XMLHttpRequest: timeout event and cross-origin request'
-xhr/timeout-multiple-fetches.html:
-- CORS preflights should not reset the timer
-- Redirects should not reset the timer
 xhr/xmlhttprequest-timeout-worker-synconworker.html:
 - 'Timeout test: timeout hit before load, timeout scheduled at 2000'

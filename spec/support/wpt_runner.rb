@@ -765,15 +765,19 @@ module WptRunner
             resp_headers[name.strip.downcase] = val.strip if name && val
           end
         end
-        # wptserve `?pipe=` response transforms: support the two the corpus uses on a
-        # static file — `header(name,value[,append])` (set a response header; the CORS
-        # tests inject Access-Control-Allow-Origin this way) and `status(code)`. Other pipe
-        # functions (trickle / gzip / slice / …) are ignored. Pipe functions are
-        # `|`-separated but a plain `header(a,b)header(c,d)` run also occurs, so scan every
-        # `fn(args)`.
+        # wptserve `?pipe=` response transforms: support the ones the corpus uses on a static
+        # file — `header(name,value[,append])` (set a response header; the CORS tests inject
+        # Access-Control-Allow-Origin this way), `status(code)`, and `trickle(...)`'s `d<seconds>`
+        # delay components (as a virtual server delay the async XHR defers on — abort-after-timeout
+        # uses `trickle(d1)`; the chunk-size streaming components aren't modeled). gzip / slice are
+        # ignored. Pipe functions are `|`-separated but a plain `header(a,b)header(c,d)` run also
+        # occurs, so scan every `fn(args)`.
         status_code = 200
         req.GET['pipe'].to_s.scan(/(\w+)\(([^)]*)\)/) do |fn, args|
           case fn
+          when 'trickle'
+            delay = args.split(':').sum {|c| c =~ /\Ad([\d.]+)\z/ ? $1.to_f : 0.0 }
+            resp_headers['X-Csim-Server-Delay-Ms'] = (delay * 1000).round.to_s if delay > 0
           when 'header'
             name, _, rest = args.partition(',')
             name = name.strip.downcase

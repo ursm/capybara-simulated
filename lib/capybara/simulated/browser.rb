@@ -6119,6 +6119,11 @@ module Capybara
         # ('null' once tainted, so the server must then allow 'null' or '*'). A SW re-fetch whose
         # navigation ALREADY crossed origin via a network redirect starts tainted (origin_null).
         effective_origin = origin_null ? 'null' : req_origin
+        # Virtual server delay (a handler's `time.sleep`, see wpt_py_handler.py) accumulated across
+        # EVERY sub-request this fetch makes — the CORS preflight AND every redirect hop — since the
+        # `timeout` a client applies spans them all and a redirect/preflight must not reset it
+        # (timeout-multiple-fetches). Reset per fetch; the final response carries the total.
+        @fetch_server_delay_ms = 0
         # An author conditional (If-None-Match / …) means the caller is doing its own
         # revalidation, so the UA cache must step aside (computed once — the headers
         # carrying it survive every redirect hop unchanged).
@@ -6262,6 +6267,7 @@ module Capybara
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
+          @fetch_server_delay_ms += server_delay_ms_of(resp_headers)
           # Transparent HTTP Basic auth (RFC 7617): a request carrying CHALLENGE credentials (open()
           # user/pass / URL userinfo) that gets a 401 "Basic" challenge — and hasn't already sent an
           # Authorization (an explicit setRequestHeader / a pre-emptively-attached cached credential) —
@@ -6403,7 +6409,14 @@ module Capybara
           # -Headers (`*` = all). content-type stays safelisted, so response decoding is
           # unaffected. (Filtered for script exposure only — trace / set-cookie / cache see
           # the full set.) The CORS check itself already ran above (incl. on 3xx hops).
-          exposed_headers = cross_origin ? cors_exposed_headers(resp_headers, with_credentials) : resp_headers
+          # The virtual server delay is EPHEMERAL processing time (accumulated across the preflight +
+          # every redirect hop): the client reads the TOTAL to time its async deferral, but it must
+          # never be cached or replayed on a cache hit — strip it from the traced/stored response and
+          # expose the total to the CLIENT only (added after CORS filtering, so it always survives).
+          total_delay      = @fetch_server_delay_ms.to_i
+          resp_headers      = resp_headers.reject {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
+          exposed_headers   = cross_origin ? cors_exposed_headers(resp_headers, with_credentials) : resp_headers
+          exposed_headers   = exposed_headers.merge('X-Csim-Server-Delay-Ms' => total_delay.to_s) if total_delay > 0
           trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
           # A no-store request must not write the cache (RFC 9111 §5.2.1.5); a request carrying
           # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
@@ -8421,6 +8434,8 @@ module Capybara
         env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
         status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
         pbody.close if pbody.respond_to?(:close)
+        # A slow preflight counts toward the client's timeout too (timeout-multiple-fetches).
+        @fetch_server_delay_ms += server_delay_ms_of(ph) if @fetch_server_delay_ms
         return nil unless (200..299).include?(status.to_i)
         acao = cors_header(ph, 'access-control-allow-origin')
         # A credentialed preflight can't be allowed by the wildcard origin and must carry
@@ -8449,6 +8464,13 @@ module Capybara
       # -Expose-Headers. `*` exposes every header, but ONLY for a non-credentialed response;
       # with credentials the wildcard loses its meaning and matches a header literally named
       # `*` (cors-expose-star "only matches literally").
+      # The virtual server delay a response carries (X-Csim-Server-Delay-Ms, ms), 0 if none.
+      def server_delay_ms_of(headers)
+        return 0 unless headers.is_a?(Hash)
+        pair = headers.find {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
+        pair ? pair.last.to_i : 0
+      end
+
       def cors_exposed_headers(headers, credentialed = false)
         # set-cookie / set-cookie2 are forbidden response-header names — NEVER exposed to
         # script, even when explicitly named in Access-Control-Expose-Headers or covered by
