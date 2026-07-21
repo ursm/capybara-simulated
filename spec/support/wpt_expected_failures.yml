@@ -6051,10 +6051,6 @@ websockets/constructor/016.html:
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
 - 'WebSockets: non-ascii URL in query, document encoding windows-1252'
-websockets/cookies/003.html:
-- 'WebSockets: sending HttpOnly cookies in ws request'
-- 'WebSockets: sending HttpOnly cookies in ws request'
-- 'WebSockets: sending HttpOnly cookies in ws request'
 websockets/cookies/005.html:
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
@@ -6273,12 +6269,8 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/send-authentication-cors-basic-setrequestheader.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated CORS request using setRequestHeader()
-  (expects to succeed)'
 xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 - CORS request with setRequestHeader auth to URL NOT accepting Authorization header
-- CORS request with setRequestHeader auth to URL accepting Authorization header
 xhr/send-authentication-prompt-2-manual.htm:
 - 'XMLHttpRequest: WWW-Authenticate challenge when user,pass are not passed to open()'
 xhr/send-authentication-prompt-manual.htm:

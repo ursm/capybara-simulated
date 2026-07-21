@@ -650,13 +650,19 @@ def main():
             out_body = raw
     elif isinstance(result, tuple):
         if len(result) == 3:
-            raw_status, hdrs, content = result
+            raw_status, ret_hdrs, content = result
         else:
-            hdrs, content = result
+            ret_hdrs, content = result
             raw_status = response.status
         status = _status_code(raw_status)
         status_reason = _status_reason(raw_status)
-        hdrs = [(_b(k), _b(v)) for k, v in hdrs]
+        # A handler may BOTH set response.headers AND return a (headers, content) tuple — e.g.
+        # auth2/corsenabled.py sets the CORS headers, then returns its delegated authentication.py's
+        # (headers, body). wptserve keeps the pre-set headers and adds the returned ones (returned
+        # override same-name), so the delegated inner headers don't drop the outer's ACAO. Merge both.
+        ret_pairs  = [(_b(k), _b(v)) for k, v in ret_hdrs]
+        ret_names  = {k.lower() for k, _ in ret_pairs}
+        hdrs = [(_b(k), _b(v)) for k, v in response.headers if _b(k).lower() not in ret_names] + ret_pairs
         out_body = _to_bytes(content)
     else:
         status = _status_code(response.status)
