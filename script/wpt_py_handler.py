@@ -154,64 +154,58 @@ class Headers:
         return iter(self._items)
 
 
-class RequestHeaders:
+class RequestHeaders(dict):
+    # A DICT SUBCLASS whose base storage is {ORIGINAL-case name: [values]} (first-seen name wins for a
+    # repeated header) — matching wptserve, where `dict(request.headers)` copies {name: [list]} via the
+    # dict fast path (bypassing __getitem__) so a handler can do `dict(request.headers)[name][0]`
+    # (access-control-allow-lists.py). `_lower` maps lower→stored name for case-insensitive lookup;
+    # `_raw` keeps the on-the-wire ordered pairs (case + duplicates) for raw_items()/__str__. Because
+    # __iter__ / keys() are NOT overridden, dict's own — yielding the original-case names in first-seen
+    # order — both feeds that fast path AND is what inspect-headers.py iterates.
     def __init__(self, pairs):
-        self._items = [(_b(k), _b(v)) for k, v in pairs]
+        self._lower = {}
+        self._raw   = [(_b(k), _b(v)) for k, v in pairs]
+        for bk, bv in self._raw:
+            lk = bk.lower()
+            if lk in self._lower:
+                dict.__getitem__(self, self._lower[lk]).append(bv)
+            else:
+                self._lower[lk] = bk
+                dict.__setitem__(self, bk, [bv])
+
+    def _vals(self, name):
+        ok = self._lower.get(_b(name).lower())
+        return dict.__getitem__(self, ok) if ok is not None else None
 
     def get(self, name, default=None):
-        n = _b(name).lower()
-        for k, v in self._items:
-            if k.lower() == n:
-                return v
-        return default
+        v = self._vals(name)
+        return default if v is None else (v[0] if len(v) == 1 else b', '.join(v))
 
     def __getitem__(self, name):
-        v = self.get(name)
+        # A single value (repeated headers comma-joined, RFC 7230 §3.2.2) — NOT the raw list; handlers
+        # do `request.headers[b"Range"]` / `[b"origin"]` expecting one value.
+        v = self._vals(name)
         if v is None:
             raise KeyError(name)
-        return v
+        return v[0] if len(v) == 1 else b', '.join(v)
 
     def __contains__(self, name):
-        return self.get(name) is not None
-
-    def __iter__(self):
-        # wptserve iterates request.headers as header NAMES (bytes), deduped in
-        # first-seen order — inspect-headers.py's `b", ".join(request.headers)` builds
-        # Access-Control-Allow-Headers from them (without it, iterating via __getitem__
-        # raised KeyError → the cross-origin ?cors handler 500'd).
-        seen = []
-        for k, _ in self._items:
-            if k not in seen:
-                seen.append(k)
-        return iter(seen)
+        return _b(name).lower() in self._lower
 
     def items(self):
-        # wptserve exposes request.headers.items() as (name, value) pairs — one per
-        # distinct header name, repeated values comma-joined (RFC 7230 §3.2.2). Without
-        # it, fetch-access-control.py's `{... for key, value in request.headers.items()}`
-        # raised AttributeError → 500 → the client eval'd the traceback (SyntaxError).
-        merged = {}
-        order  = []
-        for k, v in self._items:
-            lk = k.lower()
-            if lk in merged:
-                merged[lk] = (merged[lk][0], merged[lk][1] + b', ' + v)
-            else:
-                merged[lk] = (k, v)
-                order.append(lk)
-        return [merged[lk] for lk in order]
+        # (name, value) per distinct header — repeated values comma-joined. fetch-access-control.py does
+        # `{... for key, value in request.headers.items()}`.
+        return [(k, (v[0] if len(v) == 1 else b', '.join(v))) for k, v in dict.items(self)]
 
     def __str__(self):
-        # wptserve's raw_headers stringifies to the on-the-wire header block; echo
-        # -headers.py returns `str(request.raw_headers)` and the test greps it for
-        # `Name: value` lines (with the author's exact casing + combined values).
+        # wptserve's raw_headers stringifies to the on-the-wire header block; echo-headers.py returns
+        # `str(request.raw_headers)` and greps it for `Name: value` lines (author casing + duplicates).
         return ''.join(u'%s: %s\r\n' % kv for kv in self.raw_items())
 
     def raw_items(self):
-        # wptserve exposes the on-the-wire header pairs as (str, str), preserving
-        # order, case, and duplicates (inspect-headers.py re-encodes them with
-        # isomorphic_encode). Our pairs are stored isomorphic (latin-1) bytes.
-        return [(k.decode('latin-1'), v.decode('latin-1')) for k, v in self._items]
+        # The on-the-wire header pairs as (str, str), preserving order, case, and duplicates
+        # (inspect-headers.py re-encodes them with isomorphic_encode).
+        return [(k.decode('latin-1'), v.decode('latin-1')) for k, v in self._raw]
 
 
 class Auth:

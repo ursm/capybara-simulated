@@ -6235,8 +6235,6 @@ xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
 - Sandboxed iframe is denied CORS access to server that allows parent origin
 xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
-xhr/allow-lists-starting-with-comma.htm:
-- Allow lists starting with a comma should be parsed correctly
 xhr/event-error.sub.any.js:
 - error while reading body should report zeros for loaded and total
 xhr/event-readystatechange-loaded.any.js:
