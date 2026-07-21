@@ -19,6 +19,7 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 import sys
 sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
 import os, json, io, re, base64, hashlib, importlib.util, pickle, posixpath
+import time as _time_mod
 from email.utils import formatdate
 from urllib.parse import urlsplit, parse_qsl
 
@@ -606,6 +607,13 @@ def main():
     response = Response()
 
     register_wptserve_stub()
+    # A handler that `time.sleep`s to delay/trickle its response (delay.py, trickle.py) would block
+    # the runner for REAL wall-time AND never advance the driver's VIRTUAL clock — so an async XHR's
+    # timeout (also virtual) could never fire. Intercept sleep: accumulate the requested seconds and
+    # emit them as `X-Csim-Server-Delay-Ms`; the async XHR defers delivery by that many VIRTUAL ms, so
+    # a shorter x.timeout wins the race (xhr timeout cluster). The handler returns immediately.
+    _accum_sleep = [0.0]
+    _time_mod.sleep = lambda s=0: _accum_sleep.__setitem__(0, _accum_sleep[0] + (float(s) if s else 0.0))
     spec = importlib.util.spec_from_file_location('wpt_handler', handler_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -683,6 +691,11 @@ def main():
         # (cors-safelisted-response-headers asserts getResponseHeader('content-length')).
         if b'content-length' not in have:
             hdrs.append((b'Content-Length', str(len(out_body)).encode('latin-1')))
+
+    # Surface the handler's accumulated `time.sleep` as a virtual server delay (see the sleep
+    # interception above). The async XHR reads this, defers delivery, and strips it before script sees it.
+    if _accum_sleep[0] > 0:
+        hdrs.append((b'X-Csim-Server-Delay-Ms', str(int(round(_accum_sleep[0] * 1000))).encode('latin-1')))
 
     meta = {
         'status': status,

@@ -10,7 +10,6 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
----
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
 - Blob URL shouldn't be fetched from a cross-partition iframe
@@ -4896,8 +4895,6 @@ service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
-service-workers/service-worker/fetch-event-respond-with-body-loaded-in-chunk.https.html:
-- Respond by chunks with a Response being loaded
 service-workers/service-worker/fetch-event-throws-after-respond-with.https.html:
 - Fetch event handler throws after a successful respondWith()
 service-workers/service-worker/fetch-event-within-sw-manual.https.html:
@@ -6239,10 +6236,6 @@ xhr/event-error.sub.any.js:
 - error while reading body should report zeros for loaded and total
 xhr/event-readystatechange-loaded.any.js:
 - event-readystatechange-loaded
-xhr/event-timeout-order.any.js:
-- event-timeout-order
-xhr/event-timeout.any.js:
-- event-timeout
 xhr/event-upload-progress-crossorigin.any.js:
 - Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
 - Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
@@ -6298,32 +6291,10 @@ xhr/send-conditional-cors.htm:
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
-xhr/send-sync-blocks-async.htm:
-- 'XMLHttpRequest: sync requests should block events on pending async requests'
-xhr/send-timeout-events.htm:
-- 'XMLHttpRequest: The send() method: timeout is not 0 '
 xhr/timeout-cors-async.htm:
 - 'XMLHttpRequest: timeout event and cross-origin request'
 xhr/timeout-multiple-fetches.html:
 - CORS preflights should not reset the timer
 - Redirects should not reset the timer
-xhr/xmlhttprequest-timeout-aborted.html:
-- 'Timeout test: time to abort is 5000, timeout set at 2000'
-xhr/xmlhttprequest-timeout-abortedonmain.html:
-- 'Timeout test: time to abort is 0, timeout set at 2000'
-- 'Timeout test: time to abort is 1000, timeout set at 2000'
-xhr/xmlhttprequest-timeout-overrides.html:
-- 'Timeout test: timeout overrides load after a delay, original timeout at 5000, reset
-  at 1000 to 2000'
-xhr/xmlhttprequest-timeout-overridesexpires.html:
-- 'Timeout test: timeout set to expired value before load fires, original timeout
-  at 5000, reset at 2000 to 1100'
-- 'Timeout test: timeout set to non-expiring value after timeout fires, original timeout
-  at 1000, reset at 2000 to 500'
-xhr/xmlhttprequest-timeout-simple.html:
-- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
-xhr/xmlhttprequest-timeout-twice.html:
-- 'Timeout test: timeout fires normally with same timeout set twice, original timeout
-  at 2000, reset at 1000 to 2000'
 xhr/xmlhttprequest-timeout-worker-synconworker.html:
 - 'Timeout test: timeout hit before load, timeout scheduled at 2000'
