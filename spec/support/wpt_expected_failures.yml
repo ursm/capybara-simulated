@@ -6254,9 +6254,6 @@ xhr/event-upload-progress.any.js:
 xhr/formdata/constructor-submitter-coordinate.html:
 - The constructed FormData object should contain correct entries for Image Button
   submitter's dispatched coordinate
-xhr/formdata/iteration.any.js:
-- Iteration skips elements removed while iterating
-- Removing elements already iterated over causes an element to be skipped during iteration
 xhr/open-after-stop.window.js:
 - open() after window.stop()
 xhr/open-url-multi-window-2.htm:
