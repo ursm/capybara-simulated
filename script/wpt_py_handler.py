@@ -559,6 +559,24 @@ def register_wptserve_stub():
     wptserve; register minimal `wptserve.utils` / `wptserve.handlers` so those imports
     resolve (latin-1 byte<->codepoint round-trips + the JSON-response decorator)."""
     import types
+    # Some handlers (xhr/resources/*/auth.py) do `from tools.wpt.utils import load_source` to load a
+    # shared sibling handler (authentication.py) by path. Provide a minimal tools.wpt.utils.load_source
+    # (the real one just execs a source file as a module).
+    if 'tools.wpt.utils' not in sys.modules:
+        def load_source(name, path):
+            spec = importlib.util.spec_from_file_location(name or '_wpt_loaded_source', path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        tools_utils = types.ModuleType('tools.wpt.utils')
+        tools_utils.load_source = load_source
+        tools_wpt = types.ModuleType('tools.wpt')
+        tools_wpt.utils = tools_utils
+        tools_pkg = types.ModuleType('tools')
+        tools_pkg.wpt = tools_wpt
+        sys.modules['tools'] = tools_pkg
+        sys.modules['tools.wpt'] = tools_wpt
+        sys.modules['tools.wpt.utils'] = tools_utils
     if 'wptserve.utils' in sys.modules:
         return
     utils = types.ModuleType('wptserve.utils')

@@ -6284,17 +6284,9 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/send-authentication-basic-repeat-no-args.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
-  passed to open() in first request, without in second'
-xhr/send-authentication-basic-setrequestheader-and-arguments.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()
-  and open() arguments (asserts header wins)'
 xhr/send-authentication-basic-setrequestheader-existing-session.htm:
 - 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()
   when there is an existing session'
-xhr/send-authentication-basic-setrequestheader.htm:
-- 'XMLHttpRequest: send() - "Basic" authenticated request using setRequestHeader()'
 xhr/send-authentication-basic.htm:
 - 'XMLHttpRequest: send() - "Basic" authenticated requests with user name and password
   passed to open()'
