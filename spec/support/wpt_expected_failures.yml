@@ -6251,8 +6251,6 @@ xhr/event-upload-progress-crossorigin.any.js:
 xhr/event-upload-progress.any.js:
 - Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
 - Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
-xhr/firing-events-http-no-content-length.html:
-- 'ProgressEvent: firing events for HTTP with no Content-Length'
 xhr/formdata/constructor-submitter-coordinate.html:
 - The constructed FormData object should contain correct entries for Image Button
   submitter's dispatched coordinate
