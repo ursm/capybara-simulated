@@ -6103,12 +6103,13 @@ module Capybara
           body = Base64.decode64(body.to_s)
           headers = headers.reject {|k, _| k == 'X-Csim-Body-B64' }
         end
-        # The Authorization header, when present, is cacheable auth (below) ONLY when it carries this
-        # internal marker — set by the XHR authentication path (open() user/password / URL userinfo),
-        # NOT a raw setRequestHeader('Authorization'). Strip the marker so it never reaches the server.
-        auth_cacheable = false
-        if headers.is_a?(Hash) && (mk = headers.keys.find {|k| k.to_s.casecmp?('x-csim-auth-cache') })
-          auth_cacheable = true
+        # CHALLENGE credentials for transparent HTTP Basic auth — set by the XHR authentication path
+        # (open() user/password / URL userinfo), NOT a raw setRequestHeader('Authorization'). They are
+        # NOT sent proactively; a 401 "Basic" challenge triggers a single re-send with them (below).
+        # Strip the marker so it never reaches the server.
+        challenge_authz = nil
+        if headers.is_a?(Hash) && (mk = headers.keys.find {|k| k.to_s.casecmp?('x-csim-auth-challenge') })
+          challenge_authz = 'Basic ' + headers[mk].to_s
           headers = headers.reject {|k, _| k == mk }
         end
         # The request's origin starts as the document origin; a cross-origin REDIRECT
@@ -6221,7 +6222,11 @@ module Capybara
           # resource loads without a fresh 401 challenge (the login helper authenticates first, then
           # the guarded image/XHR requests carry the cached header). Gated on the same credential
           # decision as cookies; the caller's own Authorization (an explicit user:pass) always wins.
-          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && (cached = @auth_cache[url_origin(target)])
+          # Skip the pre-emptive cache when THIS request brought its own challenge credentials (open()
+          # user/pass) — those must win over a cached session, so the request goes out unauthenticated
+          # and the 401-retry below applies the caller's credentials, not a stale cached pair
+          # (send-authentication-competing-names-passwords).
+          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && !challenge_authz && (cached = @auth_cache[url_origin(target)])
             env['HTTP_AUTHORIZATION'] = cached
           end
           # A CORS request to a URL carrying credentials (`user:pass@`) is a network
@@ -6257,19 +6262,29 @@ module Capybara
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
+          # Transparent HTTP Basic auth (RFC 7617): a request carrying CHALLENGE credentials (open()
+          # user/pass / URL userinfo) that gets a 401 "Basic" challenge — and hasn't already sent an
+          # Authorization (an explicit setRequestHeader / a pre-emptively-attached cached credential) —
+          # is re-sent ONCE with them; only the authenticated response reaches script, the 401 never does
+          # (send-authentication-basic / -existing-session). `omit` sends no credentials at all.
+          if challenge_authz && status.to_i == 401 && credentials != 'omit' &&
+             !env.key?('HTTP_AUTHORIZATION') && www_authenticate_basic?(resp_headers)
+            resp_body.close if resp_body.respond_to?(:close)
+            env['HTTP_AUTHORIZATION'] = challenge_authz
+            status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
+          end
           # Fetch credentials mode "omit" ignores credentials the response sends back too —
           # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
           merge_set_cookie(resp_headers, target) unless credentials == 'omit'
-          # Cache the credentials that this origin ACCEPTED (AUTHENTICATION credentials — marked
-          # above — that weren't rejected with a 401 challenge), for the pre-emptive send above.
-          # `omit` ignores credentials wholesale, so it neither sends nor caches them. Only the
-          # request's OWN origin is ever cached: the Authorization is stripped on a cross-origin
-          # redirect hop (above), so origin A's credentials can't seed origin B's cache — the actual
-          # cross-origin leak risk. (A non-2xx same-origin response — an opaque status-0 no-cors
-          # fetch, a same-origin 3xx the UA follows — still legitimately establishes the credentials
-          # for THAT origin, so the gate is "not a 401", not "is a 2xx".)
-          if auth_cacheable && credentials != 'omit' && (authz = env['HTTP_AUTHORIZATION']) && status.to_i != 401
-            @auth_cache[url_origin(target)] = authz
+          # Cache the credentials this origin ACCEPTED (AUTHENTICATION credentials — a pre-emptively
+          # attached cached credential, or the challenge credential the 401-retry above just supplied —
+          # that weren't rejected with a 401), for the pre-emptive send above. `omit` neither sends nor
+          # caches. Only the request's OWN origin is cached: Authorization is stripped on a cross-origin
+          # redirect hop (above), so origin A's credentials can't seed origin B's cache. (A non-2xx
+          # same-origin response — an opaque status-0 no-cors fetch, a same-origin 3xx — still
+          # establishes the credentials for THAT origin, so the gate is "not a 401", not "is a 2xx".)
+          if challenge_authz && credentials != 'omit' && status.to_i != 401
+            @auth_cache[url_origin(target)] = env['HTTP_AUTHORIZATION'] || challenge_authz
           end
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
@@ -8116,6 +8131,14 @@ module Capybara
       # Store a response's Set-Cookie headers under the RESPONDING host's jar (`url` is
       # the hop that produced `headers`). A cross-origin hop therefore writes its own
       # host's jar, never the document's (cors-cookies isolation).
+      # True if the response carries a `WWW-Authenticate: Basic …` challenge — the only scheme the
+      # transparent-auth retry in rack_fetch answers.
+      def www_authenticate_basic?(headers)
+        return false unless headers.is_a?(Hash)
+        headers.each {|k, v| return true if k.to_s.casecmp?('www-authenticate') && v.to_s.strip.downcase.start_with?('basic') }
+        false
+      end
+
       def merge_set_cookie(headers, url)
         sc = headers['set-cookie'] || headers['Set-Cookie']
         return if sc.nil? || sc.empty?
