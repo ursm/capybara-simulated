@@ -4986,9 +4986,6 @@ service-workers/service-worker/indexeddb.https.html:
 service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL
-service-workers/service-worker/interface-requirements-sw.https.html:
-- Event constructors
-- xhr is not exposed
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL iframe should not intercept fetch().
 - Data URL worker should not inherit service worker controller.
