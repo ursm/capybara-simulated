@@ -3956,8 +3956,6 @@ dom/events/AddEventListenerOptions-signal.any.js:
 - Passing an AbortSignal to multiple listeners
 - Passing null as the signal should throw
 - Passing null as the signal should throw (listener is also null)
-dom/events/Event-constructors.any.js:
-- Event-constructors 1
 dom/events/Event-isTrusted.any.js:
 - Event-isTrusted
 dom/events/event-global-extra.window.js:
