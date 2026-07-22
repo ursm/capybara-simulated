@@ -10,6 +10,7 @@
 #
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
+---
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
 - Blob URL shouldn't be fetched from a cross-partition iframe
@@ -2058,8 +2059,6 @@ custom-elements/attribute-changed-callback.html:
   the callback being invoked
 - Mutating observedAttributes after calling customElements.define must not affect
   the set of attributes for which attributedChangedCallback is invoked
-- Upgrading a cloned element must enqueue and invoke attributeChangedCallback for
-  an HTML attribute
 - attributedChangedCallback must be enqueued for attributes specified in a non-Array
   iterable observedAttributes
 - setAttributeNS and removeAttributeNS must enqueue and invoke attributeChangedCallback
@@ -2069,34 +2068,27 @@ custom-elements/builtin-coverage.html:
 - 'a: Operator ''new'' should instantiate a customized built-in element'
 - 'a: document.createElement() should instantiate a customized built-in element'
 - 'a: innerHTML should instantiate a customized built-in element'
-- 'abbr: Operator ''new'' should instantiate a customized built-in element'
 - 'abbr: document.createElement() should instantiate a customized built-in element'
 - 'abbr: innerHTML should instantiate a customized built-in element'
-- 'address: Operator ''new'' should instantiate a customized built-in element'
 - 'address: document.createElement() should instantiate a customized built-in element'
 - 'address: innerHTML should instantiate a customized built-in element'
 - 'area: Operator ''new'' should instantiate a customized built-in element'
 - 'area: document.createElement() should instantiate a customized built-in element'
 - 'area: innerHTML should instantiate a customized built-in element'
-- 'article: Operator ''new'' should instantiate a customized built-in element'
 - 'article: document.createElement() should instantiate a customized built-in element'
 - 'article: innerHTML should instantiate a customized built-in element'
-- 'aside: Operator ''new'' should instantiate a customized built-in element'
 - 'aside: document.createElement() should instantiate a customized built-in element'
 - 'aside: innerHTML should instantiate a customized built-in element'
 - 'audio: Operator ''new'' should instantiate a customized built-in element'
 - 'audio: document.createElement() should instantiate a customized built-in element'
 - 'audio: innerHTML should instantiate a customized built-in element'
-- 'b: Operator ''new'' should instantiate a customized built-in element'
 - 'b: document.createElement() should instantiate a customized built-in element'
 - 'b: innerHTML should instantiate a customized built-in element'
 - 'base: Operator ''new'' should instantiate a customized built-in element'
 - 'base: document.createElement() should instantiate a customized built-in element'
 - 'base: innerHTML should instantiate a customized built-in element'
-- 'bdi: Operator ''new'' should instantiate a customized built-in element'
 - 'bdi: document.createElement() should instantiate a customized built-in element'
 - 'bdi: innerHTML should instantiate a customized built-in element'
-- 'bdo: Operator ''new'' should instantiate a customized built-in element'
 - 'bdo: document.createElement() should instantiate a customized built-in element'
 - 'bdo: innerHTML should instantiate a customized built-in element'
 - 'blockquote: Operator ''new'' should instantiate a customized built-in element'
@@ -2117,10 +2109,8 @@ custom-elements/builtin-coverage.html:
 - 'caption: Operator ''new'' should instantiate a customized built-in element'
 - 'caption: document.createElement() should instantiate a customized built-in element'
 - 'caption: innerHTML should instantiate a customized built-in element'
-- 'cite: Operator ''new'' should instantiate a customized built-in element'
 - 'cite: document.createElement() should instantiate a customized built-in element'
 - 'cite: innerHTML should instantiate a customized built-in element'
-- 'code: Operator ''new'' should instantiate a customized built-in element'
 - 'code: document.createElement() should instantiate a customized built-in element'
 - 'code: innerHTML should instantiate a customized built-in element'
 - 'col: Operator ''new'' should instantiate a customized built-in element'
@@ -2135,7 +2125,6 @@ custom-elements/builtin-coverage.html:
 - 'datalist: Operator ''new'' should instantiate a customized built-in element'
 - 'datalist: document.createElement() should instantiate a customized built-in element'
 - 'datalist: innerHTML should instantiate a customized built-in element'
-- 'dd: Operator ''new'' should instantiate a customized built-in element'
 - 'dd: document.createElement() should instantiate a customized built-in element'
 - 'dd: innerHTML should instantiate a customized built-in element'
 - 'del: Operator ''new'' should instantiate a customized built-in element'
@@ -2144,7 +2133,6 @@ custom-elements/builtin-coverage.html:
 - 'details: Operator ''new'' should instantiate a customized built-in element'
 - 'details: document.createElement() should instantiate a customized built-in element'
 - 'details: innerHTML should instantiate a customized built-in element'
-- 'dfn: Operator ''new'' should instantiate a customized built-in element'
 - 'dfn: document.createElement() should instantiate a customized built-in element'
 - 'dfn: innerHTML should instantiate a customized built-in element'
 - 'dialog: Operator ''new'' should instantiate a customized built-in element'
@@ -2156,10 +2144,8 @@ custom-elements/builtin-coverage.html:
 - 'dl: Operator ''new'' should instantiate a customized built-in element'
 - 'dl: document.createElement() should instantiate a customized built-in element'
 - 'dl: innerHTML should instantiate a customized built-in element'
-- 'dt: Operator ''new'' should instantiate a customized built-in element'
 - 'dt: document.createElement() should instantiate a customized built-in element'
 - 'dt: innerHTML should instantiate a customized built-in element'
-- 'em: Operator ''new'' should instantiate a customized built-in element'
 - 'em: document.createElement() should instantiate a customized built-in element'
 - 'em: innerHTML should instantiate a customized built-in element'
 - 'embed: Operator ''new'' should instantiate a customized built-in element'
@@ -2168,13 +2154,10 @@ custom-elements/builtin-coverage.html:
 - 'fieldset: Operator ''new'' should instantiate a customized built-in element'
 - 'fieldset: document.createElement() should instantiate a customized built-in element'
 - 'fieldset: innerHTML should instantiate a customized built-in element'
-- 'figcaption: Operator ''new'' should instantiate a customized built-in element'
 - 'figcaption: document.createElement() should instantiate a customized built-in element'
 - 'figcaption: innerHTML should instantiate a customized built-in element'
-- 'figure: Operator ''new'' should instantiate a customized built-in element'
 - 'figure: document.createElement() should instantiate a customized built-in element'
 - 'figure: innerHTML should instantiate a customized built-in element'
-- 'footer: Operator ''new'' should instantiate a customized built-in element'
 - 'footer: document.createElement() should instantiate a customized built-in element'
 - 'footer: innerHTML should instantiate a customized built-in element'
 - 'form: Operator ''new'' should instantiate a customized built-in element'
@@ -2198,10 +2181,8 @@ custom-elements/builtin-coverage.html:
 - 'h6: Operator ''new'' should instantiate a customized built-in element'
 - 'h6: document.createElement() should instantiate a customized built-in element'
 - 'h6: innerHTML should instantiate a customized built-in element'
-- 'header: Operator ''new'' should instantiate a customized built-in element'
 - 'header: document.createElement() should instantiate a customized built-in element'
 - 'header: innerHTML should instantiate a customized built-in element'
-- 'hgroup: Operator ''new'' should instantiate a customized built-in element'
 - 'hgroup: document.createElement() should instantiate a customized built-in element'
 - 'hgroup: innerHTML should instantiate a customized built-in element'
 - 'hr: Operator ''new'' should instantiate a customized built-in element'
@@ -2210,7 +2191,6 @@ custom-elements/builtin-coverage.html:
 - 'html: Operator ''new'' should instantiate a customized built-in element'
 - 'html: document parser should instantiate a customized built-in element'
 - 'html: document.createElement() should instantiate a customized built-in element'
-- 'i: Operator ''new'' should instantiate a customized built-in element'
 - 'i: document.createElement() should instantiate a customized built-in element'
 - 'i: innerHTML should instantiate a customized built-in element'
 - 'iframe: Operator ''new'' should instantiate a customized built-in element'
@@ -2225,7 +2205,6 @@ custom-elements/builtin-coverage.html:
 - 'ins: Operator ''new'' should instantiate a customized built-in element'
 - 'ins: document.createElement() should instantiate a customized built-in element'
 - 'ins: innerHTML should instantiate a customized built-in element'
-- 'kbd: Operator ''new'' should instantiate a customized built-in element'
 - 'kbd: document.createElement() should instantiate a customized built-in element'
 - 'kbd: innerHTML should instantiate a customized built-in element'
 - 'label: Operator ''new'' should instantiate a customized built-in element'
@@ -2240,13 +2219,11 @@ custom-elements/builtin-coverage.html:
 - 'link: Operator ''new'' should instantiate a customized built-in element'
 - 'link: document.createElement() should instantiate a customized built-in element'
 - 'link: innerHTML should instantiate a customized built-in element'
-- 'main: Operator ''new'' should instantiate a customized built-in element'
 - 'main: document.createElement() should instantiate a customized built-in element'
 - 'main: innerHTML should instantiate a customized built-in element'
 - 'map: Operator ''new'' should instantiate a customized built-in element'
 - 'map: document.createElement() should instantiate a customized built-in element'
 - 'map: innerHTML should instantiate a customized built-in element'
-- 'mark: Operator ''new'' should instantiate a customized built-in element'
 - 'mark: document.createElement() should instantiate a customized built-in element'
 - 'mark: innerHTML should instantiate a customized built-in element'
 - 'menu: Operator ''new'' should instantiate a customized built-in element'
@@ -2258,10 +2235,8 @@ custom-elements/builtin-coverage.html:
 - 'meter: Operator ''new'' should instantiate a customized built-in element'
 - 'meter: document.createElement() should instantiate a customized built-in element'
 - 'meter: innerHTML should instantiate a customized built-in element'
-- 'nav: Operator ''new'' should instantiate a customized built-in element'
 - 'nav: document.createElement() should instantiate a customized built-in element'
 - 'nav: innerHTML should instantiate a customized built-in element'
-- 'noscript: Operator ''new'' should instantiate a customized built-in element'
 - 'noscript: document.createElement() should instantiate a customized built-in element'
 - 'noscript: innerHTML should instantiate a customized built-in element'
 - 'object: Operator ''new'' should instantiate a customized built-in element'
@@ -2297,25 +2272,19 @@ custom-elements/builtin-coverage.html:
 - 'q: Operator ''new'' should instantiate a customized built-in element'
 - 'q: document.createElement() should instantiate a customized built-in element'
 - 'q: innerHTML should instantiate a customized built-in element'
-- 'rp: Operator ''new'' should instantiate a customized built-in element'
 - 'rp: document.createElement() should instantiate a customized built-in element'
 - 'rp: innerHTML should instantiate a customized built-in element'
-- 'rt: Operator ''new'' should instantiate a customized built-in element'
 - 'rt: document.createElement() should instantiate a customized built-in element'
 - 'rt: innerHTML should instantiate a customized built-in element'
-- 'ruby: Operator ''new'' should instantiate a customized built-in element'
 - 'ruby: document.createElement() should instantiate a customized built-in element'
 - 'ruby: innerHTML should instantiate a customized built-in element'
-- 's: Operator ''new'' should instantiate a customized built-in element'
 - 's: document.createElement() should instantiate a customized built-in element'
 - 's: innerHTML should instantiate a customized built-in element'
-- 'samp: Operator ''new'' should instantiate a customized built-in element'
 - 'samp: document.createElement() should instantiate a customized built-in element'
 - 'samp: innerHTML should instantiate a customized built-in element'
 - 'script: Operator ''new'' should instantiate a customized built-in element'
 - 'script: document.createElement() should instantiate a customized built-in element'
 - 'script: innerHTML should instantiate a customized built-in element'
-- 'section: Operator ''new'' should instantiate a customized built-in element'
 - 'section: document.createElement() should instantiate a customized built-in element'
 - 'section: innerHTML should instantiate a customized built-in element'
 - 'select: Operator ''new'' should instantiate a customized built-in element'
@@ -2324,7 +2293,6 @@ custom-elements/builtin-coverage.html:
 - 'slot: Operator ''new'' should instantiate a customized built-in element'
 - 'slot: document.createElement() should instantiate a customized built-in element'
 - 'slot: innerHTML should instantiate a customized built-in element'
-- 'small: Operator ''new'' should instantiate a customized built-in element'
 - 'small: document.createElement() should instantiate a customized built-in element'
 - 'small: innerHTML should instantiate a customized built-in element'
 - 'source: Operator ''new'' should instantiate a customized built-in element'
@@ -2333,19 +2301,15 @@ custom-elements/builtin-coverage.html:
 - 'span: Operator ''new'' should instantiate a customized built-in element'
 - 'span: document.createElement() should instantiate a customized built-in element'
 - 'span: innerHTML should instantiate a customized built-in element'
-- 'strong: Operator ''new'' should instantiate a customized built-in element'
 - 'strong: document.createElement() should instantiate a customized built-in element'
 - 'strong: innerHTML should instantiate a customized built-in element'
 - 'style: Operator ''new'' should instantiate a customized built-in element'
 - 'style: document.createElement() should instantiate a customized built-in element'
 - 'style: innerHTML should instantiate a customized built-in element'
-- 'sub: Operator ''new'' should instantiate a customized built-in element'
 - 'sub: document.createElement() should instantiate a customized built-in element'
 - 'sub: innerHTML should instantiate a customized built-in element'
-- 'summary: Operator ''new'' should instantiate a customized built-in element'
 - 'summary: document.createElement() should instantiate a customized built-in element'
 - 'summary: innerHTML should instantiate a customized built-in element'
-- 'sup: Operator ''new'' should instantiate a customized built-in element'
 - 'sup: document.createElement() should instantiate a customized built-in element'
 - 'sup: innerHTML should instantiate a customized built-in element'
 - 'table: Operator ''new'' should instantiate a customized built-in element'
@@ -2384,19 +2348,16 @@ custom-elements/builtin-coverage.html:
 - 'track: Operator ''new'' should instantiate a customized built-in element'
 - 'track: document.createElement() should instantiate a customized built-in element'
 - 'track: innerHTML should instantiate a customized built-in element'
-- 'u: Operator ''new'' should instantiate a customized built-in element'
 - 'u: document.createElement() should instantiate a customized built-in element'
 - 'u: innerHTML should instantiate a customized built-in element'
 - 'ul: Operator ''new'' should instantiate a customized built-in element'
 - 'ul: document.createElement() should instantiate a customized built-in element'
 - 'ul: innerHTML should instantiate a customized built-in element'
-- 'var: Operator ''new'' should instantiate a customized built-in element'
 - 'var: document.createElement() should instantiate a customized built-in element'
 - 'var: innerHTML should instantiate a customized built-in element'
 - 'video: Operator ''new'' should instantiate a customized built-in element'
 - 'video: document.createElement() should instantiate a customized built-in element'
 - 'video: innerHTML should instantiate a customized built-in element'
-- 'wbr: Operator ''new'' should instantiate a customized built-in element'
 - 'wbr: document.createElement() should instantiate a customized built-in element'
 - 'wbr: innerHTML should instantiate a customized built-in element'
 custom-elements/connected-callbacks-html-fragment-parsing.html:
@@ -2676,12 +2637,6 @@ custom-elements/pseudo-class-defined.html:
 - createElementNS("http://www.w3.org/2000/svg", "div") should be :defined
 - createElementNS("http://www.w3.org/2000/svg", "font-face") should be :defined
 - this.matches(:defined) should not match during an upgrade
-custom-elements/range-and-constructors.html:
-- Range.cloneContents should invoke constructor in tree order
-- Range.extractContents should invoke constructor in tree order
-custom-elements/reaction-timing.html:
-- Calling Node.prototype.cloneNode(false) must push a new element queue to the processing
-  stack
 custom-elements/reactions/Animation.html:
 - Animation.animate must enqueue an attributeChanged reaction when it adds the observed
   style attribute
@@ -2741,20 +2696,7 @@ custom-elements/reactions/HTMLTableElement.html:
 custom-elements/reactions/HTMLTitleElement.html:
 - text on HTMLTitleElement must enqueue disconnectedCallback when removing a custom
   element
-custom-elements/reactions/Node.html:
-- cloneNode on Node must enqueue an attributeChanged reaction when cloning an element
-  only for observed attributes
-- cloneNode on Node must enqueue an attributeChanged reaction when cloning an element
-  with an observed attribute
-- cloneNode on Node must not enqueue an attributeChanged reaction when cloning an
-  element with an unobserved attribute
 custom-elements/reactions/Range.html:
-- cloneContents on Range must enqueue an attributeChanged reaction when cloning an
-  element only for observed attributes
-- cloneContents on Range must enqueue an attributeChanged reaction when cloning an
-  element with an observed attribute
-- cloneContents on Range must not enqueue an attributeChanged reaction when cloning
-  an element with an unobserved attribute
 - createContextualFragment on Range must construct a custom element
 custom-elements/reactions/Selection.html:
 - deleteFromDocument on Selection must enqueue a disconnected reaction
@@ -3884,14 +3826,6 @@ custom-elements/upgrading/Node-cloneNode.html:
   itself before super() call
 - Inserting an element must not try to upgrade a custom element when it had already
   failed to upgrade once
-- Node.prototype.cloneNode(false) must be able to clone a custom element
-- Node.prototype.cloneNode(false) must be able to clone a custom element inside an
-  iframe
-- Node.prototype.cloneNode(false) must be able to clone as a autonomous custom element
-  when it contains is attribute
-- Node.prototype.cloneNode(true) must be able to clone a descendent custom element
-- Node.prototype.cloneNode(true) must set parentNode, previousSibling, and nextSibling
-  before upgrading custom elements
 - Upgrading a custom element must throw TypeError when the custom element's constructor
   returns another element
 custom-elements/upgrading/upgrade-custom-element-error-event.html:
@@ -3903,11 +3837,8 @@ custom-elements/upgrading/upgrade-custom-element-error-event.html:
 - 'customized built-in: exception thrown in constructor is reported to definition''s
   global'
 custom-elements/upgrading/upgrading-enqueue-reactions.html:
-- Upgrading a custom element must enqueue attributeChangedCallback before connectedCallback
 - Upgrading a custom element must not invoke attributeChangedCallback and connectedCallback
   when the element failed to upgrade
-- Upgrading a custom element not must enqueue attributeChangedCallback on unobserved
-  attributes
 custom-elements/upgrading/upgrading-parser-created-element.html:
 - Element.prototype.createElement must add an unresolved custom element to the upgrade
   candidates map
