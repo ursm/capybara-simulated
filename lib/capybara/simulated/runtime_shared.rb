@@ -507,11 +507,24 @@ module Capybara
         '__csim_okpImportRaw' => lambda {|*a|
           OpenSSL::PKey.new_raw_public_key(a[0].to_s, crypto_bytes(a[1])).public_to_der.bytes
         },
+        # Parse + re-emit a canonical OKP DER — validates the SPKI/PKCS#8 structure at
+        # import time (a truncated / malformed key raises, which JS maps to DataError)
+        # instead of storing the bytes blindly and only failing on first use.
+        '__csim_okpImportDer' => lambda {|*a|
+          key = RuntimeShared.pkey_read(a[1])
+          a[0].to_s == 'private' ? key.private_to_der.bytes : key.public_to_der.bytes
+        },
         '__csim_okpImportJwk' => lambda {|*a|
           type = a[0].to_s
-          key  = a[1] ? OpenSSL::PKey.new_raw_private_key(type, crypto_bytes(a[3]))
-                      : OpenSSL::PKey.new_raw_public_key(type, crypto_bytes(a[2]))
-          (a[1] ? key.private_to_der : key.public_to_der).bytes
+          if a[1]
+            key = OpenSSL::PKey.new_raw_private_key(type, crypto_bytes(a[3]))
+            # The JWK "x" (public) must equal the public key derived from "d" — a mismatch is
+            # an invalid key pair (DataError on the JS side).
+            raise OpenSSL::PKey::PKeyError, 'OKP JWK x does not match d' unless key.raw_public_key == crypto_bytes(a[2])
+            key.private_to_der.bytes
+          else
+            OpenSSL::PKey.new_raw_public_key(type, crypto_bytes(a[2])).public_to_der.bytes
+          end
         },
         '__csim_okpExportJwk' => lambda {|*a|
           key = RuntimeShared.pkey_read(a[0])
