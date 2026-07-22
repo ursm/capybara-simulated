@@ -4157,15 +4157,6 @@ webstorage/event_body_attribute.html:
   specified as an attribute on the body.
 webstorage/event_case_sensitive.html:
 - localStorage storage events fire even when only the case of the value changes.
-webstorage/event_constructor.window.js:
-- constructor with no arguments
-- constructor with null type argument and members
-webstorage/event_initstorageevent.window.js:
-- initStorageEvent with 0 arguments
-- initStorageEvent with 1 argument
-- initStorageEvent with 8 null arguments
-- initStorageEvent with 8 sensible arguments
-- initStorageEvent with 8 undefined arguments
 webstorage/event_no_duplicates.html:
 - Clearing empty storage does not trigger event for localStorage
 - Clearing empty storage does not trigger event for sessionStorage
