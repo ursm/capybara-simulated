@@ -2689,23 +2689,6 @@ custom-elements/reactions/Animation.html:
   observed style attribute
 - Animation.animate must not enqueue an attributeChanged reaction when it mutates
   the style attribute but the style attribute is not observed
-custom-elements/reactions/AriaMixin-element-attributes.html:
-- ariaActiveDescendantElement in Element must enqueue an attributeChanged reaction
-  when replacing an existing attribute
-- ariaControlsElements in Element must enqueue an attributeChanged reaction when replacing
-  an existing attribute
-- ariaDescribedByElements in Element must enqueue an attributeChanged reaction when
-  replacing an existing attribute
-- ariaDetailsElements in Element must enqueue an attributeChanged reaction when replacing
-  an existing attribute
-- ariaErrorMessageElements in Element must enqueue an attributeChanged reaction when
-  replacing an existing attribute
-- ariaFlowToElements in Element must enqueue an attributeChanged reaction when replacing
-  an existing attribute
-- ariaLabelledByElements in Element must enqueue an attributeChanged reaction when
-  replacing an existing attribute
-- ariaOwnsElements in Element must enqueue an attributeChanged reaction when replacing
-  an existing attribute
 custom-elements/reactions/CSSStyleDeclaration.html:
 - A webkit prefixed camel case attribute (webkitFilter) on CSSStyleDeclaration must
   enqueue an attributeChanged reaction when it adds the observed style attribute
@@ -2727,14 +2710,6 @@ custom-elements/reactions/CSSStyleDeclaration.html:
 - A webkit prefixed dashed property (-webkit-filter) on CSSStyleDeclaration must not
   enqueue an attributeChanged reaction when it mutates the style attribute but the
   style attribute is not observed
-custom-elements/reactions/DOMStringMap.html:
-- setter on DOMStringMap must enqueue an attributeChanged reaction when mutating the
-  value of an observed data attribute to the same value
-custom-elements/reactions/DOMTokenList.html:
-- remove on DOMTokenList must enqueue an attributeChanged reaction even when removing
-  a non-existent value from an attribute
-- the stringifier of DOMTokenList must enqueue an attributeChanged reaction when the
-  setter is called with the original value of the attribute
 custom-elements/reactions/Document.html:
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
