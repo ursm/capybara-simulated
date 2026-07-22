@@ -1533,16 +1533,8 @@ custom-elements/reactions/customized-builtins/HTMLTimeElement.html:
 - dateTime on HTMLTimeElement must enqueue an attributeChanged reaction when replacing
   an existing attribute
 custom-elements/registries/Construct.html:
-- A constructor creating an element from another registry before or after super call
-  should work
-- A constructor uses the global registry to create an element
 - A constructor with only a scoped custom element registry definition should fail
   upon construction
-custom-elements/registries/CustomElementRegistry-define.html:
-- Defining an element in a scoped global registry does not add a definition to the
-  global registry
-- Defining an element in the global registry does not add a definition to a scoped
-  CustomElementRegistry
 custom-elements/registries/CustomElementRegistry-initialize.html:
 - initialize does not set descendants whose customElementRegistry already uses a different
   registry
@@ -1559,9 +1551,6 @@ custom-elements/registries/CustomElementRegistry-initialize.html:
 - initialize throws when the registry scoped is false and the root is the document.
 - initialize works on Document
 - initialize works on DocumentFragment
-custom-elements/registries/CustomElementRegistry-multi-register.html:
-- Non-global registries still reject duplicate registrations of the same constructor
-- Same constructor can be registered to different registries
 custom-elements/registries/CustomElementRegistry-upgrade.html:
 - upgrade is a no-op when called on a shadow root with no association
 - upgrade is a no-op when called on an element associated with a different registry
@@ -1583,34 +1572,36 @@ custom-elements/registries/Document-importNode-cross-document.window.js:
 - Cloning with global registry (null registry target)
 - Cloning with scoped registry
 - Cloning with scoped registry (null registry target)
+custom-elements/registries/Document-importNode.html:
+- importNode should clone a shadow host with a declarative shadow DOM using a specified
+  scoped registry
+- importNode should clone a template content using a specified scoped registry
+- importNode should clone a template content with a nested template element using
+  a scoped registry
+- importNode should clone using target's registry if non-null, including when it's
+  not the global registry
+- importNode should clone using the specified registry if target's registry is null
+- importNode should preserve null-ness of custom element registry
+- importNode should use the provided fallback registry for null-registry descendants
+  nested under non-null-registry ancestors
+- 'importNode: pass options argument with value { customElementRegistry: null }'
+- 'importNode: pass options argument with value { selfOnly: true }'
 custom-elements/registries/Element-customElementRegistry-exceptions.html:
 - customElementRegistry on a failed custom element created by calling createElement
   on CustomElementRegistry should return the registry
 - customElementRegistry on a failed custom element created by parser should return
   the specified custom regsitry
-- customElementRegistry on a failed custom element created by setting innerHTML should
-  return the associated scoped registry
 custom-elements/registries/Element-customElementRegistry.html:
 - customElementRegistry inside a custom element constructor should return the correct
   registry
-- customElementRegistry on a builtin element created by calling createElement on CustomElementRegistry
-  should return the registry
 - customElementRegistry on a clone of a declarative shadow tree with shadowrootcustomelementregistry
   should return null
 - customElementRegistry on a clone of a declarative shadow tree with shadowrootcustomelementregistry
   should return the global registry after getting inserted into a document
-- customElementRegistry on a defined custom element created by calling createElement
-  on CustomElementRegistry should return the registry
-- customElementRegistry on an element inside a declarative shadow DOM should return
-  window.customElements by default
 - customElementRegistry on an element inside a declarative shadow DOM with shadowrootcustomelementregistry
   should return null
 - customElementRegistry on an element inside a declarative shadow DOM with shadowrootcustomelementregistry
   should return the scoped registry after calling initialize
-- customElementRegistry on an unknown element created by calling createElement on
-  CustomElementRegistry should return the registry
-- customElementRegistry on an upgarde candidate created by calling createElement on
-  CustomElementRegistry should return the registry
 custom-elements/registries/Element-innerHTML.html:
 - createContextualFragment on a range inside a template should use null registry even
   when the template has a scoped registry
@@ -1618,41 +1609,16 @@ custom-elements/registries/Element-innerHTML.html:
   use the scoped registry of the element
 - innerHTML on a disconnected element should use the scoped registry it was created
   with
-- innerHTML on a disconnected element should use the scoped registry it was created
-  with when parsing a simple HTML
 - innerHTML on an inserted element should continue to use the scoped registry it was
   created with
 - insertAdjacentHTML should use the element's registry even when the registry is null
-- insertAdjacentHTML with afterend should use the containing scope's registry
-- insertAdjacentHTML with beforebegin should use the containing scope's registry
 - nested descendants in innerHTML on a disconnected element should use the scoped
   registry the element was created with
 - nested descendants in innerHTML should use the null registry when the container
   element has null registry
-- outerHTML setter should use the parent scope's registry, not the replaced element's
 custom-elements/registries/ShadowRoot-init-customElementRegistry.html:
-- A newly attached ShadowRoot should use the global registry by default even if the
-  host is within another shadow tree that uses a custom registry
-- A newly attached ShadowRoot should use the global registry by default even if the
-  host uses a custom registry
-- A newly attached connected ShadowRoot should use the global registry by default
-- A newly attached connected ShadowRoot should use the scoped registry if explicitly
-  specified in attachShadow
-- A newly attached disconnected ShadowRoot should use the global registry by default
-- A newly attached disconnected ShadowRoot should use the scoped registry if explicitly
-  specified in attachShadow
-- attachShadow() should use null registry when customElementRegistry is null (host
-  uses custom registry)
-- attachShadow() should use null registry when customElementRegistry is null (host
-  uses global registry)
 - attachShadow() should use the null registry when the shadow host uses null registry
   and customElementRegistry is null
-- attchShadow on a builtin element with null customElementRegistry should create a
-  ShadowRoot with null registry
-- attchShadow on a custom elememnt candidate with null customElementRegistry should
-  create a ShadowRoot with null registry
-- attchShadow on a custom elememnt with null customElementRegistry should create a
-  ShadowRoot with null registry
 custom-elements/registries/ShadowRoot-init-declarative.html:
 - Built-in element inside 'shadowrootcustomelementregistry' declarative shadow root
   should use document's registry as attachShadow default registry
@@ -1681,12 +1647,8 @@ custom-elements/registries/adoption.window.js:
   registry target)
 - Adoption including shadow root with global registry into a scoped registry (scoped
   registry target)
-- Adoption including shadow root with scoped registry
-- Adoption including shadow root with scoped registry (null registry target)
 - Adoption including shadow root with scoped registry (scoped registry target)
 - Adoption including shadow root with scoped registry into a scoped registry
-- Adoption including shadow root with scoped registry into a scoped registry (null
-  registry target)
 - Adoption including shadow root with scoped registry into a scoped registry (scoped
   registry target)
 - Adoption with explicit global registry
@@ -1701,11 +1663,8 @@ custom-elements/registries/adoption.window.js:
 - Adoption with global registry into a scoped registry
 - Adoption with global registry into a scoped registry (null registry target)
 - Adoption with global registry into a scoped registry (scoped registry target)
-- Adoption with scoped registry
-- Adoption with scoped registry (null registry target)
 - Adoption with scoped registry (scoped registry target)
 - Adoption with scoped registry into a scoped registry
-- Adoption with scoped registry into a scoped registry (null registry target)
 - Adoption with scoped registry into a scoped registry (scoped registry target)
 custom-elements/registries/constructor-reentry-with-different-definition.html:
 - Re-entry via direct constructor call after calling super()
@@ -1774,7 +1733,6 @@ custom-elements/registries/scoped-custom-element-registry-customelementregistry-
 - Cloning a custom element with null regsitry should create an element with null registry
 - Custom element candidate child of body with customelementregistry should have null
   registry during initial parse
-- Descendants of an element with customelementregistry should use null registry
 - Descendants of body with customelementregistry should all have null registry during
   initial parse
 - HTML parser should create a builtin element with null registry if customelementregistry
@@ -1806,14 +1764,9 @@ custom-elements/registries/scoped-registry-append-does-not-upgrade.html:
 - customElementRegistry of an upgrade candidate created in a document without a browsing
   context uses null regsitry by default
 custom-elements/registries/scoped-registry-define-upgrade-criteria.html:
-- Adding definition to global registry should not affect shadow roots using scoped
-  registry
 - Adding definition to scoped registry affects associated shadow roots in all iframes
 - Adding definition to scoped registry affects associated shadow roots in other frame
   trees
-- Adding definition to scoped registry should not affect document tree scope
-- Adding definition to scoped registry should not affect shadow roots using other
-  registries
 custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Elements in the "owner" window of a scoped registry are not always upgraded first
 - Upgrade in association order across documents, then tree order in each document
@@ -1823,8 +1776,6 @@ custom-elements/registries/scoped-registry-initialize-upgrades.html:
 - CustomElementRegistry.prototype.initialize upgrades already initialized elements
 - CustomElementRegistry.prototype.initialize upgrades custom elements in declarative
   shadow root when initialize() runs before define()
-- CustomElementRegistry.prototype.initialize upgrades custom elements in imperative
-  shadow root when inserted before define()
 - 'Document: CustomElementRegistry.prototype.initialize only upgrades elements beloning
   to the registry'
 - 'Document: CustomElementRegistry.prototype.initialize should upgrade elements in
@@ -1850,8 +1801,6 @@ custom-elements/registries/scoped-registry-initialize.html:
   should return the registry'
 - 'Document: customElementRegistry of an unknown element created with a document without
   a browsing context uses null regsitry by default'
-- 'Document: customElementRegistry of an unknown element created with an explicit
-  customElementRegistry argument should return the registry'
 - 'Document: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
   should return the registry'
 - 'Document: customElementRegistry of an upgrade candidate connected to a document
@@ -1868,8 +1817,6 @@ custom-elements/registries/scoped-registry-initialize.html:
   should return the registry'
 - 'HTMLDocument: customElementRegistry of an unknown element created with a document
   without a browsing context uses null regsitry by default'
-- 'HTMLDocument: customElementRegistry of an unknown element created with an explicit
-  customElementRegistry argument should return the registry'
 - 'HTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
   should return the registry'
 - 'HTMLDocument: customElementRegistry of an upgrade candidate connected to a document
@@ -1886,8 +1833,6 @@ custom-elements/registries/scoped-registry-initialize.html:
   should return the registry'
 - 'XHTMLDocument: customElementRegistry of an unknown element created with a document
   without a browsing context uses null regsitry by default'
-- 'XHTMLDocument: customElementRegistry of an unknown element created with an explicit
-  customElementRegistry argument should return the registry'
 - 'XHTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
   should return the registry'
 - 'XHTMLDocument: customElementRegistry of an upgrade candidate connected to a document
@@ -1898,19 +1843,7 @@ custom-elements/registries/scoped-registry-initialize.html:
   customElementRegistry argument should return the registry'
 - 'XHTMLDocument: customElementRegistry of document and an upgrade candidate after
   calling CustomElementRegistry.prototype.initialize should return the registry'
-custom-elements/registries/scoped-registry-registry-define-get-etc.html:
-- Scoped Custom element registries allow registering name that exists in global registry
-- Scoped Custom element registries do not inherit names or classes from the global
-  registry
-- Scoped Custom element registries resolve the same constructor from whenDefined when
-  it is defined in both
-- Scoped Custom element registries return the same constructor when it is defined
-  in both
-- Scoped Custom element registry getters do not resolve globally registered classes
-  from whenDefined
 custom-elements/registries/template.window.js:
-- A declarative shadow root gets its default registry from its node document
-- Serializing a global registry ShadowRoot with a global registry host (document)
 - Serializing a null registry ShadowRoot with a global registry host (document)
 - Serializing a null registry ShadowRoot with a null registry host (document)
 - Serializing a null registry ShadowRoot with a scoped registry host (document)
