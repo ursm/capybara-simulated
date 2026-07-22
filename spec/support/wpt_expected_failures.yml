@@ -4149,19 +4149,6 @@ websockets/unload-a-document/005.html:
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
-webstorage/defineProperty.window.js:
-- Defining data property for key 9 on localStorage
-- Defining data property for key 9 on localStorage twice
-- Defining data property for key 9 on sessionStorage
-- Defining data property for key 9 on sessionStorage twice
-- Defining data property for key x on localStorage
-- Defining data property for key x on localStorage twice
-- Defining data property for key x on sessionStorage
-- Defining data property for key x on sessionStorage twice
-- Defining data property with toString for key 9 on localStorage
-- Defining data property with toString for key 9 on sessionStorage
-- Defining data property with toString for key x on localStorage
-- Defining data property with toString for key x on sessionStorage
 webstorage/event_basic.html:
 - localStorage mutations fire StorageEvents that are caught by the event listener
   set via window.onstorage.
@@ -4195,17 +4182,6 @@ webstorage/localstorage-cross-origin-iframe.https.window.js:
 - LocalStorage should be accessible on both same_origin and cross_origin iframes
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
-webstorage/missing_arguments.window.js:
-- Should throw TypeError for function "function() { localStorage.getItem(); }".
-- Should throw TypeError for function "function() { localStorage.key(); }".
-- Should throw TypeError for function "function() { localStorage.removeItem(); }".
-- Should throw TypeError for function "function() { localStorage.setItem("a"); }".
-- Should throw TypeError for function "function() { localStorage.setItem(); }".
-- Should throw TypeError for function "function() { sessionStorage.getItem(); }".
-- Should throw TypeError for function "function() { sessionStorage.key(); }".
-- Should throw TypeError for function "function() { sessionStorage.removeItem(); }".
-- Should throw TypeError for function "function() { sessionStorage.setItem("a"); }".
-- Should throw TypeError for function "function() { sessionStorage.setItem(); }".
 webstorage/set.window.js:
 - Setting property for key 9 on localStorage with accessor property on prototype
 - Setting property for key 9 on localStorage with data property on prototype
@@ -4242,29 +4218,18 @@ webstorage/storage_session_window_open.window.js:
 webstorage/storage_session_window_reopen.window.js:
 - ensure that re-opening a named window doesn't copy sessionStorage
 webstorage/storage_setitem.window.js:
-- localStorage.setItem(_, null)
-- localStorage.setItem(_, undefined)
 - localStorage[] = "U+d800"
 - localStorage[] = "U+d83ca"
 - localStorage[] = "U+dbff"
 - localStorage[] = "U+dc00"
 - localStorage[] = "U+dfff"
 - localStorage[] = "aU+df4d"
-- localStorage[] = null
-- localStorage[] = undefined
-- sessionStorage.setItem(_, null)
-- sessionStorage.setItem(_, undefined)
 - sessionStorage[] = "U+d800"
 - sessionStorage[] = "U+d83ca"
 - sessionStorage[] = "U+dbff"
 - sessionStorage[] = "U+dc00"
 - sessionStorage[] = "U+dfff"
 - sessionStorage[] = "aU+df4d"
-- sessionStorage[] = null
-- sessionStorage[] = undefined
-webstorage/storage_string_conversion.window.js:
-- localStorage only stores strings
-- sessionStorage only stores strings
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
