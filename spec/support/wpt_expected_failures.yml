@@ -1102,16 +1102,6 @@ custom-elements/upgrading/upgrading-parser-created-element.html:
   not SameValue as the upgraded element
 - Upgrading a custom element whose constructor returns a Text node must throw
 - Upgrading a custom element whose constructor returns an Element must throw
-dom/events/AddEventListenerOptions-passive.any.js:
-- Supports passive option on addEventListener only
-dom/events/AddEventListenerOptions-signal.any.js:
-- Aborting from a listener does not call future listeners
-- Passing an AbortSignal to addEventListener options should allow removing a listener
-- Passing an AbortSignal to addEventListener works with the capture flag
-- Passing an AbortSignal to addEventListener works with the once flag
-- Passing an AbortSignal to multiple listeners
-- Passing null as the signal should throw
-- Passing null as the signal should throw (listener is also null)
 dom/events/Event-isTrusted.any.js:
 - Event-isTrusted
 dom/events/event-global-extra.window.js:
