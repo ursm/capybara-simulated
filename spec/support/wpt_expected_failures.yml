@@ -111,9 +111,6 @@ css/cssom/cssstyledeclaration-setter-attr.html:
 css/cssom/flex-serialization.html:
 - Multiple values flex with CSS-wide and two non-CSS-wide-keyword values should serialize
   correctly.
-- Multiple values flex with CSS-wide keyword should serialize correctly.
-- Multiple values flex with CSS-wide keywords and non-CSS-wide value should serialize
-  correctly.
 - Single value flex with non-CSS-wide value should serialize correctly.
 css/cssom/font-family-serialization-001.html:
 - 'Computed: mixed font-family list serialization'
