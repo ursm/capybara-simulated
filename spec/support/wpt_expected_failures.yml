@@ -355,21 +355,6 @@ custom-elements/ElementInternals-role.html:
 - Applies parent/child relationship of "table"/"rowgroup" via Element Internals
 - Applies parent/child relationship of "tablist"/"tab" via Element Internals
 - Applies parent/child relationship of "tree"/"treeitem" via Element Internals
-custom-elements/HTMLElement-constructor-customized-builtins.html:
-- HTMLElement constructor must not get .prototype until it finishes its extends sanity
-  checks, calling proxy constructor directly
-- HTMLElement constructor must not get .prototype until it finishes its extends sanity
-  checks, calling via Reflect
-custom-elements/HTMLElement-constructor.html:
-- Custom element constructor must throw TypeError when it does not extend HTMLElement
-- Custom element constructor must throw TypeError when it does not extend the proper
-  element interface
-- HTMLElement constructor must not get .prototype until it finishes its registration  sanity
-  checks, calling via Reflect
-- HTMLElement constructor must throw TypeError when it has not been defined by customElements.define
-- HTMLElement constructor must throw a TypeError when NewTarget is equal to itself
-- HTMLElement constructor must throw a TypeError when NewTarget is equal to itself
-  via a Proxy object
 custom-elements/adopted-callback.html:
 - Inserting a custom element into a detached shadow tree that belongs to the document
   of an iframe must enqueue and invoke adoptedCallback
@@ -556,10 +541,6 @@ custom-elements/form-associated/label-delegatesFocus.html:
 - Clicking on a span in a label for a form associated custom element with delegatesFocus
   should focus the custom element's focus delegate.
 custom-elements/htmlconstructor/newtarget-customized-builtins.html:
-- HTMLParagraphElement constructor must not get .prototype until it finishes its extends
-  sanity checks, calling proxy constructor directly
-- HTMLParagraphElement constructor must not get .prototype until it finishes its extends
-  sanity checks, calling via Reflect
 - If prototype is not object (5), derives the fallback from NewTarget's GetFunctionRealm
   (customized built-in elements)
 - If prototype is not object (5), derives the fallback from NewTarget's realm (customized
