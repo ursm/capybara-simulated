@@ -187,52 +187,8 @@ custom-elements/CustomElementRegistry-getName.html:
 - customElements.getName returns the name of the entry with the given constructor
   when there is a matching entry.
 custom-elements/Document-createElement.html:
-- document.createElement must report a NotSupportedError when a Comment child is added
-  during construction
-- document.createElement must report a NotSupportedError when a Text child is added
-  during construction
-- document.createElement must report a NotSupportedError when an element child is
-  added during construction
-- document.createElement must report a NotSupportedError when attribute is added by
-  attributes.setNamedItem during construction
-- document.createElement must report a NotSupportedError when attribute is added by
-  setAttribute during construction
-- document.createElement must report a NotSupportedError when the element gets inserted
-  into another element during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a a cloned document during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a a document created by createHTMLDocument during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a a new document during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a an HTML document created by createDocument during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a an HTML document fetched by XHR during construction
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a the document of an iframe during construction
 - document.createElement must report a NotSupportedError when the element is adopted
   into a the document of the template elements during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a a cloned document during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a a document created by createHTMLDocument during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a a new document during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a an HTML document created by createDocument during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a an HTML document fetched by XHR during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a the document of an iframe during construction
-- document.createElement must report a NotSupportedError when the element is inserted
-  into a the document of the template elements during construction
-- document.createElement must report a NotSupportedError when the local name of the
-  element does not match that of the custom element
-- document.createElement must report a TypeError when the result of Construct is a
-  TextNode
-- document.createElement must report a TypeError when the result of Construct is not
-  a DOM node
 custom-elements/Document-createElementNS.html:
 - 'autonomous: document.createElementNS should not create HTMLUnknownElement for a
   valid custom element name'
