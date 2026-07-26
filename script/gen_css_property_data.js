@@ -35,36 +35,60 @@ const supported = [...longhands, ...Object.keys(shorthands), ...vendor].sort();
 
 // A CONSERVATIVE value-type classification, for rejecting invalid declaration values (CSSOM
 // "set a CSS declaration" ignores a value that doesn't parse for the property). We classify a
-// longhand ONLY when EVERY `|`-alternative of its mdn syntax is either a bare keyword or the
-// single base type `<color>` / `<integer>` — the types we can validate cheaply and without
-// over-rejecting (color via the culori parser, integer via a regex). Anything richer (a
-// `<length-percentage [0,∞]>`, `calc()`, `fit-content()`, `<opacity-value>`, …) stays
-// unclassified and is accepted unchecked, so we never drop a valid value. `{base, keywords}`:
-// the base type plus the extra bare-keyword alternatives (`auto`, `none`, …) that are also valid.
+// longhand when its mdn syntax reduces to a single validatable base type — `<color>`, `<integer>`,
+// `<number>`, or a length/percentage — plus bare keyword alternatives; the runtime validator checks
+// these cheaply (culori for colour, regexes for the numerics) without over-rejecting. A `[min,∞]`
+// range annotation (`<length-percentage [0,∞]>`) is captured as `min`, so a negative value is
+// rejected (`width: -100px`). FUNCTIONAL alternatives (`fit-content(…)`, `<calc-size()>`,
+// `<anchor-size()>`) are IGNORED here — the runtime accepts any value containing `(` unchecked — so
+// they don't block classification. Any OTHER non-functional type (`<image>`, `<opacity-value>`, …)
+// leaves the property unclassified and accepted unchecked, so we never drop a valid value.
+// `{base, keywords, min?}`.
+const TYPE_BASE = {
+  'color': 'color', 'integer': 'integer', 'number': 'number',
+  'length': 'length', 'percentage': 'length', 'length-percentage': 'length',
+};
+function parseRangeMin(bound) {
+  const s = bound.trim();
+  if (s.indexOf('∞') !== -1) return s[0] === '-' ? -Infinity : Infinity;   // ∞ / -∞
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
 function classifyValueType(syntax) {
   if (!syntax) return null;
-  let base = null;
+  let base = null, min = null;
   const keywords = [];
   for (const raw of syntax.split('|')) {
     const part = raw.trim();
-    if (part === '<color>' || part === '<integer>') {
-      const t = part === '<color>' ? 'color' : 'integer';
-      if (base && base !== t) return null;                 // mixed base types — don't classify
+    if (part.indexOf('(') !== -1) continue;                // functional alternative — runtime accepts, skip
+    // A type reference with an optional numeric range: `<name>` / `<name [min,max]>`.
+    const m = /^<([a-z-]+)(?:\s*\[\s*([^,\]]+)\s*,[^\]]*\])?>$/.exec(part);
+    if (m) {
+      const t = TYPE_BASE[m[1]];
+      if (!t) return null;                                 // an unknown type — can't validate
+      if (base && base !== t) return null;                 // mixed base types
       base = t;
+      if (m[2] != null) {
+        const lo = parseRangeMin(m[2]);
+        if (lo != null && Number.isFinite(lo)) min = (min == null) ? lo : Math.min(min, lo);
+      }
     } else if (/^[a-z][a-z-]*$/i.test(part)) {
       keywords.push(part.toLowerCase());                   // a bare keyword alternative
     } else {
-      return null;                                         // a richer alternative — don't classify
+      return null;                                         // a richer non-functional alternative — bail
     }
   }
   if (!base) return null;
   // A `<color>` property with keyword alternatives (`outline-color: auto | <color>`) is NOT
   // classified: mdn-data omits legacy colour keywords (outline-color also accepts `invert`), so
   // validating one risks rejecting a valid value. Pure `<color>` props (color / background-color /
-  // border-*-color) have the complete `<color>` grammar and are safe. `<integer>` keyword
-  // alternatives (`z-index: auto`) carry no such legacy-omission risk, so those stay classified.
+  // border-*-color) have the complete `<color>` grammar and are safe. The numeric bases carry no
+  // such legacy-keyword-omission risk, so their keyword alternatives (`z-index: auto`, `width:
+  // min-content`) stay classified.
   if (base === 'color' && keywords.length > 0) return null;
-  return { base, keywords };
+  const out = { base, keywords };
+  if (min != null) out.min = min;
+  return out;
 }
 const valueTypes = {};
 for (const name of longhands) {
@@ -103,10 +127,12 @@ export const SHORTHAND_LONGHANDS = ${JSON.stringify(shorthands, null, 0)};
 // \`style.COLOR\` / \`style.unknown\`.
 export const SUPPORTED_PROPERTY_NAMES = new Set(${JSON.stringify(supported)});
 
-// Conservative value-type map (longhand → \`{base, keywords}\`) for rejecting invalid declaration
-// values. Only properties whose whole syntax is a base \`<color>\`/\`<integer>\` plus bare keywords
-// are listed; everything else is validated as "always valid" (accepted), so a real value is never
-// dropped. Used by isValidDeclarationValue (css-utils).
+// Conservative value-type map (longhand → \`{base, keywords, min?}\`) for rejecting invalid
+// declaration values. base is one of color / integer / number / length (length covers
+// <length>/<percentage>/<length-percentage>); \`min\` is a numeric lower bound from a \`[min,∞]\`
+// range (so a negative value is rejected, e.g. \`width: -100px\`). Only properties that reduce to
+// one such base plus bare keywords (functional alternatives ignored) are listed; everything else
+// is accepted unchecked, so a real value is never dropped. Used by isValidDeclarationValue.
 export const PROPERTY_VALUE_TYPES = ${JSON.stringify(valueTypes, null, 0)};
 
 // Valid pseudo-class / pseudo-element base names (a \`selectorText\` with an unknown pseudo is
