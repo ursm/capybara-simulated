@@ -195,7 +195,10 @@ module Capybara
       def selected?        = browser.option_selected?(handle_id)
       def checked?         = !!self['checked']
       def readonly?        = !!self['readonly']
-      def obscured?(*)     = !visible?
+      def obscured?(*)
+        check_stale
+        browser.obscured?(handle_id)
+      end
       def synchronize(*)   = yield
       def style(names = [])
         check_stale

@@ -981,6 +981,9 @@ module Capybara
         tag(handle) == 'input' && attr(handle, 'type').to_s.downcase == 'file'
       end
       def visible?(handle)    = dom_call('__csimVisible', handle) ? true : false
+      # `obscured?` — coarse occlusion / hit-test in JS (layout.js). Non-visible / out-of-viewport /
+      # click-point-lands-on-another-element → obscured.
+      def obscured?(handle)   = dom_call('__csimObscured', handle) ? true : false
 
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.

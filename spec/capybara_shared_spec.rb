@@ -27,7 +27,12 @@ SKIPPED_TESTS = (%i[
 DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #drag_to ',
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  'Capybara::Session Simulated node #obscured?',
+  # `#obscured?` now runs a coarse occlusion / hit-test (layout.js) — the visibility, overlap,
+  # descendant-overlap and viewport cases pass. Still deferred: the scroll-reveal case (scroll_to is
+  # a Ruby no-op today) and the frame cases (per-frame coordinate mapping) — later layout increments.
+  'Capybara::Session Simulated node #obscured? should see elements outside the viewport as obscured',
+  'Capybara::Session Simulated node #obscured? should work in frames',
+  'Capybara::Session Simulated node #obscured? should work in nested iframes',
   'Capybara::Session Simulated #all with obscured filter should not find nodes on top outside the viewport when false',
   'Capybara::Session Simulated #all with obscured filter should find top nodes outside the viewport when true',
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
