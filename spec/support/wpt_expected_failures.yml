@@ -81,14 +81,10 @@ css/cssom/computed-style-005.html:
 - relative_computed_margins
 css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
-- Removing non-existing property or setting invalid value on CSS declaration block
-  shouldn't queue mutation record
 css/cssom/cssimportrule-parent.html:
 - "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
-css/cssom/cssstyledeclaration-csstext.html:
-- overwriting with invalid value
 css/cssom/cssstyledeclaration-mutationrecord-002.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
@@ -151,8 +147,6 @@ css/cssom/selectorText-modification-restyle-002.html:
 css/cssom/serialize-values.html:
 - 'content: counter(par-num, decimal)'
 - 'font-family: ''Lucida Grande'''
-css/cssom/setproperty-null-undefined.html:
-- Verify that setting a CSS property to undefined has no effect.
 css/cssom/shorthand-values.html:
 - 'The serialization of -webkit-line-clamp: none; should be canonical.'
 css/cssom/stylesheet-cross-origin-redirect-quirks.sub.html:
