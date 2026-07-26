@@ -88,9 +88,7 @@ css/cssom/cssimportrule-parent.html:
 css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssstyledeclaration-csstext.html:
-- invalid property does not appear
 - overwriting with invalid value
-- uppercase property
 css/cssom/cssstyledeclaration-mutationrecord-002.html:
 - CSSStyleDeclaration.setPropertyValue doesn't queue a mutation record when setting
   invalid values
@@ -106,7 +104,6 @@ css/cssom/cssstyledeclaration-registered-custom-properties.html:
 - Only relevant custom properties are included
 - Registered custom properties are included in CSSComputedStyleDeclaration
 css/cssom/cssstyledeclaration-setter-attr.html:
-- Setting an invalid property via the declaration setter doesn't create a declaration
 - Setting an invalid value via the declaration setter doesn't create a declaration
 css/cssom/flex-serialization.html:
 - Multiple values flex with CSS-wide and two non-CSS-wide-keyword values should serialize
