@@ -23,17 +23,17 @@ SKIPPED_TESTS = (%i[
   windows
 ] + (CsimEngine.v8? ? [] : %i[frames])).freeze
 
-DESCRIPTION_SKIPS = [
+DESCRIPTION_SKIPS = ([
   'Capybara::Session Simulated node #drag_to ',
   'Capybara::Session Simulated node #click should not retry clicking when wait is disabled',
-  # `#obscured?` now runs a coarse occlusion / hit-test (layout.js) — the visibility, overlap,
-  # descendant-overlap and viewport cases pass. Still deferred: the scroll-reveal case (scroll_to is
-  # a Ruby no-op today) and the frame cases (per-frame coordinate mapping) — later layout increments.
-  'Capybara::Session Simulated node #obscured? should work in frames',
-  'Capybara::Session Simulated node #obscured? should work in nested iframes',
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
   'Capybara::Session Simulated #has_css? :style option should support Hash'
-].freeze
+] + (CsimEngine.v8? ? [] : [
+  # `#obscured?` in a frame composes geometry across per-frame realms, which only the rusty_racer
+  # engine builds (same gate as the `frames` capability above).
+  'Capybara::Session Simulated node #obscured? should work in frames',
+  'Capybara::Session Simulated node #obscured? should work in nested iframes'
+])).freeze
 
 RSpec.configure do |config|
   config.filter_run_excluding requires: Capybara::SpecHelper.method(:filter).to_proc
