@@ -33441,11 +33441,6 @@ dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
-- name: Tests scrollend event for scrollIntoView with behavior 'smooth' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
 - name: Tests scrollend event for scrollIntoView with behavior 'smooth' on subframe.
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
@@ -33738,10 +33733,6 @@ dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fra
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
     .py resource; needs true network async runtime not modeled.
-dom/nodes/moveBefore/child-style-preserve.html:
-- name: child-style-preserve
-  reason: Asserts getBoundingClientRect().width equals 100 then 200 after style change;
-    pure layout geometry, not modeled.
 dom/nodes/moveBefore/continue-css-animation-left.html:
 - name: Node.moveBefore should preserve CSS animation state (left)
   reason: Requires CSS animation engine firing animationstart + mid-animation getComputedStyle(left);
@@ -33803,10 +33794,6 @@ dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html:
 - name: moveBefore-from-light-to-shadow
   reason: Asserts getBoundingClientRect().width>0 then ==0 after slotting into display:none;
     layout geometry + render-visibility not modeled.
-dom/nodes/moveBefore/moveBefore-shadow-inside.html:
-- name: moveBefore-shadow-inside
-  reason: Asserts shadow div getBoundingClientRect().width==300 after move+rAF; resolved
-    box geometry requires a layout engine.
 dom/nodes/moveBefore/moveBefore-size-query.html:
 - name: moveBefore() between different size containers invalidates target
   reason: Relies on @container (width=400px) size container query resolving via inline-size
@@ -40823,11 +40810,6 @@ html/canvas/element/manual/draw-element-image/hit-test/selection.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/canvas/element/manual/draw-element-image/hit-test/z-index.tentative.html:
-- name: elementFromPoint should hit the highest z-index element.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/intersection-observer-visibility.tentative.html:
 - name: Elements under canvas should report intersections, but not visibility
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -41827,15 +41809,6 @@ html/dom/elements/global-attributes/dataset.html:
     the property exists on every element; making it per-namespace needs a per-instance
     defineProperty (hot path) and the naive return-undefined gate regresses encoding/utf-32
     (which relies on `"dataset" in foreignEl` being false). (CLAUDE.md rule 1 bounded-design-cost.)
-html/dom/elements/global-attributes/the-lang-attribute-001.html:
-- name: The browser will recognize a language declared in a lang attribute on the
-    html tag.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
 html/dom/elements/global-attributes/the-lang-attribute-002.html:
 - name: The browser will NOT recognize a language declared in an xml:lang attribute
     on the html tag.
@@ -41864,60 +41837,10 @@ html/dom/elements/global-attributes/the-lang-attribute-004.html:
     deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
     proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
     Content-Language.
-html/dom/elements/global-attributes/the-lang-attribute-005.html:
-- name: If there is a conflict between the language declarations in the HTTP header
-    and the html element using lang, the browser will recognize the language declared
-    in the html element.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
 html/dom/elements/global-attributes/the-lang-attribute-006.html:
 - name: If there is a conflict between the language declarations in the HTTP header
     and the Content-Language meta element, the UA will recognize the language declared
     in the meta element.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
-html/dom/elements/global-attributes/the-lang-attribute-007.html:
-- name: If there is a conflict between the language declared using lang in the html
-    element and that in the meta element, the UA will recognize the language declared
-    in the html element.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
-html/dom/elements/global-attributes/the-lang-attribute-008.html:
-- name: If an element contains a lang attribute with an empty value, the value of
-    a lang attribute higher up the document tree will no longer be applied to the
-    content of that element.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
-html/dom/elements/global-attributes/the-lang-attribute-009.html:
-- name: If the HTTP header contains a language declaration but the html element uses
-    an empty lang value, the UA will not recognize the language declared in the HTTP
-    header.
-  reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
-    -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
-    Requires a layout/rendering engine to resolve CSS width into geometry, which we
-    deliberately do not model (CLAUDE.md rule 1); offsetWidth here is a binary visible=1/hidden=0
-    proxy. Also needs :lang() + language-tag inheritance from lang/xml:lang/HTTP/meta
-    Content-Language.
-html/dom/elements/global-attributes/the-lang-attribute-010.html:
-- name: If the meta Content-Language element contains a language declaration but the
-    html element uses an empty lang value, the UA will not recognize the language
-    declared in the meta Content-Language element.
   reason: Asserts offsetWidth in CSS pixels to detect language recognition (#box:lang(ko){width:100px}
     -> offsetWidth 100, .test div{width:50px} -> 50, :lang(xx){display:none} -> 0).
     Requires a layout/rendering engine to resolve CSS width into geometry, which we
@@ -59090,14 +59013,8 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
   reason: offset-parent walk over flat tree needs layout boxes; layout engine not
     modeled
 shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
-- name: Verifies that HTMLElement.offsetLeft accounts for shadow boundaries.
-  reason: offsetLeft is a pixel layout metric requiring a rendering engine we deliberately
-    do not model
 - name: Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested
     in multiple shadow roots.
-  reason: offsetTop is a pixel layout metric requiring a rendering engine we deliberately
-    do not model
-- name: Verifies that HTMLElement.offsetTop accounts for shadow boundaries.
   reason: offsetTop is a pixel layout metric requiring a rendering engine we deliberately
     do not model
 shadow-dom/reference-target/tentative/commandfor.html:

@@ -1093,6 +1093,8 @@ dom/events/relatedTarget.window.js:
 - Reset targets before activation behavior
 - Reset targets on early return
 - Retarget a shadow-tree relatedTarget
+dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html:
+- snap to fractional offset fires scrollend exactly once.
 dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
 - Custom element reactions follow script execution
 dom/nodes/NodeList-live-mutations.window.js:

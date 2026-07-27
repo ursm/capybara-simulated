@@ -1395,8 +1395,16 @@ module Capybara
         invalidate_find_cache
         ensure_alive_after_tick(source_handle)
         ensure_alive_after_tick(target_handle)
-        dom_call('__csimDragOnto', source_handle, target_handle,
+        # Staged with a settle between each step: a real drag spans several frames, and libraries
+        # use that gap (SortableJS applies its ghost class from a `setTimeout` scheduled in
+        # `dragstart` and never reaches its reorder logic if `dragover` lands in the same turn).
+        # This is what the reference driver's `delay:` between steps buys.
+        dom_call('__csimDragBegin', source_handle, target_handle,
                  {'html5' => html5, 'modifiers' => modifier_flags(drop_modifiers)})
+        settle
+        dom_call('__csimDragMove')
+        settle
+        dom_call('__csimDragFinish')
         drain_after_user_action
       end
       def drop_items(arg)
@@ -1450,19 +1458,26 @@ module Capybara
         }
       end
 
-      # Resolve click offset against the element's CSS-declared box.
-      # `opts[:offset] == :center` means "x/y is relative to the
-      # element's centre" (Capybara's w3c_click_offset semantics);
-      # otherwise the offset is relative to the top-left. We don't run
-      # a real layout engine — `__csimElementRect` reads
-      # top / left / width / height from the cascade so tests that
-      # declare those values via CSS see honest coordinates.
+      # Resolve the click point against the element's laid-out box — the
+      # same geometry `rect` / `obscured?` / `drag_to` and the page's own
+      # `getBoundingClientRect` read, so a click lands where the page
+      # believes the element is. `opts[:offset] == :center` means x/y are
+      # relative to the element's centre (Capybara's w3c_click_offset
+      # semantics); otherwise they're relative to its top-left, so the
+      # point is the element's own origin plus the offset — including the
+      # 8px body margin a real page has (confirmed in Chrome).
+      #
+      # This is exactly what the unified geometry buys: Capybara's own
+      # click-offset fixture logs `event.clientX - this.getBoundingClientRect()
+      # .left`, which only comes back as the requested offset when the
+      # pointer we synthesize and the rect the page measures are the same
+      # geometry. Two sources disagree by the element's position.
       def click_event_init(handle, keys, opts)
         out = modifier_flags(keys)
         has_xy = opts[:x] || opts[:y]
         center = opts[:offset] == :center || !has_xy
         if has_xy || center
-          rect = dom_call('__csimElementRect', handle)
+          rect = dom_call('__csimRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
           out['clientX'] = base_x + opts[:x].to_f
