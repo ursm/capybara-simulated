@@ -29,7 +29,6 @@ DESCRIPTION_SKIPS = [
   # `#obscured?` now runs a coarse occlusion / hit-test (layout.js) — the visibility, overlap,
   # descendant-overlap and viewport cases pass. Still deferred: the scroll-reveal case (scroll_to is
   # a Ruby no-op today) and the frame cases (per-frame coordinate mapping) — later layout increments.
-  'Capybara::Session Simulated node #obscured? should see elements outside the viewport as obscured',
   'Capybara::Session Simulated node #obscured? should work in frames',
   'Capybara::Session Simulated node #obscured? should work in nested iframes',
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
