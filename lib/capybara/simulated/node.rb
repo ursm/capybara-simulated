@@ -125,13 +125,14 @@ module Capybara
       def scroll_to(*, **)       ; self ; end
 
       # Capybara's standard rect API. No layout engine — but
-      # Discourse's `wait_for_animation` helper polls `element.rect[:x]`
-      # twice and waits for the values to stabilise, which they
-      # immediately do here (constant zeros) since we never animate.
-      # That unblocks every test guarded by an animation settle.
+      # The element's coarse border-box (viewport-relative), from the layout engine — backs the
+      # spatial selectors (`:above`/`:below`/`:near`) and coordinate drag. Deterministic per layout
+      # generation (memoised; only a DOM/style mutation changes it), so Discourse's
+      # `wait_for_animation` — which polls `element.rect[:x]` twice and waits for it to stabilise —
+      # still settles immediately when nothing is animating.
       def rect
         check_stale
-        {x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0}
+        browser.rect(handle_id)
       end
 
       def send_keys(*keys)

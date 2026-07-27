@@ -20,7 +20,6 @@ SKIPPED_TESTS = (%i[
   screenshot
   scroll
   server
-  spatial
   windows
 ] + (CsimEngine.v8? ? [] : %i[frames])).freeze
 

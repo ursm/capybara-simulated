@@ -984,6 +984,20 @@ module Capybara
       # `obscured?` — coarse occlusion / hit-test in JS (layout.js). Non-visible / out-of-viewport /
       # click-point-lands-on-another-element → obscured.
       def obscured?(handle)   = dom_call('__csimObscured', handle) ? true : false
+      # `rect` — the element's coarse border-box from the layout engine, as the full 8-field box.
+      # Two key styles on purpose: Capybara's spatial `Rectangle` reads STRING keys
+      # (`position['top']`); Discourse's `wait_for_animation` reads the SYMBOL key (`rect[:x]`).
+      def rect(handle)
+        r = dom_call('__csimRect', handle)
+        x = (r['x'] || 0).to_f
+        y = (r['y'] || 0).to_f
+        w = (r['width'] || 0).to_f
+        h = (r['height'] || 0).to_f
+        {
+          x:, y:, width: w, height: h, top: y, left: x, bottom: y + h, right: x + w,
+          'x' => x, 'y' => y, 'width' => w, 'height' => h, 'top' => y, 'left' => x, 'bottom' => y + h, 'right' => x + w
+        }
+      end
 
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.
