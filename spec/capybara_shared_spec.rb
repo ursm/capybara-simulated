@@ -32,8 +32,6 @@ DESCRIPTION_SKIPS = [
   'Capybara::Session Simulated node #obscured? should see elements outside the viewport as obscured',
   'Capybara::Session Simulated node #obscured? should work in frames',
   'Capybara::Session Simulated node #obscured? should work in nested iframes',
-  'Capybara::Session Simulated #all with obscured filter should not find nodes on top outside the viewport when false',
-  'Capybara::Session Simulated #all with obscured filter should find top nodes outside the viewport when true',
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties",
   'Capybara::Session Simulated #has_css? :style option should support Hash'
 ].freeze

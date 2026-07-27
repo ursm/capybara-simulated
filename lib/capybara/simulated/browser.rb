@@ -998,6 +998,13 @@ module Capybara
           'x' => x, 'y' => y, 'width' => w, 'height' => h, 'top' => y, 'left' => x, 'bottom' => y + h, 'right' => x + w
         }
       end
+      # `scroll_to` — drive a real scroll offset in the layout engine (layout.applyScrollTo). `target`
+      # is a target element's handle (or nil); `pos` a keyword (`:top`/`:bottom`/`:center`); `x`/`y`
+      # an explicit coordinate. Symbols are stringified for the JS side.
+      def scroll_to(handle, target = nil, pos = nil, x = nil, y = nil)
+        dom_call('__csimScrollTo', handle, target, pos&.to_s, x, y)
+        nil
+      end
 
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.

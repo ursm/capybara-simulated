@@ -122,7 +122,21 @@ module Capybara
         self
       end
 
-      def scroll_to(*, **)       ; self ; end
+      # Capybara's driver `scroll_to` contract (from Element#scroll_to): a target element + align
+      # symbol, a position symbol (`:top`/`:bottom`/`:center`), or an `[x, y]` coordinate pair.
+      # `self` is the element it was called on — the document root for a session-level scroll (routed
+      # via `find('/html')`), else an element. Drives a real scroll offset in the layout engine.
+      def scroll_to(target = nil, arg = nil, coords = nil)
+        check_stale
+        if target
+          browser.scroll_to(handle_id, target.handle_id, arg)
+        elsif coords
+          browser.scroll_to(handle_id, nil, nil, coords[0], coords[1])
+        elsif arg
+          browser.scroll_to(handle_id, nil, arg)
+        end
+        self
+      end
 
       # Capybara's standard rect API. No layout engine — but
       # The element's coarse border-box (viewport-relative), from the layout engine — backs the
