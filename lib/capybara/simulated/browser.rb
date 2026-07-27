@@ -1381,19 +1381,22 @@ module Capybara
       end
 
       # Element-to-element drag. Capybara's `Element#drag_to(target,
-      # delay: …)` lands here. Fires the HTML5 drag event sequence on
-      # the source / target pair (mousedown → dragstart → dragenter →
-      # dragover → drop → dragend) with a shared DataTransfer. Discourse
-      # sidebar reorder + Avo Sortable-shaped widgets read the
-      # `event.offsetY` to decide "above vs below"; without a layout
-      # engine we report 0, which routes drops above the target.
-      def drag_to(source_handle, target_handle, **_opts)
+      # drop_modifiers:, html5:, delay:)` lands here; the sequencing lives
+      # in `drag.js` (pointer-driven vs HTML5, decided from the source's
+      # mousedown). `drop_modifiers` are held down from `dragenter` on, the
+      # way a user pressing a key mid-drag produces. `delay` is a
+      # real-browser pacing knob — our dispatch is synchronous, so the page
+      # sees each step in order without it. Discourse sidebar reorder + Avo
+      # Sortable-shaped widgets read `event.offsetY` to decide "above vs
+      # below"; we report 0, which routes drops above the target.
+      def drag_to(source_handle, target_handle, html5: nil, drop_modifiers: [], **_opts)
         mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(source_handle)
         ensure_alive_after_tick(target_handle)
-        dom_call('__csimDragOnto', source_handle, target_handle)
+        dom_call('__csimDragOnto', source_handle, target_handle,
+                 {'html5' => html5, 'modifiers' => modifier_flags(drop_modifiers)})
         drain_after_user_action
       end
       def drop_items(arg)
@@ -1436,7 +1439,8 @@ module Capybara
         alt:      'altKey',
         option:   'altKey',
         meta:     'metaKey',
-        command:  'metaKey'
+        command:  'metaKey',
+        cmd:      'metaKey'
       }.freeze
       MODIFIER_KEY_NAMES = MODIFIER_KEYS.keys.to_set.freeze
       def modifier_flags(keys)
