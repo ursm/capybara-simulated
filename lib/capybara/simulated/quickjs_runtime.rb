@@ -13,6 +13,7 @@
 
 require 'digest'
 require 'quickjs'
+require 'quickjs-polyfill-intl/datetimeformat'
 
 require_relative 'runtime_shared'
 require_relative 'worker_runtime'
@@ -243,14 +244,17 @@ module Capybara
       # URL / TextEncoder / atob/btoa / crypto — already route through Ruby host fns,
       # so POLYFILL_INTL is the only one we strictly need).
       #
-      # PERF (rule 3): quickjs is pinned to `~> 0.18.0` in the Gemfile. quickjs 0.19
-      # both split the Intl polyfills into a separate quickjs-polyfill-intl gem (which
-      # eval's them per VM at ~226 ms — vs this single bundled flag's ~140 ms) AND
-      # regressed interpreter execution ~2.8× (measured: the QuickJS spec suite ran
-      # 5.6 min on 0.18 vs 15.5 min on 0.19 with an equivalent Intl set). The 0.19
-      # migration is recorded in the cross-window / quickjs-CI memory; re-migrate to
-      # 0.19 + quickjs-polyfill-intl once that upstream perf regression is fixed.
-      INTL_FEATURES = [Quickjs::POLYFILL_INTL].freeze
+      # Since 0.19 the Intl polyfills live in the separate `quickjs-polyfill-intl`
+      # gem, registered by name instead of quickjs's old bundled `POLYFILL_INTL`
+      # flag. `:polyfill_intl_datetimeformat_all` is the whole DateTimeFormat chain
+      # (getcanonicallocales → locale → pluralrules → numberformat → datetimeformat)
+      # as ONE registration — the only chain bridge.js needs, and cheaper than
+      # requiring the five links separately.
+      #
+      # PERF (rule 3): the polyfill source is eval'd per VM, and the VM-pool pre-warm
+      # used to be GVL-serial, which put every feature on the critical path. quickjs
+      # now releases the GVL while loading polyfills, so the pre-warm overlaps.
+      INTL_FEATURES = [:polyfill_intl_datetimeformat_all].freeze
       #
       # `max_stack_size: 0` — `JS_SetMaxStackSize` measures C stack
       # delta from runtime construction; Ruby callers reach QuickJS

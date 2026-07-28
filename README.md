@@ -41,9 +41,10 @@ The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
 gem 'rusty_racer', '>= 0.1.9'  # V8 (JIT, fastest per spec) — default
-gem 'quickjs', '>= 0.18'       # QuickJS (interpreter, smaller per-VM RAM —
-                               # wins when scaling parallel workers under
-                               # a fixed memory budget)
+gem 'quickjs', '>= 0.19'       # QuickJS (interpreter, smaller per-VM RAM —
+gem 'quickjs-polyfill-intl'    # wins when scaling parallel workers under
+                               # a fixed memory budget). Intl lives in the
+                               # companion gem since quickjs 0.19.
 ```
 
 The V8 engine comes from [rusty_racer](https://github.com/ursm/rusty_racer), a rusty_v8-based Ruby binding with the native ES Module API, `ScriptCompiler::CachedData` snapshots, and per-frame realm contexts the driver builds on.
