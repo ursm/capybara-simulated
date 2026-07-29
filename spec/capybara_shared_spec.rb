@@ -18,7 +18,6 @@ end
 SKIPPED_TESTS = (%i[
   about_scheme
   screenshot
-  scroll
   server
   windows
 ] + (CsimEngine.v8? ? [] : %i[frames])).freeze
@@ -28,9 +27,13 @@ SKIPPED_TESTS = (%i[
 STYLE_HASH = 'matcher gap: :style Hash matching'
 
 DESCRIPTION_SKIPS = ({
-  # Click doesn't hit-test: it dispatches on the element whatever covers it, so an obscured click
-  # never raises. Now buildable on layout.js `isObscured` — a follow-up increment.
-  'Capybara::Session Simulated node #click should not retry clicking when wait is disabled'    => 'click does not hit-test through layout yet',
+  # Click deliberately does NOT hit-test. The layout engine could tell us the element is covered
+  # (`obscured?` does exactly that), but reporting it means raising an `invalid_element_error`, and
+  # Capybara only retries those while `driver.wait?` is true. Ours reflects genuinely pending work
+  # (timers, workers, in-flight requests) rather than a fixed timeout, so the sibling "should retry
+  # clicking" / "should allow to retry longer" examples — which wait out an animation that uncovers
+  # the element — go red. Measured: the gate turns 1 example green and 2 red, so it stays out.
+  'Capybara::Session Simulated node #click should not retry clicking when wait is disabled'    => 'click does not hit-test: see the note above (net-negative against our wait? model)',
 
   "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties" => STYLE_HASH,
   'Capybara::Session Simulated #has_css? :style option should support Hash'                    => STYLE_HASH

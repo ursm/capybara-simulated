@@ -1006,6 +1006,15 @@ module Capybara
         nil
       end
 
+      # Capybara's `scroll_to(:current, offset: [dx, dy])` routes here — a scroll relative to the
+      # element's current offset, clamped to its scrollable range like a browser does.
+      def scroll_by(handle, dx, dy)
+        tick_real_time
+        ensure_alive_after_tick(handle)
+        dom_call('__csimScrollBy', handle, dx.to_f, dy.to_f)
+        settle
+      end
+
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.
       def all_text(handle)     = text(handle)

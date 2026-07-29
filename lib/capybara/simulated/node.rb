@@ -138,6 +138,14 @@ module Capybara
         self
       end
 
+      # Capybara's `Element#scroll_to(:current, offset: [dx, dy])` calls this after the position
+      # handling above — a relative scroll from wherever the element is now.
+      def scroll_by(dx, dy)
+        check_stale
+        browser.scroll_by(handle_id, dx, dy)
+        self
+      end
+
       # Capybara's standard rect API. No layout engine — but
       # The element's coarse border-box (viewport-relative), from the layout engine — backs the
       # spatial selectors (`:above`/`:below`/`:near`) and coordinate drag. Deterministic per layout
