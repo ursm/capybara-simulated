@@ -13,7 +13,23 @@
 
 require 'digest'
 require 'quickjs'
-require 'quickjs-polyfill-intl/datetimeformat'
+begin
+  # Intl moved out of the quickjs gem in 0.19. bridge.js patches Intl.DateTimeFormat, so the
+  # companion gem is required for the QuickJS engine — say so plainly rather than letting a bare
+  # LoadError name a file the user never asked for.
+  require 'quickjs-polyfill-intl/datetimeformat'
+rescue LoadError
+  raise LoadError, <<~MSG
+    capybara-simulated's QuickJS engine needs the `quickjs-polyfill-intl` gem
+    (quickjs 0.19 moved Intl out of the core gem, and the DOM bridge uses
+    Intl.DateTimeFormat). Add it next to quickjs:
+
+        gem 'quickjs', '>= 0.19'
+        gem 'quickjs-polyfill-intl'
+
+    Or use the V8 engine (`gem 'rusty_racer'`), which has ICU built in.
+  MSG
+end
 
 require_relative 'runtime_shared'
 require_relative 'worker_runtime'
