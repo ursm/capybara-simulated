@@ -753,8 +753,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -806,7 +806,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -858,6 +858,11 @@ module Capybara
         # loads, so a frame whose load handler reads window.name to identify itself
         # (declarative-shadow declarative-child-frame) sees it.
         realm.call('__csimSetWindowName', frame_name.to_s) unless frame_name.nil?
+        # The frame's viewport is its container's content box, measured by the parent realm. Seed it
+        # BEFORE the document loads so load-time `innerWidth` reads and `@media` evaluation see the
+        # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
+        # 0x0 window — pass it through rather than skipping, or the frame keeps the top-level size.
+        realm.call('__csimFrameViewportChanged', frame_viewport)
         # Seed the frame's document origin (opaque/inherited) BEFORE the document
         # loads, so its load-time scripts read the right self.origin. nil → a
         # real-URL frame whose origin is its own location origin.
