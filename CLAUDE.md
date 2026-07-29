@@ -37,10 +37,10 @@ satisfied**, never assumed because a fix looks like work. The default is
 **in scope**. A subtest is out of scope (allowlisted / skipped, *not* a
 driver bug) only when one of these holds:
 
-1. **It needs a subsystem we deliberately don't model.** A layout /
-   rendering engine (visual hit-testing, `getBoundingClientRect`
-   truthiness, viewport-clip visibility, `display: contents` / table
-   layout), a real async runtime, or legacy-multibyte / Unicode-version-tied
+1. **It needs a subsystem we deliberately don't model.** A *rendering*
+   engine — glyph metrics (real font advance widths / line breaking),
+   inline flow, flex / grid track sizing, table layout, `display:
+   contents` — a real async runtime, or legacy-multibyte / Unicode-version-tied
    encoding tables (ISO-2022-JP & friends; the *residual* IDNA cases where
    `uri-idna` diverges from the WPT reference — **not IDNA wholesale**: see
    the in-scope note below).
@@ -68,6 +68,15 @@ earned-out before as "a subsystem we don't model", then reverted):
   cross-origin is pure ORIGIN TAGGING, not a network boundary — no real DNS
   / `*.localhost` needed. Backlog, not a non-goal. (See the
   `multi-origin-in-scope` memory.)
+- **Box layout is MODELED** (`js/src/layout.js`, since v0.8.0): block flow,
+  absolute / relative / fixed, a coarse grid pass, overflow clipping, the flat
+  tree, cross-realm frames — and the page-visible geometry
+  (`getBoundingClientRect` / `elementFromPoint` / `offset*` / `client*` /
+  `scroll*`) reads from it, so there is ONE geometry. Visual hit-testing,
+  gBCR truthiness and viewport-clip visibility are therefore IN scope: a
+  failing geometry test is a coarse-model gap to diagnose (does it need real
+  glyph metrics / track sizing, or just a box rule we haven't written?), not
+  an automatic "needs a layout engine" exclusion.
 - **IDNA, Streams, Workers, EventSource are MODELED** (uri-idna /
   web-streams-polyfill / thread / TCPSocket). A failing IDNA test is usually
   a driver over-/under-rejection bug to fix (e.g. an `xn--` A-label browsers
