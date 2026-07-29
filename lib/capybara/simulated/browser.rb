@@ -134,6 +134,11 @@ module Capybara
       # debounce fires" tests (Discourse refetchForSearch / doubled-filter, Avo
       # filters) still observe the intermediate state across several polls.
       FF_TRANSIENT_GUARD_POLLS = (ENV['CSIM_FF_TRANSIENT_GUARD_POLLS'] || '6').to_i
+      # The display the window lives on. Mirrors the JS-side `screen` /
+      # initial `innerWidth` / `innerHeight` (js/src/platform-globals.js)
+      # — the window starts filling it, `resize_to` moves the viewport
+      # off it, and `maximize` / `fullscreen` restore it.
+      SCREEN_SIZE = [1024, 768].freeze
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
       # Per-`run_loop_step` task cap (its `maxIter`). Bounds a self-rescheduling
@@ -1850,7 +1855,11 @@ module Capybara
         @viewport_width  = w.to_i
         @viewport_height = h.to_i
         invalidate_find_cache
-        @runtime.eval("globalThis.innerWidth = #{@viewport_width}; globalThis.innerHeight = #{@viewport_height};")
+        # One slot for the viewport (`__csimViewport`): `innerWidth` / `innerHeight` are
+        # `[Replaceable]` accessors over it, the `@media` cascade and the layout engine read it
+        # directly, and the setter re-pushes every live frame's content box — a frame lays out
+        # against its container, which just changed size too.
+        @runtime.eval("globalThis.__csimSetViewport(#{@viewport_width}, #{@viewport_height});")
         # Recompute the cascade `@media` rules against the new
         # viewport so visibility checks (Capybara `visible?`,
         # `getComputedStyle().display`) re-reflect mobile-breakpoint
@@ -1870,8 +1879,13 @@ module Capybara
         @runtime.eval("try { (globalThis.dispatchEvent || function(){})(new Event('resize')); } catch (_) {}")
         nil
       end
-      def viewport_width                  ; @viewport_width  || 1024 ; end
-      def viewport_height                 ; @viewport_height || 768  ; end
+      def viewport_width                  ; @viewport_width  || SCREEN_SIZE[0] ; end
+      def viewport_height                 ; @viewport_height || SCREEN_SIZE[1] ; end
+      # What `maximize` / `fullscreen` restore. A driver configured with a viewport is a mobile
+      # session (`default_viewport`, the same channel `reset!` uses to keep it mobile across
+      # resets), and maximizing must not silently promote it to desktop — its "display" is the
+      # viewport it was built with.
+      def screen_size                     ; @default_viewport || SCREEN_SIZE ; end
       # Capybara-initiated `page.go_back` runs from Ruby, not inside a
       # JS call, so it's safe to rebuild the Context synchronously. The
       # `force:` flag bypasses the deferral that `history_go` uses to

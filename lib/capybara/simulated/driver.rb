@@ -362,6 +362,12 @@ module Capybara
         window_entries.find {|w| w[:handle] == handle }&.fetch(:browser)
       end
 
+      # Same, but for the operations that ADDRESS a window rather than probe for one: a closed or
+      # unknown handle is Capybara's `WindowError`, never a silent fall back to the current window.
+      def window_browser!(handle)
+        window_browser(handle) or raise Capybara::WindowError, "Unknown window handle: #{handle}"
+      end
+
       # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
       # clicks and `window.open` both land here. A non-empty `name` that
       # matches an existing window navigates that window instead of opening a
@@ -634,7 +640,14 @@ module Capybara
       def open_new_window(_kind = :tab)
         open_aux_window('about:blank')
       end
-      def window_size(_)           = [current_browser.viewport_width, current_browser.viewport_height]
+      # Every window has its own viewport, so these address the window the
+      # handle names — not the active one. `Capybara::Window#resize_to` on a
+      # background window must resize THAT window and leave the current one
+      # (and Capybara's idea of which window is current) alone.
+      def window_size(handle)
+        b = window_browser!(handle)
+        [b.viewport_width, b.viewport_height]
+      end
       def close_window(h)
         return if h == PRIMARY_HANDLE
         @aux_windows.reject! {|w|
@@ -655,19 +668,23 @@ module Capybara
         end
       end
       def switch_to_window(h)
-        if h == PRIMARY_HANDLE
-          @active_handle = nil
-        elsif @aux_windows.any? {|w| w[:handle] == h }
-          @active_handle = h
-        else
-          raise Capybara::WindowError, "Unknown window handle: #{h}"
-        end
+        window_browser!(h)   # unknown / already-closed handle → WindowError
+        @active_handle = (h == PRIMARY_HANDLE ? nil : h)
       end
-      def resize_window_to(_, w, h) = current_browser.set_viewport(w, h)
+      def resize_window_to(handle, w, h) = window_browser!(handle).set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly
       # rather than through `current_window.resize_to`.
       def resize(w, h) = current_browser.set_viewport(w, h)
-      def maximize_window(_)       ; nil ; end
+      # Both restore the window to the display it lives on (`Browser#screen_size`), which is where
+      # it started — so they undo a `resize_to` rather than doing nothing. Coarse: we model no
+      # window chrome, so a maximized window and a fullscreen one end up the same size (a real
+      # browser's fullscreen is taller by the chrome it hides).
+      def maximize_window(handle)   = restore_window_size(handle)
+      def fullscreen_window(handle) = restore_window_size(handle)
+      private def restore_window_size(handle)
+        b = window_browser!(handle)
+        b.set_viewport(*b.screen_size)
+      end
 
       def evaluate_script(script, *args)
         unwrap(current_browser.evaluate_script(script, args))
