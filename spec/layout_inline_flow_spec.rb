@@ -11,8 +11,10 @@ require 'rack'
 # the assertions below track the numbers we actually produce, and the Chrome value is named whenever
 # it differs so the gap is visible rather than forgotten.
 RSpec.describe 'layout: inline / flex / grid / table rows' do
-  # An 80x40 red PNG, built here so the fixture needs no binary asset.
-  PNG_80x40 = begin
+
+  # An 80x40 red PNG, built here so the fixture needs no binary asset. A method, not a constant:
+  # a constant assigned inside a `describe` block lands at TOP LEVEL and leaks across the suite.
+  def png_80x40
     require 'zlib'
     w = 80
     h = 40
@@ -25,6 +27,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
       chunk.call('IDAT', Zlib::Deflate.deflate(raw)) +
       chunk.call('IEND', '')
   end
+
   def body
     <<~HTML
       <!DOCTYPE html>
@@ -157,7 +160,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
   it 'sizes an image from its natural size, its attributes, or the broken-image box' do
     app = lambda {|env|
       if env['PATH_INFO'] == '/real.png'
-        [200, {'content-type' => 'image/png'}, [PNG_80x40]]
+        [200, {'content-type' => 'image/png'}, [png_80x40]]
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>
@@ -176,6 +179,65 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(box(s, 'sized')[2, 2]).to eq([120, 60])     # Chrome: 120x60 — attributes win
     expect(box(s, 'real')[2, 2]).to eq([80, 40])       # Chrome: 80x40 — the decoded size
     expect(box(s, 'ratio')[2, 2]).to eq([160, 80])     # one axis given → the other keeps 2:1
+  end
+
+  # Cases a code review found by building counter-examples; every number below is real Chrome's.
+  it 'paints content with the stacking context it lives in' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0}
+        #bar{position:fixed;top:0;left:0;width:200px;height:40px;z-index:10}
+        #btn{width:100px;height:40px}
+        #under{position:absolute;top:0;left:0;width:300px;height:60px;z-index:5}
+      </style></head><body><div id="under"></div><div id="bar"><div id="btn">btn</div></div></body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # The static button inside the z-index:10 bar is painted AT 10, so it beats the z-index:5 box —
+    # and the bar does not swallow the click meant for its own content either. Chrome: btn.
+    expect(s.evaluate_script("(e => e && e.id)(document.elementFromPoint(50, 20))")).to eq('btn')
+  end
+
+  it 'does not stretch an inline box around its absolutely positioned content' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0;font:16px sans-serif}
+        a{position:relative}
+        .menu{position:absolute;left:600px;top:40px;width:200px;height:100px}
+      </style></head><body><a id="one">One<div class="menu"></div></a><a id="two">Two</a></body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # Chrome: one=0,30 two=30,29 — the dropdown is out of flow, so the link stays one word wide and
+    # the next link sits beside it (it used to be pushed to x=800).
+    expect(box(s, 'one')[2]).to be < 60
+    expect(box(s, 'two')[0]).to eq(box(s, 'one')[2])
+  end
+
+  it 'keeps replaced elements and controls their own size in a flex row' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0;font:16px sans-serif}
+        .frow{display:flex;width:600px}
+        #fa{flex:2;width:100px}#fb{flex:1}
+        table{width:600px}#c1{width:100px}
+      </style></head><body>
+        <div class="frow"><input id="inp"><button id="btnf">Go</button></div>
+        <div class="frow"><div id="fa">a</div><div id="fb">b</div></div>
+        <table><tr><td id="c1">c1</td><td id="c2">c2</td></tr></table>
+      </body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # A control in a flex row keeps its intrinsic size instead of being measured as text
+    # (Chrome: input 185, button 34 — ours uses the same measured control sizes).
+    expect(box(s, 'inp')[2]).to eq(185)
+    expect(box(s, 'btnf')[0]).to eq(185)
+    # `flex: 2` sets `flex-basis: 0`, which OUTRANKS the declared width — Chrome: 400/200.
+    expect(box(s, 'fa')[2]).to eq(400)
+    expect(box(s, 'fb')[2]).to eq(200)
+    # A table cell is not a flex item: its declared width stands (Chrome: 102 with borders).
+    expect(box(s, 'c1')[2]).to eq(100)
   end
 
   it 'lands the end of the page where a browser does' do
