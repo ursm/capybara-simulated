@@ -97,6 +97,42 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(box(s, 'c2')[0]).to eq(0)
   end
 
+  # Chrome, same markup at 1024x768. `flex: 1` twice in a 600px row is 300/300 whatever the words
+  # inside are (the shorthand sets `flex-basis: 0`), `flex: 2` + `flex: 1` is 400/200, a fixed item
+  # keeps its width and the grower takes the rest, and bare `flex-grow` starts from CONTENT so 1:3
+  # over the leftover gives 154/446. The overflowing row shrinks by `flex-shrink x base`, never
+  # below an item's automatic minimum — without that half, a row of fixed items pushed its siblings
+  # off the line and took a good part of Avo's suite with it.
+  it 'distributes a flex row by grow, and takes space back by shrink' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0;font:16px sans-serif}
+        .row{display:flex;width:600px}
+        #a{flex:1}#b{flex:1}#c{flex:2}#d{flex:1}#e{flex:1}#f{width:150px}#g{flex-grow:1}#h{flex-grow:3}
+        #i{width:500px}#j{width:400px}
+      </style></head><body>
+        <div class="row"><div id="a">a</div><div id="b">b</div></div>
+        <div class="row"><div id="c">c</div><div id="d">d</div></div>
+        <div class="row"><div id="e">e</div><div id="f">fixed</div></div>
+        <div class="row"><div id="g">g</div><div id="h">h</div></div>
+        <div class="row"><div id="i">i</div><div id="j">j</div></div>
+      </body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    widths = s.evaluate_script(<<~JS)
+      ['a','b','c','d','e','f','g','h'].map(i => {
+        const r = document.getElementById(i).getBoundingClientRect();
+        return [Math.round(r.x), Math.round(r.width)].join(',');
+      })
+    JS
+    expect(widths).to eq(['0,300', '300,300', '0,400', '400,200', '0,450', '450,150', '0,154', '154,446'])
+    # 500 + 400 into 600: both shrink in proportion to their base, and the row still fits.
+    over = s.evaluate_script("['i','j'].map(i => Math.round(document.getElementById(i).getBoundingClientRect().width))")
+    expect(over.sum).to be <= 600
+    expect(over.first).to be > over.last
+  end
+
   it 'sizes an auto grid row from its content' do
     s = session
     # Chrome: 18 tall. This used to answer a flat 100px per row, which inflated every grid.
