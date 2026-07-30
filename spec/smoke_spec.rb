@@ -467,13 +467,17 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     expect(s.all('#log li').map(&:text)).to include('pointerenter@trigger', 'pointermove@leaf')
   end
 
-  it 'refires IntersectionObserver targets on scrollIntoView for pagination patterns' do
+  # The load-more pattern: a sentinel below the fold fires only once it is actually scrolled into
+  # view — and scrolling again, with the sentinel already there, does NOT re-fire (verified in
+  # Chrome: the second `scrollIntoView` adds no entry).
+  it 'fires an IntersectionObserver sentinel when it is scrolled into view, once' do
     pager_app = Rack::Builder.new {
       run lambda {|_env|
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
-          <!doctype html><html><body>
+          <!doctype html><html><body style="margin:0">
             <ul id="items"><li>1</li><li>2</li></ul>
-            <div id="sentinel"></div>
+            <div id="pad" style="height:3000px"></div>
+            <div id="sentinel" style="height:10px"></div>
             <ul id="log"></ul>
             <script>
               const log = document.querySelector('#log');
@@ -495,13 +499,14 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     s = Capybara::Session.new(:simulated, pager_app)
     s.visit '/'
 
+    # Below the fold: the initial notification says isIntersecting=false, so nothing is logged.
+    expect(s.all('#log li').size).to eq(0)
+
+    s.execute_script("document.querySelector('#sentinel').scrollIntoView(true)")
     expect(s.all('#log li').size).to eq(1)
 
     s.execute_script("document.querySelector('#sentinel').scrollIntoView(true)")
-    expect(s.all('#log li').size).to eq(2)
-
-    s.execute_script("document.querySelector('#sentinel').scrollIntoView(true)")
-    expect(s.all('#log li').size).to eq(3)
+    expect(s.all('#log li').size).to eq(1)
   end
 
   it 'sets the focused replacement control when focus swaps the original field' do
