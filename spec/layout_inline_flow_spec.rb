@@ -11,6 +11,20 @@ require 'rack'
 # the assertions below track the numbers we actually produce, and the Chrome value is named whenever
 # it differs so the gap is visible rather than forgotten.
 RSpec.describe 'layout: inline / flex / grid / table rows' do
+  # An 80x40 red PNG, built here so the fixture needs no binary asset.
+  PNG_80x40 = begin
+    require 'zlib'
+    w = 80
+    h = 40
+    raw = ([0].pack('C') + ([255, 0, 0].pack('C*') * w)) * h
+    chunk = lambda {|type, data|
+      [data.bytesize].pack('N') + type + data + [Zlib.crc32(type + data)].pack('N')
+    }
+    "\x89PNG\r\n\x1a\n".b +
+      chunk.call('IHDR', [w, h, 8, 2, 0, 0, 0].pack('NNC5')) +
+      chunk.call('IDAT', Zlib::Deflate.deflate(raw)) +
+      chunk.call('IEND', '')
+  end
   def body
     <<~HTML
       <!DOCTYPE html>
@@ -99,6 +113,33 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(box(s, 'td1')[0]).to eq(0)
     expect(box(s, 'td2')[0]).to eq(512)
     expect(box(s, 'td3')[1]).to eq(171)   # second row, below the first
+  end
+
+  # Chrome, same markup: a failed-to-load `<img>` with no attributes is 16x16 (its broken-image
+  # box), width/height attributes win over that, and a decoded image is its natural size. Verified
+  # with `--headless --dump-dom`; the driver records the decoded size as `naturalWidth`/`Height`.
+  it 'sizes an image from its natural size, its attributes, or the broken-image box' do
+    app = lambda {|env|
+      if env['PATH_INFO'] == '/real.png'
+        [200, {'content-type' => 'image/png'}, [PNG_80x40]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>
+            <p><img id="broken" src="/nope.png"></p>
+            <p><img id="sized" src="/nope.png" width="120" height="60"></p>
+            <p><img id="ratio" src="/real.png" width="160"></p>
+            <p><img id="real" src="/real.png"></p>
+          </body></html>
+        HTML
+      end
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+
+    expect(box(s, 'broken')[2, 2]).to eq([16, 16])     # Chrome: 16x16
+    expect(box(s, 'sized')[2, 2]).to eq([120, 60])     # Chrome: 120x60 — attributes win
+    expect(box(s, 'real')[2, 2]).to eq([80, 40])       # Chrome: 80x40 — the decoded size
+    expect(box(s, 'ratio')[2, 2]).to eq([160, 80])     # one axis given → the other keeps 2:1
   end
 
   it 'lands the end of the page where a browser does' do
