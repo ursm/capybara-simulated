@@ -58659,13 +58659,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - name: Modulepreloaded CSS module is shared across multiple shadow roots.
   reason: Asserts a modulepreload-fetched CSS module is the same instance across roots
     via the module map; module-loading/async-fetch outcome.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-multiple.html:
-- name: Styles from the sheets applied via shadowrootadoptedstylesheets are applied
-    to elements.
-  reason: Tentative WICG shadowrootadoptedstylesheets proposal (declarative adoptedStyleSheets
-    on a shadow root via import-map/CSS-module specifiers); unshipped feature — not
-    modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
-    IDL-reflection/serialization surface is part of the same unshipped feature.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-nested-async.html:
 - name: Nested shadow roots independently resolve async adoptedStyleSheets.
   reason: Asserts empty placeholders before fetchAndWait then rule population after

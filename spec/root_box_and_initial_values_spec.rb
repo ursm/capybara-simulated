@@ -232,4 +232,88 @@ RSpec.describe 'root box + computed initial values' do
     # corrects all four rather than shipping them.
     expect(got).to eq(['1', '1', '0', 'start'])
   end
+
+  it 'inherits a value declared by a shadow tree stylesheet' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="host"></div><script>
+        const r = document.getElementById('host').attachShadow({mode: 'open'});
+        r.innerHTML = '<style>div { color: rgb(255, 0, 0) }</style><div id="a"><span id="b">x</span></div>';
+      </script></body></html>
+    HTML
+    # The inheritance walk skips the per-ancestor cascade lookup when NO rule declares the property
+    # — but a shadow tree's own sheet isn't in that document-scope index, so the skip must not apply
+    # to an element inside one.
+    expect(s.evaluate_script(<<~JS)).to eq('rgb(255, 0, 0)')
+      getComputedStyle(document.getElementById('host').shadowRoot.getElementById('b')).color
+    JS
+  end
+
+  it 'computes color: currentcolor as inherit instead of recursing' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#outer { color: rgb(0, 0, 255) } #c { color: currentcolor }</style></head>
+      <body><div id="outer"><div id="c">x</div></div></body></html>
+    HTML
+    # CSS Color 4: on `color` itself the keyword means `inherit`. Resolving it as "this element's
+    # own colour" is a self-reference that recursed until the stack blew.
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('c')).color")).to eq('rgb(0, 0, 255)')
+  end
+
+  it 'expands a shorthand the same way whatever its origin' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#sheet { flex: initial }</style></head>
+      <body><div id="sheet">a</div><div id="inline" style="flex: initial">b</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('sheet').flexGrow, g('inline').flexGrow, g('sheet').flexBasis, g('inline').flexBasis];
+      })()
+    JS
+    # `flex: initial` is `0 1 auto`. The inline and stylesheet paths used different expanders, and
+    # the generic one left the css-wide keyword in place — a string the layout engine can't parse.
+    expect(got).to eq(['0', '0', 'auto', 'auto'])
+  end
+
+  it 'folds a keyword shorthand value to lowercase' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#u { overflow: HIDDEN }</style></head>
+      <body><div id="u">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => { const c = getComputedStyle(document.getElementById('u')); return [c.overflow, c.overflowX, c.overflowY]; })()
+    JS
+    expect(got).to eq(['hidden', 'hidden', 'hidden'])
+  end
+
+  it 'reports a stylesheet value for any property, not just a captured few' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        #x { box-shadow: 0 0 4px red; transition-duration: .4s; text-decoration-line: underline;
+             list-style-type: square }
+      </style></head>
+      <body><div id="x">x</div><div id="y">y</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        const x = g('x'), y = g('y');
+        return [x.boxShadow, x.transitionDuration, x.textDecorationLine, x.listStyleType,
+                y.boxShadow, y.transitionDuration];
+      })()
+    JS
+    # The cascade captures every declaration, so an initial value is only ever reported for a
+    # property the page really leaves unset. A hand-listed capture set made the answer for anything
+    # outside it a guess — `box-shadow: none` for an element that plainly has one.
+    #
+    # The declared value is reported as written: Chrome serializes these in computed form
+    # (`rgb(255, 0, 0) 0px 0px 4px`, `0.4s`), which needs a per-property serializer we only have for
+    # the colour / background / length props resolved above. Reporting what the page declared is the
+    # coarse part; claiming a value it doesn't have was the bug.
+    expect(got).to eq(['0 0 4px red', '.4s', 'underline', 'square', 'none', '0s'])
+  end
 end
