@@ -403,4 +403,52 @@ RSpec.describe 'root box + computed initial values' do
     # phantom flow.
     expect(s.evaluate_script('Math.round(document.documentElement.getBoundingClientRect().height)')).to eq(0)
   end
+
+  it 'does not let the root element clip out-of-flow content' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        html { overflow-y: scroll } body { margin: 0 }
+        #far { position: absolute; top: 400px; left: 0; width: 200px; height: 30px }
+      </style></head>
+      <body><div id="near">near</div><div id="far">far</div></body></html>
+    HTML
+    # The ROOT's overflow propagates to the viewport (CSS Overflow 3.3) and the element itself stays
+    # `visible`. `html { overflow-y: scroll }` is near-universal in app CSS, and treating it as a
+    # scroll container clipped to a root box only as tall as the body made every absolutely
+    # positioned dropdown below that vanish from hit-testing.
+    expect(s.evaluate_script("(document.elementFromPoint(60, 415) || {}).id")).to eq('far')
+  end
+
+  it 'leaves a tall panel alone when part of it is already showing' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        body { margin: 0 } #spacer { height: 100px } #panel { height: 1000px }
+      </style></head>
+      <body><div id="spacer"></div><div id="panel">panel</div></body></html>
+    HTML
+    s.find(:css, '#panel').click
+    # WebDriver clicks the IN-VIEW centre point, so a box with any part in the viewport already has
+    # a clickable one. Aligning its top instead scrolled the page on every click of anything taller
+    # than the window.
+    expect(s.evaluate_script('window.scrollY')).to eq(0)
+  end
+
+  it 'expands an inline background shorthand to its longhands' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="bg" style="background: #fff">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = getComputedStyle(document.getElementById('bg'));
+        return [c.backgroundColor, c.backgroundImage, c.backgroundRepeat, c.backgroundClip];
+      })()
+    JS
+    # The inline path has to expand `background` exactly as the stylesheet path does; otherwise the
+    # longhands never reach the cascade and the unexpanded-shorthand gate reports nothing at all —
+    # an empty string to every `parseColor(getComputedStyle(el).backgroundColor)` in the page.
+    expect(got).to eq(['rgb(255, 255, 255)', 'none', 'repeat', 'border-box'])
+  end
 end
