@@ -102,14 +102,38 @@ for (const name of longhands) {
 // Two shapes are dropped: a non-string initial (mdn lists sub-property names for `marker` /
 // `stroke`, which it classifies as longhands), and a camelCase prose sentinel
 // (`dependsOnUserAgent`, `startOrNamelessValueIfLTRRightIfRTL`) — real initial values are
-// lowercase keywords or lengths, so an uppercase letter marks prose, not a value.
+// lowercase keywords or lengths, so an uppercase letter marks prose, not a value. A property whose
+// mdn initial is DAMAGED is corrected here rather than shipped: each entry is the value a browser
+// actually reports, applied after the shape filters (which would otherwise drop the two
+// legitimately mixed-case ones). `all` / `font-family` / `quotes` / `text-size-adjust` stay
+// dropped — their initial genuinely depends on the UA, or the property has no single one.
+const MDN_INITIAL_FIXES = {
+  'flood-opacity': '1',                       // mdn says "black" — it is <'opacity'>, initial 1
+  'stop-opacity':  '1',                       // same mdn error
+  'text-align':    'start',                   // mdn: "startOrNamelessValueIfLTRRightIfRTL"
+  'color-interpolation-filters': 'linearRGB', // a real value the prose filter's /[A-Z]/ catches
+};
+const BARE_NUMBER_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const initialValues = {};
 const inherited = [];
 for (const name of longhands) {
   const initial = props[name].initial;
-  if (typeof initial === 'string' && !/[A-Z]/.test(initial)) initialValues[name] = initial.trim();
+  if (typeof initial === 'string' && !/[A-Z]/.test(initial)) {
+    const trimmed = initial.trim();
+    // A bare number is reported in canonical form (`shape-image-threshold: "0.0"` → `0`).
+    initialValues[name] = BARE_NUMBER_RE.test(trimmed) ? String(parseFloat(trimmed)) : trimmed;
+  }
+  // A property mdn classifies as numeric whose initial ISN'T a number is data damage; drop it
+  // rather than report a keyword where a number belongs. (This is the backstop that catches the
+  // next such mdn bug; the two known today are corrected by name above.)
+  const type = valueTypes[name];
+  if (initialValues[name] != null && type && (type.base === 'number' || type.base === 'integer') &&
+      !BARE_NUMBER_RE.test(initialValues[name]) && type.keywords.indexOf(initialValues[name]) === -1) {
+    delete initialValues[name];
+  }
   if (props[name].inherited) inherited.push(name);
 }
+for (const [name, value] of Object.entries(MDN_INITIAL_FIXES)) if (longhands.includes(name)) initialValues[name] = value;
 
 // Valid pseudo-class / pseudo-element base names (leading `:`/`::` and any `()` stripped),
 // for validating a `selectorText` setter — an unknown pseudo makes the selector invalid.

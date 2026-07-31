@@ -17,11 +17,17 @@ RSpec.describe 'CSSOM property maps are prototype-less' do
   # write / read named after one must not throw.
   it 'does not leak Object.prototype members as CSS values' do
     s = session
-    expect(s.evaluate_script(<<~JS)).to eq(['CSSStyleDeclaration', '', '', 'ok'])
+    expect(s.evaluate_script(<<~JS)).to eq(['CSSStyleDeclaration', 'function', '', '', 'ok'])
       (() => {
         const el = document.getElementById('d');
         const c = getComputedStyle(el);
-        const out = [c.constructor && c.constructor.name, String(c.valueOf ? '' : ''), c.getPropertyValue('constructor')];
+        const out = [
+          c.constructor && c.constructor.name,       // the interface, not Object
+          typeof c.valueOf,                          // still a function, not a CSS value string
+          c.getPropertyValue('constructor'),         // a miss, not "function Object() {…}"
+          c.getPropertyValue('valueOf')
+        ];
+        // A write named after one must not throw on the declaration map either.
         try { el.style.setProperty('constructor', 'red'); el.style.hasOwnProperty = '1px'; out.push('ok'); }
         catch (e) { out.push('threw: ' + e.message); }
         return out;
