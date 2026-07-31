@@ -136,6 +136,36 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(over.first).to be > over.last
   end
 
+  # Chrome, same markup. `row-reverse` runs the main axis the other way — reverse order AND packed
+  # against the right edge — and a text-heavy item shrinks past its text because `min-width: auto`
+  # is the MIN-CONTENT width (the longest word), not everything it holds. Measuring the whole text
+  # instead left Redmine's `#content` unshrinkable, which pushed its sidebar (and the heading an
+  # IntersectionObserver was watching) off the right edge of the viewport.
+  it 'reverses and right-packs a row-reverse flex row, and shrinks past text' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0;font:16px sans-serif}
+        #main{display:flex;flex-direction:row-reverse;width:600px}
+        #side{flex-shrink:0;width:150px}
+        #rev{display:flex;flex-direction:row-reverse;width:400px}
+        #r1{width:100px}#r2{width:100px}
+      </style></head><body>
+        <div id="main"><div id="content">#{'word ' * 30}</div><div id="side">side</div></div>
+        <div id="rev"><div id="r1">one</div><div id="r2">two</div></div>
+      </body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # Chrome: content=150,450 side=0,150 — the sidebar keeps its width on the right, the text pane
+    # shrinks into what is left instead of overflowing.
+    expect(box(s, 'side')[0, 3]).to eq([0, 0, 150])
+    expect(box(s, 'content')[0]).to eq(150)
+    expect(box(s, 'content')[2]).to eq(450)
+    # Chrome: r1=300 r2=200 — reversed AND packed against the end, not laid out from x=0.
+    expect(box(s, 'r1')[0]).to eq(300)
+    expect(box(s, 'r2')[0]).to eq(200)
+  end
+
   it 'sizes an auto grid row from its content' do
     s = session
     # Chrome: 18 tall. This used to answer a flat 100px per row, which inflated every grid.
