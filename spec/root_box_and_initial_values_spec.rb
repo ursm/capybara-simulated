@@ -451,4 +451,99 @@ RSpec.describe 'root box + computed initial values' do
     # an empty string to every `parseColor(getComputedStyle(el).backgroundColor)` in the page.
     expect(got).to eq(['rgb(255, 255, 255)', 'none', 'repeat', 'border-box'])
   end
+
+  it 'does not let the body clip out-of-flow content either' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        body { overflow-x: hidden; margin: 0; height: 50px }
+        #drop { position: absolute; top: 200px; left: 0; width: 200px; height: 30px }
+      </style></head>
+      <body><div id="drop">drop</div></body></html>
+    HTML
+    # Overflow propagates from the BODY to the viewport too, whenever the root took none of its own
+    # (CSS Overflow 3.3) — the body's used value becomes `visible`. `body { overflow-x: hidden }` is
+    # as common in app CSS as the `html` form.
+    expect(s.evaluate_script("(document.elementFromPoint(10, 210) || {}).id")).to eq('drop')
+  end
+
+  it 'scrolls the nearest scrollable ancestor, not the page' do
+    rows = (0...60).map {|i| %(<div class="row" id="it#{i}">row #{i}</div>) }.join
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        body { margin: 0 } #box { height: 200px; overflow: auto } .row { height: 40px }
+      </style></head>
+      <body><div id="box">#{rows}</div></body></html>
+    HTML
+    s.find(:css, '#it50').click
+    # `scrollIntoView({block: 'nearest'})` walks the nearest-scrollable-ancestor chain, which is
+    # what WebDriver's element-click runs. Scrolling only the document moved the PAGE and left the
+    # row exactly as hidden as before.
+    expect(s.evaluate_script('window.scrollY')).to eq(0)
+    expect(s.evaluate_script("document.getElementById('box').scrollTop")).to be > 0
+  end
+
+  it 'keeps a scroll container overflow out of its ancestors scrollHeight' do
+    rows = (0...60).map {|i| %(<div class="row">row #{i}</div>) }.join
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        body { margin: 0 } #box { height: 200px; overflow: auto } .row { height: 40px }
+      </style></head>
+      <body><div id="box">#{rows}</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      [document.documentElement.scrollHeight, document.body.scrollHeight,
+       document.getElementById('box').scrollHeight]
+    JS
+    # Chrome measured: `[681, 200, 2400]` — the 2400px of rows is scrollable INSIDE the box and
+    # nowhere else. (681 vs our 768 is the horizontal scrollbar we don't model; the body reports its
+    # own 200px content height, not the viewport.)
+    expect(got).to eq([768, 200, 2400])
+  end
+
+  it 'ignores an inline shorthand a browser would drop' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="bogus" style="overflow: inherit hidden">x</div><div id="plain">y</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('bogus').overflowX, g('plain').overflowX];
+      })()
+    JS
+    # An unparsable declaration doesn't exist. Recording its name made the resolved-value gate treat
+    # every longhand it could have set as unknowable. (Only checkable for a shorthand we can
+    # expand: for one we can't — `transition: !!!` — we can't tell valid from invalid, so it still
+    # suppresses. The wrong answer there is '' — "don't know" — not a confident one.)
+    expect(got).to eq(['visible', 'visible'])
+  end
+
+  it 'applies a longhand re-declared after a shorthand in the inline block too' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="m" style="margin-left:7px; margin:1px; margin-left:9px">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const el = document.getElementById('m');
+        return [el.style.marginLeft, getComputedStyle(el).marginLeft];
+      })()
+    JS
+    # Chrome: 9px from both. The CSSOM block used to expand from the first-position MAP, so it
+    # disagreed with the cascade about which declaration came last.
+    expect(got).to eq(['9px', '9px'])
+  end
+
+  it 'normalises the SVG paint initials like every other colour' do
+    s = session(short_page)
+    got = s.evaluate_script(<<~JS)
+      (() => { const c = getComputedStyle(document.getElementById('s')); return [c.fill, c.stroke]; })()
+    JS
+    # Chrome: `rgb(0, 0, 0)` / `none`. `fill` and `stroke` are colour-valued but don't end in
+    # `-color`, so they missed the normalisation their siblings got.
+    expect(got).to eq(['rgb(0, 0, 0)', 'none'])
+  end
 end
