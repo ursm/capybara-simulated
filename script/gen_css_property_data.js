@@ -96,6 +96,21 @@ for (const name of longhands) {
   if (t) valueTypes[name] = t;
 }
 
+// Each longhand's INITIAL value and whether it INHERITS — what `getComputedStyle` must report
+// for a property no rule sets. mdn-data records the SPECIFIED initial; a few compute to something
+// else (`color: canvastext` → `rgb(0, 0, 0)`), which style-proxy overrides on top of this map.
+// Two shapes are dropped: a non-string initial (mdn lists sub-property names for `marker` /
+// `stroke`, which it classifies as longhands), and a camelCase prose sentinel
+// (`dependsOnUserAgent`, `startOrNamelessValueIfLTRRightIfRTL`) — real initial values are
+// lowercase keywords or lengths, so an uppercase letter marks prose, not a value.
+const initialValues = {};
+const inherited = [];
+for (const name of longhands) {
+  const initial = props[name].initial;
+  if (typeof initial === 'string' && !/[A-Z]/.test(initial)) initialValues[name] = initial.trim();
+  if (props[name].inherited) inherited.push(name);
+}
+
 // Valid pseudo-class / pseudo-element base names (leading `:`/`::` and any `()` stripped),
 // for validating a `selectorText` setter — an unknown pseudo makes the selector invalid.
 const selPath = require.resolve('mdn-data/css/selectors.json', { paths: [require.resolve('css-tree')] });
@@ -114,12 +129,19 @@ const out =
 // model, generic css-wide shorthand serialization, supported-property gating for named-property /
 // \`setProperty\` writes, declaration-value validation, and \`selectorText\` pseudo validation.
 
+// Every property-keyed map below is PROTOTYPE-LESS: these are looked up with a name that came from
+// page script (\`style.constructor\`, \`getPropertyValue('valueOf')\`), and a plain object would
+// answer such a lookup with an inherited Object.prototype member — a function where the caller
+// expects a CSS value or a record, which reads as a hit and then blows up on the next property
+// access.
+const bare = (o) => Object.assign(Object.create(null), o);
+
 // Every standard longhand property (a property whose value is a single field, not a
 // shorthand). \`all\` resets all of these except \`direction\` and \`unicode-bidi\`.
 export const LONGHANDS = new Set(${JSON.stringify(longhands)});
 
 // Each standard shorthand → the longhand properties it sets, per mdn-data.
-export const SHORTHAND_LONGHANDS = ${JSON.stringify(shorthands, null, 0)};
+export const SHORTHAND_LONGHANDS = bare(${JSON.stringify(shorthands, null, 0)});
 
 // Every "supported CSS property" name (standard longhands + shorthands + vendor-prefixed
 // aliases). A named-property write or \`setProperty\` whose name isn't here (and isn't a
@@ -133,11 +155,22 @@ export const SUPPORTED_PROPERTY_NAMES = new Set(${JSON.stringify(supported)});
 // range (so a negative value is rejected, e.g. \`width: -100px\`). Only properties that reduce to
 // one such base plus bare keywords (functional alternatives ignored) are listed; everything else
 // is accepted unchecked, so a real value is never dropped. Used by isValidDeclarationValue.
-export const PROPERTY_VALUE_TYPES = ${JSON.stringify(valueTypes, null, 0)};
+export const PROPERTY_VALUE_TYPES = bare(${JSON.stringify(valueTypes, null, 0)});
 
 // Valid pseudo-class / pseudo-element base names (a \`selectorText\` with an unknown pseudo is
 // invalid). Vendor-prefixed (\`-webkit-…\`) pseudos are accepted separately (forward-compat).
 export const PSEUDO_NAMES = new Set(${JSON.stringify([...pseudos].sort())});
+
+// Longhand → its INITIAL value: what a resolved-value read reports for a property nothing set.
+// This is the SPECIFIED initial; where the computed value differs (\`color\`, \`font-weight\`, …)
+// style-proxy overrides it. Reporting the real initial rather than '' matters beyond
+// conformance: page code branches on it (Floating UI decides whether an ancestor establishes a
+// containing block with \`getComputedStyle(el).transform !== 'none'\`, so '' reads as "transformed").
+export const INITIAL_VALUES = bare(${JSON.stringify(initialValues, null, 0)});
+
+// The longhands that INHERIT. With no value of its own, one of these takes the parent's computed
+// value before falling back to the initial.
+export const INHERITED_PROPERTIES = new Set(${JSON.stringify(inherited)});
 `;
 
 const dest = path.join(__dirname, '..', 'lib', 'capybara', 'simulated', 'js', 'src', 'css-property-data.js');
