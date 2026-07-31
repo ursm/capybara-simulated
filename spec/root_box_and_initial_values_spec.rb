@@ -546,4 +546,58 @@ RSpec.describe 'root box + computed initial values' do
     # `-color`, so they missed the normalisation their siblings got.
     expect(got).to eq(['rgb(0, 0, 0)', 'none'])
   end
+
+  it 'reports the UA stylesheet value, not the CSS initial' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body>
+        <pre id="pre"><span id="in">x</span></pre><ol id="ol"></ol><ul id="ul"></ul>
+        <a id="link" href="#">l</a><a id="bare">b</a><b id="b">b</b><em id="em">e</em>
+        <del id="del">d</del><table><tr><th id="th">t</th></tr></table>
+        <textarea id="ta"></textarea>
+      </body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('pre').whiteSpace, g('in').whiteSpace, g('ol').listStyleType, g('ul').listStyleType,
+                g('link').textDecorationLine, g('bare').textDecorationLine, g('b').fontWeight,
+                g('em').fontStyle, g('del').textDecorationLine, g('th').textAlign, g('ta').whiteSpace];
+      })()
+    JS
+    # All Chrome measured. Without a UA layer the initial-value fallback answered confidently and
+    # wrongly for elements every page has — and contradicted the driver's own
+    # `elementPreservesWhitespace`, which has always known `<pre>` preserves whitespace. The bare
+    # `<a>` keeps the initial: the UA rule is `:any-link`, not every anchor. `<span>` inside the
+    # `<pre>` INHERITS the UA value.
+    expect(got).to eq(['pre', 'pre', 'decimal', 'disc', 'underline', 'none', '700',
+                       'italic', 'line-through', 'center', 'pre-wrap'])
+  end
+
+  it 'keeps an inline !important shorthand from being clobbered within its own block' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#i { margin-top: 20px !important }</style></head>
+      <body><div id="i" style="margin: 1px !important; margin-top: 2px">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const el = document.getElementById('i');
+        return [el.style.marginTop, el.style.getPropertyPriority('margin-top')];
+      })()
+    JS
+    # CSSOM "set a CSS declaration": within one block a later NORMAL declaration never clobbers an
+    # `!important` one. Losing that also let the author rule win the cascade.
+    expect(got).to eq(['1px', 'important'])
+  end
+
+  it 'keeps the all shorthand winner positional on the inline path' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="al" style="color: red; all: initial; color: blue">x</div></body></html>
+    HTML
+    # `all`'s cascade is decided by SOURCE position, which the declaration map encodes by moving a
+    # property re-declared after `all` to the end. Expanding from the ordered list has to keep it.
+    expect(s.evaluate_script("document.getElementById('al').style.getPropertyValue('color')")).to eq('blue')
+  end
 end
