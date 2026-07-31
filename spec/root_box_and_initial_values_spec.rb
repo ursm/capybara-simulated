@@ -316,4 +316,91 @@ RSpec.describe 'root box + computed initial values' do
     # coarse part; claiming a value it doesn't have was the bug.
     expect(got).to eq(['0 0 4px red', '.4s', 'underline', 'square', 'none', '0s'])
   end
+
+  it 'keeps an inline !important shorthand winning over an author rule' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#d { margin-left: 20px !important; border-left-color: lime !important }</style></head>
+      <body><div id="d" style="margin: 0 !important; border: 1px solid red !important">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => { const c = getComputedStyle(document.getElementById('d')); return [c.marginLeft, c.borderLeftColor]; })()
+    JS
+    # The generic expander re-attaches `!important` per longhand only when its input carried one,
+    # and the caller strips it first — so the declaration's own importance is what has to travel.
+    expect(got).to eq(['0px', 'rgb(255, 0, 0)'])
+  end
+
+  it 'applies a re-declared inline property in source order' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="ord" style="margin-left:5px; margin:0; margin-left:7px">x</div></body></html>
+    HTML
+    # A declaration MAP keeps a re-declared property at its first position (that's where a block
+    # serializes it), so iterating it fed the shorthand last and lost the 7px. Chrome: 7px.
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('ord')).marginLeft")).to eq('7px')
+  end
+
+  it 'lets list-style: none set the type as well as the image' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>ul { list-style-type: none }</style></head>
+      <body><ul id="ls" style="list-style: none"></ul></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => { const c = getComputedStyle(document.getElementById('ls')); return [c.listStyleType, c.listStyleImage]; })()
+    JS
+    # A lone `none` sets BOTH (CSS Lists). Giving it to the image slot alone left the type at `disc`
+    # — at inline precedence, beating the author rule.
+    expect(got).to eq(['none', 'none'])
+  end
+
+  it 'says nothing rather than guessing when an unexpanded shorthand sets the longhand' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#t { transition: opacity 1s } #a { animation: spin 2s }</style></head>
+      <body><div id="t">t</div><div id="a">a</div><div id="p">p</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('t').transitionDuration, g('a').animationName, g('p').transitionDuration];
+      })()
+    JS
+    # We don't expand `transition` / `animation`, so the cascade never sees their longhands.
+    # Reporting the initial there would be the confident-wrong-answer failure again (Chrome says
+    # `1s` / `spin`); an empty string at least doesn't claim the element has no transition.
+    expect(got).to eq(['', '', '0s'])
+  end
+
+  it 'normalises a colour initial the way a cascaded colour is normalised' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#g { color: rgb(0, 128, 0) }</style></head>
+      <body><div id="g">x</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = getComputedStyle(document.getElementById('g'));
+        return [c.floodColor, c.lightingColor, c.outlineColor, c.caretColor, c.wordSpacing,
+                c.borderTopLeftRadius, c.borderSpacing];
+      })()
+    JS
+    # Chrome measured, all of them: a colour parser fed `black` where it expects `rgb()` fails, and
+    # `outline-color` / `caret-color`'s `auto` means the element's own colour. The length initials
+    # carry their unit.
+    expect(got).to eq(['rgb(0, 0, 0)', 'rgb(255, 255, 255)', 'rgb(0, 128, 0)', 'rgb(0, 128, 0)',
+                       '0px', '0px', '0px'])
+  end
+
+  it 'gives a document whose body is not rendered a zero-height root' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>body { display: none }</style></head>
+      <body><div>x</div></body></html>
+    HTML
+    # Chrome: 0. The layout pass stamps a box for the body either way, and the root took that
+    # phantom flow.
+    expect(s.evaluate_script('Math.round(document.documentElement.getBoundingClientRect().height)')).to eq(0)
+  end
 end

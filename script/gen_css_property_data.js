@@ -114,14 +114,30 @@ const MDN_INITIAL_FIXES = {
   'color-interpolation-filters': 'linearRGB', // a real value the prose filter's /[A-Z]/ catches
 };
 const BARE_NUMBER_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
+// Does the property take a LENGTH and nothing bare-numeric? Then its `0` initial computes to
+// `0px`. A syntax that also admits `<number>` / `<integer>` (`border-image-outset`, `math-depth`)
+// keeps the bare number, which is what a browser reports for those.
+function isLengthValued(syntax, depth = 0) {
+  if (!syntax || depth > 3) return false;
+  // mdn writes a logical property's grammar as a reference to its physical twin
+  // (`margin-block-end: <'margin-left'>`); follow it.
+  const ref = /^<'([a-z-]+)'>$/.exec(syntax.trim());
+  if (ref) return props[ref[1]] ? isLengthValued(props[ref[1]].syntax, depth + 1) : false;
+  if (/<(number|integer)/.test(syntax)) return false;
+  return /<length/.test(syntax) || /<percentage/.test(syntax);
+}
 const initialValues = {};
 const inherited = [];
 for (const name of longhands) {
   const initial = props[name].initial;
   if (typeof initial === 'string' && !/[A-Z]/.test(initial)) {
     const trimmed = initial.trim();
-    // A bare number is reported in canonical form (`shape-image-threshold: "0.0"` → `0`).
-    initialValues[name] = BARE_NUMBER_RE.test(trimmed) ? String(parseFloat(trimmed)) : trimmed;
+    // A bare number is reported in canonical form (`shape-image-threshold: "0.0"` → `0`) — and
+    // when the property takes a LENGTH, browsers report the unit too (`border-radius: 0` → `0px`).
+    // mdn writes the specified `0`; the unit is part of the computed value.
+    initialValues[name] = BARE_NUMBER_RE.test(trimmed)
+      ? String(parseFloat(trimmed)) + (isLengthValued(props[name].syntax) ? 'px' : '')
+      : trimmed;
   }
   // A property mdn classifies as numeric whose initial ISN'T a number is data damage; drop it
   // rather than report a keyword where a number belongs. (This is the backstop that catches the
