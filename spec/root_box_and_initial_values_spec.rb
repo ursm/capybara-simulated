@@ -600,4 +600,83 @@ RSpec.describe 'root box + computed initial values' do
     # property re-declared after `all` to the end. Expanding from the ordered list has to keep it.
     expect(s.evaluate_script("document.getElementById('al').style.getPropertyValue('color')")).to eq('blue')
   end
+
+  it 'puts the UA stylesheet above inheritance, not below it' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        body { text-align: left; list-style-type: square }
+        #red { color: red } #nw { white-space: nowrap }
+      </style></head>
+      <body>
+        <div id="red"><a id="link" href="/x">l</a></div>
+        <div id="nw"><pre id="pre">p</pre></div>
+        <ol id="ol"></ol><table><tr><th id="th">t</th></tr></table>
+        <pre id="init" style="white-space: initial">i</pre>
+      </body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('link').color, g('pre').whiteSpace, g('ol').listStyleType, g('th').textAlign,
+                g('init').whiteSpace];
+      })()
+    JS
+    # The UA origin sits BELOW author rules and ABOVE inheritance, so an ancestor's declaration
+    # never beats it (all Chrome measured). An explicit `initial` asks for the CSS initial and so
+    # skips the UA origin — which is what makes the last one `normal`, not `pre`.
+    expect(got).to eq(['rgb(0, 0, 238)', 'pre', 'decimal', 'center', 'normal'])
+  end
+
+  it 'inherits a longhand a stylesheet set through a shorthand' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>ul.nav { list-style: none }</style></head>
+      <body><ul class="nav" id="nav"><li id="li">x</li></ul></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('nav').listStyleType, g('li').listStyleType];
+      })()
+    JS
+    # `ul { list-style: none }` is in every nav stylesheet, and `x !== 'none'` is the branch page
+    # code writes. The rule path expands the same shorthand registry the inline path does, so the
+    # longhand exists in the cascade and the child inherits it.
+    expect(got).to eq(['none', 'none'])
+  end
+
+  it 'computes a line width of zero while its style is none' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#o { outline-style: solid }</style></head>
+      <body><div id="plain">p</div><div id="o">o</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('plain').outlineWidth, g('plain').columnRuleWidth, g('o').outlineWidth];
+      })()
+    JS
+    # CSS UI: a line's used width is 0 while its style is `none`, which is the initial. mdn's
+    # `medium` reported verbatim is a keyword `parseFloat` turns into NaN.
+    expect(got).to eq(['0px', '0px', '3px'])
+  end
+
+  it 'reports the monospace family the UA sheet gives code and pre' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>body { font-family: Georgia, serif }</style></head>
+      <body><code id="code">c</code><div id="d">d</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('code').fontFamily, g('d').fontFamily];
+      })()
+    JS
+    # `<code>` is monospace whatever the page sets on the body — the dedicated font-family branch
+    # returns before the generic UA lookup, so it has to consult it itself.
+    expect(got).to eq(['monospace', 'Georgia, serif'])
+  end
 end
