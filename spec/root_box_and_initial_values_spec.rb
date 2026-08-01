@@ -731,4 +731,57 @@ RSpec.describe 'root box + computed initial values' do
     # an element nothing touches still reports the initial.
     expect(got).to eq(['', '', 'none'])
   end
+
+  it 'keeps a written inline block agreeing with how it was read' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="a">a</div><div id="b">b</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a'), b = document.getElementById('b');
+        a.setAttribute('style', 'margin-left: 7px; margin: 1px; margin-left: 9px');
+        const beforeA = a.style.marginLeft;
+        a.style.color = 'red';                       // any write re-serializes the whole block
+        b.setAttribute('style', 'color: red !important; color: blue');
+        const beforeB = [b.style.color, b.style.getPropertyPriority('color')];
+        b.style.width = '5px';
+        return [beforeA, a.style.marginLeft, beforeB, [b.style.color, b.style.getPropertyPriority('color')]];
+      })()
+    JS
+    # Chrome keeps both across the write. The read path parses in SOURCE ORDER; a write path on the
+    # map form rebuilds the block from a different parse and silently changes values that were
+    # already correct.
+    expect(got).to eq(['9px', '9px', ['red', 'important'], ['red', 'important']])
+  end
+
+  it 'keeps a rule !important from being clobbered inside its own block' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        #imp { margin: 1px !important; margin-top: 2px }
+        #ov { overflow: hidden !important; overflow: auto }
+      </style></head>
+      <body><div id="imp">i</div><div id="ov">o</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('imp').marginTop, g('ov').overflowX];
+      })()
+    JS
+    # Chrome: `1px` / `hidden`. The inline reader already had this rule; the stylesheet side has to
+    # agree, all the more now that every declaration is captured.
+    expect(got).to eq(['1px', 'hidden'])
+  end
+
+  it 'lets revert fall through to inheritance when the UA sheet has nothing to say' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><pre id="pre">x<span id="sp" style="white-space: revert">y</span></pre></body></html>
+    HTML
+    # `revert` rolls back to the UA origin — and a `<span>` has no UA `white-space`, so what it
+    # reverts to is what it inherits. Chrome: `pre`.
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('sp')).whiteSpace")).to eq('pre')
+  end
 end
