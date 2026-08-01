@@ -1,0 +1,56 @@
+require 'capybara/simulated'
+require 'rack'
+
+# A declaration whose VALUE the property's grammar doesn't admit is not a declaration: a browser
+# drops it at parse time, leaving whatever was there before. We used to keep it, so
+# `style.width = undefined` left `width: undefined` in the attribute — a value no browser has, which
+# then flowed into the cascade and the layout. Every expectation here is real Chrome's, read off the
+# same assignments with `--headless --dump-dom`.
+RSpec.describe 'invalid declaration values' do
+  def after_setting(script)
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="d"></div></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d');
+        d.removeAttribute('style');
+        #{script}
+        return d.getAttribute('style') || '';
+      })()
+    JS
+  end
+
+  it 'drops a value the property does not admit' do
+    expect(after_setting("d.style.width = 'notalength';")).to eq('')
+    expect(after_setting("d.style.display = 'blockish';")).to eq('')
+    expect(after_setting("d.style.color = 'notacolor';")).to eq('')
+    expect(after_setting("d.style.zIndex = '1.5';")).to eq('')
+    expect(after_setting("d.style.width = '100';")).to eq('')      # a length needs a unit
+  end
+
+  it 'drops what a JS value stringifies into' do
+    expect(after_setting('d.style.width = undefined;')).to eq('')
+    expect(after_setting('d.style.width = {};')).to eq('')          # "[object Object]"
+    expect(after_setting('d.style.width = 100;')).to eq('')         # "100", no unit
+    expect(after_setting("d.style.setProperty('width', undefined);")).to eq('')
+  end
+
+  it 'leaves the previous declaration standing' do
+    # The invalid assignment is a no-op, not a removal.
+    expect(after_setting("d.style.width = '5px'; d.style.width = 'nope';")).to eq('width: 5px;')
+  end
+
+  it 'still accepts everything a browser does' do
+    expect(after_setting("d.style.width = 'fit-content';")).to eq('width: fit-content;')
+    expect(after_setting("d.style.width = 'calc(100% - 10px)';")).to eq('width: calc(100% - 10px);')
+    expect(after_setting("d.style.width = 'var(--x)';")).to eq('width: var(--x);')
+    expect(after_setting("d.style.position = 'sticky';")).to eq('position: sticky;')
+    expect(after_setting("d.style.color = 'color-mix(in srgb, red, blue)';"))
+      .to eq('color: color-mix(in srgb, red, blue);')
+    # A legacy keyword mdn's grammar data omits, which browsers do accept.
+    expect(after_setting("d.style.outlineColor = 'invert';")).to eq('outline-color: invert;')
+    # `null` and '' are the CSSOM's clear path, not an invalid value.
+    expect(after_setting("d.style.width = '5px'; d.style.width = null;")).to eq('')
+  end
+end

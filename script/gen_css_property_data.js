@@ -152,6 +152,63 @@ for (const name of longhands) {
 }
 for (const [name, value] of Object.entries(MDN_INITIAL_FIXES)) if (longhands.includes(name)) initialValues[name] = value;
 
+// Every BARE KEYWORD a property's grammar admits, followed through `<'property'>` and `<type>`
+// references — the data a full grammar validator would consult, reduced to the one question the
+// CSSOM actually has to answer cheaply: is this single identifier a value this property takes?
+// (`width: notalength` and the `undefined` a JS setter stringifies are both rejected by it.)
+//
+// css-tree ships that validator, but the vendor bundle deliberately leaves its lexer out — it is
+// ~60% of css-tree's minified weight, and boot time is a fifth of our wall. This table is the part
+// we need. The ~190 named + system COLOUR keywords are shared by 63 properties, so they are
+// emitted ONCE and referenced by name; without that factoring the table is 190kB rather than 43kB.
+const syntaxesPath = require.resolve('mdn-data/css/syntaxes.json', { paths: [require.resolve('css-tree')] });
+const syntaxes = JSON.parse(fs.readFileSync(syntaxesPath, 'utf8'));
+function grammarKeywords(syntax, depth = 0, seen = new Set()) {
+  if (!syntax || depth > 6) return [];
+  const out = [];
+  for (const m of syntax.matchAll(/<'([a-z-]+)'>/g)) {
+    if (props[m[1]] && !seen.has(m[1])) { seen.add(m[1]); out.push(...grammarKeywords(props[m[1]].syntax, depth + 1, seen)); }
+  }
+  for (const m of syntax.matchAll(/<([a-z-]+)>/g)) {
+    const t = syntaxes[m[1]];
+    if (t && !seen.has(`<${m[1]}>`)) { seen.add(`<${m[1]}>`); out.push(...grammarKeywords(t.syntax, depth + 1, seen)); }
+  }
+  // A bare identifier alternative — not a `<type>`, not a `func(` name.
+  for (const m of syntax.matchAll(/(^|[|[\]\s])([a-zA-Z][a-zA-Z0-9-]*)(?![(\w-])/g)) out.push(m[2].toLowerCase());
+  return out;
+}
+// Does a property's grammar admit an ARBITRARY identifier? `list-style-type` reaches
+// `<custom-ident>` through `<counter-style-name>`, `font-family` through `<family-name>` — for
+// those, any identifier is a value and there is nothing to reject.
+const OPEN_IDENT_TYPES = /<(custom-ident|dashed-ident|string|family-name|counter-style-name|counter-name|ident|keyframes-name|timeline-name|container-name|view-transition-name|anchor-name|feature-value-name|palette-identifier)>/;
+function admitsAnyIdent(syntax, depth = 0, seen = new Set()) {
+  if (!syntax || depth > 6) return false;
+  if (OPEN_IDENT_TYPES.test(syntax)) return true;
+  for (const m of syntax.matchAll(/<'([a-z-]+)'>/g)) {
+    if (props[m[1]] && !seen.has(m[1])) { seen.add(m[1]); if (admitsAnyIdent(props[m[1]].syntax, depth + 1, seen)) return true; }
+  }
+  for (const m of syntax.matchAll(/<([a-z-]+)>/g)) {
+    const t = syntaxes[m[1]];
+    if (t && !seen.has(`<${m[1]}>`)) { seen.add(`<${m[1]}>`); if (admitsAnyIdent(t.syntax, depth + 1, seen)) return true; }
+  }
+  return false;
+}
+const openIdentProps = [];
+
+const colorKeywords = new Set(grammarKeywords(syntaxes['color'] ? syntaxes['color'].syntax : '<named-color> | <system-color>'));
+const propertyKeywords = {};
+const colorValued = [];
+for (const name of Object.keys(props)) {
+  if (name.startsWith('--')) continue;
+  if (admitsAnyIdent(props[name].syntax)) openIdentProps.push(name);
+  const all = new Set(grammarKeywords(props[name].syntax));
+  if (colorKeywords.size > 10 && [...colorKeywords].every(k => all.has(k))) {
+    colorValued.push(name);
+    for (const k of colorKeywords) all.delete(k);
+  }
+  if (all.size) propertyKeywords[name] = [...all].sort();
+}
+
 // Valid pseudo-class / pseudo-element base names (leading `:`/`::` and any `()` stripped),
 // for validating a `selectorText` setter — an unknown pseudo makes the selector invalid.
 const selPath = require.resolve('mdn-data/css/selectors.json', { paths: [require.resolve('css-tree')] });
@@ -212,6 +269,20 @@ export const INITIAL_VALUES = bare(${JSON.stringify(initialValues, null, 0)});
 // The longhands that INHERIT. With no value of its own, one of these takes the parent's computed
 // value before falling back to the initial.
 export const INHERITED_PROPERTIES = new Set(${JSON.stringify(inherited)});
+
+// Every bare KEYWORD each property's grammar admits (colour keywords factored out below). Used to
+// reject a single identifier a property doesn't take — \`width: notalength\`, or the \`undefined\` a
+// JS setter stringifies — which a browser drops and we used to keep.
+export const PROPERTY_KEYWORDS = bare(${JSON.stringify(propertyKeywords)});
+
+// The ~200 named + system colour keywords, and the properties that accept them. Shared rather
+// than repeated per property (43kB instead of 190kB).
+export const COLOR_KEYWORDS = new Set(${JSON.stringify([...colorKeywords].sort())});
+export const COLOR_VALUED_PROPERTIES = new Set(${JSON.stringify(colorValued.sort())});
+
+// Properties whose grammar admits an ARBITRARY identifier (\`font-family\`, \`list-style-type\`,
+// anything reaching \`<custom-ident>\`). There is no identifier to reject for these.
+export const OPEN_IDENT_PROPERTIES = new Set(${JSON.stringify(openIdentProps.sort())});
 `;
 
 const dest = path.join(__dirname, '..', 'lib', 'capybara', 'simulated', 'js', 'src', 'css-property-data.js');
