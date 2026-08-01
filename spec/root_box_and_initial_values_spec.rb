@@ -358,19 +358,20 @@ RSpec.describe 'root box + computed initial values' do
   it 'says nothing rather than guessing when an unexpanded shorthand sets the longhand' do
     s = session(<<~HTML)
       <!DOCTYPE html>
-      <html><head><style>#t { transition: opacity 1s } #a { animation: spin 2s }</style></head>
-      <body><div id="t">t</div><div id="a">a</div><div id="p">p</div></body></html>
+      <html><head><style>#m { mask: url(#a) luminance } #p { color: red }</style></head>
+      <body><div id="m">m</div><div id="p">p</div></body></html>
     HTML
     got = s.evaluate_script(<<~JS)
       (() => {
         const g = id => getComputedStyle(document.getElementById(id));
-        return [g('t').transitionDuration, g('a').animationName, g('p').transitionDuration];
+        return [g('m').maskMode, g('p').maskMode];
       })()
     JS
-    # We don't expand `transition` / `animation`, so the cascade never sees their longhands.
-    # Reporting the initial there would be the confident-wrong-answer failure again (Chrome says
-    # `1s` / `spin`); an empty string at least doesn't claim the element has no transition.
-    expect(got).to eq(['', '', '0s'])
+    # `mask` has no expander, so the cascade never sees `mask-mode`. Reporting the initial there
+    # would be the confident-wrong-answer failure again (Chrome: `luminance`); an empty string at
+    # least doesn't claim the element leaves it alone. An element nothing touches still reports the
+    # initial. (`transition` / `animation` used to be the example here — they are expanded now.)
+    expect(got).to eq(['', 'match-source'])
   end
 
   it 'normalises a colour initial the way a cascaded colour is normalised' do
