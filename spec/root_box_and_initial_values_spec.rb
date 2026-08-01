@@ -784,4 +784,87 @@ RSpec.describe 'root box + computed initial values' do
     # reverts to is what it inherits. Chrome: `pre`.
     expect(s.evaluate_script("getComputedStyle(document.getElementById('sp')).whiteSpace")).to eq('pre')
   end
+
+  it 'expands a shorthand the same way from a rule as from a style attribute' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#r { margin: 1px; flex: 1; background: red; border: 2px solid red }</style></head>
+      <body><div id="r">r</div>
+        <div id="i" style="margin: 1px; flex: 1; background: red; border: 2px solid red">i</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        const read = c => [c.margin, c.marginTop, c.flexGrow, c.backgroundColor, c.borderTopStyle, c.borderTopWidth];
+        return [read(g('r')), read(g('i'))];
+      })()
+    JS
+    # Both readers run ONE expander now. They had drifted apart into a different visible bug in four
+    # separate review rounds — the rule path dropping the shorthand's own name, and never reaching
+    # the per-side border longhands at all.
+    expect(got[0]).to eq(got[1])
+    expect(got[0]).to eq(['1px', '1px', '1', 'rgb(255, 0, 0)', 'solid', '2px'])
+  end
+
+  it 'drops an unsupported property name from a stylesheet' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#a { constructor: red; hasOwnProperty: blue }</style></head>
+      <body><div id="a">a</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = getComputedStyle(document.getElementById('a'));
+        return [c.constructor && c.constructor.name, c.getPropertyValue('constructor')];
+      })()
+    JS
+    # A name a browser doesn't support never becomes a declaration. Capturing every declaration made
+    # the stylesheet path able to reach names the inline path was already gated against.
+    expect(got).to eq(['CSSStyleDeclaration', ''])
+  end
+
+  it 'computes a declared line width, not just an absent one' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><div id="o" style="outline: solid red">o</div>
+        <div id="w" style="outline-width: 2px">w</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('o').outlineWidth, g('w').outlineWidth];
+      })()
+    JS
+    # Chrome: `3px` (the `medium` keyword resolved) and `0px` (the style is still `none`). The rule
+    # has to see the CASCADED value, not only fire where nothing is declared.
+    expect(got).to eq(['3px', '0px'])
+  end
+
+  it 'serializes text-decoration from its longhands' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#f { text-decoration: underline dotted blue }</style></head>
+      <body><del id="d">d</del><div id="p">p</div><div id="f">f</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('d').textDecorationLine, g('d').textDecoration, g('p').textDecoration, g('f').textDecoration];
+      })()
+    JS
+    # Hardcoding the shorthand to `none` contradicted its own longhand the moment the UA sheet set
+    # one. All Chrome measured — and a shorthand serialization OMITS components still at their
+    # initial, so only the fully-specified one carries its style and colour.
+    expect(got).to eq(['line-through', 'line-through', 'none', 'underline dotted rgb(0, 0, 255)'])
+  end
+
+  it 'does not let a tag name reach Object.prototype through the display table' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><constructor id="c">x</constructor></body></html>
+    HTML
+    # `el._tag` is page-controlled, and the per-tag UA display table was the last property-keyed map
+    # still carrying Object.prototype.
+    expect(s.evaluate_script("typeof getComputedStyle(document.getElementById('c')).display")).to eq('string')
+  end
 end
