@@ -714,7 +714,7 @@ RSpec.describe 'root box + computed initial values' do
     expect(got).to eq([50, 'HTML'])
   end
 
-  it 'says nothing for either side a flow-relative shorthand might have set' do
+  it 'resolves a flow-relative shorthand to the side it actually sets' do
     s = session(<<~HTML)
       <!DOCTYPE html>
       <html><head><style>#d { border-block-end: 3px solid red }</style></head>
@@ -726,11 +726,10 @@ RSpec.describe 'root box + computed initial values' do
         return [g('d').borderBottomStyle, g('d').borderTopStyle, g('p').borderTopStyle];
       })()
     JS
-    # We don't expand flow-relative shorthands, and mdn's table names whichever physical side the
-    # value would RESOLVE to, which depends on the writing mode. So the whole family is unknowable
-    # rather than confidently `none` for the side that is actually solid (Chrome: solid / none) —
-    # an element nothing touches still reports the initial.
-    expect(got).to eq(['', '', 'none'])
+    # Chrome measured. The physical side a flow-relative property lands on depends on the writing
+    # mode, so it is resolved per ELEMENT at read time — both names are in the cascade and the
+    # winner is whichever declaration the cascade prefers.
+    expect(got).to eq(['solid', 'none', 'none'])
   end
 
   it 'keeps a written inline block agreeing with how it was read' do
