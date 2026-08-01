@@ -119,8 +119,6 @@ css/cssom/getComputedStyle-insets-relpos-inline.html:
 - OOF with left auto right fixed in relpos inline container with mixed directions
 - OOF with left fixed right auto in relpos inline container
 - OOF with left fixed right auto in relpos inline container with mixed directions
-css/cssom/getComputedStyle-resolved-colors.html:
-- The resolved value for 'box-shadow' is the used value
 css/cssom/invalid-pseudo-elements.html:
 - 'CSSOM: Test that rules with invalid pseudo elements are not found'
 css/cssom/page-descriptors.html:

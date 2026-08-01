@@ -185,7 +185,8 @@ RSpec.describe 'root box + computed initial values' do
     # Reporting the initial for a property a rule actually sets would be the containing-block bug in
     # the opposite direction — Floating UI would then treat a genuinely transformed ancestor as
     # transparent. The cascade captures these, so only the untouched element reports `none`.
-    expect(got).to eq(['translateX(10px)', 'blur(2px)', 'none'])
+    # (`transform` reports the composed MATRIX, as a browser does — see computed_serialization_spec.)
+    expect(got).to eq(['matrix(1, 0, 0, 1, 10, 0)', 'blur(2px)', 'none'])
   end
 
   it 'keeps a case-sensitive custom-property reference through a keyword shorthand' do
@@ -309,12 +310,7 @@ RSpec.describe 'root box + computed initial values' do
     # The cascade captures every declaration, so an initial value is only ever reported for a
     # property the page really leaves unset. A hand-listed capture set made the answer for anything
     # outside it a guess — `box-shadow: none` for an element that plainly has one.
-    #
-    # The declared value is reported as written: Chrome serializes these in computed form
-    # (`rgb(255, 0, 0) 0px 0px 4px`, `0.4s`), which needs a per-property serializer we only have for
-    # the colour / background / length props resolved above. Reporting what the page declared is the
-    # coarse part; claiming a value it doesn't have was the bug.
-    expect(got).to eq(['0 0 4px red', '.4s', 'underline', 'square', 'none', '0s'])
+    expect(got).to eq(['rgb(255, 0, 0) 0px 0px 4px 0px', '0.4s', 'underline', 'square', 'none', '0s'])
   end
 
   it 'keeps an inline !important shorthand winning over an author rule' do
