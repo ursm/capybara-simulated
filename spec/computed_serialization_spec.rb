@@ -86,4 +86,42 @@ RSpec.describe 'computed value serialization' do
     expect(got[0]).to eq(got[1])
     expect(got[0]).to eq(['matrix(1, 0, 0, 1, 10, 0)', '0.4s'])
   end
+
+  it 'resolves a percentage translate against the element box' do
+    # `translate(-50%, -50%)` is the centring idiom; reporting a zero matrix there is worse than
+    # not answering. Chrome on a 100x40 box: `matrix(1, 0, 0, 1, -50, -20)`.
+    expect(computed('transform: translate(-50%, -50%); width: 100px; height: 40px', %w[transform]))
+      .to eq(['matrix(1, 0, 0, 1, -50, -20)'])
+    # A component we can't resolve leaves the author's value rather than inventing a matrix.
+    expect(computed('transform: translateX(2em)', %w[transform])).to eq(['translateX(2em)'])
+  end
+
+  it 'keeps a colour word that is part of a path' do
+    # `gold`, `red`, `tan`, `plum`, `snow`, `linen` are all named colours; inside a `url()` they are
+    # filenames. Rewriting them made every such asset 404.
+    expect(computed('background: url(/img/gold-star.png) no-repeat', %w[backgroundImage]))
+      .to eq(['url("http://www.example.com/img/gold-star.png")'])
+  end
+
+  it 'reports a shadow with no colour using the element colour' do
+    expect(computed('box-shadow: 1px 2px', %w[boxShadow])).to eq(['rgb(0, 0, 0) 1px 2px 0px 0px'])
+    expect(computed('color: rgb(0, 128, 0); box-shadow: 1px 2px', %w[boxShadow]))
+      .to eq(['rgb(0, 128, 0) 1px 2px 0px 0px'])
+  end
+
+  it 'keeps a transform function in its canonical spelling' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="t"></div></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # Chrome preserves `translateX` in the style attribute while folding `BLUR(2PX)` — the rule is
+    # the function's canonical spelling, not a blanket lowercase.
+    expect(s.evaluate_script(<<~JS)).to eq('transform: translateX(10px) rotate(45deg); --state: collapsed;')
+      (() => {
+        const t = document.getElementById('t');
+        t.style.transform = 'translateX(10px) rotate(45deg)';
+        t.style.setProperty('--state', 'collapsed');
+        return t.getAttribute('style');
+      })()
+    JS
+  end
 end

@@ -91,4 +91,15 @@ RSpec.describe 'logical properties' do
                     '<div id="t">t</div>', %w[marginTop]))
       .to eq(['9px'])
   end
+
+  it 'swaps the logical SIZES with the writing mode, in both directions' do
+    # In a vertical mode `inline-size` is the height. The sides were writing-mode aware; the sizes
+    # were a fixed map, so they weren't.
+    expect(computed('#t { writing-mode: vertical-rl; inline-size: 60px; block-size: 30px }',
+                    '<div id="t">t</div>', %w[width height]))
+      .to eq(['30px', '60px'])
+    # And the mapping answers the other way too: a physical declaration is what a logical read sees.
+    expect(computed('#t { height: 50px; width: 20px }', '<div id="t">t</div>', %w[blockSize inlineSize]))
+      .to eq(['50px', '20px'])
+  end
 end

@@ -77,4 +77,21 @@ RSpec.describe 'shorthand expansion' do
     expect(both('column-rule: 2px dashed red', %w[columnRuleWidth columnRuleStyle columnRuleColor]))
       .to eq(['2px', 'dashed', 'rgb(255, 0, 0)'])
   end
+
+  it 'leaves an omitted grid end at auto unless the start names a line' do
+    # Chrome measured. The omitted end mirrors the start ONLY for a custom ident (a line name);
+    # for an integer or a `span` it is `auto`, and `grid-column: N` is everywhere.
+    expect(both('grid-column: 2', %w[gridColumnStart gridColumnEnd])).to eq(['2', 'auto'])
+    expect(both('grid-area: span 2 / 3', %w[gridRowStart gridRowEnd gridColumnStart gridColumnEnd]))
+      .to eq(['span 2', 'auto', '3', 'auto'])
+    expect(both('grid-column: myline', %w[gridColumnStart gridColumnEnd])).to eq(['myline', 'myline'])
+  end
+
+  it 'binds an alignment modifier to the keyword it qualifies' do
+    # `safe center` is ONE value, not two — Chrome gives both longhands `safe center`. And
+    # `first baseline` is just `baseline`, the modifier being the default.
+    expect(both('place-content: safe center', %w[alignContent justifyContent]))
+      .to eq(['safe center', 'safe center'])
+    expect(both('place-items: first baseline', %w[alignItems justifyItems])).to eq(['baseline', 'baseline'])
+  end
 end

@@ -53,4 +53,14 @@ RSpec.describe 'invalid declaration values' do
     # `null` and '' are the CSSOM's clear path, not an invalid value.
     expect(after_setting("d.style.width = '5px'; d.style.width = null;")).to eq('')
   end
+
+  it 'never judges a value it has no grammar for' do
+    # A CUSTOM property is an arbitrary token stream, and mdn carries no data for vendor-prefixed
+    # properties or values — `display: -webkit-box` is the canonical multiline-truncation pair with
+    # `-webkit-line-clamp`, and every browser keeps it.
+    expect(after_setting("d.style.setProperty('--state', 'collapsed');")).to eq('--state: collapsed;')
+    expect(after_setting("d.style.display = '-webkit-box';")).to eq('display: -webkit-box;')
+    expect(after_setting("d.style.setProperty('-webkit-font-smoothing', 'antialiased');"))
+      .to eq('-webkit-font-smoothing: antialiased;')
+  end
 end
