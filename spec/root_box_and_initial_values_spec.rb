@@ -679,4 +679,56 @@ RSpec.describe 'root box + computed initial values' do
     # returns before the generic UA lookup, so it has to consult it itself.
     expect(got).to eq(['monospace', 'Georgia, serif'])
   end
+
+  it 'keeps the UA sheet metadata out of the property space' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><body><a id="link" href="/x">l</a></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = getComputedStyle(document.getElementById('link'));
+        return [typeof c.when, c.getPropertyValue('when')];
+      })()
+    JS
+    # Every key of the UA value map is reachable as a property name, so the `:any-link` predicate
+    # can't live there — a caller treating the answer as a CSS string would get a function. (Chrome
+    # answers an unknown name with `undefined`; our declaration proxy answers '' for any string key,
+    # a separate bounded gap. What matters here is that it is not a function.)
+    expect(got).to eq(['string', ''])
+  end
+
+  it 'hit-tests the root across the whole canvas' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>body { margin: 0 } #s { height: 50px }</style></head>
+      <body><div id="s">s</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      [Math.round(document.documentElement.getBoundingClientRect().height),
+       (document.elementFromPoint(10, 400) || {}).tagName]
+    JS
+    # Chrome measured `[50, "HTML"]`: the root's client rect is only as tall as its content, but it
+    # still paints — and hit-tests — the canvas across the whole viewport.
+    expect(got).to eq([50, 'HTML'])
+  end
+
+  it 'says nothing for either side a flow-relative shorthand might have set' do
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>#d { border-block-end: 3px solid red }</style></head>
+      <body><div id="d">d</div><div id="p">p</div></body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = id => getComputedStyle(document.getElementById(id));
+        return [g('d').borderBottomStyle, g('d').borderTopStyle, g('p').borderTopStyle];
+      })()
+    JS
+    # We don't expand flow-relative shorthands, and mdn's table names whichever physical side the
+    # value would RESOLVE to, which depends on the writing mode. So the whole family is unknowable
+    # rather than confidently `none` for the side that is actually solid (Chrome: solid / none) —
+    # an element nothing touches still reports the initial.
+    expect(got).to eq(['', '', 'none'])
+  end
 end
