@@ -134,4 +134,28 @@ RSpec.describe 'logical properties' do
     expect(computed('', '<div id="t" style="margin-block-start:9px; margin-top:1px">t</div>', %w[marginTop]))
       .to eq(['1px'])
   end
+
+  it 'lets an INLINE flow-relative declaration outrank a stylesheet physical rule' do
+    # The precedence comparator knows an inline INCUMBENT outranks a rule, but had no parameter for
+    # an inline CANDIDATE — so the inline logical value was compared on specificity [0,0,0] and
+    # lost. Chrome: 10px. JS-positioned and RTL-aware UI writes logical insets inline constantly.
+    expect(computed('.x { margin-left: 5px }',
+                    '<div class="x" id="t" style="margin-inline-start: 10px">t</div>', %w[marginLeft]))
+      .to eq(['10px'])
+  end
+
+  it 'expands the flow-relative scroll shorthands' do
+    # These had no expander, yet were excluded from the unknowable-shorthand gate on the claim that
+    # every logical shorthand was expanded — so `scroll-margin-top` confidently reported `0px`.
+    expect(computed('#t { scroll-margin-block: 10px; scroll-padding-inline: 4px }', '<div id="t">t</div>',
+                    %w[scrollMarginTop scrollMarginBottom scrollPaddingLeft]))
+      .to eq(['10px', '10px', '4px'])
+  end
+
+  it 'agrees between a physical size and its flow-relative twin' do
+    # Chrome computes a `min-*` size as `0px`, not mdn's specified `auto` — and the two names are
+    # the same declaration, which is the premise of the whole merge, so they must not disagree.
+    expect(computed('', '<div id="t">t</div>', %w[minWidth minInlineSize maxWidth minHeight]))
+      .to eq(['0px', '0px', 'none', '0px'])
+  end
 end

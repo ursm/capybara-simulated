@@ -160,4 +160,13 @@ RSpec.describe 'shorthand expansion' do
   it 'drops a transform a browser would reject' do
     expect(both('transform: matrix(1,2,3)', %w[transform])).to eq(['none'])
   end
+
+  it 'keeps a shorthand carrying a substitution and resolves it per element' do
+    # `transition: <prop> var(--dur) <easing>` is a standard themed-CSS idiom. The parser can't
+    # decompose it — a substitution resolves per ELEMENT, later — and dropping the declaration whole
+    # made the element look like it had no transition at all. Chrome resolves it; so do we, at the
+    # read, where the custom property is in scope.
+    expect(both('transition: all var(--d, 2s) ease', %w[transitionDuration transitionProperty transition]))
+      .to eq(['2s', 'all', '2s'])
+  end
 end
