@@ -113,4 +113,51 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['1s, 2s'])
     expect(both('transition: a 1s, b 2s, c 3s', %w[transitionDuration])).to eq(['1s, 2s, 3s'])
   end
+
+  it 'handles the elliptical border-radius form' do
+    # `border-radius: 50% / 20%` gives every corner a horizontal AND a vertical radius, and each
+    # corner longhand carries both. Chrome measured; the plain 4-value expander wrote a literal `/`
+    # into a declaration.
+    expect(both('border-radius: 50% / 20%', %w[borderTopLeftRadius borderRadius]))
+      .to eq(['50% 20%', '50% / 20%'])
+    expect(both('border-radius: 10px 20px / 5px 8px', %w[borderTopLeftRadius borderRadius]))
+      .to eq(['10px 5px', '10px 20px / 5px 8px'])
+    expect(both('border-radius: 4px', %w[borderTopLeftRadius borderRadius])).to eq(['4px', '4px'])
+  end
+
+  it 'round-trips a newly registered shorthand through the style attribute' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const mk = () => { const d = document.createElement('div'); document.body.appendChild(d); return d; };
+        const a = mk(); a.style.transition = 'opacity 1s';
+        const b = mk(); b.style.animation = 'spin 2s linear infinite';
+        const c = mk(); c.style.borderRadius = '50% / 20%';
+        const d = mk(); d.style.gap = '10px'; d.style.color = 'red';
+        return [a, b, c, d].map(e => e.getAttribute('style'));
+      })()
+    JS
+    # The block serializer re-serializes on EVERY write, so a shorthand missing from its list has
+    # the attribute exploded into longhands the first time any property is set. All Chrome measured.
+    expect(got).to eq([
+      'transition: opacity 1s;',
+      'animation: 2s linear 0s infinite normal none running spin;',
+      'border-radius: 50% / 20%;',
+      'gap: 10px; color: red;'
+    ])
+  end
+
+  it 'reports the shorthand a plain element has' do
+    got = both('color: black', %w[animation transition flexFlow textEmphasis placeItems columns columnRule borderRadius gap])
+    # All Chrome measured. `animation` is `none` and `transition` is `all` — the shorthand's own
+    # "nothing set" token, not whichever component happens to be listed first.
+    expect(got).to eq(['none', 'all', 'row nowrap', 'none rgb(0, 0, 0)', 'normal', 'auto',
+                       '3px rgb(0, 0, 0)', '0px', 'normal'])
+  end
+
+  it 'drops a transform a browser would reject' do
+    expect(both('transform: matrix(1,2,3)', %w[transform])).to eq(['none'])
+  end
 end

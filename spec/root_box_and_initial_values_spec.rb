@@ -643,7 +643,7 @@ RSpec.describe 'root box + computed initial values' do
     expect(got).to eq(['none', 'none'])
   end
 
-  it 'computes a line width of zero while its style is none' do
+  it 'resolves a line width keyword regardless of its style' do
     s = session(<<~HTML)
       <!DOCTYPE html>
       <html><head><style>#o { outline-style: solid }</style></head>
@@ -655,9 +655,10 @@ RSpec.describe 'root box + computed initial values' do
         return [g('plain').outlineWidth, g('plain').columnRuleWidth, g('o').outlineWidth];
       })()
     JS
-    # CSS UI: a line's used width is 0 while its style is `none`, which is the initial. mdn's
-    # `medium` reported verbatim is a keyword `parseFloat` turns into NaN.
-    expect(got).to eq(['0px', '0px', '3px'])
+    # Chrome measured across every combination: unlike a BORDER width, an outline / column-rule
+    # width is unaffected by its style — `medium` resolves to `3px` whether the style is `none` or
+    # `solid`. mdn's `medium` reported verbatim was a keyword `parseFloat` turns into NaN.
+    expect(got).to eq(['3px', '3px', '3px'])
   end
 
   it 'reports the monospace family the UA sheet gives code and pre' do
@@ -831,9 +832,11 @@ RSpec.describe 'root box + computed initial values' do
         return [g('o').outlineWidth, g('w').outlineWidth];
       })()
     JS
-    # Chrome: `3px` (the `medium` keyword resolved) and `0px` (the style is still `none`). The rule
-    # has to see the CASCADED value, not only fire where nothing is declared.
-    expect(got).to eq(['3px', '0px'])
+    # Chrome measured across every combination: an outline width is a plain keyword-to-px
+    # resolution, and unlike a BORDER width its style has no bearing on it — a declared `2px` stays
+    # `2px` whether the style is `none` or `solid`. (An earlier version of this example asserted
+    # `0px` on a review claim I did not measure.)
+    expect(got).to eq(['3px', '2px'])
   end
 
   it 'serializes text-decoration from its longhands' do

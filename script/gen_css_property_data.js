@@ -113,6 +113,7 @@ const MDN_INITIAL_FIXES = {
   'text-align':    'start',                   // mdn: "startOrNamelessValueIfLTRRightIfRTL"
   'color-interpolation-filters': 'linearRGB', // a real value the prose filter's /[A-Z]/ catches
   'stroke': 'none',                           // mdn lists SUB-PROPERTY NAMES here, not a value
+  'justify-items': 'normal',                  // mdn says `legacy`; Chrome computes `normal`
 };
 const BARE_NUMBER_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 // Does the property take a LENGTH and nothing bare-numeric? Then its `0` initial computes to
