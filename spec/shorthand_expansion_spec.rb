@@ -41,6 +41,25 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['opacity, transform', '1s, 2s', '0.5s, 0s'])
   end
 
+  it 'expands transition-behavior, the component transition-property would otherwise swallow' do
+    # `transition: display .3s allow-discrete` is the popover / dialog idiom. `transition-property`
+    # is a catch-all matcher, so `allow-discrete` matched nothing and the whole declaration was
+    # dropped — leaving a confident `transition-duration: 0s` where the page plainly set 0.3s.
+    expect(both('transition: opacity 0.3s allow-discrete',
+                %w[transition transitionProperty transitionDuration transitionBehavior]))
+      .to eq(['opacity 0.3s allow-discrete', 'opacity', '0.3s', 'allow-discrete'])
+    expect(both('transition: display 0.3s allow-discrete, opacity 1s',
+                %w[transition transitionBehavior]))
+      .to eq(['display 0.3s allow-discrete, opacity 1s', 'allow-discrete, normal'])
+    # `normal` is the BEHAVIOR's initial, not a property named `normal`: everything is at its
+    # initial, so the shorthand reports its own "nothing set" token.
+    expect(both('transition: normal', %w[transition transitionProperty transitionBehavior]))
+      .to eq(['all', 'all', 'normal'])
+    # The behavior serializes LAST, whichever order it was written in.
+    expect(both('transition: allow-discrete 1s opacity linear 2s', %w[transition]))
+      .to eq(['opacity 1s linear 2s allow-discrete'])
+  end
+
   it 'expands animation, whose name is whatever is left over' do
     expect(both('animation: spin 2s', %w[animationName animationDuration animationIterationCount]))
       .to eq(['spin', '2s', '1'])
@@ -187,5 +206,24 @@ RSpec.describe 'shorthand expansion' do
     # style attribute keeps only what isn't at its initial. One `serialize` feeds both paths.
     expect(got).to eq(['flex-flow: row; color: red;', 'text-emphasis: red; color: red;',
                        'row nowrap', 'none rgb(255, 0, 0)'])
+  end
+
+  it 'serializes a specified animation in full and its computed value tersely' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div');
+        d.setAttribute('style', 'animation: spin 2s linear infinite');
+        document.body.appendChild(d);
+        return [getComputedStyle(d).animation, d.style.animation];
+      })()
+    JS
+    # `animation`'s polarity is the REVERSE of `flex-flow`'s: the specified surface (`.style` and
+    # the style attribute alike — see the round-trip case above) lists every component, and the
+    # computed value omits the initials.
+    expect(got).to eq(['2s linear infinite spin',
+                       '2s linear 0s infinite normal none running spin'])
   end
 end

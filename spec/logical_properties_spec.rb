@@ -187,5 +187,29 @@ RSpec.describe 'logical properties' do
     expect(computed('#f { display: flex }',
                     '<div id="f"><div id="t" style="float:left"></div></div>', %w[minWidth]))
       .to eq(['auto'])
+    # An EXPLICIT `min-width: auto` — what flex-reset CSS writes — resolves exactly the same way as
+    # the initial one. Resolving only the initial answered `auto` on a plain block.
+    expect(computed('', '<div id="t" style="min-width:auto; min-height:auto"></div>',
+                    %w[minWidth minHeight])).to eq(['0px', '0px'])
+    expect(computed('#f { display: flex }',
+                    '<div id="f"><div id="t" style="min-width:auto"></div></div>', %w[minWidth]))
+      .to eq(['auto'])
+  end
+
+  it 'agrees between a physical inset and its flow-relative twin' do
+    # `inset-block: 3px` reported `3px` for `insetBlockStart` and nothing for `top`, though they are
+    # the same declaration. A DEFINITE inset is reported as written in every case Chrome was
+    # measured in — static, relative, absolute, and over-constrained.
+    expect(computed('', '<div id="t" style="position:absolute; inset-block: 3px"></div>',
+                    %w[top bottom insetBlockStart])).to eq(['3px', '3px', '3px'])
+    expect(computed('', '<div id="t" style="position:absolute; inset: 5px"></div>',
+                    %w[top left])).to eq(['5px', '5px'])
+    expect(computed('', '<div id="t" style="position:absolute; inset-inline-start: 7px"></div>',
+                    %w[left insetInlineStart])).to eq(['7px', '7px'])
+    # `auto` and a percentage stay layout-dependent — their used value is the box's static position
+    # / a share of the containing block — so the resolver declines them rather than reporting a
+    # length it would have to guess at.
+    expect(computed('#t { position: absolute; top: auto; left: 10% }', '<div id="t"></div>',
+                    %w[top left])).to eq(['', ''])
   end
 end

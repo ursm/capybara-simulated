@@ -46,6 +46,16 @@ RSpec.describe 'computed value serialization' do
     # A genuine 3D component escalates the whole thing to the 4x4 form.
     expect(computed('transform: translateZ(5px)', %w[transform]))
       .to eq(['matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 5, 1)'])
+    # `translate3d` — the GPU-compositing idiom — is composed, not reported as written. A ZERO Z
+    # doesn't escalate: `translateZ(0)` is a plain 2D matrix in Chrome, so the compositing hint
+    # stays invisible to page code parsing the matrix back out.
+    expect(computed('transform: translate3d(10px, 20px, 0)', %w[transform])).to eq(['matrix(1, 0, 0, 1, 10, 20)'])
+    expect(computed('transform: translateZ(0)', %w[transform])).to eq(['matrix(1, 0, 0, 1, 0, 0)'])
+    expect(computed('transform: translate3d(10px, 20px, 5px)', %w[transform]))
+      .to eq(['matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 20, 5, 1)'])
+    # A percentage is no valid Z translation — there is nothing to resolve it against — so the
+    # whole declaration is invalid rather than silently resolving against the height.
+    expect(computed('transform: translateZ(50%); height: 40px', %w[transform])).to eq(['none'])
   end
 
   it 'reports a shadow colour-first with every omitted length filled in' do
@@ -56,6 +66,14 @@ RSpec.describe 'computed value serialization' do
       .to eq(['rgb(255, 0, 0) 1px 2px 0px 0px, rgb(0, 0, 255) 3px 4px 0px 0px'])
     # `text-shadow` has no spread, so three lengths.
     expect(computed('text-shadow: 1px 2px #ABCDEF', %w[textShadow])).to eq(['rgb(171, 205, 239) 1px 2px 0px'])
+    # Every length is reported as its USED value — the colour-first form exists to be parsed, and an
+    # em / viewport unit left in it defeats that. At the 1024x768 viewport `2vw` is `20.48px`.
+    expect(computed('font-size: 10px; box-shadow: 0 0 2em red', %w[boxShadow]))
+      .to eq(['rgb(255, 0, 0) 0px 0px 20px 0px'])
+    expect(computed('box-shadow: 0 0 2vw red', %w[boxShadow])).to eq(['rgb(255, 0, 0) 0px 0px 20.48px 0px'])
+    # There is no such thing as a percentage shadow length, so the declaration is invalid whole and
+    # the property falls back to its initial.
+    expect(computed('box-shadow: 0 0 2% red', %w[boxShadow])).to eq(['none'])
   end
 
   it 'absolutizes a url() however the author cased it' do
