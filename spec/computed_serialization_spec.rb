@@ -72,8 +72,11 @@ RSpec.describe 'computed value serialization' do
       .to eq(['rgb(255, 0, 0) 0px 0px 20px 0px'])
     expect(computed('box-shadow: 0 0 2vw red', %w[boxShadow])).to eq(['rgb(255, 0, 0) 0px 0px 20.48px 0px'])
     # There is no such thing as a percentage shadow length, so the declaration is invalid whole and
-    # the property falls back to its initial.
+    # the property falls back to its initial. Only a ZERO may omit its unit, so a bare `4` is
+    # invalid the same way — reporting it as `4px` was inventing a unit the author never wrote.
     expect(computed('box-shadow: 0 0 2% red', %w[boxShadow])).to eq(['none'])
+    expect(computed('box-shadow: 0 0 4 red', %w[boxShadow])).to eq(['none'])
+    expect(computed('box-shadow: 0 0 4foo red', %w[boxShadow])).to eq(['none'])
   end
 
   it 'absolutizes a url() however the author cased it' do

@@ -208,6 +208,67 @@ RSpec.describe 'shorthand expansion' do
                        'row nowrap', 'none rgb(255, 0, 0)'])
   end
 
+  it 'keeps a shorthand whose whole value is a substitution' do
+    # `animation: var(--spin)` is the themed-CSS idiom. Every one of these groups ends in a
+    # catch-all component (`animation-name`, `column-rule-color`), which swallowed the reference
+    # whole: the animation NAME came back as `spin 2s linear infinite` and the duration as `0s`.
+    # Failing the structural expansion keeps the shorthand, which the read re-expands per element.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html><head><style>
+          :root { --spin: spin 2s linear infinite; --t: opacity 1s }
+          @keyframes spin { from {} to {} }
+        </style></head>
+        <body><div id="a" style="animation: var(--spin)"></div>
+          <div id="t" style="transition: var(--t)"></div></body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to eq(['spin', '2s', '2s linear infinite spin', 'opacity', '1s'])
+      (() => {
+        const a = getComputedStyle(document.getElementById('a'));
+        const t = getComputedStyle(document.getElementById('t'));
+        return [a.animationName, a.animationDuration, a.animation, t.transitionProperty, t.transitionDuration];
+      })()
+    JS
+  end
+
+  it 'rejects a layer list with an empty layer' do
+    # A trailing comma is a malformed list; a browser drops the whole declaration rather than
+    # reading a second, all-initials layer out of it.
+    expect(both('transition: opacity 1s,', %w[transition transitionProperty transitionDuration]))
+      .to eq(['all', 'all', '0s'])
+    expect(both('animation: spin 1s,', %w[animation animationName])).to eq(['none', 'none'])
+  end
+
+  it 'reconstructs the flow-relative scroll shorthands when the block is rewritten' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html>
+      <html><body>
+        <div id="a" style="scroll-margin-block: 1px 3px"></div>
+        <div id="b" style="scroll-padding-inline: 4px"></div>
+        <div id="c" style="scroll-margin-block-start:1px; scroll-margin-top:2px; scroll-margin-block-start:3px"></div>
+      </body></html>
+    HTML
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = id => { const e = document.getElementById(id); e.style.color = 'red';
+                          return e.getAttribute('style'); };
+        return ['a', 'b', 'c'].map(w);
+      })()
+    JS
+    # A shorthand missing from the block serializer's list gets exploded into longhands the first
+    # time anything is written; and `group` is what lets the third case perform the CSSOM
+    # logical-property-group move (the re-set `-block-start` re-appends after the physical side).
+    expect(got).to eq(['scroll-margin-block: 1px 3px; color: red;',
+                       'scroll-padding-inline: 4px; color: red;',
+                       'scroll-margin-top: 2px; scroll-margin-block-start: 3px; color: red;'])
+  end
+
   it 'serializes a specified animation in full and its computed value tersely' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = Capybara::Session.new(:simulated, app)
