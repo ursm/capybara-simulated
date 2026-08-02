@@ -169,4 +169,23 @@ RSpec.describe 'shorthand expansion' do
     expect(both('transition: all var(--d, 2s) ease', %w[transitionDuration transitionProperty transition]))
       .to eq(['2s', 'all', '2s'])
   end
+
+  it 'serializes a block more tersely than the computed value' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const mk = (css) => { const d = document.createElement('div'); d.setAttribute('style', css);
+                              document.body.appendChild(d); d.style.color = 'red'; return d; };
+        const ff = mk('flex-flow: row nowrap'), te = mk('text-emphasis: red');
+        return [ff.getAttribute('style'), te.getAttribute('style'),
+                getComputedStyle(ff).flexFlow, getComputedStyle(te).textEmphasis];
+      })()
+    JS
+    # Chrome uses DIFFERENT rules for the two: a computed `flex-flow` is `row nowrap`, but the
+    # style attribute keeps only what isn't at its initial. One `serialize` feeds both paths.
+    expect(got).to eq(['flex-flow: row; color: red;', 'text-emphasis: red; color: red;',
+                       'row nowrap', 'none rgb(255, 0, 0)'])
+  end
 end

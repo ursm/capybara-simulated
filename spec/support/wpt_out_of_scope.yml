@@ -32986,18 +32986,6 @@ css/cssom/getComputedStyle-resolved-min-size-auto.html:
   reason: resolved min-size:auto is a used-value that requires layout; layout deliberately
     unmodeled (rule 1).
 - name: Resolved value of min-width & min-height 'auto' keyword behaves as expected
-    on element with id="flex-item-column"
-  reason: resolved min-size:auto is a used-value that requires layout; layout deliberately
-    unmodeled (rule 1).
-- name: Resolved value of min-width & min-height 'auto' keyword behaves as expected
-    on element with id="flex-item-row"
-  reason: resolved min-size:auto is a used-value that requires layout; layout deliberately
-    unmodeled (rule 1).
-- name: Resolved value of min-width & min-height 'auto' keyword behaves as expected
-    on element with id="grid-item"
-  reason: resolved min-size:auto is a used-value that requires layout; layout deliberately
-    unmodeled (rule 1).
-- name: Resolved value of min-width & min-height 'auto' keyword behaves as expected
     on element with id="inline-box"
   reason: resolved min-size:auto is a used-value that requires layout; layout deliberately
     unmodeled (rule 1).

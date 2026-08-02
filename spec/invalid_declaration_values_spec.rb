@@ -73,4 +73,10 @@ RSpec.describe 'invalid declaration values' do
     expect(s.evaluate_script("[CSS.supports('-webkit-nope', 'x'), CSS.supports('-webkit-font-smoothing', 'antialiased')]"))
       .to eq([false, true])
   end
+
+  it 'keeps a shipped value mdn has no entry for yet' do
+    # Customizable Select's `appearance: base-select` is shipped and absent from mdn's grammar data,
+    # so the keyword table alone would drop it.
+    expect(after_setting("d.style.appearance = 'base-select';")).to eq('appearance: base-select;')
+  end
 end

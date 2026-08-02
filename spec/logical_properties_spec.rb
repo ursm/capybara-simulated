@@ -158,4 +158,26 @@ RSpec.describe 'logical properties' do
     expect(computed('', '<div id="t">t</div>', %w[minWidth minInlineSize maxWidth minHeight]))
       .to eq(['0px', '0px', 'none', '0px'])
   end
+
+  it 'keeps a presentational hint below a layered author rule' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html><head><style>@layer base { #t { inline-size: 50px } }</style></head>
+        <body><img id="t" width="100"></body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # A hint sits BELOW every author rule. Leaving its layer rank unset read as "unlayered", which
+    # ranks HIGHEST, so the `width` attribute beat the `@layer` rule once the logical/physical merge
+    # started comparing the two records. Chrome: 50px.
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('t')).width")).to eq('50px')
+  end
+
+  it 'leaves a flex item min-size at auto' do
+    expect(computed('#f { display: flex }', '<div id="f"><div id="t"></div></div>', %w[minWidth]))
+      .to eq(['auto'])
+    expect(computed('', '<div id="t"></div>', %w[minWidth])).to eq(['0px'])
+  end
 end

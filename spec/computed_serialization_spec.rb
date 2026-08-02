@@ -124,4 +124,24 @@ RSpec.describe 'computed value serialization' do
       })()
     JS
   end
+
+  it 'reads a scale percentage as a fraction' do
+    # `parseFloat` strips the `%` and hands page code a 100x factor — and `transform` is exactly the
+    # value Floating UI and Popper parse to recover a scale.
+    expect(computed('transform: scale(50%)', %w[transform])).to eq(['matrix(0.5, 0, 0, 0.5, 0, 0)'])
+    expect(computed('transform: scale(1.5, 50%)', %w[transform])).to eq(['matrix(1.5, 0, 0, 0.5, 0, 0)'])
+  end
+
+  it 'drops a transform whose angle has no unit' do
+    # `rotate(1)` is not one degree — only a zero may omit its unit, so the declaration is invalid
+    # and Chrome reports `none`.
+    expect(computed('transform: rotate(1)', %w[transform])).to eq(['none'])
+    expect(computed('transform: rotate(0)', %w[transform])).to eq(['matrix(1, 0, 0, 1, 0, 0)'])
+  end
+
+  it 'resolves a shadow length to the used px' do
+    # The colour-first form exists to be parsed; a font-relative unit left in it defeats that.
+    expect(computed('font-size: 16px; box-shadow: 0 0 1em red', %w[boxShadow]))
+      .to eq(['rgb(255, 0, 0) 0px 0px 16px 0px'])
+  end
 end
