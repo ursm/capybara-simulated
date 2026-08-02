@@ -144,4 +144,35 @@ RSpec.describe 'computed value serialization' do
     expect(computed('font-size: 16px; box-shadow: 0 0 1em red', %w[boxShadow]))
       .to eq(['rgb(255, 0, 0) 0px 0px 16px 0px'])
   end
+
+  it 'keeps a function whose arguments contain spaces intact' do
+    # A corner radius can be `calc(10px + 5px)`. Splitting each corner on whitespace to recover the
+    # horizontal / vertical radii tore that into three tokens and wrote `border-radius: calc(10px /
+    # +;` back into the style attribute — the block serializer runs on every write.
+    expect(computed('border-radius: calc(10px + 5px)', %w[borderTopLeftRadius borderRadius]))
+      .to eq(['calc(10px + 5px)', 'calc(10px + 5px)'])
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="w" style="border-radius: calc(10px + 5px)"></div></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # Chrome writes `calc(15px)` — it EVALUATES calc, which we don't; the contract asserted here is
+    # that an unrelated write leaves the declaration intact rather than corrupting it.
+    expect(s.evaluate_script("(() => { const w = document.getElementById('w'); w.style.color = 'red'; return w.getAttribute('style'); })()"))
+      .to eq('border-radius: calc(10px + 5px); color: red;')
+  end
+
+  it 'accepts an explicit plus sign' do
+    # CSS numbers, angles and times may carry one. Rejecting it made a transform report `none` —
+    # the confident wrong answer Floating UI reads as "this ancestor is a containing block".
+    expect(computed('transform: rotate(+45deg)', %w[transform]))
+      .to eq(['matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)'])
+    expect(computed('transform: scale(+2)', %w[transform])).to eq(['matrix(2, 0, 0, 2, 0, 0)'])
+    expect(computed('transform: translateX(+10px)', %w[transform])).to eq(['matrix(1, 0, 0, 1, 10, 0)'])
+    # The sign is dropped in the reported value, as a browser does.
+    expect(computed('transition: opacity +2s', %w[transitionDuration])).to eq(['2s'])
+  end
+
+  it 'leaves a colour word inside a custom-property name alone' do
+    # `--tan-100` is an identifier; `tan` in it is no more a colour than `gold` in a filename.
+    expect(computed('background: var(--tan-100)', %w[backgroundImage])).to eq(['none'])
+  end
 end

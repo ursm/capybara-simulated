@@ -179,5 +179,13 @@ RSpec.describe 'logical properties' do
     expect(computed('#f { display: flex }', '<div id="f"><div id="t"></div></div>', %w[minWidth]))
       .to eq(['auto'])
     expect(computed('', '<div id="t"></div>', %w[minWidth])).to eq(['0px'])
+    # An ABSOLUTELY POSITIONED child is out of flow — not a flex item — and computes `0px`. A float
+    # still is one, since the container blockifies it. Both Chrome measured.
+    expect(computed('#f { display: flex }',
+                    '<div id="f"><div id="t" style="position:absolute"></div></div>', %w[minWidth]))
+      .to eq(['0px'])
+    expect(computed('#f { display: flex }',
+                    '<div id="f"><div id="t" style="float:left"></div></div>', %w[minWidth]))
+      .to eq(['auto'])
   end
 end
