@@ -63,4 +63,14 @@ RSpec.describe 'invalid declaration values' do
     expect(after_setting("d.style.setProperty('-webkit-font-smoothing', 'antialiased');"))
       .to eq('-webkit-font-smoothing: antialiased;')
   end
+
+  it 'does not treat a vendor prefix as a blank cheque' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # An unknown `-webkit-…` is not a property — Chrome says false — while the handful of prefixed
+    # names browsers DO implement and mdn omits are listed explicitly.
+    expect(s.evaluate_script("[CSS.supports('-webkit-nope', 'x'), CSS.supports('-webkit-font-smoothing', 'antialiased')]"))
+      .to eq([false, true])
+  end
 end

@@ -102,4 +102,36 @@ RSpec.describe 'logical properties' do
     expect(computed('#t { height: 50px; width: 20px }', '<div id="t">t</div>', %w[blockSize inlineSize]))
       .to eq(['50px', '20px'])
   end
+
+  it 'follows the dir ATTRIBUTE, not just a CSS declaration' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html dir="rtl"><head><style>#t { padding-inline-start: 7px }</style></head>
+        <body><div id="t">t</div></body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # `<html dir="rtl">` is how essentially every RTL app sets direction. The computed `direction`
+    # comes from the HTML directionality algorithm, so reading only the CSS side put every
+    # `*-inline-start` on the mirrored edge — in the layout too.
+    expect(s.evaluate_script(<<~JS)).to eq(['rtl', '7px', '0px'])
+      (() => { const c = getComputedStyle(document.getElementById('t'));
+        return [c.direction, c.paddingRight, c.paddingLeft]; })()
+    JS
+  end
+
+  it 'breaks a physical/logical tie by declaration order within the block' do
+    # Every declaration of a rule shares one source, so neither specificity nor source order
+    # separates these — the winner is simply the one written last, both in a rule and inline.
+    expect(computed('#t { margin-block-start: 9px; margin-top: 1px }', '<div id="t">t</div>', %w[marginTop]))
+      .to eq(['1px'])
+    expect(computed('#t { margin-top: 1px; margin-block-start: 9px }', '<div id="t">t</div>', %w[marginTop]))
+      .to eq(['9px'])
+    expect(computed('', '<div id="t" style="margin-top:1px; margin-block-start:9px">t</div>', %w[marginTop]))
+      .to eq(['9px'])
+    expect(computed('', '<div id="t" style="margin-block-start:9px; margin-top:1px">t</div>', %w[marginTop]))
+      .to eq(['1px'])
+  end
 end

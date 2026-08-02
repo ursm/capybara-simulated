@@ -94,4 +94,23 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['safe center', 'safe center'])
     expect(both('place-items: first baseline', %w[alignItems justifyItems])).to eq(['baseline', 'baseline'])
   end
+
+  it 'fills every grid slot from a single line name' do
+    # Each end mirrors the RESOLVED start, not the (absent) input slot.
+    expect(both('grid-area: myarea', %w[gridRowStart gridRowEnd gridColumnStart gridColumnEnd]))
+      .to eq(%w[myarea myarea myarea myarea])
+  end
+
+  it 'groups alignment modifiers before splitting the pair' do
+    expect(both('place-content: safe center safe start', %w[alignContent justifyContent]))
+      .to eq(['safe center', 'safe start'])
+  end
+
+  it 'cycles a shorter layer list across the layers' do
+    # CSS repeats a shorter longhand list cyclically: with two durations and four properties,
+    # layer 3 takes duration[1].
+    expect(both('transition-property: a, b, c, d; transition-duration: 1s, 2s', %w[transitionDuration]))
+      .to eq(['1s, 2s'])
+    expect(both('transition: a 1s, b 2s, c 3s', %w[transitionDuration])).to eq(['1s, 2s, 3s'])
+  end
 end
