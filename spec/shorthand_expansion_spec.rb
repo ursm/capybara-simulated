@@ -18,7 +18,7 @@ RSpec.describe 'shorthand expansion' do
   # constant: a constant assigned inside a `describe` block lands at TOP level, where a second spec
   # file using the same name collides with it.
   def vars
-    '--m: 1px 2px; --x: 5px; --b: 3px dashed blue; --rule: 2px solid red'
+    '--m: 1px 2px; --x: 5px; --b: 3px dashed blue; --rule: 2px solid red; --m2: .5px 2.0px; --plus: +20px; --one: 1.0'
   end
 
   # Both origins run one expander, so each case is asserted from a RULE and from a `style=`
@@ -344,6 +344,12 @@ RSpec.describe 'shorthand expansion' do
   def substitution_equivalents
     [
       ['margin',            '1px 2px 3px 4px'],
+      # Deliberately NON-canonical: a substitution's result has to be canonicalised the same way a
+      # literal is (`.5px` → `0.5px`, `+20px` → `20px`), and a table of already-canonical values
+      # cannot catch that.
+      ['margin',            '.5px 2.0px'],
+      ['padding',           '+20px .40px'],
+      ['flex',              '1.0 2.50 30.0px'],
       ['padding',           '1px 2px'],
       ['inset',             '1px 2px 3px 4px'],
       ['border',            '3px dashed blue'],
@@ -430,18 +436,13 @@ RSpec.describe 'shorthand expansion' do
       })()
     JS
     # Overwriting one slot leaves the other three pending on a shorthand that can no longer be
-    # reconstructed, and the block serializes exactly as Chrome writes it (measured) — a value-less
-    # declaration each.
-    #
-    # KNOWN GAP, and a deliberate one: that text is not re-parseable, and our inline store IS the
-    # attribute text (which is what keeps `getAttribute('style')` canonical and MutationObserver's
-    # oldValue honest), so re-reading it drops the three — `margin-right` falls back to `0px` where
-    # Chrome, whose block lives in memory, still computes `2px`. Chrome's OWN re-parse of that text
-    # agrees with us (`margin-top: 7px;`, `margin-right: 0px` — measured), so nothing can depend on
-    # the difference; closing it would mean giving up the text-backed store.
+    # reconstructed. Chrome writes a value-less `margin-right: ;` for each; we drop them, because our
+    # inline store IS the attribute text and that text is not re-parseable — emitting it left a
+    # non-empty style attribute whose own declaration block read back empty, a state no browser
+    # produces. Chrome's OWN re-parse agrees with what we write (`margin-top: 7px;`, and
+    # `margin-right` back at `0px` — measured), so nothing can depend on the difference.
     expect(got).to eq(['var(--m)', '', 'margin: var(--m);', 4,
-                       'margin-top: 7px; margin-right: ; margin-bottom: ; margin-left: ;',
-                       'margin-top: 7px;', '', ''])
+                       'margin-top: 7px;', 'margin-top: 7px;', '', ''])
   end
 
   it 'never lets the pending marker escape to page script' do
@@ -525,6 +526,28 @@ RSpec.describe 'shorthand expansion' do
                 getComputedStyle(document.getElementById('ov')).overflow];
       })()
     JS
+  end
+
+  it 'canonicalises what a substitution produces, exactly as a literal is canonicalised' do
+    # The sweep below compares the two FORMS against each other, so it cannot catch this on its own:
+    # these are Chrome's own values. What a `var()` resolves to has to go through the same
+    # canonicalisation the cascade applies to a literal — `.5px` → `0.5px`, `+20px` → `20px`,
+    # `1.0` → `1`. Skipping it also made `+20px` fail the px-reportable regex outright, which
+    # dropped the read back to the raw author text (`"var(--a)"`) for page script to see.
+    expect(both('margin: var(--m2)', %w[marginTop marginRight])).to eq(['0.5px', '2px'])
+    expect(both('margin: .5px 2.0px', %w[marginTop marginRight])).to eq(['0.5px', '2px'])
+    expect(both('margin-left: var(--plus)', %w[marginLeft])).to eq(['20px'])
+    expect(both('flex-grow: var(--one)', %w[flexGrow])).to eq(['1'])
+  end
+
+  it 'sets the axis-level name a two-sided logical border shorthand covers' do
+    # `border-block-width` is itself a shorthand over the two block sides, and Chrome reports `2px`
+    # for it (measured). Emitting only the per-side longhands left the axis names undeclared, so the
+    # resolved-value read answered with their initial — `medium` / `none`, a confidently wrong value
+    # where the honest answer was already available.
+    expect(both('border-block: 2px solid red',
+                %w[borderBlockWidth borderBlockStyle borderBlockStartWidth borderBlockStartStyle]))
+      .to eq(['2px', 'solid', '2px', 'solid'])
   end
 
   it 'serializes a specified animation in full and its computed value tersely' do
