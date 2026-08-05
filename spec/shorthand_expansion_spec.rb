@@ -14,15 +14,19 @@ RSpec.describe 'shorthand expansion' do
   end
 
   # The custom properties the substitution cases below reference. They live on `:root` so both
-  # origins see the same definitions, and `--bogus` is deliberately never defined.
-  VARS = '--m: 1px 2px; --x: 5px; --b: 3px dashed blue; --rule: 2px solid red'
+  # origins see the same definitions, and `--bogus` is deliberately never defined. A method, not a
+  # constant: a constant assigned inside a `describe` block lands at TOP level, where a second spec
+  # file using the same name collides with it.
+  def vars
+    '--m: 1px 2px; --x: 5px; --b: 3px dashed blue; --rule: 2px solid red'
+  end
 
   # Both origins run one expander, so each case is asserted from a RULE and from a `style=`
   # attribute at once — the asymmetry between them surfaced as a different bug in five rounds.
   def both(decls, props)
     s = session(<<~HTML)
       <!DOCTYPE html>
-      <html><head><style>:root { #{VARS} } #r { #{decls} }</style></head>
+      <html><head><style>:root { #{vars} } #r { #{decls} }</style></head>
       <body><div id="r">r</div><div id="i" style="#{decls}">i</div></body></html>
     HTML
     got = s.evaluate_script(<<~JS)
@@ -337,34 +341,36 @@ RSpec.describe 'shorthand expansion' do
   # it is for: a shorthand's literal value and the same value behind a `var()` must compute
   # identically — every property, not just the ones this file happened to think of. A slot the table
   # forgets shows up here as a divergent longhand.
-  SUBSTITUTION_EQUIVALENTS = [
-    ['margin',            '1px 2px 3px 4px'],
-    ['padding',           '1px 2px'],
-    ['inset',             '1px 2px 3px 4px'],
-    ['border',            '3px dashed blue'],
-    ['border-inline-start', '2px dotted green'],
-    ['flex',              '2 1 30px'],
-    ['background',        'url(a.png) no-repeat center / cover'],
-    ['overflow',          'hidden scroll'],
-    ['text-decoration',   'underline dotted blue'],
-    ['font',              'italic bold 13px/1.5 serif'],
-    ['transition',        'opacity 1s ease-in 0.5s'],
-    ['animation',         'spin 2s linear infinite'],
-    ['outline',           '2px solid red'],
-    ['list-style',        'square inside none'],
-    ['grid-area',         '1 / 2 / 3 / 4'],
-    ['columns',           '3 40px'],
-    ['column-rule',       '2px solid red'],
-    ['place-items',       'center start'],
-    ['border-radius',     '1px 2px 3px 4px'],
-    ['gap',               '1px 2px'],
-    ['flex-flow',         'column wrap'],
-    ['scroll-margin',     '1px 2px 3px 4px'],
-    ['text-emphasis',     'filled dot red']
-  ]
+  def substitution_equivalents
+    [
+      ['margin',            '1px 2px 3px 4px'],
+      ['padding',           '1px 2px'],
+      ['inset',             '1px 2px 3px 4px'],
+      ['border',            '3px dashed blue'],
+      ['border-inline-start', '2px dotted green'],
+      ['flex',              '2 1 30px'],
+      ['background',        'url(a.png) no-repeat center / cover'],
+      ['overflow',          'hidden scroll'],
+      ['text-decoration',   'underline dotted blue'],
+      ['font',              'italic bold 13px/1.5 serif'],
+      ['transition',        'opacity 1s ease-in 0.5s'],
+      ['animation',         'spin 2s linear infinite'],
+      ['outline',           '2px solid red'],
+      ['list-style',        'square inside none'],
+      ['grid-area',         '1 / 2 / 3 / 4'],
+      ['columns',           '3 40px'],
+      ['column-rule',       '2px solid red'],
+      ['place-items',       'center start'],
+      ['border-radius',     '1px 2px 3px 4px'],
+      ['gap',               '1px 2px'],
+      ['flex-flow',         'column wrap'],
+      ['scroll-margin',     '1px 2px 3px 4px'],
+      ['text-emphasis',     'filled dot red']
+    ]
+  end
 
   it 'computes a shorthand the same whether its value is literal or behind a substitution' do
-    SUBSTITUTION_EQUIVALENTS.each do |prop, value|
+    substitution_equivalents.each do |prop, value|
       s = session(<<~HTML)
         <!DOCTYPE html>
         <html><head><style>:root { --v: #{value} } @keyframes spin { from {} to {} }</style></head>
@@ -436,6 +442,89 @@ RSpec.describe 'shorthand expansion' do
     expect(got).to eq(['var(--m)', '', 'margin: var(--m);', 4,
                        'margin-top: 7px; margin-right: ; margin-bottom: ; margin-left: ;',
                        'margin-top: 7px;', '', ''])
+  end
+
+  it 'never lets the pending marker escape to page script' do
+    # A pending slot is an INTERNAL stand-in. `propValue` guarded the ordinary route but returned
+    # `allGet`'s answer straight, so a block carrying `all` handed the raw marker out — and page
+    # code that copies a value forward (`b.style.marginTop = a.style.marginTop`) would have written
+    # a control character into a style attribute. Chrome measured: '' for the slot, the original
+    # text for the shorthand, and the substitution still resolves.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html><head><style>:root { --m: 1px 2px }</style></head>
+        <body><div id="a" style="all: initial; margin: var(--m)"></div></body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to eq(['', '', 'var(--m)', '1px', '2px'])
+      (() => {
+        const st = document.getElementById('a').style;
+        const c = getComputedStyle(document.getElementById('a'));
+        return [st.marginTop, st.getPropertyValue('margin-left'), st.margin, c.marginTop, c.marginRight];
+      })()
+    JS
+  end
+
+  it 'treats an unresolvable substitution on a LONGHAND as unset too' do
+    # The shorthand form was fixed above; the longhand route still answered with the author text,
+    # because an undefined `var()` collapses to '' and '' read as "a declared value". Chrome
+    # computes `0px` either way (measured, rule and inline alike).
+    expect(both('margin-left: var(--bogus); padding-left: var(--bogus)', %w[marginLeft paddingLeft]))
+      .to eq(['0px', '0px'])
+  end
+
+  it 'keeps an empty CUSTOM property, which is a legal value' do
+    # `--x: ` is a valid declaration whose value is the empty token sequence (css-variables-1 §2);
+    # Chrome keeps it in the block (measured `cssText === "--x: ; color: red;"`). Dropping every
+    # value-less declaration — right for a regular property — took these with it.
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    # …while a value-less REGULAR declaration is still dropped, as Chrome's own re-parse does.
+    expect(s.evaluate_script(<<~JS)).to eq([2, '', 'color: red;'])
+      (() => {
+        const d = document.createElement('div');
+        d.setAttribute('style', '--x: ; color: red');
+        const a = [d.style.length, d.style.getPropertyValue('--x')];
+        const e = document.createElement('div');
+        e.setAttribute('style', 'margin-right: ; color: red');
+        return a.concat([e.style.cssText]);
+      })()
+    JS
+  end
+
+  it 'lays out a substitution shorthand from the same value getComputedStyle reports' do
+    # The layout pass read the cascade store directly, so it saw the pending marker as opaque text:
+    # `flex: var(--f)` measured 8px per item where getComputedStyle said grow 1 / 2. ONE geometry
+    # has to mean one value resolution. Chrome measured 100 / 200 across a 300px row.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html><head><style>:root { --f1: 1; --f2: 2; --o: hidden }</style></head>
+        <body>
+          <div style="display:flex; width:300px">
+            <div id="i1" style="flex: var(--f1)"></div><div id="i2" style="flex: var(--f2)"></div>
+          </div>
+          <div id="ov" style="overflow: var(--o); width:100px; height:50px">
+            <div style="height:200px"></div>
+          </div>
+        </body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to eq([100, 200, '1', '2', 'hidden'])
+      (() => {
+        const w = id => document.getElementById(id).getBoundingClientRect().width;
+        return [w('i1'), w('i2'),
+                getComputedStyle(document.getElementById('i1')).flexGrow,
+                getComputedStyle(document.getElementById('i2')).flexGrow,
+                getComputedStyle(document.getElementById('ov')).overflow];
+      })()
+    JS
   end
 
   it 'serializes a specified animation in full and its computed value tersely' do
