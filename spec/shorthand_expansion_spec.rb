@@ -13,12 +13,16 @@ RSpec.describe 'shorthand expansion' do
     s
   end
 
+  # The custom properties the substitution cases below reference. They live on `:root` so both
+  # origins see the same definitions, and `--bogus` is deliberately never defined.
+  VARS = '--m: 1px 2px; --x: 5px; --b: 3px dashed blue; --rule: 2px solid red'
+
   # Both origins run one expander, so each case is asserted from a RULE and from a `style=`
   # attribute at once — the asymmetry between them surfaced as a different bug in five rounds.
   def both(decls, props)
     s = session(<<~HTML)
       <!DOCTYPE html>
-      <html><head><style>#r { #{decls} }</style></head>
+      <html><head><style>:root { #{VARS} } #r { #{decls} }</style></head>
       <body><div id="r">r</div><div id="i" style="#{decls}">i</div></body></html>
     HTML
     got = s.evaluate_script(<<~JS)
@@ -267,6 +271,171 @@ RSpec.describe 'shorthand expansion' do
     expect(got).to eq(['scroll-margin-block: 1px 3px; color: red;',
                        'scroll-padding-inline: 4px; color: red;',
                        'scroll-margin-top: 2px; scroll-margin-block-start: 3px; color: red;'])
+  end
+
+  it 'resets the longhands a shorthand does not mention to their initial' do
+    # A shorthand sets EVERY longhand it names; the omitted ones take their initial rather than
+    # nothing. `text-decoration` only emitted the components actually written, which left the
+    # thickness unknowable and — the visible half — let an EARLIER `text-decoration-color` survive a
+    # later `text-decoration`. Chrome measured: the colour falls back to the element's own.
+    expect(both('color: green; text-decoration: underline',
+                %w[textDecoration textDecorationStyle textDecorationColor textDecorationThickness]))
+      .to eq(['underline', 'solid', 'rgb(0, 128, 0)', 'auto'])
+    expect(both('text-decoration-color: red; text-decoration: underline', %w[textDecorationColor]))
+      .to eq(['rgb(0, 0, 0)'])
+    expect(both('text-decoration: underline dotted blue',
+                %w[textDecoration textDecorationStyle textDecorationColor textDecorationThickness]))
+      .to eq(['underline dotted rgb(0, 0, 255)', 'dotted', 'rgb(0, 0, 255)', 'auto'])
+  end
+
+  # ── pending substitution (css-variables-1 §3) ───────────────────────────────
+  # A shorthand carrying a `var()` can't be decomposed until it resolves, which happens per element.
+  # It still OCCUPIES its longhands' slots, and the two surfaces disagree about what those slots
+  # say: the specified one reports nothing for them, the computed one the resolved component.
+  # Every expectation below is Chrome's, measured on the same declarations.
+
+  it 'lets a substitution shorthand win the slots it would have won with a literal value' do
+    # The shorthand is written AFTER the longhand, so it must beat it — a model that kept the
+    # declaration whole under its own name left the earlier `margin-top: 9px` standing.
+    expect(both('margin-top: 9px; margin: var(--m)', %w[marginTop marginRight marginBottom marginLeft]))
+      .to eq(['1px', '2px', '1px', '2px'])
+    # …and the reverse order leaves the later longhand alone.
+    expect(both('margin: var(--m); margin-top: 9px', %w[marginTop marginLeft]))
+      .to eq(['9px', '2px'])
+    # Importance separates them either way.
+    expect(both('margin-top: 9px !important; margin: var(--m)', %w[marginTop marginLeft]))
+      .to eq(['9px', '2px'])
+    expect(both('margin-top: 9px; margin: var(--m) !important', %w[marginTop marginLeft]))
+      .to eq(['1px', '2px'])
+  end
+
+  it 'treats an unresolvable substitution as unset, not as an unknowable value' do
+    # `var(--undefined)` with no fallback is INVALID AT COMPUTED-VALUE TIME. The declaration still
+    # wins its slots — wiping the earlier `margin-top: 9px` — and then computes to the property's
+    # initial. Answering '' instead ("we can't know") is the confident wrong answer in reverse:
+    # a real browser knows exactly what this is.
+    expect(both('margin-top: 9px; margin: var(--bogus)', %w[marginTop marginLeft])).to eq(['0px', '0px'])
+    expect(both('background: var(--bogus)', %w[backgroundImage backgroundColor]))
+      .to eq(['none', 'rgba(0, 0, 0, 0)'])
+    # A fallback the reference DOES have is not a failure — it substitutes normally, alongside a
+    # literal component.
+    expect(both('padding: var(--nope, 4px) 6px', %w[paddingTop paddingRight])).to eq(['4px', '6px'])
+  end
+
+  it 'resolves a substitution per component rather than handing each the whole reference' do
+    # Every one of these was reported as the whole `var(--…)` text (or, for a width, as the
+    # property initial) because the box / border shorthands decomposed the reference structurally.
+    expect(both('column-rule: var(--rule)', %w[columnRuleWidth columnRuleStyle columnRuleColor]))
+      .to eq(['2px', 'solid', 'rgb(255, 0, 0)'])
+    expect(both('border: var(--b)', %w[borderTopWidth borderTopStyle borderTopColor]))
+      .to eq(['3px', 'dashed', 'rgb(0, 0, 255)'])
+    expect(both('margin: 1px var(--x)', %w[marginTop marginRight])).to eq(['1px', '5px'])
+  end
+
+  # The pending slots have to cover EVERY longhand each expander can emit, and the hand-written
+  # expanders keep their slot list in a table beside them. Rather than assert the table, assert what
+  # it is for: a shorthand's literal value and the same value behind a `var()` must compute
+  # identically — every property, not just the ones this file happened to think of. A slot the table
+  # forgets shows up here as a divergent longhand.
+  SUBSTITUTION_EQUIVALENTS = [
+    ['margin',            '1px 2px 3px 4px'],
+    ['padding',           '1px 2px'],
+    ['inset',             '1px 2px 3px 4px'],
+    ['border',            '3px dashed blue'],
+    ['border-inline-start', '2px dotted green'],
+    ['flex',              '2 1 30px'],
+    ['background',        'url(a.png) no-repeat center / cover'],
+    ['overflow',          'hidden scroll'],
+    ['text-decoration',   'underline dotted blue'],
+    ['font',              'italic bold 13px/1.5 serif'],
+    ['transition',        'opacity 1s ease-in 0.5s'],
+    ['animation',         'spin 2s linear infinite'],
+    ['outline',           '2px solid red'],
+    ['list-style',        'square inside none'],
+    ['grid-area',         '1 / 2 / 3 / 4'],
+    ['columns',           '3 40px'],
+    ['column-rule',       '2px solid red'],
+    ['place-items',       'center start'],
+    ['border-radius',     '1px 2px 3px 4px'],
+    ['gap',               '1px 2px'],
+    ['flex-flow',         'column wrap'],
+    ['scroll-margin',     '1px 2px 3px 4px'],
+    ['text-emphasis',     'filled dot red']
+  ]
+
+  it 'computes a shorthand the same whether its value is literal or behind a substitution' do
+    SUBSTITUTION_EQUIVALENTS.each do |prop, value|
+      s = session(<<~HTML)
+        <!DOCTYPE html>
+        <html><head><style>:root { --v: #{value} } @keyframes spin { from {} to {} }</style></head>
+        <body><div id="lit" style="position: absolute; #{prop}: #{value}"></div>
+          <div id="sub" style="position: absolute; #{prop}: var(--v)"></div></body></html>
+      HTML
+      diff = s.evaluate_script(<<~JS)
+        (() => {
+          const a = getComputedStyle(document.getElementById('lit'));
+          const b = getComputedStyle(document.getElementById('sub'));
+          const out = [];
+          for (let i = 0; i < a.length; i++) {
+            const p = a.item(i);
+            if (a.getPropertyValue(p) !== b.getPropertyValue(p)) out.push([p, a.getPropertyValue(p), b.getPropertyValue(p)]);
+          }
+          return out;
+        })()
+      JS
+      expect(diff).to eq([]), "#{prop}: #{value} diverges behind var(): #{diff.inspect}"
+    end
+  end
+
+  it 'reports nothing for a pending slot on the specified surface' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html>
+        <html><head><style>:root { --m: 1px 2px }</style></head>
+        <body><div id="i" style="margin: var(--m)"></div></body></html>
+      HTML
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const st = document.getElementById('i').style;
+        return [st.margin, st.marginTop, st.getPropertyValue('margin-top'), st.cssText,
+                st.length, st.item(0), document.getElementById('i').getAttribute('style')];
+      })()
+    JS
+    # The slots ARE in the block — four of them, `margin-top` first — but a pending substitution has
+    # no serialization of its own, so only the shorthand reads back.
+    expect(got).to eq(['var(--m)', '', '', 'margin: var(--m);', 4, 'margin-top', 'margin: var(--m)'])
+  end
+
+  it 'leaves the surviving slots unserializable once one of them is overwritten' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.margin = 'var(--m)';
+        const before = [d.style.margin, d.style.marginTop, d.style.cssText, d.style.length];
+        d.style.marginTop = '7px';
+        return before.concat([d.getAttribute('style'), d.style.cssText, d.style.margin, d.style.marginLeft]);
+      })()
+    JS
+    # Overwriting one slot leaves the other three pending on a shorthand that can no longer be
+    # reconstructed, and the block serializes exactly as Chrome writes it (measured) — a value-less
+    # declaration each.
+    #
+    # KNOWN GAP, and a deliberate one: that text is not re-parseable, and our inline store IS the
+    # attribute text (which is what keeps `getAttribute('style')` canonical and MutationObserver's
+    # oldValue honest), so re-reading it drops the three — `margin-right` falls back to `0px` where
+    # Chrome, whose block lives in memory, still computes `2px`. Chrome's OWN re-parse of that text
+    # agrees with us (`margin-top: 7px;`, `margin-right: 0px` — measured), so nothing can depend on
+    # the difference; closing it would mean giving up the text-backed store.
+    expect(got).to eq(['var(--m)', '', 'margin: var(--m);', 4,
+                       'margin-top: 7px; margin-right: ; margin-bottom: ; margin-left: ;',
+                       'margin-top: 7px;', '', ''])
   end
 
   it 'serializes a specified animation in full and its computed value tersely' do
