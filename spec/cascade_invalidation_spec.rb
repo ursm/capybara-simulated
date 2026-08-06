@@ -6,11 +6,16 @@ require 'rack'
 # selectors read. Most already move `settleGen` (an attribute, the tree, the location) or
 # `cascadeVersion` (a stylesheet); the rest move `styleStateGen`.
 #
-# This file exists because ENUMERATING those inputs by hand failed twice — five pseudo-classes went
-# stale the second time. The table below is derived from `selectors.js`'s own pseudo-class table
-# rather than from anyone's recollection, and every case READS BEFORE MUTATING, because a cache
-# that is only ever cold cannot go stale. When a pseudo-class is added to the driver, add a row
-# here; that is far cheaper than the rounds of regressions the alternative has already cost.
+# This file exists because ENUMERATING those inputs by hand failed three times. Each round the
+# enumeration got better and still missed, because the axis that matters is not WHICH pseudo-classes
+# are dynamic (the table below, derived from `selectors.js`) but WHICH CODE PATHS write the state
+# behind them — `_value` has 19 writers and `_selectedness` 18. A table of IDL-setter mutations is
+# itself just a second hand-enumeration: it passed green while `:checked` had stopped updating
+# after a CLICK, the driver's most common interaction.
+#
+# So the rows come in two flavours: the property setter AND, where one exists, the interaction path
+# a user actually takes. Every case READS BEFORE MUTATING, because a cache that is only ever cold
+# cannot go stale. When a pseudo-class is added, add both.
 RSpec.describe 'cascade invalidation' do
   # [name, body, css, mutation, colour after the mutation]. The rule paints green when the
   # pseudo-class matches, so a passing case is one where the colour CHANGES.
@@ -90,6 +95,54 @@ RSpec.describe 'cascade invalidation' do
     end
   end
 
+  # The INTERACTION paths. These are the ones a cache keyed on IDL setters gets wrong, and the ones
+  # a table of setter mutations cannot see.
+  it 'updates :checked style across repeated clicks' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t:checked { color: rgb(0, 128, 0) }</style></head>' \
+        '<body><input type="checkbox" id="t"></body></html>']]
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('t')).color"
+    seen = [s.evaluate_script(read)]
+    3.times { s.find('#t').click; seen << s.evaluate_script(read) }
+    # Alternating, not stuck: a click writes checkedness through `setCheckedness`, which no IDL
+    # setter is involved in.
+    expect(seen).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  it 'updates :placeholder-shown style after setRangeText' do
+    # One of ~19 writers of the live value that never touch the `value` IDL setter (the others
+    # include execCommand('insertText'), stepUp/stepDown and the whole typing family).
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { color: rgb(0, 0, 0) } #t:placeholder-shown { color: rgb(128, 0, 0) }</style></head>' \
+        '<body><input id="t" placeholder="p"></body></html>']]
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('t')).color"
+    before = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('t').setRangeText('abc', 0, 0)")
+    expect([before, s.evaluate_script(read)]).to eq(['rgb(128, 0, 0)', 'rgb(0, 0, 0)'])
+  end
+
+  it 'updates :invalid style after setCustomValidity' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t:invalid { color: rgb(0, 128, 0) }</style></head>' \
+        '<body><input id="t"></body></html>']]
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('t')).color"
+    before = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('t').setCustomValidity('boom')")
+    expect([before, s.evaluate_script(read)]).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
   it 'updates style when a shadow root ADOPTS a sheet in place' do
     # Not a pseudo-class: an in-place mutation of the ObservableArray. The `adoptedStyleSheets`
     # SETTER already invalidated; the array mutators moved no generation.
@@ -113,9 +166,12 @@ RSpec.describe 'cascade invalidation' do
     expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
   end
 
-  # KNOWN GAPS, pre-existing — measured the same on the commit before the cache landed, so neither is
-  # an invalidation bug: `:user-invalid` / `:user-valid` don't respond to `reportValidity()` (the
-  # user-interacted flag isn't modelled), and `:selected` can't be cleared on a single-selection
-  # `<select>`, because deselecting its only selected option re-selects one per the selectedness
-  # rules. Both belong to the form-state model, not here.
+  # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,
+  # so none is an invalidation bug:
+  #   * `:user-invalid` / `:user-valid` don't respond to `reportValidity()` (the user-interacted
+  #     flag isn't modelled);
+  #   * `:selected` can't be cleared on a single-selection `<select>` — deselecting its only
+  #     selected option re-selects one, per the selectedness rules;
+  #   * clicking an INDETERMINATE checkbox doesn't clear `indeterminate`, where Chrome does.
+  # All three belong to the form-state model, not to invalidation.
 end
