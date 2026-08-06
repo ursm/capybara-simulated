@@ -184,6 +184,66 @@ RSpec.describe 'CSS math functions' do
     expect(computed('margin-left: calc(1toString + 2px)', %w[marginLeft])).to eq([''])
   end
 
+  it 'agrees across ALL the CSSOM write surfaces about invalid math' do
+    # Three ways to write a declaration, one answer. The per-property setter, the block parse
+    # (`cssText` / `setAttribute`) and the cascade each judge it, and the check had only reached the
+    # first — so `style.marginLeft = …` was ignored while `style.cssText = …` stored it. Every
+    # expectation below is Chrome's, measured.
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const mk = () => document.createElement('div');
+        const a = mk(); a.style.marginLeft = 'calc(1px + 1)';
+        const b = mk(); b.style.cssText = 'margin-left: calc(1px + 1)';
+        const c = mk(); c.setAttribute('style', 'margin-left: calc(1px + 1); color: red');
+        return [[a.style.marginLeft, a.getAttribute('style')],
+                [b.style.marginLeft, b.getAttribute('style')],
+                [c.style.marginLeft, c.style.color, c.getAttribute('style')]];
+      })()
+    JS
+    expect(got).to eq([['', nil],
+                       ['', ''],
+                       # The ATTRIBUTE is the author's text and is never rewritten; only the parsed
+                       # block drops the invalid declaration, so the sibling survives.
+                       ['', 'red', 'margin-left: calc(1px + 1); color: red']])
+  end
+
+  it 'does not judge a CUSTOM property or a substitution fallback by math validity' do
+    # A custom property's value is `<declaration-value>` — any token sequence, with no grammar to be
+    # invalid against — and the inner `calc(` of a `var()` FALLBACK is only reached down one path.
+    # Rejecting either dropped a declaration Chrome stores (both measured).
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('div');
+        a.style.setProperty('--x', 'calc(1px + 1)');
+        const b = document.createElement('div');
+        b.style.width = 'var(--w, calc(1px + 1))';
+        return [[a.style.getPropertyValue('--x'), a.getAttribute('style')],
+                [b.style.width, b.getAttribute('style')]];
+      })()
+    JS
+    expect(got).to eq([['calc(1px + 1)', '--x: calc(1px + 1);'],
+                       ['var(--w, calc(1px + 1))', 'width: var(--w, calc(1px + 1));']])
+  end
+
+  it 'never rewrites a negative literal inside an expression it could not reduce' do
+    # The non-negative clamp is for a RESULT. Applied to text, it rewrote a negative term inside an
+    # expression that stayed unresolved and changed what the expression means — `calc(100% -
+    # var(--x))` with `--x: -10px` became `calc(100% - 0px)`, i.e. plain `100%`.
+    #
+    # Chrome normalises the leftover arithmetic (`calc(100% + 10px)` / `calc(100% - 10px)`); we hand
+    # the substituted text back as-is. Same expression, different spelling — the simplification of a
+    # calc that can't fully reduce is a separate, open gap.
+    expect(computed('background-size: calc(100% - var(--neg))', %w[backgroundSize],
+                    extra_css: ':root { --neg: -10px }')).to eq(['calc(100% - -10px)'])
+    expect(computed('flex-basis: calc(-10px + 100%)', %w[flexBasis])).to eq(['calc(-10px + 100%)'])
+  end
+
   it 'hands a custom property back unreduced' do
     # An unregistered custom property's computed value is a TOKEN SEQUENCE — Chrome does not
     # evaluate it, exactly as it does not canonicalise `.5px` or `url(a.png)` there.
