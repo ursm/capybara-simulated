@@ -550,6 +550,60 @@ RSpec.describe 'shorthand expansion' do
       .to eq(['2px', 'solid', '2px', 'solid'])
   end
 
+  it 'lets a css-wide keyword fill every longhand of a hand-expanded shorthand' do
+    # Only the REGISTRY expanders knew that a lone `inherit` fills every slot; each hand-written one
+    # classified it as a COMPONENT instead — `border: inherit` made it a colour and left the width at
+    # `medium`, `text-decoration: inherit` the same. Chrome measured: the child takes the parent's
+    # computed value for every longhand, and a keyword MIXED with other tokens is invalid, so the
+    # whole declaration is dropped (`margin: inherit 1px` computes `0px`).
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        #p { text-decoration: underline wavy blue 3px; flex: 3 4 30px; display: flex;
+             border: 3px dashed blue; overflow: hidden scroll; margin: 5px 6px }
+        #k { text-decoration: inherit; flex: inherit }
+        #k2 { border: inherit; overflow: inherit; margin: inherit }
+        #bad { border: 1px solid inherit; margin: inherit 1px }
+      </style></head>
+      <body><div id="p"><div id="k"></div><div id="k2"></div></div><div id="bad"></div></body></html>
+    HTML
+    expect(s.evaluate_script(<<~JS)).to eq([
+      (() => {
+        const C = id => getComputedStyle(document.getElementById(id));
+        return [[C('k').textDecorationLine, C('k').textDecorationStyle, C('k').textDecorationThickness],
+                [C('k').flexGrow, C('k').flexShrink, C('k').flexBasis],
+                [C('k2').borderTopWidth, C('k2').borderTopStyle, C('k2').overflowX,
+                 C('k2').marginTop, C('k2').marginRight],
+                [C('bad').borderTopWidth, C('bad').marginTop]];
+      })()
+    JS
+      ['underline', 'wavy', '3px'],
+      ['3', '4', '30px'],
+      ['3px', 'dashed', 'hidden', '5px', '6px'],
+      ['0px', '0px']
+    ])
+  end
+
+  it 'hands a custom property back exactly as written, through an indirection too' do
+    # A custom property's computed value is a TOKEN SEQUENCE, not a parsed value: Chrome reports
+    # `.5px`, `url(a.png)` and `10PX` verbatim (measured). Canonicalising what a substitution
+    # produces is right for a regular property and wrong here, so only the INDIRECTED form
+    # (`--a: var(--b)`) regressed — a design token read differently depending on how it was written.
+    s = session(<<~HTML)
+      <!DOCTYPE html>
+      <html><head><style>
+        :root { --half: .5px; --u: url(a.png); --big: 10PX }
+        #c { --derived: var(--half); --lit: .5px; --du: var(--u); --lu: url(a.png); --db: var(--big) }
+      </style></head><body><div id="c"></div></body></html>
+    HTML
+    expect(s.evaluate_script(<<~JS)).to eq(['.5px', '.5px', 'url(a.png)', 'url(a.png)', '10PX'])
+      (() => {
+        const c = getComputedStyle(document.getElementById('c'));
+        return ['--derived', '--lit', '--du', '--lu', '--db'].map(p => c.getPropertyValue(p));
+      })()
+    JS
+  end
+
   it 'serializes a specified animation in full and its computed value tersely' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = Capybara::Session.new(:simulated, app)
