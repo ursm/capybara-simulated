@@ -68,6 +68,63 @@ RSpec.describe 'CSS math functions' do
     expect(computed('width: calc(50% + 10px)',        %w[width])).to eq([''])
   end
 
+  # The cases below were all invisible to the table above, which only exercised length math on
+  # non-`font-size` properties with a well-ordered clamp. Each was a real defect.
+
+  it 'resolves a math function IN font-size, against the parent size' do
+    # `em` on `font-size` means the INHERITED size, so resolving it against the element's own
+    # font-size recursed until the stack blew — `getComputedStyle` threw outright, taking the layout
+    # pass with it. `font-size: clamp(...)` is ordinary responsive typography.
+    expect(computed('font-size: calc(10px + 5px)', %w[fontSize])).to eq(['15px'])
+    expect(computed('font-size: calc(1rem + 2px)', %w[fontSize])).to eq(['18px'])
+    expect(computed('font-size: min(20px, 30px)',  %w[fontSize])).to eq(['20px'])
+    expect(computed('font-size: calc(2em + 1px)',  %w[fontSize], extra_css: 'body { font-size: 20px }'))
+      .to eq(['41px'])
+  end
+
+  it 'keeps each dimension apart instead of treating every unit as a length' do
+    # A driver that converts blindly answers `calc(1s + 500ms)` with `501px`.
+    expect(computed('transition-duration: calc(1s + 500ms)', %w[transitionDuration])).to eq(['1.5s'])
+    expect(computed('transform: rotate(calc(10deg + 20deg))', %w[transform]))
+      .to eq(['matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)'])
+    # Mixing dimensions is a type error, so the declaration is dropped.
+    expect(computed('margin-left: calc(10deg + 5px)', %w[marginLeft])).to eq(['0px'])
+  end
+
+  it 'treats the dynamic viewport units as the viewport' do
+    # There is no browser chrome to retract here, so `dvh` is `vh`. Reading them as unitless numbers
+    # made `calc(100dvh - 50px)` come out as `50px` — and that went straight into layout.
+    expect(computed('height: calc(100dvh - 50px)', %w[height])).to eq(['718px'])
+    expect(computed('height: calc(100vh - 50px)',  %w[height])).to eq(['718px'])
+  end
+
+  it 'lets clamp MIN win over MAX' do
+    # `clamp(MIN, VAL, MAX)` is `max(MIN, min(VAL, MAX))`, which is deliberately asymmetric: an
+    # inverted pair (two `var()` tokens a theme override crosses) resolves to MIN, not MAX.
+    expect(computed('margin-left: clamp(40px, 10px, 20px)', %w[marginLeft])).to eq(['40px'])
+    expect(computed('margin-left: clamp(5px, 10px, 20px)',  %w[marginLeft])).to eq(['10px'])
+  end
+
+  it 'drops an invalid declaration so the next one in the cascade wins' do
+    # An invalid math function is a PARSE error: the declaration never enters the cascade. Resolving
+    # it and reporting the property's INITIAL instead skipped the loser entirely — Chrome measured
+    # `7px` here, where reporting the initial gives `0px`.
+    expect(computed('margin-left: calc(1px + 1)', %w[marginLeft], extra_css: 'div { margin-left: 7px }'))
+      .to eq(['7px'])
+  end
+
+  it 'reduces a math function in place, leaving the value structure alone' do
+    # A property value is not one expression: the `/` in `aspect-ratio` is a separator, and
+    # `background-position` has two components. Parsing the whole value as one sum ate both.
+    expect(computed('aspect-ratio: calc(1 + 1) / 2', %w[aspectRatio])).to eq(['2 / 2'])
+    # Chrome reports `15px 0px`; the `0` -> `0px` difference is a PRE-EXISTING gap in the
+    # background-position canonicaliser (`background-position: 15px 0` without any calc reports
+    # `15px 0` too), not something the reduction introduces. Asserted as it is so the calc half is
+    # pinned without pretending the other half is fixed.
+    expect(computed('background-position: calc(10px + 5px) 0', %w[backgroundPosition]))
+      .to eq(['15px 0'])
+  end
+
   it 'hands a custom property back unreduced' do
     # An unregistered custom property's computed value is a TOKEN SEQUENCE — Chrome does not
     # evaluate it, exactly as it does not canonicalise `.5px` or `url(a.png)` there.
