@@ -125,6 +125,65 @@ RSpec.describe 'CSS math functions' do
       .to eq(['15px 0'])
   end
 
+  it 'resolves rem inside the ROOT font-size against the initial size' do
+    # `rem` normally reads the root's computed font-size — but while resolving the ROOT's own
+    # `font-size` that re-enters this resolver forever, and `html { font-size: calc(1rem + 1vw) }`
+    # is the fluid-typography idiom. Per spec it is the INITIAL 16px there (Chrome measured: 18px).
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ['<!DOCTYPE html><html><head><style>html { font-size: calc(1rem + 2px) }</style></head>' \
+        '<body></body></html>']]
+    }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    expect(s.evaluate_script('getComputedStyle(document.documentElement).fontSize')).to eq('18px')
+  end
+
+  it 'never reduces a math function inside a quoted string' do
+    # A math function is only a math function in VALUE syntax. Rewriting one inside a string changed
+    # the text a page displays, and — worse — a type error inside a string made the STATIC check drop
+    # the whole declaration. Chrome keeps both verbatim.
+    expect(computed('content: "calc(1px + 2px)"', %w[content])).to eq(['"calc(1px + 2px)"'])
+    expect(computed("font-family: 'calc(1px + 1)'", %w[fontFamily])).to eq(['"calc(1px + 1)"'])
+  end
+
+  it 'clamps a negative result where the property cannot be negative' do
+    # `width: calc(50vw - 800px)` is `0px` in Chrome, not `-288px` — and a negative used width
+    # propagates into scrollWidth, hit-testing and the geometry `visible?` reads. `margin` is
+    # deliberately NOT clamped: it may be negative.
+    expect(computed('width: calc(50vw - 800px)', %w[width])).to eq(['0px'])
+    expect(computed('margin-left: calc(10px - 30px)', %w[marginLeft])).to eq(['-20px'])
+  end
+
+  it 'agrees between the CSSOM setter and the cascade about invalid math' do
+    # A statically-invalid math function is a parse error, so the assignment is IGNORED — Chrome
+    # leaves the property at '' and writes no attribute. The cascade already dropped it; a page that
+    # writes a computed `calc()` and reads it back to see whether it applied needs the same answer
+    # from both surfaces.
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = Capybara::Session.new(:simulated, app)
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to eq(['', nil])
+      (() => {
+        const d = document.createElement('div');
+        d.style.marginLeft = 'calc(1px + 1)';
+        return [d.style.marginLeft, d.getAttribute('style')];
+      })()
+    JS
+  end
+
+  it 'keeps a declaration it cannot reduce rather than dropping it' do
+    # Two CONSERVATIVE divergences, both deliberate. Division by zero is infinity in CSS (Chrome
+    # clamps it to `3.35544e+07px`), not a type error — calling it invalid dropped the declaration
+    # and handed the cascade to a lower one, which is the bug that mattered. An unknown UNIT is kept
+    # for the same reason: this table has no `lh` / `cqw` / `ic`, so rejecting what it doesn't list
+    # would drop real CSS. Both compute '' — the driver's honest "we don't know" — where Chrome has
+    # a number.
+    expect(computed('margin-left: calc(10px / 0)', %w[marginLeft], extra_css: 'div { margin-left: 7px }'))
+      .to eq([''])
+    expect(computed('margin-left: calc(1toString + 2px)', %w[marginLeft])).to eq([''])
+  end
+
   it 'hands a custom property back unreduced' do
     # An unregistered custom property's computed value is a TOKEN SEQUENCE — Chrome does not
     # evaluate it, exactly as it does not canonicalise `.5px` or `url(a.png)` there.
