@@ -170,13 +170,20 @@ RSpec.describe 'computed value serialization' do
     # A corner radius can be `calc(10px + 5px)`. Splitting each corner on whitespace to recover the
     # horizontal / vertical radii tore that into three tokens and wrote `border-radius: calc(10px /
     # +;` back into the style attribute — the block serializer runs on every write.
+    # The COMPUTED value is fully reduced (Chrome measured: `15px`, not `calc(15px)`); a percentage
+    # keeps the calc, because it needs a per-property basis (`calc(10% + 5px)` — also measured).
     expect(computed('border-radius: calc(10px + 5px)', %w[borderTopLeftRadius borderRadius]))
-      .to eq(['calc(10px + 5px)', 'calc(10px + 5px)'])
+      .to eq(['15px', '15px'])
+    expect(computed('border-radius: calc(10% + 5px)', %w[borderTopLeftRadius]))
+      .to eq(['calc(10% + 5px)'])
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="w" style="border-radius: calc(10px + 5px)"></div></body></html>']] }
     s = Capybara::Session.new(:simulated, app)
     s.visit '/'
-    # Chrome writes `calc(15px)` — it EVALUATES calc, which we don't; the contract asserted here is
-    # that an unrelated write leaves the declaration intact rather than corrupting it.
+    # The SPECIFIED surface is not the computed one: Chrome writes `calc(15px)` — it keeps the calc
+    # WRAPPER and simplifies inside it — where we write the author's text back. (A percentage calc
+    # round-trips identically in both: `calc(10% + 5px)`.) The contract asserted here is the one
+    # this example was written for: an unrelated write leaves the declaration intact rather than
+    # tearing it into `border-radius: calc(10px /` + `;`.
     expect(s.evaluate_script("(() => { const w = document.getElementById('w'); w.style.color = 'red'; return w.getAttribute('style'); })()"))
       .to eq('border-radius: calc(10px + 5px); color: red;')
   end
