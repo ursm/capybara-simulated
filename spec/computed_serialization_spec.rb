@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # A RESOLVED value is reported canonically, not as the author wrote it. The inline declaration block
 # has always canonicalized on the way in; the cascade returned raw source text, so the same
@@ -11,7 +12,7 @@ RSpec.describe 'computed value serialization' do
       <!DOCTYPE html>
       <html><head><style>#t { #{css} }</style></head><body>#{body}</body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s.evaluate_script(<<~JS)
       (() => {
@@ -93,7 +94,7 @@ RSpec.describe 'computed value serialization' do
           <div id="i" style="transform: translateX(10px); transition-duration: .4s">i</div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -132,7 +133,7 @@ RSpec.describe 'computed value serialization' do
 
   it 'keeps a transform function in its canonical spelling' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="t"></div></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # Chrome preserves `translateX` in the style attribute while folding `BLUR(2PX)` — the rule is
     # the function's canonical spelling, not a blanket lowercase.
@@ -177,7 +178,7 @@ RSpec.describe 'computed value serialization' do
     expect(computed('border-radius: calc(10% + 5px)', %w[borderTopLeftRadius]))
       .to eq(['calc(10% + 5px)'])
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="w" style="border-radius: calc(10px + 5px)"></div></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # The SPECIFIED surface is not the computed one: Chrome writes `calc(15px)` — it keeps the calc
     # WRAPPER and simplifies inside it — where we write the author's text back. (A percentage calc

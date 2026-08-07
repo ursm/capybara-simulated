@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # A declaration whose VALUE the property's grammar doesn't admit is not a declaration: a browser
 # drops it at parse time, leaving whatever was there before. We used to keep it, so
@@ -9,7 +10,7 @@ require 'rack'
 RSpec.describe 'invalid declaration values' do
   def after_setting(script)
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="d"></div></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s.evaluate_script(<<~JS)
       (() => {
@@ -66,7 +67,7 @@ RSpec.describe 'invalid declaration values' do
 
   it 'does not treat a vendor prefix as a blank cheque' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # An unknown `-webkit-…` is not a property — Chrome says false — while the handful of prefixed
     # names browsers DO implement and mdn omits are listed explicitly.

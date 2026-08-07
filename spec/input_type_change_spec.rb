@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # HTML "input type change" value-mode migration. The live IDL value (`_value`)
 # is separate from the `value` content attribute; a "default"/"default-on" type
@@ -15,7 +16,7 @@ RSpec.describe 'input type-change value migration' do
   let(:app) {
     ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def probe(steps)

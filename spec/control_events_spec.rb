@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # Each Capybara user-action method (fill_in / check / choose / select / etc.)
 # should fire the same event sequence a real browser does. Lock the
@@ -44,7 +45,7 @@ RSpec.describe 'HTML control event dispatch' do
     end
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   def event_log
     session.evaluate_script("document.querySelector('#log').textContent").lines.map(&:chomp)

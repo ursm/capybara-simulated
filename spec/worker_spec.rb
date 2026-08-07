@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require 'json'
+require_relative 'support/session_teardown'
 
 # Web Worker round-trip coverage: spawn isolate, post messages each
 # way, terminate. The driver creates a fresh V8 Context / QuickJS VM
@@ -57,7 +58,7 @@ RSpec.describe 'Web Worker' do
   end
 
   it 'spawns a worker and round-trips a postMessage' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script(<<~JS)
       window.__r = null;
@@ -70,7 +71,7 @@ RSpec.describe 'Web Worker' do
   end
 
   it 'runs computation in the worker and returns the result' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script(<<~JS)
       window.__sumRes = null;
@@ -83,7 +84,7 @@ RSpec.describe 'Web Worker' do
   end
 
   it 'supports addEventListener("message") on the worker scope' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script(<<~JS)
       window.__res = [];
@@ -102,7 +103,7 @@ RSpec.describe 'Web Worker' do
   end
 
   it 'terminate() kills the worker thread' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script(<<~JS)
       window.__t = null;

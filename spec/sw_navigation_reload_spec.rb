@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # A reload navigation of a controlled iframe (location.reload() / history.go(0)) routes through
 # the controlling service worker's fetch event with `request.isReloadNavigation === true` — the
@@ -45,7 +46,7 @@ RSpec.describe 'Service Worker reload-navigation interception' do
   # Register the SW at /scope/, wait for activation, build a controlled iframe, and return the
   # session with the iframe (id 'f') loaded (its body reflects the SW's isReloadNavigation echo).
   def controlled_iframe
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
       globalThis.__ready = false;

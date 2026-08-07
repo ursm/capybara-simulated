@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # Globals real apps probe at boot or use during a test. Specs here lock
 # the bridge's contract for each one — apps that hit `if (typeof X)`
@@ -9,7 +10,7 @@ RSpec.describe 'browser global surface' do
       [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

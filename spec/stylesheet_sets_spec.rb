@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Stylesheet handling the WPT Node-appendChild stylesheet/meta-from-fragment test
 # exercises: `data:` URL CSS loaded into the cascade, alternate/preferred
@@ -12,7 +13,7 @@ RSpec.describe 'stylesheet sets + data: CSS' do
       [200, {'content-type' => 'text/html'}, ["<!doctype html><html><head>#{head_html}</head><body>" \
         "<div id=a>a</div><div id=b>b</div></body></html>"]]
     end
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

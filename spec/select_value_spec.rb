@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # What a `<select>` reports as its value, and how a user pick changes it.
 #
@@ -22,7 +23,7 @@ RSpec.describe 'select value (IDL)' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'keeps a present value attribute verbatim, whitespace and all' do
@@ -69,7 +70,7 @@ RSpec.describe 'Capybara Node#value for a select' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def value_of(id)
@@ -112,7 +113,7 @@ RSpec.describe 'picking a disabled option' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'leaves the selection alone when select_option targets a disabled option' do

@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # `right` / `bottom` insets, and the `inset` shorthand. An out-of-flow box with
 # both insets on an axis and an auto size stretches between them — which is what
@@ -33,7 +34,7 @@ RSpec.describe 'layout insets' do
 
   def session
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

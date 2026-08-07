@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Frame-document scripts must execute in the FRAME's realm, whichever
 # execution path the runtime routes them through. The leading-lexical and
@@ -51,7 +52,7 @@ RSpec.describe 'iframe inline-script realm routing' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   def titles_after_visit(path)
     session.visit path
@@ -93,7 +94,7 @@ RSpec.describe 'iframe contentDocument same-origin policy' do
       [200, {'content-type' => 'text/html'}, [body]]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def content_doc_reachable(frame_html)
@@ -150,7 +151,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   # Read `prop` off a freshly-appended cross-origin frame's contentWindow.
@@ -287,7 +288,7 @@ RSpec.describe 'postMessage cross-document origin' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'delivers only matching-targetOrigin messages and sets event.origin to the sender' do

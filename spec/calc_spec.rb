@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # CSS math functions. Every expectation is real Chrome's, read off the same declarations with
 # `--headless --dump-dom` at 1024x768 with a 16px root font.
@@ -15,9 +16,10 @@ RSpec.describe 'CSS math functions' do
       <body><div id="t"></div></body></html>
     HTML
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] }
-    s = Capybara::Session.new(:simulated, app)
-    s.visit '/'
-    s.evaluate_script("(() => { const c = getComputedStyle(document.getElementById('t')); return #{props.inspect}.map(p => c[p]); })()")
+    with_simulated_session(app) {|s|
+      s.visit '/'
+      s.evaluate_script("(() => { const c = getComputedStyle(document.getElementById('t')); return #{props.inspect}.map(p => c[p]); })()")
+    }
   end
 
   it 'reduces an arithmetic expression to a single length' do
@@ -134,7 +136,7 @@ RSpec.describe 'CSS math functions' do
        ['<!DOCTYPE html><html><head><style>html { font-size: calc(1rem + 2px) }</style></head>' \
         '<body></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script('getComputedStyle(document.documentElement).fontSize')).to eq('18px')
   end
@@ -161,7 +163,7 @@ RSpec.describe 'CSS math functions' do
     # writes a computed `calc()` and reads it back to see whether it applied needs the same answer
     # from both surfaces.
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script(<<~JS)).to eq(['', nil])
       (() => {
@@ -190,7 +192,7 @@ RSpec.describe 'CSS math functions' do
     # first — so `style.marginLeft = …` was ignored while `style.cssText = …` stored it. Every
     # expectation below is Chrome's, measured.
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -215,7 +217,7 @@ RSpec.describe 'CSS math functions' do
     # invalid against — and the inner `calc(` of a `var()` FALLBACK is only reached down one path.
     # Rejecting either dropped a declaration Chrome stores (both measured).
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -252,7 +254,7 @@ RSpec.describe 'CSS math functions' do
        ['<!DOCTYPE html><html><head><style>#t { --x: calc(1px + 1px) }</style></head>' \
         '<body><div id="t"></div></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script("getComputedStyle(document.getElementById('t')).getPropertyValue('--x')"))
       .to eq('calc(1px + 1px)')

@@ -6,6 +6,7 @@ require 'capybara/simulated/minitest'  # inside the gem resolves wrong; keep thi
 require 'json'
 require 'open3'
 require 'tmpdir'
+require_relative 'support/session_teardown'
 
 RSpec.describe Capybara::Simulated::Trace do
   def sample_trace
@@ -166,7 +167,7 @@ RSpec.describe 'trace network capture' do
           '</script></body></html>']]
       end
     end
-    driver = Capybara::Simulated::Driver.new(app)
+    driver = simulated_driver(app)
     driver.start_tracing  # force a trace so trace_network runs on the fetch
     driver.visit('/')
 
@@ -183,7 +184,7 @@ RSpec.describe 'trace network capture' do
   # Encoding::CompatibilityError on any byte ≥ 0x80 — the "trace network log
   # failed: Encoding::CompatibilityError" spam seen on Discourse.
   it 'reinterprets a binary-tagged (valid UTF-8) body as readable UTF-8, even past the size cap' do
-    browser = Capybara::Simulated::Driver.new(->(_) { [200, {}, ['']] }).browser
+    browser = simulated_driver(->(_) { [200, {}, ['']] }).browser
     big = ('日本語のテスト ' * 40_000).b   # ASCII-8BIT, valid UTF-8 bytes, > 256 KiB
     expect(big.encoding).to eq(Encoding::BINARY)
 

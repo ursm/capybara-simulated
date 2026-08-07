@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # The shorthands the CSSOM registry had no expander for. Each was invisible to the cascade: it saw
 # `transition: opacity 1s` and no `transition-duration`, so a resolved-value read of the longhand
@@ -8,7 +9,7 @@ require 'rack'
 RSpec.describe 'shorthand expansion' do
   def session(body)
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)          # disposed when the example ends — each owns a V8 isolate
     s.visit '/'
     s
   end
@@ -154,7 +155,7 @@ RSpec.describe 'shorthand expansion' do
 
   it 'round-trips a newly registered shorthand through the style attribute' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -199,7 +200,7 @@ RSpec.describe 'shorthand expansion' do
 
   it 'serializes a block more tersely than the computed value' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -232,7 +233,7 @@ RSpec.describe 'shorthand expansion' do
           <div id="t" style="transition: var(--t)"></div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script(<<~JS)).to eq(['spin', '2s', '2s linear infinite spin', 'opacity', '1s'])
       (() => {
@@ -260,7 +261,7 @@ RSpec.describe 'shorthand expansion' do
         <div id="c" style="scroll-margin-block-start:1px; scroll-margin-top:2px; scroll-margin-block-start:3px"></div>
       </body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -407,7 +408,7 @@ RSpec.describe 'shorthand expansion' do
         <body><div id="i" style="margin: var(--m)"></div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -423,7 +424,7 @@ RSpec.describe 'shorthand expansion' do
 
   it 'leaves the surviving slots unserializable once one of them is overwritten' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -458,7 +459,7 @@ RSpec.describe 'shorthand expansion' do
         <body><div id="a" style="all: initial; margin: var(--m)"></div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script(<<~JS)).to eq(['', '', 'var(--m)', '1px', '2px'])
       (() => {
@@ -482,7 +483,7 @@ RSpec.describe 'shorthand expansion' do
     # Chrome keeps it in the block (measured `cssText === "--x: ; color: red;"`). Dropping every
     # value-less declaration — right for a regular property — took these with it.
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # …while a value-less REGULAR declaration is still dropped, as Chrome's own re-parse does.
     expect(s.evaluate_script(<<~JS)).to eq([2, '', 'color: red;'])
@@ -515,7 +516,7 @@ RSpec.describe 'shorthand expansion' do
         </body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     expect(s.evaluate_script(<<~JS)).to eq([100, 200, '1', '2', 'hidden'])
       (() => {
@@ -606,7 +607,7 @@ RSpec.describe 'shorthand expansion' do
 
   it 'serializes a specified animation in full and its computed value tersely' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {

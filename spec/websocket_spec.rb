@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'websocket/driver'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # WebSocket transport: `new WebSocket(url)` rides the in-process `rack.hijack`
 # socket (Browser#ws_open) — the same substrate Action Cable uses. This spec
@@ -63,7 +64,7 @@ RSpec.describe 'WebSocket' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit('/') }
 
   it 'opens, receives a server push, and echoes a sent frame' do

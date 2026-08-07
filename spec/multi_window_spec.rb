@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rusty_racer' if (ENV['CSIM_JS_ENGINE'].to_s.empty? ? Gem.loaded_specs.key?('rusty_racer') : ENV['CSIM_JS_ENGINE'] == 'v8')
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Full multi-window: each window/tab is its own Browser + JS VM (own DOM,
 # sessionStorage, history; cookies + localStorage shared). On top of the
@@ -58,7 +59,7 @@ RSpec.describe 'multi-window' do
       [200, {'content-type' => 'text/html'}, [body]]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit('/') }
   # Reset between examples (these are ad-hoc sessions Capybara doesn't auto-reset)
   # so the PROCESS-WIDE transfer registry doesn't carry a parked token from a
@@ -191,7 +192,7 @@ RSpec.describe 'meta+Enter on a link the app already handles' do
       [200, {'content-type' => 'text/html'}, [body]]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit('/') }
   after  { session.reset_session! }
 

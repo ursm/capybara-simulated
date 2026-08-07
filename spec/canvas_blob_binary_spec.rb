@@ -1,4 +1,5 @@
 require_relative 'spec_helper'
+require_relative 'support/session_teardown'
 
 # `canvas.toBlob` must emit the encoded image as raw binary. The libvips
 # encoder hands back a byte buffer; if that buffer is funnelled through a
@@ -13,7 +14,7 @@ RSpec.describe 'canvas.toBlob binary integrity' do
     ->(_e) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

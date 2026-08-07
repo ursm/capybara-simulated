@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # Every map the CSSOM keys by a property NAME is looked up with a name that came from page script
 # (`getComputedStyle(el).constructor`, `getPropertyValue('valueOf')`, `style.hasOwnProperty = …`).
@@ -7,7 +8,7 @@ require 'capybara/simulated'
 RSpec.describe 'CSSOM property maps are prototype-less' do
   def session
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="d">x</div></body></html>']] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

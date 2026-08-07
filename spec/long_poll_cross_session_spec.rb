@@ -1,5 +1,6 @@
 require_relative 'spec_helper'
 require 'json'
+require_relative 'support/session_teardown'
 
 # Regression test for the find-tick delivery gate (`find_with_timer_fallback`):
 # a message delivered to an ESTABLISHED held long-poll must be reflected by
@@ -155,8 +156,8 @@ RSpec.describe 'long-poll cross-session delivery through the simulated driver' d
   let(:app) { HijackLongPollBus.new }
 
   it 'reflects a publish delivered to an established held poll in find-polling' do
-    subscriber = Capybara::Session.new(:simulated, app)
-    publisher  = Capybara::Session.new(:simulated, app)
+    subscriber = simulated_session(app)
+    publisher  = simulated_session(app)
 
     subscriber.visit('/')
     # Drive the subscription to its held steady state via the test's own

@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # A nested browsing context's viewport is its container's content box — not the top window's. That
 # is what makes a responsive component inside a narrow frame take its narrow branch, and it has to
@@ -27,7 +28,7 @@ RSpec.describe 'frame viewport' do
       body = env['PATH_INFO'] == '/child' ? CHILD : parent_body
       [200, {'content-type' => 'text/html'}, [body]]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

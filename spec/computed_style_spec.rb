@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # getComputedStyle resolution for layout-free values commonly read by app JS: the inherited
 # font longhands (`font-size` / `font-weight` / `font-style` / `line-height` / `font-family`,
@@ -16,7 +17,7 @@ RSpec.describe 'getComputedStyle resolved values' do
       run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] }
     }.to_app
     Capybara.app = app
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     session
   end

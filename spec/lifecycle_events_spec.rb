@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # Document lifecycle: as the page transitions from `loading` →
 # `interactive` → `complete`, the browser dispatches a
@@ -29,7 +30,7 @@ RSpec.describe 'document lifecycle events' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

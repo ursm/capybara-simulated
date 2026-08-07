@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # The flow-relative (logical) properties. Which PHYSICAL side one lands on depends on the element's
 # writing mode and direction, so the mapping can't happen at parse time, where there is no element:
@@ -12,7 +13,7 @@ RSpec.describe 'logical properties' do
       <!DOCTYPE html>
       <html><head><style>#{css}</style></head><body>#{body}</body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s.evaluate_script(<<~JS)
       (() => {
@@ -41,7 +42,7 @@ RSpec.describe 'logical properties' do
         </style></head><body><div id="t">t</div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # `inset-block-start` IS `top` — the layout reader runs the same logical merge, so a page that
     # positions flow-relatively lands where a browser puts it. (The computed `top` itself stays
@@ -111,7 +112,7 @@ RSpec.describe 'logical properties' do
         <body><div id="t">t</div></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # `<html dir="rtl">` is how essentially every RTL app sets direction. The computed `direction`
     # comes from the HTML directionality algorithm, so reading only the CSS side put every
@@ -167,7 +168,7 @@ RSpec.describe 'logical properties' do
         <body><img id="t" width="100"></body></html>
       HTML
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # A hint sits BELOW every author rule. Leaving its layer rank unset read as "unlayered", which
     # ranks HIGHEST, so the `width` attribute beat the `@layer` rule once the logical/physical merge

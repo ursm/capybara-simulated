@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # navigator.geolocation: spec-compliant Geolocation API whose position is
 # injectable from tests via `page.driver.set_geolocation(...)`. Callbacks are
@@ -10,7 +11,7 @@ RSpec.describe 'navigator.geolocation' do
       [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

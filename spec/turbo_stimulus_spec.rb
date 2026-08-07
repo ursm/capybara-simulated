@@ -1,4 +1,5 @@
 require_relative 'spec_helper'
+require_relative 'support/session_teardown'
 
 # Hotwire smoke: Stimulus + Turbo loaded as UMD bundles via classic
 # `<script src="...">` tags. We don't support `<script type="module">`
@@ -60,7 +61,7 @@ RSpec.describe 'Hotwire (Stimulus + Turbo) via UMD' do
     end
   }
 
-  let(:session) { Capybara::Session.new(:simulated, hello_app) }
+  let(:session) { simulated_session(hello_app) }
 
   it 'starts the Stimulus application and connects controllers' do
     session.visit '/'
@@ -128,7 +129,7 @@ RSpec.describe 'Hotwire (Stimulus + Turbo) via UMD' do
     }
 
     it 'replaces a turbo-frame body via fetch on link click' do
-      session = Capybara::Session.new(:simulated, frame_app)
+      session = simulated_session(frame_app)
       session.visit '/'
       session.find('#load-frame').click
       expect(session).to have_css('#loaded', text: 'frame body')

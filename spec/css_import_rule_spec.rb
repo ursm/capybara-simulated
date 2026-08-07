@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # CSSOM `@import` rule modelling (`CSSImportRule.styleSheet` fetched + linked lazily), and the
 # cascade dropping a removed `<style>`'s rules on the next synchronous style read.
@@ -31,7 +32,7 @@ RSpec.describe 'CSSImportRule + stylesheet removal' do
   before { Capybara.app = app }
 
   it 'exposes the imported CSSStyleSheet (non-constructed, linked) and parses supports/href' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const sheet = document.styleSheets[0];
@@ -59,7 +60,7 @@ RSpec.describe 'CSSImportRule + stylesheet removal' do
   end
 
   it "drops a removed <style> element's rules on the next synchronous getComputedStyle read" do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const before = getComputedStyle(document.documentElement).backgroundColor;

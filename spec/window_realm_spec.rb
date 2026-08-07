@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rusty_racer' if (ENV['CSIM_JS_ENGINE'].to_s.empty? ? Gem.loaded_specs.key?('rusty_racer') : ENV['CSIM_JS_ENGINE'] == 'v8')
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Same-origin `window.open()` (and same-origin iframes) live as REALMS in the
 # opener's V8 isolate (shared heap), not as separate Browsers/VMs. That makes
@@ -12,7 +13,7 @@ RSpec.describe 'same-isolate window realms' do
 
   def session(body)
     app = ->(_env) { [200, {'content-type' => 'text/html'}, [body]] }
-    Capybara::Session.new(:simulated, app).tap {|s| s.visit '/' }
+    simulated_session(app).tap {|s| s.visit '/' }
   end
 
   describe 'window.open() popup' do

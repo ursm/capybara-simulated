@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # The customizable-`<select>` content model (HTML "SelectParserRelaxation",
 # shipped by default in Chromium ≥134): the "in select" / "in select in table"
@@ -17,7 +18,7 @@ RSpec.describe 'customizable-select content model' do
     end
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   def visit_html(html)
     @html = html

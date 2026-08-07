@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # CSSOM `@font-feature-values` (css-fonts-4): CSSFontFeatureValuesRule exposes `type === 14`,
 # a settable `fontFamily`, and one CSSFontFeatureValuesMap per feature at-rule (@annotation /
@@ -17,7 +18,7 @@ RSpec.describe 'CSSFontFeatureValuesRule' do
   before { Capybara.app = app }
 
   it 'parses the rule + maps and supports set/delete/clear on the feature maps' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const sheet = document.styleSheets[0];

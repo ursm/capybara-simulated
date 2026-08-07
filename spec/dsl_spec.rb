@@ -1,5 +1,6 @@
 require_relative 'spec_helper'
 require 'capybara/dsl'
+require_relative 'support/session_teardown'
 
 RSpec.describe 'Capybara DSL through simulated driver' do
   let(:app) {
@@ -93,7 +94,7 @@ RSpec.describe 'Capybara DSL through simulated driver' do
     }.to_app
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   it 'has_text? matches visible text' do
     session.visit('/')

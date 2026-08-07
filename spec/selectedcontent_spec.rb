@@ -1,4 +1,5 @@
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # `<selectedcontent>` mirrors (deep-clones) the currently-selected `<option>`'s
 # child nodes into itself, re-cloned whenever the selection settles. It is a
@@ -20,7 +21,7 @@ RSpec.describe '<selectedcontent> mirroring' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def sc_html

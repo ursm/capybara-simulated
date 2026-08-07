@@ -52,7 +52,10 @@ module Capybara
           @@live.select!(&:weakref_alive?)
           @@live.filter_map {|ref| ref.__getobj__ rescue nil }
         }
-        drivers.each {|d| yield d if d.owner_thread == thread }
+        # A DISPOSED driver is not live: its runtime context is gone, so calling into it raises
+        # (`undefined method 'call' for nil` out of `run_loop_step`). `dispose` deregisters, but the
+        # predicate is the belt — a WeakRef stays in the list until GC actually collects.
+        drivers.each {|d| yield d if d.owner_thread == thread && !d.disposed? }
       end
 
       # `viewport: [w, h]` and `user_agent:` (typically supplied via
@@ -310,9 +313,18 @@ module Capybara
       # isolate per cross-origin file (hundreds over the suite); disposing here
       # incrementally is what reset_windows! already does for aux windows.
       def dispose
+        return if @disposed
+        @disposed = true
+        # Drop out of the live registry FIRST: everything below tears down the runtime this driver
+        # would be asked to step if `each_live_on_thread` still yielded it.
+        @@live_lock.synchronize { @@live.reject! {|ref| (ref.__getobj__ rescue nil).equal?(self) } }
         reset_windows!
         @browser.dispose rescue nil
       end
+
+      # Has this driver been permanently dropped? (A `reset!` between examples does NOT set this —
+      # that rebuilds the page on a live runtime.)
+      def disposed? = @disposed == true
       def go_back              = current_browser.go_back
       def go_forward           = current_browser.go_forward
       def reset_history!       = current_browser.reset_history!

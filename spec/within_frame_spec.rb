@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # `within_frame` / `switch_to_frame`: the block's finds + actions route into
 # the iframe's own V8 realm (a real nested browsing context). This mirrors
@@ -71,7 +72,7 @@ RSpec.describe 'within_frame / switch_to_frame' do
       [200, {'content-type' => 'text/html'}, [page]]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit('/') }
 
   it 'finds content inside a frame by id locator' do
@@ -202,7 +203,7 @@ RSpec.describe 'within_frame on QuickJS' do
       [200, {'content-type' => 'text/html'}, ['<!doctype html><body><iframe id="f" src="about:blank"></iframe></body>']]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit('/') }
 
   it 'raises FrameNotSupported rather than a misleading error' do

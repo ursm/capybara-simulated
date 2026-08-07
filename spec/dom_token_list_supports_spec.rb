@@ -1,4 +1,5 @@
 require_relative 'spec_helper'
+require_relative 'support/session_teardown'
 
 # https://dom.spec.whatwg.org/#dom-domtokenlist-supports
 # `supports(token)` throws TypeError only when the associated attribute defines
@@ -21,7 +22,7 @@ RSpec.describe 'DOMTokenList#supports' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'returns true for a supported link rel token (modulepreload), case-insensitively' do

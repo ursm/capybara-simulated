@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Smoke coverage for the `:simulated` driver — visit / find / event
 # dispatch / virtual-clock timers / MutationObserver / custom elements /
@@ -39,7 +40,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     }.to_app
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   it 'visits a page and finds elements via Capybara DSL' do
     session.visit '/'
@@ -93,7 +94,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, js_app)
+    s = simulated_session(js_app)
     s.visit '/'
     expect(s.evaluate_script('globalThis.__title')).to eq('hello')
     expect(s.evaluate_script('globalThis.__items')).to eq(%w[One Two Three])
@@ -107,7 +108,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, port_app)
+    s = simulated_session(port_app)
     s.visit 'http://example.test:80/'
 
     result = s.evaluate_script(<<~JS)
@@ -158,7 +159,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         end
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, redirect_app)
+    s = simulated_session(redirect_app)
     s.visit '/'
 
     result = s.evaluate_async_script(<<~JS)
@@ -220,14 +221,14 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         ]
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, timer_app)
+    s = simulated_session(timer_app)
     s.visit '/'
 
     expect(s).to have_selector('#transient')
   end
 
   it 'parses full documents assigned to a detached documentElement innerHTML' do
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
 
     result = s.evaluate_script(<<~JS)
@@ -288,7 +289,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, mut_app)
+    s = simulated_session(mut_app)
     s.visit '/'
     expect(s.find('#title').text).to eq('new')
     expect(s.all('#list li').map(&:text)).to eq(%w[Three One Two])
@@ -340,7 +341,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         end
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, ev_app)
+    s = simulated_session(ev_app)
 
     s.visit '/'
     s.click_link 'Stay'
@@ -384,7 +385,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, hover_app)
+    s = simulated_session(hover_app)
     s.visit '/'
 
     s.click_link 'Next'
@@ -419,7 +420,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, hover_app)
+    s = simulated_session(hover_app)
     s.visit '/'
 
     s.find('#target').hover
@@ -455,7 +456,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, bubble_app)
+    s = simulated_session(bubble_app)
     s.visit '/'
 
     s.find('#leaf').hover
@@ -496,7 +497,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, pager_app)
+    s = simulated_session(pager_app)
     s.visit '/'
 
     # Below the fold: the initial notification says isIntersecting=false, so nothing is logged.
@@ -527,7 +528,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, replace_app)
+    s = simulated_session(replace_app)
     s.visit '/'
 
     s.find('#body').set('replacement value')
@@ -578,7 +579,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         end
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, replace_form_app)
+    s = simulated_session(replace_form_app)
     s.visit '/'
 
     s.select 'Assigned', from: 'status'
@@ -618,7 +619,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, timer_app)
+    s = simulated_session(timer_app)
     s.visit '/'
     expect(s.find('#out').text).to eq('ready')
 
@@ -666,7 +667,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, mo_app)
+    s = simulated_session(mo_app)
     s.visit '/'
 
     s.click_button 'Add'
@@ -715,7 +716,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         HTML
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, ce_app)
+    s = simulated_session(ce_app)
     s.visit '/'
 
     expect(s.find('#a').text).to eq('card')
@@ -755,7 +756,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
         end
       }
     }.to_app
-    s = Capybara::Session.new(:simulated, src_app)
+    s = simulated_session(src_app)
     s.visit '/'
     expect(s.evaluate_script('window.__cap_loaded')).to be true
     expect(s.find('#t').text).to eq('hello alice')
@@ -809,7 +810,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
       }.to_app
     }
 
-    let(:form_session) { Capybara::Session.new(:simulated, form_app) }
+    let(:form_session) { simulated_session(form_app) }
 
     it 'fills inputs / textarea, picks radio + checkbox + select, and submits the form' do
       form_session.visit '/'

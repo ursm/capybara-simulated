@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # `<template>`'s contract: its children live in `template.content`
 # (a DocumentFragment), not in the live tree. Selector queries that
@@ -33,7 +34,7 @@ RSpec.describe 'template content semantics' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

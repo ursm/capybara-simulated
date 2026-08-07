@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # CSSOM "serialize a simple selector" for type / universal selectors with namespaces:
 # an any-namespace `*|` prefix drops without a default @namespace, a named prefix that
@@ -28,7 +29,7 @@ RSpec.describe 'CSSOM namespaced type-selector serialization' do
   end
 
   it 'drops an any-namespace `*|` prefix only without a default namespace' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     ns  = '@namespace ns url(ns);'
     dfl = '@namespace url(default_ns); @namespace nsdefault url(default_ns); @namespace ns url(ns);'
@@ -42,7 +43,7 @@ RSpec.describe 'CSSOM namespaced type-selector serialization' do
   end
 
   it 'drops a named prefix that resolves to the default namespace URL' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     # `nsdefault` maps to the SAME url as the (prefix-less) default namespace.
     dfl = '@namespace url(default_ns); @namespace nsdefault url(default_ns); @namespace ns url(ns);'
@@ -52,7 +53,7 @@ RSpec.describe 'CSSOM namespaced type-selector serialization' do
   end
 
   it 'omits an unprefixed universal `*` when its compound has other simple selectors' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     expect(serialize(session, '*', '')).to eq('*')            # lone universal kept
     expect(serialize(session, '*.c', '')).to eq('.c')

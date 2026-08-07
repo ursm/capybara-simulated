@@ -1,5 +1,6 @@
 require_relative 'spec_helper'
 require 'capybara/dsl'
+require_relative 'support/session_teardown'
 
 # CSS-cascade visibility conformance battery.
 #
@@ -222,7 +223,7 @@ RSpec.describe 'CSS cascade visibility conformance' do
     }
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   CASES.each_with_index do |c, idx|
     it "matches real-browser visibility: #{c[:name]}" do
@@ -251,7 +252,7 @@ RSpec.describe 'dynamic CSSOM visibility propagation' do
     }
   }
 
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   def visible_after(session, script)
     session.visit('/')

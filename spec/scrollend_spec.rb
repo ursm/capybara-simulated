@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # `scrollend` (CSSOM-View): the driver models the spec "pending scroll event
 # targets" — scrollend is queued on a position change and dispatched at the next
@@ -14,7 +15,7 @@ RSpec.describe 'scrollend event' do
        ['<!DOCTYPE html><html><head></head><body><div id="s" style="overflow:scroll">' \
         '<div style="height:4000px"></div></div></body></html>']]
     end
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

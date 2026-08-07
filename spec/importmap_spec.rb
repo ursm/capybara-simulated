@@ -1,4 +1,5 @@
 require_relative 'spec_helper'
+require_relative 'support/session_teardown'
 
 # Standard Rails importmap-rails layout: `<script type="importmap">`
 # pins specifiers to URLs, `<script type="module">` `import`s from
@@ -68,7 +69,7 @@ RSpec.describe 'ESM via importmap' do
     end
   }
 
-  let(:session) { Capybara::Session.new(:simulated, hello_app) }
+  let(:session) { simulated_session(hello_app) }
 
   it 'starts Stimulus via ESM importmap and bare specifiers' do
     session.visit '/'
@@ -125,7 +126,7 @@ RSpec.describe 'ESM via importmap' do
     }
 
     it 'fetches and swaps a turbo-frame on link click' do
-      session = Capybara::Session.new(:simulated, frame_app)
+      session = simulated_session(frame_app)
       session.visit '/'
       session.find('#load-frame').click
       expect(session).to have_css('#loaded', text: 'frame body')
@@ -162,7 +163,7 @@ RSpec.describe 'ESM via importmap' do
     }
 
     it 'resolves nested relative imports through the loader' do
-      session = Capybara::Session.new(:simulated, rel_app)
+      session = simulated_session(rel_app)
       session.visit '/'
       expect(session.find('#out').text).to eq('Hi, WORLD')
     end

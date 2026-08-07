@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Navigation initiated INSIDE a nested browsing context — a frame realm reached
 # via `iframe.contentWindow.document` rather than an entered `within_frame`
@@ -30,7 +31,7 @@ RSpec.describe 'nested-context navigation' do
         end
       [200, {'content-type' => 'text/html'}, [body]]
     end
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/host/test.html'
     s
   end

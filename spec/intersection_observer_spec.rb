@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # IntersectionObserver against the layout engine. What matters most is the half a "fires
 # isIntersecting: true once" stub can never report — LEAVING, and never entering at all — because
@@ -30,7 +31,7 @@ RSpec.describe 'IntersectionObserver' do
 
   def session
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Small CSSOM interface-completeness fixes: CSSStyleDeclaration is iterable, CSSMediaRule.media
 # has the [PutForwards=mediaText] setter, and an @keyframes name that is a CSS-wide keyword /
@@ -23,7 +24,7 @@ RSpec.describe 'CSSOM interface completeness' do
   before { Capybara.app = app }
 
   it 'exposes the CSSOM interface surface (iterator / media setter / keyframes-name quoting)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const sheet  = document.styleSheets[0];
@@ -48,7 +49,7 @@ RSpec.describe 'CSSOM interface completeness' do
   end
 
   it 'accepts multiple @page pseudo-pages, preserving order and repeats verbatim' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const page = document.styleSheets[0].cssRules[3];

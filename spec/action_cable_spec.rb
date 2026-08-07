@@ -3,6 +3,7 @@ require 'action_cable'
 require 'concurrent/timer_task'   # AC's heartbeat needs this loaded outside Rails
 require 'logger'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Action Cable end-to-end, self-contained in csim (no Rails): a standalone
 # `ActionCable::Server::Base` with the in-process async adapter, mounted at
@@ -65,7 +66,7 @@ RSpec.describe 'Action Cable' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   it 'connects, subscribes, and receives a server broadcast' do
     session.visit('/')

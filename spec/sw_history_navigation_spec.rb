@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # A cross-document history traversal (history.go(-1)/back()) of a controlled iframe routes
 # through the controlling service worker's fetch event with `request.isHistoryNavigation ===
@@ -68,7 +69,7 @@ RSpec.describe 'Service Worker history-navigation interception' do
 
   it 'history.go(-1) back into scope is a history navigation; the initial load is not' do
     Capybara.app = app
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     a, back = run_traversal(session)
     expect(a).to eq('hist=false')      # initial load is not a history navigation

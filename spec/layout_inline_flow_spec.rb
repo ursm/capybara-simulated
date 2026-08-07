@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Vertical accuracy. Inline content, flex rows, grid rows and table rows all put their children side
 # by side; laying each out as a full-width block made every page two to three times too tall, which
@@ -53,7 +54,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
 
   def session
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end
@@ -121,7 +122,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         <div class="row"><div id="i">i</div><div id="j">j</div></div>
       </body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     widths = s.evaluate_script(<<~JS)
       ['a','b','c','d','e','f','g','h'].map(i => {
@@ -154,7 +155,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         <div id="rev"><div id="r1">one</div><div id="r2">two</div></div>
       </body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # Chrome: content=150,450 side=0,150 — the sidebar keeps its width on the right, the text pane
     # shrinks into what is left instead of overflowing.
@@ -202,7 +203,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         HTML
       end
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
 
     expect(box(s, 'broken')[2, 2]).to eq([16, 16])     # Chrome: 16x16
@@ -221,7 +222,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         #under{position:absolute;top:0;left:0;width:300px;height:60px;z-index:5}
       </style></head><body><div id="under"></div><div id="bar"><div id="btn">btn</div></div></body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # The static button inside the z-index:10 bar is painted AT 10, so it beats the z-index:5 box —
     # and the bar does not swallow the click meant for its own content either. Chrome: btn.
@@ -236,7 +237,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         .menu{position:absolute;left:600px;top:40px;width:200px;height:100px}
       </style></head><body><a id="one">One<div class="menu"></div></a><a id="two">Two</a></body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # Chrome: one=0,30 two=30,29 — the dropdown is out of flow, so the link stays one word wide and
     # the next link sits beside it (it used to be pushed to x=800).
@@ -257,7 +258,7 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
         <table><tr><td id="c1">c1</td><td id="c2">c2</td></tr></table>
       </body></html>
     HTML
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     # A control in a flex row keeps its intrinsic size instead of being measured as text
     # (Chrome: input 185, button 34 — ours uses the same measured control sizes).

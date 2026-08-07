@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # A rejection with NO handler ever attached (fire-and-forget async function,
 # bare `Promise.reject`) never flows through the bridge's `Promise.prototype
@@ -13,7 +14,7 @@ RSpec.describe 'unhandled promise rejections' do
       [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

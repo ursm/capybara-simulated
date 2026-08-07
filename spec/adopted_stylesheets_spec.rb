@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # `adoptedStyleSheets` is a live ObservableArray<CSSStyleSheet>: in-place mutation
 # (push / splice / index write) validates each new member and re-runs the cascade, and
@@ -20,7 +21,7 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
   before { Capybara.app = app }
 
   it 'validates + restyles on in-place mutation of document.adoptedStyleSheets' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const cs = getComputedStyle(document.getElementById('target'));
@@ -57,7 +58,7 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
   end
 
   it 'keeps constructed sheets encapsulated between the document and a shadow tree' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       // An !important document rule that would otherwise win the cascade everywhere.

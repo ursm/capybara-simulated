@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # `new FormData(form)` must mirror real-browser submission semantics:
 # the option's `value` attribute, NOT its visible text. Most apps put
@@ -30,7 +31,7 @@ RSpec.describe 'FormData serialization' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 
@@ -67,7 +68,7 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
   let(:app) {
     ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'fires a bubbling, non-cancelable formdata event whose mutations land in the entry list' do
@@ -163,7 +164,7 @@ RSpec.describe 'named-frame submit threads the constructed entry list' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'fires formdata once and submits the handler-appended entry' do
@@ -203,7 +204,7 @@ RSpec.describe 'top-page submit threads the constructed entry list to Ruby' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'submits the handler-mutated entry list (append + delete)' do
@@ -238,7 +239,7 @@ RSpec.describe 'named-frame form submit during parse' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'navigates the named iframe, leaving the top page intact' do
@@ -287,7 +288,7 @@ RSpec.describe 'FormData entry-list skips (datalist / disabled fieldset)' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def entry_names
@@ -342,7 +343,7 @@ RSpec.describe 'FormData select entries (disabled options / ask-for-a-reset)' do
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   def entries
@@ -391,7 +392,7 @@ RSpec.describe 'FormData select entries (option value falls back to the collapse
       HTML
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
   it 'submits the stripped-and-collapsed text, keeping a value attribute verbatim' do

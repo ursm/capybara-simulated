@@ -4,6 +4,7 @@ require 'json'
 require 'yaml'
 require 'set'
 require 'capybara/simulated'
+require_relative 'support/session_teardown'
 
 # WebIDL existence-coverage gate.
 #
@@ -160,7 +161,7 @@ RSpec.describe 'WebIDL existence coverage' do
   let(:app) {
     ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 
@@ -205,7 +206,7 @@ RSpec.describe 'WebIDL per-interface ownership (members not leaked across interf
   let(:app) {
     ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] }
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
 
   before { session.visit '/' }
 

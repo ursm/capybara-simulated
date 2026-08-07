@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'rack'
 require 'base64'
 require 'timeout'
+require_relative 'support/session_teardown'
 
 # Coverage for the pixel-buffer stack: ImageData, OffscreenCanvas,
 # CanvasRenderingContext2D's drawImage / getImageData / putImageData
@@ -35,7 +36,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   before { Capybara.app = app }
 
   it 'constructs ImageData with width/height and a zero-filled buffer' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const d = new ImageData(2, 3);
@@ -49,7 +50,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'OffscreenCanvas getImageData reads back what putImageData wrote' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = new OffscreenCanvas(4, 2);
@@ -70,7 +71,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'createImageBitmap decodes a PNG blob via libvips and drawImage copies pixels' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     # Build a Blob from a known PNG. A string blobPart is UTF-8-encoded
     # per the WHATWG Blob spec (`new Blob(['€']).size === 3`), which would
@@ -98,7 +99,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillRect paints an exact solid-colour block, respecting fillStyle' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = new OffscreenCanvas(3, 3);
@@ -118,7 +119,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'serializes fillStyle / strokeStyle and ignores invalid assignments' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -139,7 +140,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'clearRect erases a region back to transparent black' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(2, 2).getContext('2d');
@@ -157,7 +158,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'composites a translucent fill over an opaque one via globalAlpha' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -178,7 +179,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'applies the current transform (translate + scale) to fillRect' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -197,7 +198,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'strokeRect paints a border frame leaving the interior untouched' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -217,7 +218,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'normalizes negative width/height in fillRect and strokeRect' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -239,7 +240,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'treats non-finite geometry / transform arguments as no-ops (spec)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(2, 2).getContext('2d');
@@ -259,7 +260,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'coerces string geometry arguments to numbers (WebIDL doubles)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(3, 3).getContext('2d');
@@ -275,7 +276,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'resets the bitmap when canvas width is reassigned (clear idiom)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas');
@@ -294,7 +295,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fills a triangle path (nonzero winding) via moveTo/lineTo/fill' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(5, 5).getContext('2d');
@@ -318,7 +319,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fill(evenodd) leaves a hole where two nested rects overlap' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(6, 6).getContext('2d');
@@ -338,7 +339,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fill(nonzero) fills nested same-wound rects solid (no hole)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(6, 6).getContext('2d');
@@ -356,7 +357,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'strokes a path outline once even where segments overlap (translucent)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -378,7 +379,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fills an arc (circle) covering the centre and clearing the corners' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -398,7 +399,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'beginPath clears the current point (no stray segment from a stale path)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(6, 6).getContext('2d');
@@ -426,7 +427,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'exposes lineCap/lineJoin/miterLimit and setLineDash without throwing' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -442,7 +443,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'setLineDash duplicates an odd-length list and ignores invalid entries' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -464,7 +465,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'renders a dashed stroke and hit-tests it with butt caps' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(40, 3).getContext('2d');
@@ -489,7 +490,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fills a rect with a horizontal linear gradient (endpoint colours + midpoint)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 1).getContext('2d');
@@ -513,7 +514,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillStyle round-trips a gradient object and reads it back' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -527,7 +528,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'addColorStop throws on an out-of-range offset or invalid colour' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const g = new OffscreenCanvas(1, 1).getContext('2d').createLinearGradient(0, 0, 1, 0);
@@ -542,7 +543,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'radial gradient fills the inner disc with the start colour' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -564,7 +565,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'clip() masks subsequent fills to the clip region' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -585,7 +586,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'restore() lifts a clip set after save()' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -602,7 +603,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'throws TypeError for non-finite gradient coordinates' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -619,7 +620,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'resizing a canvas resets the context state (transform + clip)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas');
@@ -638,7 +639,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'measureText returns real font metrics that scale with size and length' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -662,7 +663,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillText rasterizes real glyphs at the baseline anchor' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = new OffscreenCanvas(120, 40);
@@ -685,7 +686,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillText honors textAlign (right shifts the run left of the anchor)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       function run(align) {
@@ -708,7 +709,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillText is masked by clip()' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(120, 40).getContext('2d');
@@ -726,7 +727,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'renders text with markup metacharacters literally (no Pango markup)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(160, 40).getContext('2d');
@@ -745,7 +746,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'maxWidth condenses the line horizontally onto one row (no wrap)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = new OffscreenCanvas(200, 40);
@@ -774,7 +775,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       }
     }.to_app
     Capybara.app = app_fs
-    session = Capybara::Session.new(:simulated, app_fs)
+    session = simulated_session(app_fs)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.getElementById('c').getContext('2d');
@@ -792,7 +793,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'keeps a named family when the size unit is not px' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -804,7 +805,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'roundRect fills a rounded rectangle (corners clipped, interior filled)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -823,7 +824,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'roundRect rejects an out-of-range radii list' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -838,7 +839,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'isPointInPath / isPointInStroke hit-test the current path' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -862,7 +863,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'DOMMatrix composes transforms, inverts, and serialises' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ident = new DOMMatrix();
@@ -902,7 +903,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'ctx.getTransform reflects the CTM and setTransform accepts a DOMMatrix' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -927,7 +928,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'createConicGradient sweeps colour around the centre' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -945,7 +946,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'reset() clears the bitmap and resets context state' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 4).getContext('2d');
@@ -967,7 +968,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'roundRect collapses radii on a zero-dimension rect and no-ops a non-finite radius' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -987,7 +988,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'getContextAttributes reflects the options passed to getContext' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const a = new OffscreenCanvas(1, 1).getContext('2d', { alpha: false, willReadFrequently: true });
@@ -1005,7 +1006,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'exposes the settings IDL properties (stored + save/restore)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -1034,7 +1035,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'casts an offset drop shadow under a filled shape' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(30, 30).getContext('2d');
@@ -1053,7 +1054,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'shadowBlur spreads the shadow beyond the shape bounds' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       function count(blur) {
@@ -1072,7 +1073,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'clearRect casts no shadow' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(30, 30).getContext('2d');
@@ -1089,7 +1090,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'shadowColor parses, serialises, and resolves currentColor' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script("document.body.innerHTML = '<canvas id=cc width=10 height=10 style=\"color:#0f0\"></canvas>'")
     out = session.evaluate_script(<<~JS)
@@ -1113,7 +1114,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'casts a shadow from an off-canvas shape and weights it by source alpha' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(100, 50).getContext('2d');
@@ -1134,7 +1135,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'composites the shadow with the current operator (xor)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(100, 50).getContext('2d');
@@ -1164,7 +1165,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         end
       }
     }
-    session = Capybara::Session.new(:simulated, face_app)
+    session = simulated_session(face_app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.getElementById('c').getContext('2d');
@@ -1194,7 +1195,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'validates globalAlpha and supports the clear operator + whole-canvas ops' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -1224,7 +1225,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'drawImage: TypeError for a non-image, self-copy snapshots, blank/undrawn draws transparent' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 2).getContext('2d');
@@ -1243,7 +1244,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillStyle accepts colour objects, coerces via toString, and rejects bare hex' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(2, 2).getContext('2d');
@@ -1275,7 +1276,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'gradient addColorStop validates the offset and resolves currentColor to black' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(4, 1).getContext('2d');
@@ -1301,7 +1302,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'parses CSS Color 4/5 (color(), color-mix, relative colour) and serialises color(srgb …)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script("document.body.innerHTML = '<canvas id=cc width=4 height=4 style=\"color:#f0f\"></canvas>'")
     out = session.evaluate_script(<<~JS)
@@ -1330,7 +1331,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'roundRect ignores a non-finite radius but throws on a finite negative one' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(20, 20).getContext('2d');
@@ -1360,7 +1361,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'throws TypeError for too few arguments (WebIDL arity)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     session.execute_script("document.body.innerHTML = '<canvas id=cc width=10 height=10></canvas>'")
     out = session.evaluate_script(<<~JS)
@@ -1391,7 +1392,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'reports context creation attributes via getContextAttributes' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const mk = (o) => new OffscreenCanvas(1, 1).getContext('2d', o).getContextAttributes();
@@ -1417,7 +1418,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'bilinearly interpolates a scaled drawImage only when imageSmoothingEnabled' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       // 2×2 source: (0,0) green, the other three red.
@@ -1445,7 +1446,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'does not bleed adjacent atlas cells when smoothing a scaled sub-rect' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       // 2×1 atlas: left cell green, right cell red.
@@ -1464,7 +1465,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'counts points exactly on the fill boundary as inside (isPointInPath)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(30, 30).getContext('2d');
@@ -1486,7 +1487,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'does not count a point on a zero-area subpath as inside (isPointInPath)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(120, 20).getContext('2d');
@@ -1505,7 +1506,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'returns null for createPattern from a video with no decoded frame' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -1517,7 +1518,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'draws a focus ring only when the fallback element is focused (drawFocusIfNeeded)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       document.body.innerHTML =
@@ -1572,7 +1573,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'does not let a thick arc stroke overshoot its endpoint into the wrong half' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(100, 50).getContext('2d');
@@ -1589,7 +1590,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'ignores invalid text drawing-state values (enums / lengths)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -1616,7 +1617,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'draws nothing when fillText is given a non-positive or NaN maxWidth' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const painted = (maxWidth) => {
@@ -1637,7 +1638,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'canonically serializes the font shorthand and ignores invalid values' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');   // detached ⇒ em/% base 10px
@@ -1666,7 +1667,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'renders a numeric-weight font at its size, not the weight value' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const inkHeight = (font) => {
@@ -1689,7 +1690,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'reflects letter/word spacing in measureText width (resolved against the current font)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(400, 60).getContext('2d');
@@ -1718,7 +1719,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'validates fontStretch / fontVariantCaps / textRendering enum values' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(10, 10).getContext('2d');
@@ -1739,7 +1740,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'measures the bounding box relative to the text-alignment / direction origin' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(200, 40).getContext('2d');
@@ -1759,7 +1760,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'normalizes tab/newline/CR/FF to spaces in text (single-line, no wrap)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(300, 80).getContext('2d');
@@ -1792,7 +1793,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         end
       }
     }.to_app
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.getElementById('c').getContext('2d');
@@ -1815,7 +1816,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'reflects fontKerning and small-caps in measureText width' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(400, 60).getContext('2d');
@@ -1839,7 +1840,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it "defaults ctx.lang to 'inherit' and resolves em/lh font sizes against the canvas element" do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       document.body.innerHTML = "<canvas id='c' width='100' height='50' style='font-size: 30px; line-height: 40px'></canvas>";
@@ -1856,7 +1857,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fillText casts a shadow' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       function paintedCount(shadow) {
@@ -1875,7 +1876,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'ignores negative / non-finite shadow values (no hang, no wipe)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = Timeout.timeout(15) do
       session.evaluate_script(<<~JS)
@@ -1901,7 +1902,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'composites with destination-out (erasing), lighter (additive), and multiply' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -1930,7 +1931,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'composites source-atop (source shows only over existing pixels)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -1947,7 +1948,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'composites the whole-canvas operators (copy / source-in / destination-in), clearing uncovered' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -1970,7 +1971,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'ignores an unknown globalCompositeOperation (keeps the previous)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(1, 1).getContext('2d');
@@ -1985,7 +1986,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fills / strokes / clips / hit-tests a Path2D built from methods' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
@@ -2015,7 +2016,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'parses a Path2D from an SVG path string (lines, cubic, arc, relative)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
@@ -2046,7 +2047,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'does not hang on a malformed SVG path string' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = Timeout.timeout(15) do
       session.evaluate_script(<<~JS)
@@ -2061,7 +2062,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'Path2D copy constructor and addPath compose paths' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const at = (ctx, x, y) => ctx.getImageData(x, y, 1, 1).data[3];
@@ -2080,7 +2081,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'addPath handles self-addition and the m11-m42 matrix alias without hanging' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = Timeout.timeout(15) do
       session.evaluate_script(<<~JS)
@@ -2100,7 +2101,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'anti-aliases a fractional edge (partial coverage) while keeping integer edges exact' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       // Axis-aligned box with a fractional left edge at x=0.5.
@@ -2129,7 +2130,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'throws (not crashes) on an un-allocatably large getImageData / ImageData' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = Timeout.timeout(15) do
       session.evaluate_script(<<~JS)
@@ -2152,7 +2153,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'createPattern tiles an image source (repeat / no-repeat) and validates args' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -2187,7 +2188,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'decodes an <img> resource on src assignment (naturalWidth/complete + load event + drawImage)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const img = document.createElement('img');
@@ -2220,7 +2221,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fires load asynchronously and error for a broken <img>' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_async_script(<<~JS)
       const cb = arguments[arguments.length - 1];
@@ -2259,7 +2260,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         end
       }
     }.to_app
-    session = Capybara::Session.new(:simulated, parse_app)
+    session = simulated_session(parse_app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const img = document.getElementById('i');
@@ -2277,7 +2278,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'decodes a data: URL <img> (no fetch) and draws it' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     data_url = 'data:image/png;base64,' + Base64.strict_encode64(png_bytes)
     out = session.evaluate_script(<<~JS)
@@ -2299,7 +2300,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'does not load images parsed into a DOMParser document (inert, no browsing context)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const doc = new DOMParser().parseFromString('<img src="/test.png">', 'text/html');
@@ -2312,7 +2313,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'resets natural size and re-arms loading when src is cleared' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const img = new Image();
@@ -2332,7 +2333,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'validates line-style IDL setters (ignoring out-of-range values)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = new OffscreenCanvas(10, 10).getContext('2d');
@@ -2353,7 +2354,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'renders a rounded line join (round bulge past the miter corner)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -2373,7 +2374,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'fills a full circle from an anticlockwise arc(0, 2*PI, true)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(40, 40).getContext('2d');
@@ -2390,7 +2391,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'maps the canvas width/height attributes to computed CSS width/height' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const parse = (attr) => {
@@ -2416,7 +2417,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'exposes context.canvas as a readonly attribute' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas');
@@ -2431,7 +2432,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'validates the ImageData constructor and exposes readonly members' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name || e.constructor.name; } };
@@ -2465,7 +2466,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'validates createImageData / getImageData / putImageData arguments' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas'); c.width = 20; c.height = 20;
@@ -2499,7 +2500,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'createPattern: null for an unusable image, throws for broken / bad repetition' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.createElement('canvas').getContext('2d');
@@ -2526,7 +2527,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'loads a zero-intrinsic-dimension image as complete + not broken, with no pixels' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     # An SVG with width 0 is a VALID image (rsvg refuses to rasterize a 0-dimension
     # canvas, but the resource loaded): the <img> is complete, not broken, and reports
@@ -2557,7 +2558,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'loads an SVG <image> resource (href / xlink:href) like an <img>' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     # An SVG <image> fetches its href just like an <img> src, so createPattern can tell a
     # BROKEN href (throw InvalidStateError) from a usable bitmap (a real pattern).
@@ -2582,7 +2583,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'reloads an SVG <image> on setAttributeNS(xlink) / removeAttribute and defers empty href to xlink:href' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const XLINK = 'http://www.w3.org/1999/xlink';
@@ -2609,7 +2610,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'parses colour keywords case-insensitively and auto-closes an unclosed function' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (v) => { const c = document.createElement('canvas'); c.width = 2; c.height = 2;
@@ -2628,7 +2629,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'bakes the transform into path points at add-time, not at fill-time' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas'); c.width = 100; c.height = 50;
@@ -2652,7 +2653,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'scales the stroke pen by the transform in effect at stroke time' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas'); c.width = 100; c.height = 50;
@@ -2668,7 +2669,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'throws IndexSizeError for a negative arc / arcTo / ellipse radius' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.createElement('canvas').getContext('2d');
@@ -2692,7 +2693,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'drawImage honors the transform, globalAlpha, and compositing operator' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const px = (ctx, x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
@@ -2725,7 +2726,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'drawImage validates its arguments (TypeError / no-op / zero-canvas)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = document.createElement('canvas').getContext('2d');
@@ -2750,7 +2751,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   it 'HTMLCanvasElement.getContext("2d") returns a working 2D context' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const c = document.createElement('canvas');

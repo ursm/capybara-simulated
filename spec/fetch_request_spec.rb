@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Fetch `Request` value-type semantics: constructing a Request from another Request
 # transfers (consumes) the source's body, `clone()` does not, and a relative input URL
@@ -22,7 +23,7 @@ RSpec.describe 'Fetch Request semantics' do
   before { Capybara.app = app }
 
   it 'transfers the source body when constructing a Request from a Request' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     session.execute_script <<~JS
       const src = new Request('/x', {method: 'POST', body: "the body"});
@@ -47,7 +48,7 @@ RSpec.describe 'Fetch Request semantics' do
   end
 
   it 'transfers the source body even when init replaces it, and clone() does not disturb' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
@@ -73,7 +74,7 @@ RSpec.describe 'Fetch Request semantics' do
   end
 
   it 'resolves a relative Request URL against the document base URI (<base href>)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/based'   # <base href="sub/">
     out = session.evaluate_script(<<~JS)
       JSON.stringify({

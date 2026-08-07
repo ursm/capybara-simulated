@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
@@ -80,7 +81,7 @@ RSpec.describe 'cascade invalidation' do
     it "updates style when :#{name} changes" do
       html = "<!DOCTYPE html><html><head><style>#{css}</style></head><body>#{body}</body></html>"
       app = lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] }
-      s = Capybara::Session.new(:simulated, app)
+      s = simulated_session(app)
       s.visit '/'
       got = s.evaluate_script(<<~JS)
         (() => {
@@ -103,7 +104,7 @@ RSpec.describe 'cascade invalidation' do
         '#t:checked { color: rgb(0, 128, 0) }</style></head>' \
         '<body><input type="checkbox" id="t"></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     read = "getComputedStyle(document.getElementById('t')).color"
     seen = [s.evaluate_script(read)]
@@ -121,7 +122,7 @@ RSpec.describe 'cascade invalidation' do
         '#t { color: rgb(0, 0, 0) } #t:placeholder-shown { color: rgb(128, 0, 0) }</style></head>' \
         '<body><input id="t" placeholder="p"></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     read = "getComputedStyle(document.getElementById('t')).color"
     before = s.evaluate_script(read)
@@ -135,7 +136,7 @@ RSpec.describe 'cascade invalidation' do
         '#t:invalid { color: rgb(0, 128, 0) }</style></head>' \
         '<body><input id="t"></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     read = "getComputedStyle(document.getElementById('t')).color"
     before = s.evaluate_script(read)
@@ -149,7 +150,7 @@ RSpec.describe 'cascade invalidation' do
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="h"></div></body></html>']]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {

@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Two contracts a browser satisfies that page code reads directly, and that we used to get wrong in
 # ways that cancelled out only while the page sat unscrolled at the origin:
@@ -18,7 +19,7 @@ require 'rack'
 RSpec.describe 'root box + computed initial values' do
   def session(body)
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end

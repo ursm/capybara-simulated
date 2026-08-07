@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Cache Storage API (`caches` / `Cache`) — the WindowOrWorkerGlobalScope surface backed by
 # the Ruby-side origin-partitioned store. Exercises the CacheStorage lifecycle, put/match
@@ -35,7 +36,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'exposes caches / Cache / CacheStorage globals' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       JSON.stringify({
@@ -51,7 +52,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'open/has/keys/delete track the cache set in creation order' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       await caches.open('v1');
@@ -73,7 +74,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'put/match round-trips a Response with headers and status' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('c');
@@ -97,7 +98,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'preserves a binary body byte-for-byte through put/match' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const bytes = new Uint8Array([0, 1, 2, 250, 251, 255]);
@@ -111,7 +112,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'match honours ignoreSearch and put replaces a same-key entry' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('q');
@@ -131,7 +132,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'matchAll with Vary distinguishes entries by the varied header' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('vary');
@@ -148,7 +149,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'delete removes a matching entry and reports whether anything was removed' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('d');
@@ -164,7 +165,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'rejects put for a non-GET request and a 206 response' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('e');
@@ -177,7 +178,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'requires a request argument for match (Cache and CacheStorage)' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('req');
@@ -194,7 +195,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'preserves body-lessness and the redirected flag through the store' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('meta');
@@ -207,7 +208,7 @@ RSpec.describe 'Cache Storage API' do
   end
 
   it 'add/addAll fetch and store real resources; caches.match spans caches' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     r = run_async(session, <<~JS)
       const c = await caches.open('added');

@@ -2,6 +2,7 @@ require 'capybara/simulated'
 require 'rusty_racer'
 require 'rack'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Zero-copy postMessage transfer to a Worker (rusty_racer >= 0.1.6): a buffer in
 # the transfer list crosses the isolate boundary by moving its backing store
@@ -66,7 +67,7 @@ RSpec.describe 'Worker postMessage zero-copy transfer' do
       end
     end
   }
-  let(:session) { Capybara::Session.new(:simulated, app) }
+  let(:session) { simulated_session(app) }
   before { Capybara.app = app }
 
   it 'moves the buffer zero-copy, detaches the source, and leaves no parked store' do

@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/js_engine'
+require_relative 'support/session_teardown'
 
 # Resizing the window moves ONE viewport: `innerWidth` / `innerHeight`, the
 # `@media` cascade, `matchMedia()`, and the layout the geometry surface reports
@@ -29,7 +30,7 @@ RSpec.describe 'window resize' do
 
   def session
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s
   end
@@ -117,7 +118,7 @@ RSpec.describe 'window resize' do
     # to desktop and flip every breakpoint for the rest of the test.
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [body]] }
     Capybara.register_driver(:simulated_mobile_probe) {|a| Capybara::Simulated::Driver.new(a, viewport: [425, 694]) }
-    s = Capybara::Session.new(:simulated_mobile_probe, app)
+    s = simulated_session(app, mode: :simulated_mobile_probe)
     s.visit '/'
     expect(s.current_window.size).to eq([425, 694])
 
@@ -137,7 +138,7 @@ RSpec.describe 'window resize' do
              '<iframe src="/frame" style="width:50%;height:200px;border:0"></iframe></body></html>'
       [200, {'content-type' => 'text/html'}, [html]]
     }
-    s = Capybara::Session.new(:simulated, app)
+    s = simulated_session(app)
     s.visit '/'
     s.within_frame(0) { expect(s.evaluate_script("document.getElementById('i').getBoundingClientRect().width")).to eq(512) }
 

@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require 'rack'
+require_relative 'support/session_teardown'
 
 # Fetch `Response` value-type semantics: a disturbed/locked stream body is rejected at
 # construction, `Response.json` throws on a non-encodable value, and a network-fetched
@@ -22,7 +23,7 @@ RSpec.describe 'Fetch Response semantics' do
   before { Capybara.app = app }
 
   it 'rejects a disturbed or locked ReadableStream body, and Response.json rejects non-encodable data' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
@@ -43,7 +44,7 @@ RSpec.describe 'Fetch Response semantics' do
   end
 
   it 'makes a fetched response header list immutable but a constructed one mutable' do
-    session = Capybara::Session.new(:simulated, app)
+    session = simulated_session(app)
     session.visit '/'
     session.execute_script <<~JS
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
