@@ -164,21 +164,43 @@ RSpec.describe 'cascade invalidation' do
     expect([before, s.evaluate_script(read)]).to eq(['rgb(128, 0, 0)', 'rgb(0, 0, 0)'])
   end
 
-  it 'taints a VENDOR-prefixed pseudo-class' do
-    # `:-webkit-autofill` produced no match at all under a name pattern that required a leading
-    # letter, and "no pseudo here" is the opposite of the "anything unrecognised taints" invariant
-    # the design rests on. Asserted through the cache's own observable: the property stays readable
-    # and correct, which it would not be if the rule were treated as static and cached across a
-    # generation the state doesn't move.
-    app = lambda {|_env|
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
-        '#t { color: rgb(0, 0, 0) } #t:-webkit-autofill { color: rgb(0, 128, 0) }</style></head>' \
-        '<body><input id="t"></body></html>']]
-    }
+  it 'classifies selectors correctly for the taint gate' do
+    # Asserted on the CLASSIFIER, not through a colour. The vendor-prefixed case cannot be toggled
+    # from a spec, so the colour-based version of this passed against the very regression it was
+    # written for — two identical reads of a rule that never matches say nothing about whether it
+    # was treated as static.
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
     s = simulated_session(app)
     s.visit '/'
-    read = "getComputedStyle(document.getElementById('t')).color"
-    expect([s.evaluate_script(read), s.evaluate_script(read)]).to eq(['rgb(0, 0, 0)', 'rgb(0, 0, 0)'])
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = globalThis.__csimSelectorIsDynamic;
+        return {
+          plain:        d('#t'),
+          structural:   d('li:first-child'),
+          attribute:    d('input:disabled'),
+          hover:        d('#t:hover'),
+          chained:      d('a:link:hover'),          // the pseudo AFTER a matched one
+          chainedInner: d(':is(:first-child:hover)'),
+          vendor:       d('input:-webkit-autofill'),
+          dirAuto:      d('#t:dir(rtl)'),           // reads the control's VALUE for dir="auto"
+          pseudoEl:     d('p::before'),             // a pseudo-ELEMENT is not a state
+          escapedColon: d('.hover' + String.fromCharCode(92) + ':bg-red-500')  // Tailwind variant: an identifier
+        };
+      })()
+    JS
+    expect(got).to eq(
+      'plain'        => false,
+      'structural'   => false,
+      'attribute'    => false,
+      'hover'        => true,
+      'chained'      => true,
+      'chainedInner' => true,
+      'vendor'       => true,
+      'dirAuto'      => true,
+      'pseudoEl'     => false,
+      'escapedColon' => false
+    )
   end
 
   it 'updates style when a shadow root ADOPTS a sheet in place' do
