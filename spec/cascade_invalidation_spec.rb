@@ -144,6 +144,43 @@ RSpec.describe 'cascade invalidation' do
     expect([before, s.evaluate_script(read)]).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
   end
 
+  it 'taints a rule whose dynamic pseudo-class FOLLOWS another one' do
+    # `a:link:hover`, `li:first-child:hover`, `input:disabled:focus` are ordinary authoring idioms.
+    # The pseudo-name scan used a `[^:]` prefix, which CONSUMES a character — so the pseudo directly
+    # after a matched one was never scanned, the rule read as static, and its properties cached
+    # through the state change. Every row of the table above is a SINGLE pseudo-class, which is why
+    # they all stayed green.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { color: rgb(0, 0, 0) } ' \
+        '#t:first-child:placeholder-shown { color: rgb(128, 0, 0) }</style></head>' \
+        '<body><input id="t" placeholder="p"></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('t')).color"
+    before = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('t').setRangeText('abc', 0, 0)")
+    expect([before, s.evaluate_script(read)]).to eq(['rgb(128, 0, 0)', 'rgb(0, 0, 0)'])
+  end
+
+  it 'taints a VENDOR-prefixed pseudo-class' do
+    # `:-webkit-autofill` produced no match at all under a name pattern that required a leading
+    # letter, and "no pseudo here" is the opposite of the "anything unrecognised taints" invariant
+    # the design rests on. Asserted through the cache's own observable: the property stays readable
+    # and correct, which it would not be if the rule were treated as static and cached across a
+    # generation the state doesn't move.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { color: rgb(0, 0, 0) } #t:-webkit-autofill { color: rgb(0, 128, 0) }</style></head>' \
+        '<body><input id="t"></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('t')).color"
+    expect([s.evaluate_script(read), s.evaluate_script(read)]).to eq(['rgb(0, 0, 0)', 'rgb(0, 0, 0)'])
+  end
+
   it 'updates style when a shadow root ADOPTS a sheet in place' do
     # Not a pseudo-class: an in-place mutation of the ObservableArray. The `adoptedStyleSheets`
     # SETTER already invalidated; the array mutators moved no generation.
