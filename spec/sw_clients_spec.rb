@@ -46,11 +46,9 @@ RSpec.describe 'Service Worker client enumeration' do
         req = Rack::Request.new(env)
         case req.path_info
         when '/'
-          # The top page pings too, so a SW scoped at '/' registers it as a client the same way
-          # a frame is — that is the only route by which the TOP-LEVEL context becomes one today.
-          [200, {'content-type' => 'text/html'},
-           ['<html><body>main<input id="top">' \
-            '<script>fetch("/scope/ping?from=top")</script></body></html>']]
+          # Deliberately NO fetch here: the top page must never talk to the worker, so every
+          # assertion about it as a client rests on becoming CONTROLLED and nothing else.
+          [200, {'content-type' => 'text/html'}, ['<html><body>main<input id="top"></body></html>']]
         when '/sw.js'      then [200, {'content-type' => 'text/javascript'}, [sw]]
         when '/scope/ping' then [200, {'content-type' => 'text/plain'}, ['from-network']]
         when '/scope/page.html'
@@ -171,6 +169,18 @@ RSpec.describe 'Service Worker client enumeration' do
 
     expect(focused.size).to eq(1)
     expect(focused.first).to end_with('#b')
+  end
+
+  # The point of registering at the moment control is installed: a controlled page is a client
+  # straight away, with no traffic of its own. `clients.matchAll()` run from a FRAME must already
+  # see the top page — the PWA shape ("raise the existing window") reads matchAll cold.
+  it 'lists a controlled top-level page that has never talked to the worker' do
+    session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
+    top     = match_all(session, via: 'a').find {|c| c['id'] == 'client-window' }
+
+    expect(top).not_to be_nil
+    expect(top['url']).to end_with('/')
+    expect(top['frameType']).to eq('top-level')
   end
 
   # The TOP-LEVEL context's client id is 'client-window', not `client-<realm>` — the main realm

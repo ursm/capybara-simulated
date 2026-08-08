@@ -902,9 +902,10 @@ module Capybara
           ctrl   = @browser.sw_client_controller_for(url.to_s)
           ctrl ||= @browser.sw_inherited_controller_for(parent_id) if opaque
           if ctrl
+            # Wiring the controller is what registers this frame as a client — the realm reports
+            # itself from installController (js/src/sw-client.js), before the document below loads.
             realm.call('__csim_swSetControllerDirect', *ctrl)
             @browser.sw_note_realm_controller(realm.id, ctrl)
-            @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0])
           end
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
