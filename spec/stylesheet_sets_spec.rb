@@ -21,6 +21,36 @@ RSpec.describe 'stylesheet sets + data: CSS' do
   def display(session, id) = session.evaluate_script("getComputedStyle(document.getElementById('#{id}')).display")
   def color(session, id)   = session.evaluate_script("getComputedStyle(document.getElementById('#{id}')).color")
 
+  # `disabled` is a CSSOM flag on the SHEET, with no content attribute behind it for `<style>` and
+  # no DOM change at all when set through `document.styleSheets[i]`. It was invisible to both the
+  # cascade cache key and the rule collection, so a disabled sheet kept applying. Chrome measured:
+  # green -> black -> green -> black across the four steps below.
+  it 'stops applying a sheet disabled through CSSStyleSheet.disabled' do
+    s = session_for('<style id=s>#a { color: rgb(0, 128, 0) }</style>')
+    expect(color(s, 'a')).to eq('rgb(0, 128, 0)')
+    s.evaluate_script('document.styleSheets[0].disabled = true')
+    expect(color(s, 'a')).to eq('rgb(0, 0, 0)')
+    s.evaluate_script('document.styleSheets[0].disabled = false')
+    expect(color(s, 'a')).to eq('rgb(0, 128, 0)')
+  end
+
+  it 'stops applying a sheet disabled through the <style> element' do
+    # HTMLStyleElement.disabled reflects the associated SHEET's flag, not an attribute.
+    s = session_for('<style id=s>#a { color: rgb(0, 128, 0) }</style>')
+    expect(color(s, 'a')).to eq('rgb(0, 128, 0)')
+    s.evaluate_script("document.getElementById('s').disabled = true")
+    expect(color(s, 'a')).to eq('rgb(0, 0, 0)')
+  end
+
+  it 'stops applying a LINKED sheet disabled through its sheet object' do
+    # The `<link disabled>` ATTRIBUTE form was already handled; setting the flag on the sheet
+    # object reaches the same state with nothing in the DOM to see.
+    s = session_for('<link rel=stylesheet href="data:text/css,%23a{color:rgb(0,128,0)}">')
+    expect(color(s, 'a')).to eq('rgb(0, 128, 0)')
+    s.evaluate_script('document.styleSheets[0].disabled = true')
+    expect(color(s, 'a')).to eq('rgb(0, 0, 0)')
+  end
+
   it 'loads percent-encoded data:text/css into the cascade' do
     s = session_for('<link rel=stylesheet href="data:text/css,%23a{display:none}">')
     expect(display(s, 'a')).to eq('none')
