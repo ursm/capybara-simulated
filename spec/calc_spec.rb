@@ -119,12 +119,8 @@ RSpec.describe 'CSS math functions' do
     # A property value is not one expression: the `/` in `aspect-ratio` is a separator, and
     # `background-position` has two components. Parsing the whole value as one sum ate both.
     expect(computed('aspect-ratio: calc(1 + 1) / 2', %w[aspectRatio])).to eq(['2 / 2'])
-    # Chrome reports `15px 0px`; the `0` -> `0px` difference is a PRE-EXISTING gap in the
-    # background-position canonicaliser (`background-position: 15px 0` without any calc reports
-    # `15px 0` too), not something the reduction introduces. Asserted as it is so the calc half is
-    # pinned without pretending the other half is fixed.
     expect(computed('background-position: calc(10px + 5px) 0', %w[backgroundPosition]))
-      .to eq(['15px 0'])
+      .to eq(['15px 0px'])
   end
 
   it 'resolves rem inside the ROOT font-size against the initial size' do
@@ -244,6 +240,46 @@ RSpec.describe 'CSS math functions' do
     expect(computed('background-size: calc(100% - var(--neg))', %w[backgroundSize],
                     extra_css: ':root { --neg: -10px }')).to eq(['calc(100% - -10px)'])
     expect(computed('flex-basis: calc(-10px + 100%)', %w[flexBasis])).to eq(['calc(-10px + 100%)'])
+  end
+
+  it 'keeps the calc() wrapper on the SPECIFIED surface, with its contents reduced' do
+    # Not the computed surface, which reduces to a plain value. Chrome keeps the WRAPPER here and
+    # simplifies inside it, and only for ABSOLUTE units — there is no element at this stage, so a
+    # font- or viewport-relative term is left exactly as written. Every string below is Chrome's.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="x" ' \
+        'style="margin-left: min(10px, 20px); margin-right: calc(2em + 4px); ' \
+        'margin-top: calc(100% + 10px); padding: clamp(1px, 5px, 9px)"></div></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const x = document.getElementById('x');
+        x.style.color = 'red';                       // an unrelated write re-serializes the block
+        return [[x.style.marginLeft, x.style.marginRight, x.style.marginTop, x.style.padding],
+                x.getAttribute('style')];
+      })()
+    JS
+    expect(got).to eq([
+      ['calc(10px)', 'calc(2em + 4px)', 'calc(100% + 10px)', 'calc(5px)'],
+      'margin-left: calc(10px); margin-right: calc(2em + 4px); ' \
+      'margin-top: calc(100% + 10px); padding: calc(5px); color: red;'
+    ])
+  end
+
+  it 'reduces the specified value identically from both write surfaces' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('div'); a.style.borderRadius = 'calc(10px + 5px)';
+        const b = document.createElement('div'); b.style.cssText = 'border-radius: calc(10px + 5px)';
+        return [a.style.borderRadius, b.style.borderRadius];
+      })()
+    JS
+    expect(got).to eq(['calc(15px)', 'calc(15px)'])
   end
 
   it 'hands a custom property back unreduced' do

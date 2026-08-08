@@ -180,13 +180,13 @@ RSpec.describe 'computed value serialization' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="w" style="border-radius: calc(10px + 5px)"></div></body></html>']] }
     s = simulated_session(app)
     s.visit '/'
-    # The SPECIFIED surface is not the computed one: Chrome writes `calc(15px)` — it keeps the calc
-    # WRAPPER and simplifies inside it — where we write the author's text back. (A percentage calc
-    # round-trips identically in both: `calc(10% + 5px)`.) The contract asserted here is the one
-    # this example was written for: an unrelated write leaves the declaration intact rather than
-    # tearing it into `border-radius: calc(10px /` + `;`.
+    # The SPECIFIED surface is not the computed one: it keeps the calc WRAPPER and simplifies
+    # inside it, so this is `calc(15px)` where the computed value is a plain `15px` (both Chrome
+    # measured). The contract this example was written for still holds alongside it: an unrelated
+    # write leaves the declaration intact rather than tearing it into `border-radius: calc(10px /`
+    # + `;`.
     expect(s.evaluate_script("(() => { const w = document.getElementById('w'); w.style.color = 'red'; return w.getAttribute('style'); })()"))
-      .to eq('border-radius: calc(10px + 5px); color: red;')
+      .to eq('border-radius: calc(15px); color: red;')
   end
 
   it 'accepts an explicit plus sign' do
@@ -204,4 +204,25 @@ RSpec.describe 'computed value serialization' do
     # `--tan-100` is an identifier; `tan` in it is no more a colour than `gold` in a filename.
     expect(computed('background: var(--tan-100)', %w[backgroundImage])).to eq(['none'])
   end
+
+  it 'reconstructs a border AXIS shorthand from its two flow sides' do
+    # `border-block-width` is a shorthand over `border-block-start-width` / `-end-width`; without a
+    # registry entry the axis name resolved to its initial `medium`. Chrome measured: equal sides
+    # collapse, differing sides list both.
+    expect(computed('border-block-start-width: 2px; border-block-end-width: 2px; border-block-style: solid',
+                    %w[borderBlockWidth borderBlockStartWidth])).to eq(['2px', '2px'])
+    expect(computed('border-block-start-width: 2px; border-block-end-width: 4px; border-block-style: solid',
+                    %w[borderBlockWidth])).to eq(['2px 4px'])
+    expect(computed('border-inline-start-width: 3px; border-inline-end-width: 3px; border-inline-style: solid',
+                    %w[borderInlineWidth])).to eq(['3px'])
+  end
+
+  it 'reports a unitless zero with its unit in a list-valued length' do
+    # The single-value path already did this; each component of a LIST carries its own unit, and
+    # Chrome reports `0px` for all three of these (measured).
+    expect(computed('background-position: 15px 0', %w[backgroundPosition])).to eq(['15px 0px'])
+    expect(computed('background-size: 10px 0',     %w[backgroundSize])).to eq(['10px 0px'])
+    expect(computed('border-spacing: 5px 0',       %w[borderSpacing])).to eq(['5px 0px'])
+  end
+
 end
