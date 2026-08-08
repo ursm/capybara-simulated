@@ -4104,6 +4104,14 @@ module Capybara
       def sw_register_client(realm_id, url, type, frame_type, handle)
         w = @workers[handle.to_i] or return
         rec = {'id' => sw_client_id(realm_id), 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
+        # A client can CHANGE controller — a longer-scoped registration activating and claim()ing
+        # it away from a shorter one. Registration follows control, so the previous worker must be
+        # told it lost the client, or its `clients.matchAll()` keeps listing a context it no longer
+        # controls and `client.postMessage` still routes there.
+        prev = @sw_clients[realm_id.to_i]
+        if prev && prev[:handle] != handle.to_i && (old = @workers[prev[:handle]])
+          old[:inbox] << {kind: 'client_unregister', id: prev[:rec]['id']}
+        end
         @sw_clients[realm_id.to_i] = {handle: handle.to_i, rec: rec}
         w[:inbox] << {kind: 'client_register', client: rec}
         # A client registered while focus already sits somewhere needs that id too —

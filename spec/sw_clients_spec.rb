@@ -49,7 +49,7 @@ RSpec.describe 'Service Worker client enumeration' do
           # Deliberately NO fetch here: the top page must never talk to the worker, so every
           # assertion about it as a client rests on becoming CONTROLLED and nothing else.
           [200, {'content-type' => 'text/html'}, ['<html><body>main<input id="top"></body></html>']]
-        when '/sw.js'      then [200, {'content-type' => 'text/javascript'}, [sw]]
+        when '/sw.js', '/sw2.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
         when '/scope/ping' then [200, {'content-type' => 'text/plain'}, ['from-network']]
         when '/scope/page.html'
           # `?sandbox=…` mirrors the WPT handler: the frame is sandboxed by a CSP RESPONSE
@@ -58,8 +58,19 @@ RSpec.describe 'Service Worker client enumeration' do
           # which registers it as a client even when nothing mirrored it.
           headers = {'content-type' => 'text/html'}
           headers['content-security-policy'] = "sandbox #{req.params['sandbox']}" if req.params['sandbox']
+          # Also answers a `report` probe with its OWN service-worker state — the only way to
+          # observe a cross-origin (sandboxed) frame, whose contentWindow we may not touch. The
+          # promise-shaped bits are latched at load so the reply itself stays synchronous; a
+          # `ready` that never settles simply leaves its flag false, which is the assertion.
           body = '<html><body>in-scope<script>' \
-                 'fetch("/scope/ping?from=" + encodeURIComponent(location.hash.slice(1)))' \
+                 'var __reg = false, __rdy = false;' \
+                 'fetch("/scope/ping?from=" + encodeURIComponent(location.hash.slice(1)));' \
+                 'try { navigator.serviceWorker.getRegistration().then(r => { __reg = !!r; }); } catch (_) {}' \
+                 'try { navigator.serviceWorker.ready.then(() => { __rdy = true; }); } catch (_) {}' \
+                 'window.addEventListener("message", e => {' \
+                 '  e.source.postMessage({origin: self.origin, controller: !!navigator.serviceWorker.controller,' \
+                 '                        registration: __reg, ready: __rdy}, "*");' \
+                 '});' \
                  '</script></body></html>'
           [200, headers, [body]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
@@ -226,6 +237,81 @@ RSpec.describe 'Service Worker client enumeration' do
     # A second, plain matchAll: the worker applied the move to its own mirror synchronously,
     # so this only stays true if the BROWSER applied it too when it drained the request.
     expect(match_all(session, via: 'b').first['url']).to end_with('#b')
+  end
+
+  # Registration now FOLLOWS control, so a client can move between workers at runtime: a
+  # longer-scoped registration activating and claim()ing it away from a shorter one. The worker
+  # that lost it must be told, or its matchAll() keeps listing a context it no longer controls
+  # and `client.postMessage` still routes there.
+  it 'drops a client from the worker that loses it to a longer scope' do
+    session = simulated_session(app)
+    session.visit '/'
+    # Register the '/' worker first and let it claim everything, THEN the '/scope/' one, which
+    # takes the in-scope frame away from it (longest matching registration wins).
+    session.execute_script(<<~JS)
+      globalThis.__ready = false;
+      const activated = reg => new Promise(res => {
+        const w = reg.installing || reg.waiting || reg.active;
+        if (w.state === 'activated') return res();
+        w.addEventListener('statechange', () => { if (w.state === 'activated') res(); });
+      });
+      (async () => {
+        await activated(await navigator.serviceWorker.register('/sw.js', {scope: '/'}));
+        await new Promise(res => {
+          const f = document.createElement('iframe');
+          f.id = 'a'; f.src = '/scope/page.html#a';
+          f.addEventListener('load', res, {once: true});
+          document.body.appendChild(f);
+        });
+        await activated(await navigator.serviceWorker.register('/sw2.js', {scope: '/scope/'}));
+        globalThis.__ready = true;
+      })();
+    JS
+    40.times do
+      break if session.evaluate_script('globalThis.__ready === true')
+
+      sleep 0.02
+    end
+
+    # The top page is outside '/scope/', so it is still controlled by the FIRST worker — asking
+    # through it asks the worker that lost the frame.
+    # `claim()` rides the worker outbox, so activation resolving does NOT mean the frame has
+    # changed hands yet. Wait for the handover itself — otherwise this asserts on whichever
+    # order the drain happened to take.
+    20.times do
+      break if session.evaluate_script("((document.getElementById('a').contentWindow.navigator.serviceWorker.controller || {}).scriptURL || '').endsWith('/sw2.js')")
+
+      sleep 0.02
+    end
+    urls = match_all(session, via: :top).map {|c| c['url'] }
+
+    expect(urls).to include(a_string_ending_with('/'))
+    expect(urls.grep(/#a\z/)).to be_empty
+  end
+
+  # An opaque-origin document gets no service-worker container at all in a real browser, so
+  # `ready` must never resolve for it — not merely "controller stays null". The registration
+  # synthesis sits AFTER the controller install on the same path, so guarding only the install
+  # left it with a registration it must not have.
+  it 'gives an opaque-origin frame no registration and never resolves its ready' do
+    session = session_with_frames({'boxed' => '/scope/page.html?sandbox=allow-scripts#boxed'}, scope: '/')
+    # The frame is cross-origin to us, so it has to report on itself.
+    session.execute_script(<<~JS)
+      globalThis.__boxed = null;
+      window.addEventListener('message', e => { globalThis.__boxed = e.data; }, {once: true});
+      document.getElementById('boxed').contentWindow.postMessage('report', '*');
+    JS
+    20.times do
+      break if session.evaluate_script('globalThis.__boxed !== null')
+
+      sleep 0.02
+    end
+    report = session.evaluate_script('globalThis.__boxed') or raise 'the sandboxed frame never reported'
+
+    expect(report['origin']).to eq('null')
+    expect(report['controller']).to be(false)
+    expect(report['registration']).to be(false)
+    expect(report['ready']).to be(false)
   end
 
   # A frame sandboxed WITHOUT allow-same-origin has an opaque origin, so it is NOT CONTROLLED
