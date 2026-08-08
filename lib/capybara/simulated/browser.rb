@@ -4144,7 +4144,7 @@ module Capybara
 
         @focused_realm_id = rid
         id = focused_client_id
-        @sw_clients.each_value.map { it[:handle] }.uniq.each do |handle|
+        @sw_clients.each_value.map {|c| c[:handle] }.uniq.each do |handle|
           w = @workers[handle] or next
           w[:inbox] << {kind: 'client_focus', id: id}
         end
