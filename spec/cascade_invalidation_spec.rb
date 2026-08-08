@@ -206,6 +206,27 @@ RSpec.describe 'cascade invalidation' do
     )
   end
 
+  it 'does not cache a flow-side mapping that a dynamic selector decided' do
+    # `flowSides` (the writing-mode / direction resolution behind every `*-inline-*` property)
+    # carries its own generation-keyed memo, and it predates the taint counter — so a `direction`
+    # set by a dynamic selector froze the mapping. The giveaway was that `direction` itself, which
+    # is NOT cached there, correctly reported the new value while `margin-inline-start` stayed on
+    # the mirrored edge.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { margin-inline-start: 7px } #t:placeholder-shown { direction: rtl }</style></head>' \
+        '<body><input id="t" placeholder="p"></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "(() => { const c = getComputedStyle(document.getElementById('t')); " \
+           "return [c.direction, c.marginLeft, c.marginRight]; })()"
+    before = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('t').setRangeText('abc', 0, 0)")
+    expect([before, s.evaluate_script(read)])
+      .to eq([['rtl', '0px', '7px'], ['ltr', '7px', '0px']])
+  end
+
   it 'never caches an element another realm owns' do
     # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps a same-realm fallback, so there
     # is no second realm for the cache to be confused between.
