@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/js_engine'
 
 # The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
@@ -185,6 +186,7 @@ RSpec.describe 'cascade invalidation' do
           vendor:       d('input:-webkit-autofill'),
           dirAuto:      d('#t:dir(rtl)'),           // reads the control's VALUE for dir="auto"
           pseudoEl:     d('p::before'),             // a pseudo-ELEMENT is not a state
+          legacyPseudoEl: d('.clearfix:before'),   // ...in its legacy single-colon spelling too
           escapedColon: d('.hover' + String.fromCharCode(92) + ':bg-red-500')  // Tailwind variant: an identifier
         };
       })()
@@ -198,9 +200,35 @@ RSpec.describe 'cascade invalidation' do
       'chainedInner' => true,
       'vendor'       => true,
       'dirAuto'      => true,
-      'pseudoEl'     => false,
+      'pseudoEl'       => false,
+      'legacyPseudoEl' => false,
       'escapedColon' => false
     )
+  end
+
+  it 'never caches an element another realm owns' do
+    # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps a same-realm fallback, so there
+    # is no second realm for the cache to be confused between.
+    skip 'needs the per-frame realms only V8 provides' unless CsimEngine.v8?
+    # A cross-realm read resolves against the READING realm's rules and its own generation counter,
+    # and both realms' counters start at 0 — so a cached answer is handed back as current forever,
+    # since nothing in the reading realm evicts it. `_ownerDoc` cannot answer the ownership
+    # question: it is null on the `html`/`head`/`body` skeleton of EVERY document, a frame's
+    # included, so the property was ambiguous in both directions before this asked the tree instead.
+    app = lambda {|env|
+      body = if env['PATH_INFO'] == '/f'
+               '<!DOCTYPE html><html><body style="color: rgb(255, 0, 0)">f</body></html>'
+             else
+               '<!DOCTYPE html><html><body><iframe id="fr" src="/f"></iframe></body></html>'
+             end
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "getComputedStyle(document.getElementById('fr').contentDocument.body).color"
+    before = s.evaluate_script(read)                       # populates any cache
+    s.within_frame('fr') { s.execute_script("document.body.setAttribute('style', 'color: rgb(0, 128, 0)')") }
+    expect([before, s.evaluate_script(read)]).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
   end
 
   it 'updates style when a shadow root ADOPTS a sheet in place' do
