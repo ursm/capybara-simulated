@@ -483,6 +483,8 @@ module Capybara
         @browser.revoke_realm_blobs(id) rescue nil
         # Drop it from the SW Client registry so matchAll stops returning a dead client.
         @browser.sw_unregister_client(id) rescue nil
+        # If it held the focus chain, focus returns to the top-level browsing context.
+        @browser.note_realm_discarded(id) rescue nil
         @realm_module_handles&.delete(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
@@ -886,22 +888,24 @@ module Capybara
         # (sw_note_realm_controller); recording it BEFORE the load also lets a NESTED frame built during
         # this frame's load inherit the controller.
         opaque = opaque_frame_url?(url)
-        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null') and is
-        # cross-origin to its creator, so it does NOT inherit the creator's controller (srcdoc-iframe:
-        # "sandboxed srcdoc should not inherit"). allow-same-origin restores the parent origin → inherits.
-        # An OPAQUE-origin document is the same story for the CLIENT set: it is not controlled,
-        # so it must not appear in `clients.matchAll()` even though the SW answered its
-        # NAVIGATION request (the sandbox only becomes known from that response — see
-        # sandboxed-iframe-fetch-event, "Service worker should NOT control the sandboxed page").
-        # A real-URL frame carries no explicit origin (nil = its own location origin).
-        same_origin = frame_doc_origin.to_s != 'null'
-        inheritable = opaque && same_origin
-        ctrl   = @browser.sw_client_controller_for(url.to_s)
-        ctrl ||= @browser.sw_inherited_controller_for(parent_id) if inheritable
-        if ctrl
-          realm.call('__csim_swSetControllerDirect', *ctrl)
-          @browser.sw_note_realm_controller(realm.id, ctrl)
-          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if same_origin
+        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null'), which
+        # is cross-origin to everything — so it is NOT CONTROLLED AT ALL. It inherits no controller
+        # from its creator (srcdoc-iframe: "sandboxed srcdoc should not inherit"), its subresource
+        # fetches never reach the SW, and it is absent from `clients.matchAll()`. Excluding it from
+        # only the client registry would not hold: a controlled frame's first subresource fetch
+        # re-registers it lazily from the fetch event (js/src/workers.js clientFor). The SW does still
+        # answer its NAVIGATION request, because a CSP-header sandbox is knowable only FROM that
+        # response (sandboxed-iframe-fetch-event, "Service worker should NOT control the sandboxed
+        # page"). allow-same-origin restores the parent origin, and a real-URL frame carries no
+        # explicit origin at all (nil = its own location origin) — both are controlled normally.
+        if frame_doc_origin.to_s != 'null'
+          ctrl   = @browser.sw_client_controller_for(url.to_s)
+          ctrl ||= @browser.sw_inherited_controller_for(parent_id) if opaque
+          if ctrl
+            realm.call('__csim_swSetControllerDirect', *ctrl)
+            @browser.sw_note_realm_controller(realm.id, ctrl)
+            @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0])
+          end
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # A `javascript:` URL frame: the initial empty document is now loaded and
@@ -1383,6 +1387,7 @@ module Capybara
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
+        c.attach('__csim_swFocusClient',   ->(client_id)       { sw_hooks[:focus_client]&.call(client_id);       nil }) if sw_hooks[:focus_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
         c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil }) if sw_hooks[:fetch_stream]

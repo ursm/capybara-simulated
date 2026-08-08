@@ -4103,7 +4103,7 @@ module Capybara
       # SW inbox (processed FIFO, so it precedes any later message that matchAll's it).
       def sw_register_client(realm_id, url, type, frame_type, handle)
         w = @workers[handle.to_i] or return
-        rec = {'id' => "client-#{realm_id.to_i}", 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
+        rec = {'id' => sw_client_id(realm_id), 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
         @sw_clients[realm_id.to_i] = {handle: handle.to_i, rec: rec}
         w[:inbox] << {kind: 'client_register', client: rec}
         # A client registered while focus already sits somewhere needs that id too —
@@ -4125,6 +4125,14 @@ module Capybara
         nil
       end
 
+      # A browsing context was discarded. HTML hands focus back to the top-level traversable
+      # when the focused navigable goes away, so a realm that held the focus chain must not
+      # keep it — otherwise `WindowClient.focused` stays true for a client that no longer exists.
+      def note_realm_discarded(realm_id)
+        note_focused_realm(0) if @focused_realm_id == realm_id.to_i
+        nil
+      end
+
       # The focused BROWSING CONTEXT (HTML "focused area of the top-level traversable"):
       # the realm whose document owns the focus chain. Reported by the realm that commits a
       # focus — focusing an <iframe> hands focus to its NESTED context, so that realm is
@@ -4143,9 +4151,22 @@ module Capybara
         nil
       end
 
-      # The client id of the focused realm, in the same `client-<realm>` form
-      # `sw_register_client` mints — nil before any focus has been committed.
-      def focused_client_id = @focused_realm_id ? "client-#{@focused_realm_id}" : nil
+      # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; every
+      # other realm is `client-<realm>`. The same two spellings are produced JS-side by
+      # sw-client.js's clientId() and the FetchEvent clientKey (js/src/workers.js), and read
+      # back by the client-message router below — so they must be minted in exactly one place.
+      def sw_client_id(realm_id) = realm_id.to_i.zero? ? 'client-window' : "client-#{realm_id.to_i}"
+
+      # The realm a client id names — the inverse of `sw_client_id`, nil for an unrecognized id.
+      def sw_client_realm(client_id)
+        id = client_id.to_s
+        return 0 if id == 'client-window'
+
+        (m = /\Aclient-(\d+)\z/.match(id)) ? m[1].to_i : nil
+      end
+
+      # The focused realm's client id — nil before any focus has been committed.
+      def focused_client_id = @focused_realm_id ? sw_client_id(@focused_realm_id) : nil
 
       # ── Cross-isolate MessagePort channel relay (client realm ↔ worker/SW isolate) ──
       # Each endpoint self-registers when it (de)serializes the transferred port.
@@ -4359,7 +4380,8 @@ module Capybara
         broadcasts,  rest0  = events.partition {|e| e[:kind] == 'broadcast' }
         port_ends,   rest0b = rest0.partition  {|e| e[:kind] == 'port_endpoint' }
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
-        sw_msgs,     rest1  = rest0c.partition {|e| e[:kind] == 'sw_client_msg' }
+        sw_focuses,  rest0d = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
+        sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
         swacks,      rest2  = rest1.partition  {|e| e[:kind] == 'swack' }
         claims,      rest3  = rest2.partition  {|e| e[:kind] == 'sw_claim' }
         fetch_resps,   rest4  = rest3.partition  {|e| e[:kind] == 'fetch_response' }
@@ -4369,6 +4391,12 @@ module Capybara
         # A worker/SW registering its end of a cross-isolate MessagePort channel — record it BEFORE
         # the message events below, so a port message carried in the same drain can already route.
         port_ends.each {|e| port_channel_endpoint_sw(e[:channel], e[:handle]) }
+        # `WindowClient.focus()` — the worker asked to move the focus chain to a client. Applied
+        # BEFORE the messages below, so a SW that focuses a client and then reports its own
+        # matchAll() in the same turn sees the move it just made.
+        sw_focuses.each do |e|
+          rid = sw_client_realm(e[:client]) and note_focused_realm(rid)
+        end
         # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
         # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
         # sw_client_msg processed just below), BUFFER until port_channel_endpoint_realm flushes.
@@ -4388,12 +4416,11 @@ module Capybara
         # the client's message `source` is exact. A message to a DISCARDED frame realm is dropped
         # (matching a real browser — a message to a gone client is discarded, not misrouted to top).
         sw_msgs.each do |e|
-          m = /\Aclient-(\d+)\z/.match(e[:client].to_s)
-          if m
-            rid = m[1].to_i
-            @runtime.realm_call(rid, '__csim_swDeliverClientMessage', e[:data], e[:handle]) if @runtime.frame_realm_alive?(rid)
-          else
+          rid = sw_client_realm(e[:client])
+          if rid.nil? || rid.zero?
             @runtime.call('__csim_swDeliverClientMessage', e[:data], e[:handle])
+          elsif @runtime.frame_realm_alive?(rid)
+            @runtime.realm_call(rid, '__csim_swDeliverClientMessage', e[:data], e[:handle])
           end
         end
         # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
@@ -5727,6 +5754,10 @@ module Capybara
         sw_has_fetch = false
         sw_hooks = {
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
+          # WindowClient.focus() — moving the focus chain is cross-realm browser state, so the
+          # worker asks rather than does. Delivered by deliver_worker_messages, which echoes the
+          # move back to every SW as a `client_focus`.
+          focus_client:   ->(client_id)       { outbox << {handle: handle, kind: 'sw_client_focus', client: client_id} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
           fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's

@@ -408,6 +408,7 @@ module Capybara
         vm.define_function('__csimBroadcast') {|name, data, _rid, origin| broadcast_out&.call(name, data, origin); nil } if broadcast_out
         # Service-worker → main-thread signals via the outbox (see v8_runtime#build_worker).
         vm.define_function('__csim_swPostToClient') {|client_id, data| sw_hooks[:post_to_client]&.call(client_id, data); nil } if sw_hooks[:post_to_client]
+        vm.define_function('__csim_swFocusClient')  {|client_id|       sw_hooks[:focus_client]&.call(client_id);       nil } if sw_hooks[:focus_client]
         vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
         vm.define_function('__csim_swFetchRespond') {|fetch_id, resp, realm_id| sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil } if sw_hooks[:fetch_respond]
         vm.define_function('__csim_swFetchStream') {|fetch_id, kind, payload, realm_id| sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil } if sw_hooks[:fetch_stream]
