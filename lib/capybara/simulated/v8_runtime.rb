@@ -889,16 +889,19 @@ module Capybara
         # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null') and is
         # cross-origin to its creator, so it does NOT inherit the creator's controller (srcdoc-iframe:
         # "sandboxed srcdoc should not inherit"). allow-same-origin restores the parent origin → inherits.
-        inheritable = opaque && frame_doc_origin.to_s != 'null'
+        # An OPAQUE-origin document is the same story for the CLIENT set: it is not controlled,
+        # so it must not appear in `clients.matchAll()` even though the SW answered its
+        # NAVIGATION request (the sandbox only becomes known from that response — see
+        # sandboxed-iframe-fetch-event, "Service worker should NOT control the sandboxed page").
+        # A real-URL frame carries no explicit origin (nil = its own location origin).
+        same_origin = frame_doc_origin.to_s != 'null'
+        inheritable = opaque && same_origin
         ctrl   = @browser.sw_client_controller_for(url.to_s)
         ctrl ||= @browser.sw_inherited_controller_for(parent_id) if inheritable
         if ctrl
           realm.call('__csim_swSetControllerDirect', *ctrl)
-          # Only an OPAQUE (about:blank / srcdoc) frame is mirrored into the SW's clients.matchAll():
-          # a real-URL frame's registration would fire during its SYNCHRONOUS SW nav-fetch (main thread
-          # blocked on @sw_nav_outbox), perturbing worker timing — the http-src client model is deferred.
           @browser.sw_note_realm_controller(realm.id, ctrl)
-          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if opaque
+          @browser.sw_register_client(realm.id, url.to_s, 'window', 'nested', ctrl[0]) if same_origin
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # A `javascript:` URL frame: the initial empty document is now loaded and

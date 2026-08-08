@@ -151,6 +151,9 @@ module Capybara
         # relay a client-realm port's postMessage to its remote (worker/SW) peer.
         '__csimClientPortEndpoint' => ->(b, *a) { b.port_channel_endpoint_realm(a[0], a[1]); nil },
         '__csimClientPortPost'     => ->(b, *a) { b.client_port_post(a[0], a[1]); nil },
+        # The focus chain moved into this realm's browsing context (a focus() commit, or an
+        # <iframe> focused in its container, which hands focus to the nested context).
+        '__csimNoteFocusedRealm'   => ->(b, *a) { b.note_focused_realm(a[0]); nil },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },

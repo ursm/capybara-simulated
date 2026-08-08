@@ -1785,8 +1785,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
   the client is claimed.
 - fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
   after the client is claimed.
-service-workers/service-worker/client-id.https.html:
-- Client.id returns the client's ID.
 service-workers/service-worker/client-navigate.https.html:
 - Frame location should not be accessible after cross-origin navigation
 - Frame location should not be accessible after redirect
@@ -1827,7 +1825,6 @@ service-workers/service-worker/clients-matchall-blob-url-worker.https.html:
 - Test Clients.matchAll() with a blob URL worker client.
 - Test Clients.matchAll() with an uncontrolled blob URL worker client.
 service-workers/service-worker/clients-matchall-client-types.https.html:
-- Verify matchAll() with window client type
 - Verify matchAll() with {window, sharedworker, worker} client types
 service-workers/service-worker/clients-matchall-exact-controller.https.html:
 - Test Clients.matchAll() with exact controller
@@ -1846,8 +1843,6 @@ service-workers/service-worker/clients-matchall-order.https.html:
 - Clients.matchAll() returns non-focused uncontrolled windows in creation order.
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 1.
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 2.
-service-workers/service-worker/clients-matchall.https.html:
-- Test Clients.matchAll()
 service-workers/service-worker/controlled-dedicatedworker-postMessage.https.html:
 - Verify dedicated worker does not get all messages if not setting event listener
   early
@@ -2536,10 +2531,7 @@ service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 - Fetch request from iframe sandboxed by an attribute with allow-scripts and allow-same-origin
   flag
 - Fetch request from iframe sandboxed by an attribute with allow-scripts flag
-- Prepare a normal iframe.
-- Prepare an iframe sandboxed by <iframe sandbox="allow-scripts allow-same-origin">.
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
-- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
   and allow-same-origin flag
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
@@ -2795,7 +2787,6 @@ service-workers/service-worker/worker-in-sandboxed-iframe-by-csp-fetch-event.htt
   flag
 - Fetch request from a worker in iframe sandboxed by CSP HTTP header with allow-scripts
   and allow-same-origin flag
-- Prepare an iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin.
 service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #1: network scope1->scope2 (classic DedicatedWorker)'
 - 'Case #1: network scope1->scope2 (classic SharedWorker)'

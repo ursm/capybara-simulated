@@ -442,6 +442,8 @@ module Capybara
         # it. Both keyed by realm id, cleared when the last worker exits.
         @sw_clients          = {}
         @sw_realm_controller = {}
+        # The realm holding the focus chain (`note_focused_realm`); nil until a first focus.
+        @focused_realm_id    = nil
         # Cross-isolate MessagePort channels: channel id → {realm:, sw:} endpoints. A port
         # transferred between a client realm and a worker/SW isolate registers both ends here;
         # the browser relays each side's postMessage to the other. Cleared with the workers.
@@ -4104,6 +4106,12 @@ module Capybara
         rec = {'id' => "client-#{realm_id.to_i}", 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
         @sw_clients[realm_id.to_i] = {handle: handle.to_i, rec: rec}
         w[:inbox] << {kind: 'client_register', client: rec}
+        # A client registered while focus already sits somewhere needs that id too —
+        # `client_focus` is only pushed on CHANGE, so a worker whose first client arrives
+        # after the move would otherwise never learn about it.
+        if (focused = focused_client_id)
+          w[:inbox] << {kind: 'client_focus', id: focused}
+        end
         nil
       end
 
@@ -4116,6 +4124,28 @@ module Capybara
         w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
         nil
       end
+
+      # The focused BROWSING CONTEXT (HTML "focused area of the top-level traversable"):
+      # the realm whose document owns the focus chain. Reported by the realm that commits a
+      # focus — focusing an <iframe> hands focus to its NESTED context, so that realm is
+      # reported rather than the container's. Feeds `WindowClient.focused`, which is why the
+      # change is mirrored into every SW that holds a client (they can't query the browser).
+      def note_focused_realm(realm_id)
+        rid = realm_id.to_i
+        return nil if @focused_realm_id == rid
+
+        @focused_realm_id = rid
+        id = focused_client_id
+        @sw_clients.each_value.map { it[:handle] }.uniq.each do |handle|
+          w = @workers[handle] or next
+          w[:inbox] << {kind: 'client_focus', id: id}
+        end
+        nil
+      end
+
+      # The client id of the focused realm, in the same `client-<realm>` form
+      # `sw_register_client` mints — nil before any focus has been committed.
+      def focused_client_id = @focused_realm_id ? "client-#{@focused_realm_id}" : nil
 
       # ── Cross-isolate MessagePort channel relay (client realm ↔ worker/SW isolate) ──
       # Each endpoint self-registers when it (de)serializes the transferred port.
@@ -5312,6 +5342,7 @@ module Capybara
         @sw_pending_claims   = []
         @sw_clients          = {}
         @sw_realm_controller = {}
+        @focused_realm_id    = nil
         @port_channels       = {}
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {
@@ -5819,6 +5850,11 @@ module Capybara
               # pending counter): the inbox is FIFO, so it's processed before any later message
               # whose handler matchAll's the client.
               rt.call('__csim_swRegisterClient', msg[:client])
+            elsif msg.is_a?(Hash) && msg[:kind] == 'client_focus'
+              # The focus chain moved: `WindowClient.focused` is per-browsing-context state the
+              # worker isolate can't read, so the browser pushes the focused client's id on every
+              # change (and once at registration, for a worker that started after the move).
+              rt.call('__csim_swNoteFocusedClient', msg[:id])
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_unregister'
               # The client's realm was disposed — drop it so matchAll stops returning a dead client.
               rt.call('__csim_swUnregisterClient', msg[:id])
