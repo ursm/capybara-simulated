@@ -27,14 +27,17 @@ RSpec.describe 'Service Worker client enumeration' do
       });
       const describe = c => ({
         url: c.url, id: c.id, type: c.type, frameType: c.frameType,
-        focused: c.focused, visibilityState: c.visibilityState, canFocus: 'focus' in c
+        focused: c.focused, visibilityState: c.visibilityState, canFocus: 'focus' in c,
+        // ServiceWorkerGlobalScope must EXPOSE these — real worker code brand-checks with them.
+        isClient: c instanceof Client, isWindowClient: c instanceof WindowClient
       });
       self.onmessage = e => {
         const cmd = e.data && e.data.focus;
         e.waitUntil(self.clients.matchAll().then(async cs => {
           if (cmd) { const t = cs.find(c => c.url.endsWith(cmd)); if (t) await t.focus(); }
           const after = cmd ? await self.clients.matchAll() : cs;
-          e.source.postMessage({clients: after.map(describe), pinged: pinged.slice()});
+          e.source.postMessage({clients: after.map(describe), pinged: pinged.slice(),
+                                clientsIsClients: self.clients instanceof Clients});
         }));
       };
     JS
@@ -180,6 +183,19 @@ RSpec.describe 'Service Worker client enumeration' do
 
     expect(focused.size).to eq(1)
     expect(focused.first).to end_with('#b')
+  end
+
+  # `ServiceWorkerGlobalScope` exposes the client interfaces, and real worker code brand-checks
+  # against them — clients-get-worker.js filters its results with `client instanceof Client`,
+  # which throws a bare ReferenceError inside a waitUntil (swallowed, so the test just hangs)
+  # when the name is missing.
+  it 'exposes Client, WindowClient and Clients on the worker global' do
+    session = session_with_frames({'a' => '/scope/page.html#a'})
+    report  = worker_report(session, via: 'a')
+
+    expect(report['clientsIsClients']).to be(true)
+    expect(report['clients'].map {|c| c['isClient'] }).to all(be(true))
+    expect(report['clients'].map {|c| c['isWindowClient'] }).to all(be(true))
   end
 
   # The point of registering at the moment control is installed: a controlled page is a client
