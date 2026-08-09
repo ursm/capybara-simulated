@@ -1799,7 +1799,6 @@ service-workers/service-worker/client-url-creation-url.https.html:
 - Going back over pushstate to creation URL
 - Going back over pushstate to other pushstate via back
 - Going back to new document changes creation URL
-- No navigation creation URL is same as window URL
 - Pushstate doesn't change creation URL
 - Query navigation changes creation URL
 - Reloading doesn't change creation URL
@@ -1830,7 +1829,6 @@ service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
 service-workers/service-worker/clients-matchall-include-uncontrolled.https.html:
 - Verify matchAll() with shared workers respect includeUncontrolled
-- Verify matchAll() with windows respect includeUncontrolled
 service-workers/service-worker/clients-matchall-on-evaluation.https.html:
 - Test Clients.matchAll() on script evaluation
 service-workers/service-worker/clients-matchall-order.https.html:

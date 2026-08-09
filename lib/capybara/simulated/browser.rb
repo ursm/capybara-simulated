@@ -3896,7 +3896,10 @@ module Capybara
           Thread.current.report_on_exception = false
           run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared, service: service, creator_key: creator_key)
         end
-        @workers[handle] = {thread: thread, inbox: inbox}
+        # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
+        # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
+        # it), and a dedicated/shared worker has no client registry to push into.
+        @workers[handle] = {thread: thread, inbox: inbox, service: service}
         handle
       end
 
@@ -3988,13 +3991,34 @@ module Capybara
       # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
       # find its controlling SW even after the destination realm's JS was rebuilt.
       def sw_register_scope(scope, handle)
+        first = @sw_registrations.empty?
         @sw_registrations[scope.to_s] = handle.to_i
+        # The FIRST registration is when a client mirror starts to matter. Contexts that loaded
+        # before it — the page that just called register(), most of all — never reported
+        # themselves, so ask every live realm to now. Uncontrolled ones count: they are still
+        # clients of the origin for `matchAll({includeUncontrolled: true})`.
+        request_client_reports if first
         # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
         # `activate → clients.claim()` fires decoupled from the client-side lifecycle that populates
         # @sw_registrations, so the claim can be drained first — see the claim handler above).
         if @sw_pending_claims.any? {|e| e[:handle].to_i == handle.to_i }
           flush, @sw_pending_claims = @sw_pending_claims.partition {|e| e[:handle].to_i == handle.to_i }
           flush.each {|e| broadcast_claim(e[:handle], e[:has_fetch], scope.to_s) }
+        end
+        nil
+      end
+
+      # Ask every live browsing context to announce itself as a service-worker client. Each realm
+      # reports its own URL / frame type / controller (js/src/sw-client.js), so nothing here has
+      # to model what a realm is — the same broadcast shape as a claim.
+      private def request_client_reports
+        @runtime.call('__csim_swReportClient') rescue nil
+        return nil unless @runtime.respond_to?(:frame_realm_ids)
+
+        @runtime.frame_realm_ids.each do |rid|
+          @runtime.realm_call(rid, '__csim_swReportClient') if @runtime.frame_realm_alive?(rid)
+        rescue StandardError
+          nil
         end
         nil
       end
@@ -4096,29 +4120,34 @@ module Capybara
         nil
       end
 
-      # Register a controlled client (a frame/window realm) with its controlling SW
-      # so `clients.matchAll()` / `getClientByURL` reflect the real client set — not
-      # only clients that happened to postMessage the worker. The client id is
-      # realm-scoped (`client-<realm>`), stable for the realm's life. Pushed to the
-      # SW inbox (processed FIFO, so it precedes any later message that matchAll's it).
-      def sw_register_client(realm_id, url, type, frame_type, handle)
-        w = @workers[handle.to_i] or return
-        rec = {'id' => sw_client_id(realm_id), 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
-        # A client can CHANGE controller — a longer-scoped registration activating and claim()ing
-        # it away from a shorter one. Registration follows control, so the previous worker must be
-        # told it lost the client, or its `clients.matchAll()` keeps listing a context it no longer
-        # controls and `client.postMessage` still routes there.
-        prev = @sw_clients[realm_id.to_i]
-        if prev && prev[:handle] != handle.to_i && (old = @workers[prev[:handle]])
-          old[:inbox] << {kind: 'client_unregister', id: prev[:rec]['id']}
-        end
-        @sw_clients[realm_id.to_i] = {handle: handle.to_i, rec: rec}
-        w[:inbox] << {kind: 'client_register', client: rec}
-        # A client registered while focus already sits somewhere needs that id too —
-        # `client_focus` is only pushed on CHANGE, so a worker whose first client arrives
-        # after the move would otherwise never learn about it.
-        if (focused = focused_client_id)
-          w[:inbox] << {kind: 'client_focus', id: focused}
+      # Every live service worker's handle. A service-worker client belongs to the ORIGIN, not
+      # to one registration — `matchAll({includeUncontrolled: true})` must see contexts this
+      # worker doesn't control — so the client mirror goes to all of them.
+      private def sw_worker_handles = @workers.select {|_h, w| w[:service] }.keys
+
+      # Mirror a browsing context into every service worker's client set. `controller_handle` is
+      # the worker that CONTROLS it, or nil for an uncontrolled context — and `controlled` is
+      # per-worker, since a client controlled by worker A is genuinely uncontrolled from B's
+      # point of view. Reported by the realm itself (js/src/sw-client.js) at document load and
+      # whenever control is installed, because only the realm knows its own URL and frame type.
+      # The client id is realm-scoped and stable for the realm's life. Pushed to the SW inbox,
+      # which is FIFO, so it precedes any later message that matchAll's it.
+      def sw_note_client(realm_id, url, frame_type, controller_handle = nil)
+        rid  = realm_id.to_i
+        ctrl = controller_handle.to_i
+        ctrl = nil if ctrl.zero?
+        rec  = {'id' => sw_client_id(rid), 'url' => url.to_s, 'type' => 'window', 'frameType' => frame_type.to_s}
+        @sw_clients[rid] = {handle: ctrl, rec: rec}
+        focused = focused_client_ids
+        sw_worker_handles.each do |h|
+          w = @workers[h] or next
+          # A re-registration with the same id refreshes the record, so a client that CHANGES
+          # controller needs no explicit removal: every worker is told, and the one that lost it
+          # simply learns `controlled` is now false.
+          w[:inbox] << {kind: 'client_register', client: rec.merge('controlled' => h == ctrl)}
+          # A client arriving after focus already moved needs the current id too — `client_focus`
+          # is only pushed on CHANGE, so this worker would otherwise never learn about it.
+          w[:inbox] << {kind: 'client_focus', ids: focused} if focused.any?
         end
         nil
       end
@@ -4128,8 +4157,10 @@ module Capybara
       def sw_unregister_client(realm_id)
         @sw_realm_controller.delete(realm_id.to_i)
         entry = @sw_clients.delete(realm_id.to_i) or return
-        w = @workers[entry[:handle]] or return
-        w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
+        sw_worker_handles.each do |h|
+          w = @workers[h] or next
+          w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
+        end
         nil
       end
 
@@ -4151,12 +4182,32 @@ module Capybara
         return nil if @focused_realm_id == rid
 
         @focused_realm_id = rid
-        id = focused_client_id
-        @sw_clients.each_value.map {|c| c[:handle] }.uniq.each do |handle|
+        ids = focused_client_ids
+        sw_worker_handles.each do |handle|
           w = @workers[handle] or next
-          w[:inbox] << {kind: 'client_focus', id: id}
+          w[:inbox] << {kind: 'client_focus', ids: ids}
         end
         nil
+      end
+
+      # Every client id that counts as focused: the focused context AND its ANCESTORS.
+      # `WindowClient.focused` follows `document.hasFocus()`, which is true for the whole chain
+      # up from the focused frame — a page containing the focused iframe is itself focused
+      # (clients-matchall-include-uncontrolled expects the top-level window and the focused
+      # nested frame to BOTH report true). Not a single winner, despite the name of the field.
+      def focused_client_ids
+        return [] if @focused_realm_id.nil?
+
+        ids = []
+        rid = @focused_realm_id
+        # `frame_realm_parent_id` returns 0 for a top-level realm, which terminates the walk.
+        16.times do
+          ids << sw_client_id(rid)
+          break if rid.zero?
+
+          rid = @runtime.respond_to?(:frame_realm_parent) ? @runtime.frame_realm_parent(rid).to_i : 0
+        end
+        ids.uniq
       end
 
       # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; every
@@ -4173,8 +4224,6 @@ module Capybara
         (m = /\Aclient-(\d+)\z/.match(id)) ? m[1].to_i : nil
       end
 
-      # The focused realm's client id — nil before any focus has been committed.
-      def focused_client_id = @focused_realm_id ? sw_client_id(@focused_realm_id) : nil
 
       # ── Cross-isolate MessagePort channel relay (client realm ↔ worker/SW isolate) ──
       # Each endpoint self-registers when it (de)serializes the transferred port.
@@ -5893,7 +5942,7 @@ module Capybara
               # The focus chain moved: `WindowClient.focused` is per-browsing-context state the
               # worker isolate can't read, so the browser pushes the focused client's id on every
               # change (and once at registration, for a worker that started after the move).
-              rt.call('__csim_swNoteFocusedClient', msg[:id])
+              rt.call('__csim_swNoteFocusedClient', msg[:ids])
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_unregister'
               # The client's realm was disposed — drop it so matchAll stops returning a dead client.
               rt.call('__csim_swUnregisterClient', msg[:id])

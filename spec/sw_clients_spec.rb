@@ -32,10 +32,11 @@ RSpec.describe 'Service Worker client enumeration' do
         isClient: c instanceof Client, isWindowClient: c instanceof WindowClient
       });
       self.onmessage = e => {
-        const cmd = e.data && e.data.focus;
-        e.waitUntil(self.clients.matchAll().then(async cs => {
+        const cmd  = e.data && e.data.focus;
+        const opts = (e.data && e.data.options) || undefined;
+        e.waitUntil(self.clients.matchAll(opts).then(async cs => {
           if (cmd) { const t = cs.find(c => c.url.endsWith(cmd)); if (t) await t.focus(); }
-          const after = cmd ? await self.clients.matchAll() : cs;
+          const after = cmd ? await self.clients.matchAll(opts) : cs;
           e.source.postMessage({clients: after.map(describe), pinged: pinged.slice(),
                                 clientsIsClients: self.clients instanceof Clients});
         }));
@@ -54,6 +55,8 @@ RSpec.describe 'Service Worker client enumeration' do
           [200, {'content-type' => 'text/html'}, ['<html><body>main<input id="top"></body></html>']]
         when '/sw.js', '/sw2.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
         when '/scope/ping' then [200, {'content-type' => 'text/plain'}, ['from-network']]
+        # Outside every scope used here — an UNCONTROLLED client.
+        when '/outside.html' then [200, {'content-type' => 'text/html'}, ['<html><body>out</body></html>']]
         when '/scope/page.html'
           # `?sandbox=…` mirrors the WPT handler: the frame is sandboxed by a CSP RESPONSE
           # header rather than by the container's attribute. Every in-scope page fetches a
@@ -124,12 +127,12 @@ RSpec.describe 'Service Worker client enumeration' do
   # Ask the worker — through a frame it controls — for its client list and its record of who
   # fetched through it. `focus:` names a client URL suffix for the worker to `WindowClient
   # .focus()` before answering.
-  def worker_report(session, via:, focus: nil)
+  def worker_report(session, via:, focus: nil, options: nil)
     session.execute_script(<<~JS)
       globalThis.__report = null;
       const win = #{via == :top ? 'window' : "document.getElementById(#{via.inspect}).contentWindow"};
       win.navigator.serviceWorker.addEventListener('message', e => { globalThis.__report = e.data; }, {once: true});
-      win.navigator.serviceWorker.controller.postMessage(#{JSON.generate(focus.nil? ? 'list' : {'focus' => focus})});
+      win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'focus' => focus, 'options' => options}.compact)});
     JS
     20.times do
       break if session.evaluate_script('globalThis.__report !== null')
@@ -139,7 +142,7 @@ RSpec.describe 'Service Worker client enumeration' do
     session.evaluate_script('globalThis.__report') or raise 'the service worker never answered'
   end
 
-  def match_all(session, via:, focus: nil) = worker_report(session, via: via, focus: focus)['clients']
+  def match_all(session, via:, focus: nil, options: nil) = worker_report(session, via: via, focus: focus, options: options)['clients']
 
   it 'enumerates every controlled frame, not only the one that messaged the worker' do
     session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
@@ -183,6 +186,34 @@ RSpec.describe 'Service Worker client enumeration' do
 
     expect(focused.size).to eq(1)
     expect(focused.first).to end_with('#b')
+  end
+
+  # `WindowClient.focused` follows `document.hasFocus()`, which is true for the whole chain up
+  # from the focused frame — a page CONTAINING the focused iframe is itself focused. So more
+  # than one client reports focused at once, and matchAll puts all of them first.
+  it 'reports the focused frame AND its ancestors as focused' do
+    session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
+    session.execute_script("document.getElementById('a').focus();")
+    clients = match_all(session, via: 'a')
+    by_url  = clients.to_h {|c| [c['url'], c['focused']] }
+
+    expect(by_url.count {|_u, f| f }).to eq(2)
+    expect(by_url.find {|u, _f| u.end_with?('#a') }&.last).to be(true)
+    expect(by_url.find {|u, _f| u.end_with?('/') }&.last).to be(true)
+  end
+
+  # A context OUT of the worker's scope is still a client of the ORIGIN: matchAll() must hide it
+  # by default and `includeUncontrolled: true` must reveal it. So the mirror carries every
+  # same-origin context with a per-worker `controlled` flag, not only the controlled ones.
+  it 'hides uncontrolled clients by default and reveals them on includeUncontrolled' do
+    session    = session_with_frames({'out' => '/outside.html#out', 'a' => '/scope/page.html#a'})
+    controlled = match_all(session, via: 'a').map {|c| c['url'] }
+    every      = match_all(session, via: 'a', options: {'includeUncontrolled' => true}).map {|c| c['url'] }
+
+    expect(controlled.grep(/#a\z/).size).to eq(1)
+    expect(controlled.grep(/#out\z/)).to be_empty
+    expect(every.grep(/#a\z/).size).to eq(1)
+    expect(every.grep(/#out\z/).size).to eq(1)
   end
 
   # `ServiceWorkerGlobalScope` exposes the client interfaces, and real worker code brand-checks

@@ -909,6 +909,10 @@ module Capybara
           end
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        # This document now has a URL and any host-wired controller, so it can announce itself
+        # as a service-worker client — an UNCONTROLLED context is still a client of its origin
+        # and must show up in `matchAll({includeUncontrolled: true})`.
+        realm.call('__csim_swReportClient') rescue nil
         # A `javascript:` URL frame: the initial empty document is now loaded and
         # parent/top are wired, so evaluate the URL's script in the realm (global
         # scope). Per HTML, only a STRING result navigates the frame to a new
@@ -1010,6 +1014,8 @@ module Capybara
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name}
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        # As in create_frame_realm: an auxiliary window is a client of its origin too.
+        realm.call('__csim_swReportClient') rescue nil
         realm.call('__csimFireWindowLoad') rescue nil
         realm.id
       rescue StandardError => e

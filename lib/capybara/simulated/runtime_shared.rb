@@ -154,9 +154,10 @@ module Capybara
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
         '__csimNoteFocusedRealm'   => ->(b, *a) { b.note_focused_realm(a[0]); nil },
-        # This realm became CONTROLLED by a service worker, which is when it joins that worker's
-        # client set — reported by the realm because only it knows its own URL and frame type.
-        '__csimNoteControlledClient' => ->(b, *a) { b.sw_register_client(a[0], a[1], 'window', a[2], a[3]); nil },
+        # This realm is a service-worker client: reported at document load and again whenever
+        # control is installed, by the realm, because only it knows its own URL, frame type and
+        # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
+        '__csimNoteClient' => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3]); nil },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },
