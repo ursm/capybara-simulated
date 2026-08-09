@@ -3900,6 +3900,13 @@ module Capybara
         # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
         # it), and a dedicated/shared worker has no client registry to push into.
         @workers[handle] = {thread: thread, inbox: inbox, service: service}
+        # A dedicated / shared worker whose SCRIPT is in a service worker's scope is controlled by
+        # it, and so is one of its clients — with type 'worker' / 'sharedworker' and frameType
+        # 'none'. A service worker is not itself a client of anything.
+        unless service
+          ctrl = sw_client_controller_for(target)
+          sw_note_worker_client(handle, target, shared, ctrl[0]) if ctrl
+        end
         handle
       end
 
@@ -4133,11 +4140,21 @@ module Capybara
       # The client id is realm-scoped and stable for the realm's life. Pushed to the SW inbox,
       # which is FIFO, so it precedes any later message that matchAll's it.
       def sw_note_client(realm_id, url, frame_type, controller_handle = nil)
-        rid  = realm_id.to_i
+        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle)
+      end
+
+      # A dedicated / shared WORKER that a service worker controls is a client too — with no
+      # visibilityState or focus (those are WindowClient's), `frameType` 'none', and its script
+      # URL. Keyed by worker handle, which outlives nothing else and is unique per worker.
+      def sw_note_worker_client(handle, url, shared, controller_handle)
+        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle)
+      end
+
+      private def note_client(client_id, url, type, frame_type, controller_handle)
         ctrl = controller_handle.to_i
         ctrl = nil if ctrl.zero?
-        rec  = {'id' => sw_client_id(rid), 'url' => url.to_s, 'type' => 'window', 'frameType' => frame_type.to_s}
-        @sw_clients[rid] = {handle: ctrl, rec: rec}
+        rec  = {'id' => client_id, 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
+        @sw_clients[client_id] = {handle: ctrl, rec: rec}
         focused = focused_client_ids
         sw_worker_handles.each do |h|
           w = @workers[h] or next
@@ -4156,7 +4173,7 @@ module Capybara
       # matchAll stops returning a dead client. No-op for an unregistered realm.
       def sw_unregister_client(realm_id)
         @sw_realm_controller.delete(realm_id.to_i)
-        entry = @sw_clients.delete(realm_id.to_i) or return
+        entry = @sw_clients.delete(sw_client_id(realm_id)) or return
         sw_worker_handles.each do |h|
           w = @workers[h] or next
           w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
@@ -4210,6 +4227,10 @@ module Capybara
         ids.uniq
       end
 
+      # A worker's service-worker Client id. Distinct from the realm ids below so the
+      # client-message router can tell a worker client from a browsing context.
+      def sw_worker_client_id(handle) = "client-worker-#{handle.to_i}"
+
       # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; every
       # other realm is `client-<realm>`. The same two spellings are produced JS-side by
       # sw-client.js's clientId() and the FetchEvent clientKey (js/src/workers.js), and read
@@ -4222,6 +4243,11 @@ module Capybara
         return 0 if id == 'client-window'
 
         (m = /\Aclient-(\d+)\z/.match(id)) ? m[1].to_i : nil
+      end
+
+      # The worker handle a client id names, or nil when the id is not a worker client's.
+      def sw_client_worker(client_id)
+        (m = /\Aclient-worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
       end
 
 
@@ -4474,7 +4500,15 @@ module Capybara
         # (matching a real browser — a message to a gone client is discarded, not misrouted to top).
         sw_msgs.each do |e|
           rid = sw_client_realm(e[:client])
-          if rid.nil? || rid.zero?
+          if (wh = sw_client_worker(e[:client]))
+            # A worker CLIENT (a dedicated/shared worker the SW controls) — deliver to its own
+            # isolate, not to a browsing context.
+            (w = @workers[wh]) && w[:inbox] << {kind: 'message', data: e[:data]}
+          elsif rid.nil?
+            # An id naming nothing we know. Dropping matches a real browser (a message to a gone
+            # client is discarded); delivering it to the main realm would MISROUTE it.
+            nil
+          elsif rid.zero?
             @runtime.call('__csim_swDeliverClientMessage', e[:data], e[:handle])
           elsif @runtime.frame_realm_alive?(rid)
             @runtime.realm_call(rid, '__csim_swDeliverClientMessage', e[:data], e[:handle])

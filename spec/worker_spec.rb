@@ -115,4 +115,42 @@ RSpec.describe 'Web Worker' do
     sleep 0.3
     expect(session.evaluate_script('window.__t')).to be_nil
   end
+  # A JSON.parse reviver that returns `undefined` makes the parser DELETE the property, so an
+  # `undefined` inside a postMessage payload arrived MISSING rather than present-and-undefined:
+  # `[undefined, undefined, 'x']` came back as a 3-length array with HOLES at 0 and 1. `in` and
+  # `hasOwnProperty` tell those apart, and so does anything reading a fixed-shape tuple — a
+  # service worker reporting `client.visibilityState` for a non-window client sends exactly that.
+  it 'keeps an undefined value PRESENT across postMessage rather than dropping the slot' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__got = null;
+      const w = new Worker('/worker.js');
+      w.onmessage = e => {
+        if (!e.data || !e.data.echo) return;
+        const a = e.data.echo.arr, o = e.data.echo.obj;
+        globalThis.__got = {
+          len:    a.length,
+          present: [0, 1, 2].map(i => i in a),
+          types:  [0, 1, 2].map(i => typeof a[i]),
+          hasKey: 'u' in o,
+          keyType: typeof o.u
+        };
+      };
+      w.postMessage({cmd: 'echo', value: {arr: [undefined, undefined, 'x'], obj: {u: undefined, v: 1}}});
+    JS
+    40.times do
+      break if session.evaluate_script('globalThis.__got !== null')
+
+      sleep 0.02
+    end
+    got = session.evaluate_script('globalThis.__got') or raise 'the worker never echoed'
+
+    expect(got['len']).to eq(3)
+    expect(got['present']).to eq([true, true, true])
+    expect(got['types']).to eq(%w[undefined undefined string])
+    expect(got['hasKey']).to be(true)
+    expect(got['keyType']).to eq('undefined')
+  end
+
 end
