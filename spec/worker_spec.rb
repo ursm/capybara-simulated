@@ -152,5 +152,4 @@ RSpec.describe 'Web Worker' do
     expect(got['hasKey']).to be(true)
     expect(got['keyType']).to eq('undefined')
   end
-
 end

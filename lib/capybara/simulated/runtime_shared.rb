@@ -107,8 +107,9 @@ module Capybara
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
         # Cross-window references (window.open / opener / postMessage). A separate-VM
         # aux window forwards to the Driver; a same-origin window realm lives in this
-        # isolate. a[2] is the opener's realm id (for wiring window.opener).
-        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1], a[2]) },
+        # isolate. a[2] is the opener's realm id (for wiring window.opener); a[3]/a[4] the opener
+        # document's base URL and origin, which an about:blank popup inherits.
+        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1], a[2], a[3], a[4]) },
         # A `target=_blank`/named link/area activation from a frame or window realm:
         # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver

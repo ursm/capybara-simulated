@@ -443,7 +443,7 @@ module Capybara
 
       # `window.open(url, name)` from the `opener` window's JS. Resolves the URL
       # against the opener's document and records the opener relationship.
-      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0)
+      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, about_origin = nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
@@ -459,7 +459,7 @@ module Capybara
         # cross-window scripting/adoption need no cross-isolate RPC. The opener's realm
         # id wires the popup's window.opener. Falls through to the separate-VM aux path
         # (cross-origin, or a URL we don't yet realm-load).
-        if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id))
+        if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base, about_origin: about_origin))
           return rid
         end
         open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser)

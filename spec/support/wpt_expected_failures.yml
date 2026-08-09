@@ -1825,8 +1825,6 @@ service-workers/service-worker/clients-matchall-exact-controller.https.html:
 - Test Clients.matchAll() with exact controller
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
-service-workers/service-worker/clients-matchall-include-uncontrolled.https.html:
-- Verify matchAll() with shared workers respect includeUncontrolled
 service-workers/service-worker/clients-matchall-on-evaluation.https.html:
 - Test Clients.matchAll() on script evaluation
 service-workers/service-worker/clients-matchall-order.https.html:

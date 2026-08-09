@@ -54,6 +54,22 @@ RSpec.describe 'same-isolate window realms' do
       JS
       expect(result).to eq([false, true])
     end
+
+    # `window.open()` with no URL opens about:blank — that is the popup's own document URL, not
+    # the opener's (which a realm built from the snapshot would otherwise keep reporting, making
+    # the popup a phantom duplicate of its opener anywhere a document URL is read). Its ORIGIN and
+    # BASE URL are still INHERITED, exactly as an empty <iframe>'s are: the origin so the popup is
+    # same-origin with the window that opened it, the base so relative URLs still resolve there.
+    it 'is at about:blank, with the opener‘s origin and base URL inherited' do
+      result = s.evaluate_script(<<~JS)
+        (function () {
+          var w = window.open();
+          return [String(w.location.href), String(w.document.baseURI),
+                  String(new URL('x/y', w.document.baseURI).href), w.document === document];
+        })()
+      JS
+      expect(result).to eq(['about:blank', 'http://www.example.com/', 'http://www.example.com/x/y', false])
+    end
   end
 
   describe 'BroadcastChannel across same-isolate realms' do

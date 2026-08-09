@@ -3900,12 +3900,13 @@ module Capybara
         # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
         # it), and a dedicated/shared worker has no client registry to push into.
         @workers[handle] = {thread: thread, inbox: inbox, service: service}
-        # A dedicated / shared worker whose SCRIPT is in a service worker's scope is controlled by
-        # it, and so is one of its clients — with type 'worker' / 'sharedworker' and frameType
-        # 'none'. A service worker is not itself a client of anything.
+        # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
+        # frameType 'none' — whether or not a service worker's scope covers its script; only the
+        # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
+        # A service worker is not itself a client of anything.
         unless service
           ctrl = sw_client_controller_for(target)
-          sw_note_worker_client(handle, target, shared, ctrl[0]) if ctrl
+          sw_note_worker_client(handle, target, shared, ctrl && ctrl[0])
         end
         handle
       end
@@ -3998,13 +3999,13 @@ module Capybara
       # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
       # find its controlling SW even after the destination realm's JS was rebuilt.
       def sw_register_scope(scope, handle)
-        first = @sw_registrations.empty?
+        # A service worker we haven't seen before starts with an EMPTY client mirror, and every
+        # context that already existed is one of its clients (a client belongs to the origin).
+        # Gating on "this handle is new" rather than on the registry being empty is what makes a
+        # SECOND registration see them too.
+        fresh = !@sw_registrations.value?(handle.to_i)
         @sw_registrations[scope.to_s] = handle.to_i
-        # The FIRST registration is when a client mirror starts to matter. Contexts that loaded
-        # before it — the page that just called register(), most of all — never reported
-        # themselves, so ask every live realm to now. Uncontrolled ones count: they are still
-        # clients of the origin for `matchAll({includeUncontrolled: true})`.
-        request_client_reports if first
+        seed_client_mirror(handle.to_i) if fresh
         # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
         # `activate → clients.claim()` fires decoupled from the client-side lifecycle that populates
         # @sw_registrations, so the claim can be drained first — see the claim handler above).
@@ -4013,6 +4014,22 @@ module Capybara
           flush.each {|e| broadcast_claim(e[:handle], e[:has_fetch], scope.to_s) }
         end
         nil
+      end
+
+      # Fill a newly-registered service worker's client mirror. Two sources, because a client's
+      # record has two possible authors: a browsing context describes ITSELF (only the realm knows
+      # its URL / frame type / controller), while a worker client has no such voice and is only in
+      # the host registry. Replay the registry first, then ask the realms — a realm's own report
+      # simply refreshes its record.
+      private def seed_client_mirror(handle)
+        if (w = @workers[handle])
+          @sw_clients.each_value do |entry|
+            w[:inbox] << {kind: 'client_register', client: entry[:rec].merge('controlled' => entry[:handle] == handle)}
+          end
+          focused = focused_client_ids
+          w[:inbox] << {kind: 'client_focus', ids: focused} if focused.any?
+        end
+        request_client_reports
       end
 
       # Ask every live browsing context to announce itself as a service-worker client. Each realm
@@ -4173,10 +4190,15 @@ module Capybara
       # matchAll stops returning a dead client. No-op for an unregistered realm.
       def sw_unregister_client(realm_id)
         @sw_realm_controller.delete(realm_id.to_i)
-        entry = @sw_clients.delete(sw_client_id(realm_id)) or return
+        unregister_client(sw_client_id(realm_id))
+      end
+
+      private def unregister_client(client_id)
+        @sw_clients.delete(client_id) or return nil
+
         sw_worker_handles.each do |h|
           w = @workers[h] or next
-          w[:inbox] << {kind: 'client_unregister', id: entry[:rec]['id']}
+          w[:inbox] << {kind: 'client_unregister', id: client_id}
         end
         nil
       end
@@ -4217,14 +4239,24 @@ module Capybara
 
         ids = []
         rid = @focused_realm_id
-        # `frame_realm_parent_id` returns 0 for a top-level realm, which terminates the walk.
         16.times do
           ids << sw_client_id(rid)
-          break if rid.zero?
+          # A top-level browsing context ends the chain: the main realm, and an auxiliary window
+          # (whose OPENER is not its ancestor — `document.hasFocus()` is false in the opener while
+          # the popup holds the focus, so its client must not be dragged in).
+          break if top_level_realm?(rid)
 
           rid = @runtime.respond_to?(:frame_realm_parent) ? @runtime.frame_realm_parent(rid).to_i : 0
         end
         ids.uniq
+      end
+
+      # A realm with no parent NAVIGABLE. Without the runtime's window/frame maps (QuickJS has no
+      # realms at all) only the main realm can be one.
+      private def top_level_realm?(realm_id)
+        return true if realm_id.to_i.zero?
+
+        @runtime.respond_to?(:top_level_realm?) ? @runtime.top_level_realm?(realm_id) : true
       end
 
       # A worker's service-worker Client id. Distinct from the realm ids below so the
@@ -4249,7 +4281,6 @@ module Capybara
       def sw_client_worker(client_id)
         (m = /\Aclient-worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
       end
-
 
       # ── Cross-isolate MessagePort channel relay (client realm ↔ worker/SW isolate) ──
       # Each endpoint self-registers when it (de)serializes the transferred port.
@@ -4398,6 +4429,10 @@ module Capybara
       def worker_terminate(handle)
         w = @workers.delete(handle.to_i)
         return unless w
+        # A dedicated / shared worker is a service-worker client (worker_spawn registers it), and a
+        # terminated one must stop showing up in matchAll — the same leak sw_unregister_client
+        # prevents for a disposed realm. A no-op for a SERVICE worker, which is never a client.
+        unregister_client(sw_worker_client_id(handle))
         w[:inbox] << :terminate
         # Most clean shutdowns are <10 ms; the kill is the fallback
         # for blocked workers. Join again AFTER the kill so the thread is actually
@@ -4502,8 +4537,9 @@ module Capybara
           rid = sw_client_realm(e[:client])
           if (wh = sw_client_worker(e[:client]))
             # A worker CLIENT (a dedicated/shared worker the SW controls) — deliver to its own
-            # isolate, not to a browsing context.
-            (w = @workers[wh]) && w[:inbox] << {kind: 'message', data: e[:data]}
+            # isolate's `navigator.serviceWorker`, not to a browsing context, and not to the
+            # worker's creator-facing `self.onmessage` (which is where a bare 'message' would land).
+            (w = @workers[wh]) && w[:inbox] << {kind: 'sw_client_message', data: e[:data], handle: e[:handle]}
           elsif rid.nil?
             # An id naming nothing we know. Dropping matches a real browser (a message to a gone
             # client is discarded); delivering it to the main realm would MISROUTE it.
@@ -4586,9 +4622,9 @@ module Capybara
       # `window.open(url, name)` from JS — returns the new (or reused, by name)
       # window's handle, or nil. The URL is resolved against THIS document so a
       # relative `window.open('/x')` targets the right origin/path.
-      def open_child_window(url, name, opener_realm_id = 0)
+      def open_child_window(url, name, opener_realm_id = 0, about_base = nil, about_origin = nil)
         return nil unless @driver.respond_to?(:open_window_from_js)
-        @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i)
+        @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i, about_base.to_s, about_origin.to_s)
       end
 
       # A `target=_blank`/named link/area activation from a frame or window realm in
@@ -4608,10 +4644,13 @@ module Capybara
       # works (dom/nodes/remove-and-adopt-thcrash). Returns nil to fall back to the
       # separate-VM aux-window path. First stage: about:blank only (a non-blank
       # same-origin URL still takes the aux path until realm URL-loading lands).
-      def open_window_realm(url, name: nil, opener_realm_id: 0)
+      def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, about_origin: nil)
         return nil unless @runtime.respond_to?(:create_window_realm)
         return nil unless url.nil?
-        @runtime.create_window_realm('', '', 'text/html', window_name: name, opener_id: opener_realm_id)
+        @runtime.create_window_realm(
+          '', '', 'text/html',
+          window_name: name, opener_id: opener_realm_id, about_base: about_base, about_origin: about_origin
+        )
       end
 
       # `targetWindow.postMessage(data, origin)` — route to the target window's
@@ -5977,6 +6016,12 @@ module Capybara
               # worker isolate can't read, so the browser pushes the focused client's id on every
               # change (and once at registration, for a worker that started after the move).
               rt.call('__csim_swNoteFocusedClient', msg[:ids])
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
+              # A service worker → THIS worker, which is one of its clients: `client.postMessage`
+              # targets the client's `navigator.serviceWorker` 'message' event, which a worker
+              # isolate has just like a document (WorkerNavigator.serviceWorker). Fire-and-forget,
+              # like the register/focus mirrors — the SW's send is not awaiting a reply.
+              rt.call('__csim_swDeliverClientMessage', msg[:data], msg[:handle])
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_unregister'
               # The client's realm was disposed — drop it so matchAll stops returning a dead client.
               rt.call('__csim_swUnregisterClient', msg[:id])

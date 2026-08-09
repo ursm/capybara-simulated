@@ -33,10 +33,18 @@ RSpec.describe 'Service Worker client enumeration' do
       });
       self.onmessage = e => {
         const cmd  = e.data && e.data.focus;
+        const to   = e.data && e.data.postTo;
         const opts = (e.data && e.data.options) || undefined;
         e.waitUntil(self.clients.matchAll(opts).then(async cs => {
           if (cmd) { const t = cs.find(c => c.url.endsWith(cmd)); if (t) await t.focus(); }
-          const after = cmd ? await self.clients.matchAll(opts) : cs;
+          // Relay to another client — used to prove a `client.postMessage` aimed at a WORKER
+          // client reaches that worker's own navigator.serviceWorker.
+          if (to) {
+            const all = await self.clients.matchAll({type: 'all', includeUncontrolled: true});
+            const t   = all.find(c => c.url.endsWith(to));
+            if (t) t.postMessage({relayed: to});
+          }
+          const after = (cmd || to) ? await self.clients.matchAll(opts) : cs;
           e.source.postMessage({clients: after.map(describe), pinged: pinged.slice(),
                                 clientsIsClients: self.clients instanceof Clients});
         }));
@@ -57,6 +65,13 @@ RSpec.describe 'Service Worker client enumeration' do
         when '/scope/ping' then [200, {'content-type' => 'text/plain'}, ['from-network']]
         # Outside every scope used here — an UNCONTROLLED client.
         when '/outside.html' then [200, {'content-type' => 'text/html'}, ['<html><body>out</body></html>']]
+        # A dedicated worker, in scope at /scope/ and out of it at the root. It relays anything
+        # its OWN navigator.serviceWorker receives back to the page — a `client.postMessage` aimed
+        # at a worker client belongs there, NOT on the worker's creator-facing `self.onmessage`.
+        when '/scope/worker.js', '/outside-worker.js'
+          body = 'navigator.serviceWorker.addEventListener("message", e => self.postMessage({fromSW: e.data}));' \
+                 'self.onmessage = e => self.postMessage({own: e.data});'
+          [200, {'content-type' => 'text/javascript'}, [body]]
         when '/scope/page.html'
           # `?sandbox=…` mirrors the WPT handler: the frame is sandboxed by a CSP RESPONSE
           # header rather than by the container's attribute. Every in-scope page fetches a
@@ -127,12 +142,12 @@ RSpec.describe 'Service Worker client enumeration' do
   # Ask the worker — through a frame it controls — for its client list and its record of who
   # fetched through it. `focus:` names a client URL suffix for the worker to `WindowClient
   # .focus()` before answering.
-  def worker_report(session, via:, focus: nil, options: nil)
+  def worker_report(session, via:, focus: nil, options: nil, post_to: nil)
     session.execute_script(<<~JS)
       globalThis.__report = null;
       const win = #{via == :top ? 'window' : "document.getElementById(#{via.inspect}).contentWindow"};
       win.navigator.serviceWorker.addEventListener('message', e => { globalThis.__report = e.data; }, {once: true});
-      win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'focus' => focus, 'options' => options}.compact)});
+      win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'focus' => focus, 'options' => options, 'postTo' => post_to}.compact)});
     JS
     20.times do
       break if session.evaluate_script('globalThis.__report !== null')
@@ -375,6 +390,104 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(report['pinged']).to include('a')
     expect(report['pinged']).not_to include('boxed')
     expect(report['clients'].map {|c| c['url'] }.grep(/sandbox=/)).to be_empty
+  end
+
+  # A dedicated worker is a client of its ORIGIN, exactly like a browsing context: in scope it is
+  # controlled and shows up by default, out of scope it is hidden until `includeUncontrolled`.
+  # Registering only the CONTROLLED ones would leave the uncontrolled worker invisible to the very
+  # option the `controlled` flag exists to serve.
+  it 'lists a worker client, and hides an out-of-scope one until includeUncontrolled' do
+    session = session_with_frames({'a' => '/scope/page.html#a'})
+    session.execute_script("globalThis.__w1 = new Worker('/scope/worker.js'); globalThis.__w2 = new Worker('/outside-worker.js');")
+    workers = ->(opts) { match_all(session, via: 'a', options: opts).select {|c| c['type'] == 'worker' }.map {|c| c['url'] } }
+
+    expect(workers.call({'type' => 'all'})).to include(a_string_ending_with('/scope/worker.js'))
+    expect(workers.call({'type' => 'all'})).not_to include(a_string_ending_with('/outside-worker.js'))
+    every = workers.call({'type' => 'all', 'includeUncontrolled' => true})
+    expect(every).to include(a_string_ending_with('/scope/worker.js'))
+    expect(every).to include(a_string_ending_with('/outside-worker.js'))
+  end
+
+  # `worker.terminate()` destroys the client, and matchAll must stop listing it — the same leak
+  # a disposed frame realm is unregistered to avoid.
+  it 'drops a worker client when the worker is terminated' do
+    session = session_with_frames({'a' => '/scope/page.html#a'})
+    session.execute_script("globalThis.__w = new Worker('/scope/worker.js');")
+    listed = ->{ match_all(session, via: 'a', options: {'type' => 'all'}).map {|c| c['url'] } }
+    expect(listed.call).to include(a_string_ending_with('/scope/worker.js'))
+
+    session.execute_script('globalThis.__w.terminate();')
+
+    expect(listed.call).not_to include(a_string_ending_with('/scope/worker.js'))
+  end
+
+  # `client.postMessage` to a WORKER client targets that worker's own `navigator.serviceWorker`
+  # 'message' event — a worker has the container just as a document does. Landing it on the
+  # worker's creator-facing `self.onmessage` instead would deliver a spurious message (and, since
+  # that path expects a serialized string, a null one).
+  it 'delivers a message to a worker client through its navigator.serviceWorker' do
+    session = session_with_frames({'a' => '/scope/page.html#a'})
+    session.execute_script(<<~JS)
+      globalThis.__fromWorker = null;
+      globalThis.__w = new Worker('/scope/worker.js');
+      globalThis.__w.onmessage = e => { globalThis.__fromWorker = e.data; };
+    JS
+    worker_report(session, via: 'a', post_to: '/scope/worker.js')
+    20.times do
+      break if session.evaluate_script('globalThis.__fromWorker !== null')
+
+      sleep 0.02
+    end
+    got = session.evaluate_script('globalThis.__fromWorker') or raise 'the worker never relayed'
+
+    expect(got).to eq({'fromSW' => {'relayed' => '/scope/worker.js'}})
+  end
+
+  # A SECOND service worker registered later starts with an empty mirror, and every context that
+  # already existed is one of its clients too. Gating the re-report on "the registry is empty"
+  # rather than "this worker is new" left it blind to everything built before it.
+  it 'gives a later-registered worker the clients that already existed' do
+    session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/scope/')
+    session.execute_script(<<~JS)
+      globalThis.__ready2 = false;
+      navigator.serviceWorker.register('/sw2.js', {scope: '/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        globalThis.__ready2 = true;
+      });
+    JS
+    # `clients.claim()` rides the worker outbox, so activation resolving does not mean the top
+    # page has a controller yet — wait for the handover itself, not for something near it.
+    40.times do
+      break if session.evaluate_script('globalThis.__ready2 === true && !!navigator.serviceWorker.controller')
+
+      sleep 0.02
+    end
+    # Ask the SECOND worker (it controls the top page, which is outside '/scope/').
+    urls = match_all(session, via: :top, options: {'includeUncontrolled' => true}).map {|c| c['url'] }
+
+    expect(urls).to include(a_string_ending_with('#a'))
+    expect(urls).to include(a_string_ending_with('/'))
+  end
+
+  # An auxiliary window is a top-level browsing context: focus inside it does NOT make its opener
+  # focused (`document.hasFocus()` is false there). The focus chain walks PARENT frames, and a
+  # window realm records parent 0 for "no parent frame" — which must not be read as "nested in
+  # the main window".
+  it 'does not focus the opener when an auxiliary window takes focus' do
+    session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
+    session.execute_script("document.getElementById('top').focus();")
+    expect(match_all(session, via: 'a').find {|c| c['id'] == 'client-window' }['focused']).to be(true)
+
+    session.execute_script(<<~JS)
+      globalThis.__popup = window.open();
+      globalThis.__popup.document.body.innerHTML = '<input id="p">';
+      globalThis.__popup.document.getElementById('p').focus();
+    JS
+    clients = match_all(session, via: 'a', options: {'includeUncontrolled' => true})
+
+    expect(clients.find {|c| c['id'] == 'client-window' }['focused']).to be(false)
+    expect(clients.select {|c| c['focused'] }.map {|c| c['frameType'] }).to eq(['auxiliary'])
   end
 
   it 'includes a frame the CSP header sandboxes WITH allow-same-origin' do
