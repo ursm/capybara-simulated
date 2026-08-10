@@ -72,6 +72,19 @@ RSpec.describe 'Service Worker client enumeration' do
           body = 'navigator.serviceWorker.addEventListener("message", e => self.postMessage({fromSW: e.data}));' \
                  'self.onmessage = e => self.postMessage({own: e.data});'
           [200, {'content-type' => 'text/javascript'}, [body]]
+        # An in-scope page that creates a worker from a BLOB URL — a script URL no registration
+        # scope can ever match, so the worker's controller can only be inherited.
+        when '/scope/blob-worker-page.html'
+          [200, {'content-type' => 'text/html'}, [<<~HTML]]
+            <script>
+              globalThis.__ready = false;
+              const url = URL.createObjectURL(new Blob(['self.onmessage = () => self.postMessage("ready");'],
+                                                       {type: 'text/javascript'}));
+              globalThis.__w = new Worker(url);
+              globalThis.__w.onmessage = () => { globalThis.__ready = true; };
+              globalThis.__w.postMessage('ping');
+            </script>
+          HTML
         when '/scope/page.html'
           # `?sandbox=…` mirrors the WPT handler: the frame is sandboxed by a CSP RESPONSE
           # header rather than by the container's attribute. Every in-scope page fetches a
@@ -406,6 +419,39 @@ RSpec.describe 'Service Worker client enumeration' do
     every = workers.call({'type' => 'all', 'includeUncontrolled' => true})
     expect(every).to include(a_string_ending_with('/scope/worker.js'))
     expect(every).to include(a_string_ending_with('/outside-worker.js'))
+  end
+
+  # A blob: worker's script URL is a UUID no registration scope could ever cover, so scope-matching
+  # it leaves it uncontrolled forever. A worker takes its service worker from the context that
+  # CREATED it (its environment settings object inherits it), exactly as an about:blank frame does.
+  it 'gives a blob-URL worker the controller of the context that created it' do
+    session = session_with_frames({'a' => '/scope/blob-worker-page.html'})
+    40.times do
+      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
+
+      sleep 0.02
+    end
+    urls = match_all(session, via: 'a', options: {'type' => 'worker'}).map {|c| c['url'] }
+
+    expect(urls.size).to eq(1)
+    expect(urls.first).to start_with('blob:')
+  end
+
+  # A dedicated worker is owned by the browsing context that created it: discarding the context
+  # terminates the worker. Leaving it running leaks a thread AND leaves a client in matchAll that
+  # nothing can ever reach.
+  it 'terminates a frame’s workers when the frame is discarded' do
+    session = session_with_frames({'a' => '/scope/blob-worker-page.html', 'b' => '/scope/page.html#b'})
+    40.times do
+      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
+
+      sleep 0.02
+    end
+    expect(match_all(session, via: 'b', options: {'type' => 'worker'}).size).to eq(1)
+
+    session.execute_script("document.getElementById('a').remove();")
+
+    expect(match_all(session, via: 'b', options: {'type' => 'worker'})).to be_empty
   end
 
   # `worker.terminate()` destroys the client, and matchAll must stop listing it — the same leak

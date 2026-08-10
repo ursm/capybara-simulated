@@ -493,6 +493,9 @@ module Capybara
         @browser.revoke_realm_blobs(id) rescue nil
         # Drop it from the SW Client registry so matchAll stops returning a dead client.
         @browser.sw_unregister_client(id) rescue nil
+        # A dedicated worker is owned by the context that created it — discarding the context
+        # terminates it (and unregisters its own client record).
+        @browser.terminate_realm_workers(id) rescue nil
         # If it held the focus chain, focus returns to the top-level browsing context.
         @browser.note_realm_discarded(id) rescue nil
         @realm_module_handles&.delete(id)

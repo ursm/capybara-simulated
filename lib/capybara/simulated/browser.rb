@@ -3867,7 +3867,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0)
         handle       = (@worker_seq += 1)
         target       = resolve_against_current(url.to_s)
         # A worker script from a blob: URL in a DIFFERENT storage partition than this
@@ -3899,13 +3899,15 @@ module Capybara
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
         # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
         # it), and a dedicated/shared worker has no client registry to push into.
-        @workers[handle] = {thread: thread, inbox: inbox, service: service}
+        # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
+        # it and is terminated when it is discarded (terminate_realm_workers).
+        @workers[handle] = {thread: thread, inbox: inbox, service: service, realm: realm_id.to_i}
         # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
         # frameType 'none' — whether or not a service worker's scope covers its script; only the
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
         # A service worker is not itself a client of anything.
         unless service
-          ctrl = sw_client_controller_for(target)
+          ctrl = worker_controller_for(target, realm_id)
           sw_note_worker_client(handle, target, shared, ctrl && ctrl[0])
         end
         handle
@@ -4120,6 +4122,29 @@ module Capybara
         return nil unless w[:thread]&.alive?
 
         [handle, w[:has_fetch] != false, w[:script_url].to_s, scope]
+      end
+
+      # The service worker controlling a newly spawned dedicated / shared worker. An http(s)
+      # script URL scope-matches like any other client. A blob: / data: script URL is OPAQUE —
+      # its path is a UUID that no registration scope could ever cover — so the worker inherits
+      # its CREATOR's controller instead, the same rule an about:blank frame follows (a worker's
+      # environment settings object takes its service worker from the creating context).
+      private def worker_controller_for(url, realm_id)
+        return sw_client_controller_for(url) if url.to_s.match?(%r{\Ahttps?://}i)
+
+        realm_id.to_i.zero? ? sw_client_controller_for(@current_url) : sw_inherited_controller_for(realm_id)
+      end
+
+      # Terminate every dedicated / shared worker a discarded browsing context created. A worker
+      # is owned by its creating context: when that context goes away the worker is terminated,
+      # so it must stop being a service-worker client too (worker_terminate unregisters it).
+      # Without this a frame's worker outlives its frame — a leaked thread AND a leaked client.
+      def terminate_realm_workers(realm_id)
+        rid = realm_id.to_i
+        return nil if rid.zero?
+
+        @workers.select {|_h, w| w[:realm] == rid && !w[:service] }.each_key {|h| worker_terminate(h) }
+        nil
       end
 
       # The controller an OPAQUE child browsing context (about:blank / srcdoc)

@@ -1810,9 +1810,6 @@ service-workers/service-worker/clients-get-resultingClientId.https.html:
 - global cleanup
 service-workers/service-worker/clients-get.https.html:
 - Test unsuccessful Clients.get(FetchEvent.resultingClientId)
-service-workers/service-worker/clients-matchall-blob-url-worker.https.html:
-- Test Clients.matchAll() with a blob URL worker client.
-- Test Clients.matchAll() with an uncontrolled blob URL worker client.
 service-workers/service-worker/clients-matchall-exact-controller.https.html:
 - Test Clients.matchAll() with exact controller
 service-workers/service-worker/clients-matchall-frozen.https.html:
