@@ -3867,7 +3867,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0)
         handle       = (@worker_seq += 1)
         target       = resolve_against_current(url.to_s)
         # A worker script from a blob: URL in a DIFFERENT storage partition than this
@@ -3907,8 +3907,7 @@ module Capybara
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
         # A service worker is not itself a client of anything.
         unless service
-          ctrl = worker_controller_for(target, realm_id)
-          sw_note_worker_client(handle, target, shared, ctrl && ctrl[0])
+          sw_note_worker_client(handle, target, shared, worker_controller_handle(target, shared, controller_handle))
         end
         handle
       end
@@ -3925,7 +3924,12 @@ module Capybara
       def worker_post_to_worker(handle, data)
         w = @workers[handle.to_i]
         return unless w
+        # Counted globally (what settle reads) AND per worker, so a worker that dies still owing
+        # replies can hand back exactly what it holds. A LISTEN-ONLY worker never answers at all,
+        # so without the per-worker tally its share is only released by the reset that fires when
+        # the LAST worker goes — which never happens while a service worker is registered.
         @worker_in_flight += 1
+        w[:in_flight] = w[:in_flight].to_i + 1
         w[:inbox] << data.to_s
       end
 
@@ -4124,15 +4128,26 @@ module Capybara
         [handle, w[:has_fetch] != false, w[:script_url].to_s, scope]
       end
 
-      # The service worker controlling a newly spawned dedicated / shared worker. An http(s)
-      # script URL scope-matches like any other client. A blob: / data: script URL is OPAQUE —
-      # its path is a UUID that no registration scope could ever cover — so the worker inherits
-      # its CREATOR's controller instead, the same rule an about:blank frame follows (a worker's
-      # environment settings object takes its service worker from the creating context).
-      private def worker_controller_for(url, realm_id)
-        return sw_client_controller_for(url) if url.to_s.match?(%r{\Ahttps?://}i)
+      # The handle of the service worker controlling a newly spawned worker, or nil.
+      #
+      # A worker with a REAL script URL is matched against registration scopes like any other
+      # client, whatever its creator is doing: clients-matchall-client-types creates its dedicated
+      # worker from the (out-of-scope, uncontrolled) top-level page and still expects a plain
+      # `matchAll({type: 'worker'})` to return it.
+      #
+      # A blob: / data: script URL is OPAQUE — a UUID no scope could ever cover — so such a worker
+      # takes its creator's controller instead (clients-matchall-blob-url-worker: controlled when
+      # an in-scope frame creates it, uncontrolled when an out-of-scope page does). That has to be
+      # the creating realm's LIVE controller, handed over at `new Worker(…)` time: control usually
+      # arrives after load via `clients.claim()`, so a controller snapshotted when the realm was
+      # BUILT is stale by then, and would report such a worker uncontrolled.
+      private def worker_controller_handle(url, shared, creator_controller)
+        return sw_client_controller_for(url)&.first if url.to_s.match?(%r{\Ahttps?://}i)
+        # A SHARED worker has no single creating context to inherit from.
+        return nil if shared
 
-        realm_id.to_i.zero? ? sw_client_controller_for(@current_url) : sw_inherited_controller_for(realm_id)
+        h = creator_controller.to_i
+        h.zero? || !@workers[h] ? nil : h
       end
 
       # Terminate every dedicated / shared worker a discarded browsing context created. A worker
@@ -4144,15 +4159,21 @@ module Capybara
         return nil if rid.zero?
 
         @workers.select {|_h, w| w[:realm] == rid && !w[:service] }.each do |handle, w|
-          # Deliberately NOT `worker_terminate`: that JOINS the thread (twice, with a kill in
-          # between) and drains its inbox. This runs on the frame-disposal path, which a
-          # frame-heavy app takes on every navigation — a blocking join there is a per-navigation
-          # stall on the main thread and shifts settle timing for the whole suite (rule 3).
-          # Asking the worker to stop is enough: it breaks its own poll loop and the thread exits.
-          # Anything it manages to post before then is dropped, since its handle is already gone.
+          # Everything `worker_terminate` does EXCEPT waiting for the thread. That wait is two
+          # blocking joins with a `Thread#kill` between them, and this runs on the frame-disposal
+          # path — which a frame-heavy app takes on every navigation, so a join here is a
+          # per-navigation stall on the main thread (rule 3). Asking the worker to stop is enough:
+          # it breaks its own poll loop and the thread exits on its own.
+          # The reap must still happen, and happen HERE: it releases the reply-pending counters the
+          # worker still holds and resets them once the last worker is gone, without which
+          # `polling?` stays true for the rest of the session.
           @workers.delete(handle)
-          unregister_client(sw_worker_client_id(handle))
-          w[:inbox] << :terminate
+          detach_worker(handle, w)
+          # Racing the still-live thread is benign: a fallback reply it also answers is dropped
+          # (the client's pending-fetch entry is one-shot), and the only real cost is that a blob
+          # URL minted in the moment between the revoke and the thread noticing `:terminate` can
+          # leak — far cheaper than stalling every navigation.
+          reap_worker(handle, w)
         end
         nil
       end
@@ -4464,11 +4485,7 @@ module Capybara
       def worker_terminate(handle)
         w = @workers.delete(handle.to_i)
         return unless w
-        # A dedicated / shared worker is a service-worker client (worker_spawn registers it), and a
-        # terminated one must stop showing up in matchAll — the same leak sw_unregister_client
-        # prevents for a disposed realm. A no-op for a SERVICE worker, which is never a client.
-        unregister_client(sw_worker_client_id(handle))
-        w[:inbox] << :terminate
+        detach_worker(handle.to_i, w)
         # Most clean shutdowns are <10 ms; the kill is the fallback
         # for blocked workers. Join again AFTER the kill so the thread is actually
         # dead before we revoke its URLs — `Thread#kill` is async, and a worker
@@ -4479,6 +4496,32 @@ module Capybara
           w[:thread].kill
           w[:thread].join(WORKER_TERMINATE_GRACE)
         end
+        reap_worker(handle.to_i, w)
+      end
+
+      # Ask a worker to stop and stop treating it as a client. Split out of `worker_terminate` so the
+      # realm-disposal path can do it WITHOUT the thread joins below (see terminate_realm_workers).
+      # A dedicated / shared worker is a service-worker client (worker_spawn registers it), and a
+      # terminated one must stop showing up in matchAll — the same leak sw_unregister_client
+      # prevents for a disposed realm. A no-op for a SERVICE worker, which is never a client.
+      private def detach_worker(handle, w)
+        unregister_client(sw_worker_client_id(handle))
+        w[:inbox] << :terminate
+      end
+
+      # Everything that must happen once a worker is out of `@workers`, whether or not we waited for
+      # its thread: drain what it will never answer, release the counters it still holds, and revoke
+      # what it created. Load-bearing — the counter reset at the end only fires when the LAST worker
+      # goes, so skipping this path leaves `polling?` stuck true for the rest of the session and
+      # every later negative assertion burns the full wait.
+      private def reap_worker(handle, w)
+        # Hand back every plain postMessage this worker still owes a reply for — queued OR already
+        # consumed by a listen-only handler that will never answer. Only a reply releases these,
+        # and a dead worker sends none; leaving them counted pins `worker_pending?` (and so
+        # `polling?`) true for the rest of the session, making every later negative assertion wait
+        # out the full timeout.
+        @worker_in_flight = [0, @worker_in_flight - w[:in_flight].to_i].max
+        w[:in_flight] = 0
         # The dead worker never answers what was still queued in its inbox: post the matching
         # fallback replies so the reply-pending counters drain (a controlled fetch falls back to
         # the network) instead of taxing every later settle's bounded wait. Mid-dispatch deaths
@@ -4630,6 +4673,9 @@ module Capybara
         @sw_msg_wait_deadline     = nil if acks.size.positive? || swacks.size.positive?
         # `__error` postbacks don't correspond to a prior post, so bottom out at zero.
         @worker_in_flight = [0, @worker_in_flight - msgs.size].max
+        # Mirror the release onto the answering worker's own tally, so what `reap_worker` hands
+        # back when it dies is exactly what it still owes.
+        msgs.each {|e| (w = @workers[e[:handle].to_i]) && (w[:in_flight] = [0, w[:in_flight].to_i - 1].max) }
         @runtime.call('__csim_deliverWorkerMessages', msgs) unless msgs.empty?
         events.size
       end

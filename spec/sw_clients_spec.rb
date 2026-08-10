@@ -422,8 +422,13 @@ RSpec.describe 'Service Worker client enumeration' do
   end
 
   # A blob: worker's script URL is a UUID no registration scope could ever cover, so scope-matching
-  # it leaves it uncontrolled forever. A worker takes its service worker from the context that
-  # CREATED it (its environment settings object inherits it), exactly as an about:blank frame does.
+  # it leaves it uncontrolled forever. Such a worker takes its service worker from the context that
+  # CREATED it, exactly as an about:blank frame does. (A worker with a REAL url still scope-matches
+  # — clients-matchall-client-types builds one from an uncontrolled page and expects it controlled.)
+  #
+  # The creator's controller must be read LIVE, when `new Worker(…)` runs. Here the page is claimed
+  # at load, so a host-side snapshot taken when the realm was BUILT would still be empty and the
+  # worker would come out uncontrolled.
   it 'gives a blob-URL worker the controller of the context that created it' do
     session = session_with_frames({'a' => '/scope/blob-worker-page.html'})
     40.times do
@@ -431,10 +436,46 @@ RSpec.describe 'Service Worker client enumeration' do
 
       sleep 0.02
     end
+    # A barrier, not a nap: the client record is registered synchronously by worker_spawn, so
+    # without this both specs below would pass even if the worker never ran at all.
+    expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
     urls = match_all(session, via: 'a', options: {'type' => 'worker'}).map {|c| c['url'] }
 
     expect(urls.size).to eq(1)
     expect(urls.first).to start_with('blob:')
+  end
+
+  # Discarding a context must REAP its workers, not merely ask them to stop: the reply-pending
+  # counters a worker still holds are released there, and the reset that zeroes them fires only
+  # once the LAST worker is gone. Skip it and `worker_pending?` stays true for the rest of the
+  # session — `polling?` never goes idle again, so every later negative Capybara assertion burns
+  # the full wait. That cost is invisible to a pass/fail spec, so assert the predicate directly.
+  it 'stops reporting pending work once a discarded frame’s workers are gone' do
+    session = session_with_frames({'a' => '/scope/blob-worker-page.html'})
+    40.times do
+      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
+
+      sleep 0.02
+    end
+    expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
+    # A LISTEN-ONLY worker: it receives and never posts back, so nothing ever releases the
+    # in-flight count this message takes out. That is the shape that pins the counter.
+    session.execute_script(<<~JS)
+      const win = document.getElementById('a').contentWindow;
+      win.__mute = new win.Worker(URL.createObjectURL(new Blob(['self.onmessage = () => {};'], {type: 'text/javascript'})));
+      win.__mute.postMessage('never answered');
+    JS
+    5.times { session.evaluate_script('1') }
+    browser = session.driver.browser
+    expect(browser.instance_variable_get(:@worker_in_flight)).to be > 0   # the leak is armed
+
+    session.execute_script("document.getElementById('a').remove();")
+    5.times { session.evaluate_script('1') }
+
+    # Only the service worker may be left — the frame's workers are gone from @workers.
+    expect(browser.instance_variable_get(:@workers).values.map {|w| w[:service] }).to all(be(true))
+    expect(browser.instance_variable_get(:@worker_in_flight)).to eq(0)
+    expect(browser.worker_pending?).to be(false)
   end
 
   # A dedicated worker is owned by the browsing context that created it: discarding the context
@@ -447,6 +488,9 @@ RSpec.describe 'Service Worker client enumeration' do
 
       sleep 0.02
     end
+    # A barrier, not a nap: the client record is registered synchronously by worker_spawn, so
+    # without this both specs below would pass even if the worker never ran at all.
+    expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
     expect(match_all(session, via: 'b', options: {'type' => 'worker'}).size).to eq(1)
 
     session.execute_script("document.getElementById('a').remove();")
