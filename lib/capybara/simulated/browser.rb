@@ -4143,7 +4143,17 @@ module Capybara
         rid = realm_id.to_i
         return nil if rid.zero?
 
-        @workers.select {|_h, w| w[:realm] == rid && !w[:service] }.each_key {|h| worker_terminate(h) }
+        @workers.select {|_h, w| w[:realm] == rid && !w[:service] }.each do |handle, w|
+          # Deliberately NOT `worker_terminate`: that JOINS the thread (twice, with a kill in
+          # between) and drains its inbox. This runs on the frame-disposal path, which a
+          # frame-heavy app takes on every navigation — a blocking join there is a per-navigation
+          # stall on the main thread and shifts settle timing for the whole suite (rule 3).
+          # Asking the worker to stop is enough: it breaks its own poll loop and the thread exits.
+          # Anything it manages to post before then is dropped, since its handle is already gone.
+          @workers.delete(handle)
+          unregister_client(sw_worker_client_id(handle))
+          w[:inbox] << :terminate
+        end
         nil
       end
 
