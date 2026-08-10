@@ -67,8 +67,10 @@ module Capybara
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
         '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1]); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
-        '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1]); nil },
-        '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1]); nil },
+        # a[2] is the realm that navigated: a nested browsing context keeps its OWN session
+        # history, so a frame's pushState must not be mirrored onto the top document's.
+        '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1], a[2]); nil },
+        '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
         '__historyGo'                => ->(b, *a) { b.history_go(a[0]); nil },
         '__historyLength'            => ->(b, *_) { b.history_length },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },

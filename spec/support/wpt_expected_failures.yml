@@ -1795,15 +1795,7 @@ service-workers/service-worker/client-navigate.https.html:
 - Redirecting to another origin should resolve with null
 - Return value should be instance of WindowClient
 service-workers/service-worker/client-url-creation-url.https.html:
-- Fragment only navigation doesn't change creation URL
-- Going back over pushstate to creation URL
-- Going back over pushstate to other pushstate via back
 - Going back to new document changes creation URL
-- Pushstate doesn't change creation URL
-- Query navigation changes creation URL
-- Reloading doesn't change creation URL
-- Reloading pushstate URL changes creation URL
-- Replacestate doesn't change creation URL
 service-workers/service-worker/client-url-of-blob-url-worker.https.html:
 - Client.url of a blob URL worker should be a blob URL.
 service-workers/service-worker/clients-get-client-types.https.html:

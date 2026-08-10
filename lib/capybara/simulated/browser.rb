@@ -7579,7 +7579,9 @@ module Capybara
       # in place rather than appending. Both the state and (when given)
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
-      def history_state(url, state = nil)
+      def history_state(url, state = nil, realm_id = 0)
+        return note_frame_same_document_url(realm_id.to_i, url) unless realm_id.to_i.zero?
+
         if url
           resolved = resolve_against_current(url.to_s)
           record_url_transition(resolved)
@@ -7597,11 +7599,39 @@ module Capybara
       # Mirror that on the Ruby side so `Capybara#go_back` traverses
       # within the pushState chain (fires `popstate`) and only crosses
       # to a real reload when the back hits a `:visit` boundary.
-      def history_push(url, state = nil)
+      def history_push(url, state = nil, realm_id = 0)
+        return note_frame_same_document_url(realm_id.to_i, url) unless realm_id.to_i.zero?
+
         resolved = resolve_against_current(url.to_s)
         record_url_transition(resolved)
         @current_url = resolved
         record_history({method: :get, url: resolved, state: state, kind: :push_state})
+      end
+
+      # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a
+      # NESTED browsing context. It belongs to that frame's own session history — mirroring it onto
+      # the top document's would make `current_url` report a URL no window is at, which is what an
+      # iframe'd SPA does on every navigation. Recorded as the current entry's URL (rather than a
+      # new entry) so a later `location.reload()` refetches the pushState'd URL, not the stale
+      # `src`; in-frame same-document TRAVERSAL over such entries is still unmodelled.
+      # A same-isolate window realm (a popup) has no iframe container and so no entry to update —
+      # its handle is 0, and not touching the top history is already the fix there.
+      private def note_frame_same_document_url(realm_id, url)
+        return nil if url.nil? || realm_id.zero?
+
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        return nil if handle.zero?
+
+        h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
+        if h[:idx].negative?
+          # Seed entry 0 from the document as it is NOW — this runs before the location update,
+          # so it still reads the URL the frame was loaded at.
+          h[:entries] << frame_history_entry(realm_id)
+          h[:idx] = 0
+        end
+        h[:entries][h[:idx]] = (h[:entries][h[:idx]] || {}).merge(url: url.to_s)
+        nil
       end
 
       # Total history entries (after forward-tail truncation), surfaced
