@@ -470,7 +470,16 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(browser.instance_variable_get(:@worker_in_flight)).to be > 0   # the leak is armed
 
     session.execute_script("document.getElementById('a').remove();")
-    5.times { session.evaluate_script('1') }
+    # Barrier on the effect itself, not a fixed number of ticks: a reply already on the outbox
+    # makes `worker_pending?` legitimately true for a tick or two, and how many ticks that takes
+    # is load-dependent (this failed on CI as a flat `5.times` drain). A LEAKED counter never
+    # clears, so the loop simply runs out and the assertions below still catch it.
+    50.times do
+      break unless browser.worker_pending?
+
+      session.evaluate_script('1')
+      sleep 0.02
+    end
 
     # Only the service worker may be left — the frame's workers are gone from @workers.
     expect(browser.instance_variable_get(:@workers).values.map {|w| w[:service] }).to all(be(true))
