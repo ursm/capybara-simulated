@@ -516,14 +516,20 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(live).to include(report['id'])
   end
 
-  # A client may not be navigated back to its initial about:blank document.
-  it 'rejects a navigate to about:blank with a TypeError' do
+  # Only an HTTP(S) target may be navigated to: about:blank (a client may not be sent back to its
+  # initial document) and every non-fetchable scheme reject the same way. Without the scheme rule
+  # these resolved with `null` — which the spec reserves for a CROSS-ORIGIN result, so a caller
+  # can't tell "went somewhere I may not see" from "was refused".
+  it 'rejects a navigate to a non-HTTP(S) url with a TypeError' do
     session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
-    report  = navigate_report(session, via: 'b', on: '#a', to: 'about:blank')
 
-    expect(report['found']).to be(true)
-    expect(report['resolved']).to be(false)
-    expect(report['name']).to eq('TypeError')
+    ['about:blank', 'file:///', 'view-source://example.com'].each do |target|
+      report = navigate_report(session, via: 'b', on: '#a', to: target)
+
+      expect(report['found']).to be(true), "no client matched for #{target}"
+      expect(report['resolved']).to be(false), "#{target} resolved instead of rejecting"
+      expect(report['name']).to eq('TypeError')
+    end
   end
 
   # navigate() is only for clients this worker CONTROLS — an out-of-scope one is a TypeError, even
