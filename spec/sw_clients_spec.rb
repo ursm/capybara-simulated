@@ -39,12 +39,16 @@ RSpec.describe 'Service Worker client enumeration' do
         if (!nav) return;
         e.waitUntil(self.clients.matchAll({includeUncontrolled: true}).then(async cs => {
           const target = cs.find(c => c.url.endsWith(e.data.on));
-          let report;
+          // `found` is reported so a rejection test can't pass vacuously: without it, a target that
+          // simply isn't in matchAll() throws its own TypeError off `undefined.navigate` and looks
+          // exactly like the rejection under test.
+          let report = {found: !!target};
           try {
             const got = await target.navigate(nav);
-            report = {resolved: true, isNull: got === null, url: got && got.url, isWindowClient: got instanceof WindowClient};
+            Object.assign(report, {resolved: true, isNull: got === null, url: got && got.url,
+                                   id: got && got.id, isWindowClient: got instanceof WindowClient});
           } catch (err) {
-            report = {resolved: false, name: err && err.constructor && err.constructor.name};
+            Object.assign(report, {resolved: false, name: err && err.constructor && err.constructor.name});
           }
           e.source.postMessage({navigateReport: report});
         }));
@@ -490,6 +494,7 @@ RSpec.describe 'Service Worker client enumeration' do
     session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
     report  = navigate_report(session, via: 'b', on: '#a', to: '/scope/page.html?navigated')
 
+    expect(report['found']).to be(true)
     expect(report['resolved']).to be(true)
     expect(report['isNull']).to be(false)
     expect(report['isWindowClient']).to be(true)
@@ -498,11 +503,25 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(session.evaluate_script("document.getElementById('a').contentWindow.location.search")).to eq('?navigated')
   end
 
+  # The navigation REBUILDS the frame's realm, and client ids are realm-derived — so the client the
+  # promise resolves with must be the context as it is NOW. Resolving with the pre-navigation id
+  # hands the worker a client whose postMessage goes nowhere and whose focus() would aim the focus
+  # chain at a discarded realm.
+  it 'resolves with a client the worker can still reach afterwards' do
+    session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
+    report  = navigate_report(session, via: 'b', on: '#a', to: '/scope/page.html?navigated')
+    live    = match_all(session, via: 'b').map {|c| c['id'] }
+
+    expect(report['id']).to be_a(String)
+    expect(live).to include(report['id'])
+  end
+
   # A client may not be navigated back to its initial about:blank document.
   it 'rejects a navigate to about:blank with a TypeError' do
     session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
     report  = navigate_report(session, via: 'b', on: '#a', to: 'about:blank')
 
+    expect(report['found']).to be(true)
     expect(report['resolved']).to be(false)
     expect(report['name']).to eq('TypeError')
   end
@@ -513,6 +532,7 @@ RSpec.describe 'Service Worker client enumeration' do
     session = session_with_frames({'out' => '/outside.html#out', 'b' => '/scope/page.html#b'})
     report  = navigate_report(session, via: 'b', on: '#out', to: '/outside.html?navigated')
 
+    expect(report['found']).to be(true)
     expect(report['resolved']).to be(false)
     expect(report['name']).to eq('TypeError')
   end

@@ -4251,29 +4251,75 @@ module Capybara
       #           TypeError rejection
       # MIXED CONTENT is checked here rather than JS-side because "is this a secure context" is the
       # host's knowledge: an https client may not be navigated to http.
+      # Queued, not performed here: `deliver_worker_messages` runs inside the `@ticking` guard, and
+      # navigating rebuilds a realm (a top-level one rebuilds the whole context). Doing that
+      # mid-drain would pull the rug from under the rest of the batch — the sw_msgs / claims /
+      # fetch_resps still to be delivered would address realms that no longer exist — and from any
+      # node handle an in-flight find is holding. `drain_pending_navigation` is where every other
+      # navigation intent lands, well clear of the V8 call we are inside.
       def sw_navigate_client(handle, client_id, url, nav_id)
-        realm_id = sw_client_realm(client_id)
-        return sw_navigate_reply(handle, nav_id, '', 'the client is not a navigable browsing context') if realm_id.nil?
-
-        from = realm_id.zero? ? @current_url.to_s : frame_realm_url(realm_id).to_s
-        return sw_navigate_reply(handle, nav_id, '', 'mixed content is not allowed') if mixed_content_navigation?(from, url)
-
-        # A frame navigation REBUILDS the realm, so the id we started from is dead afterwards and
-        # reading it back would report an empty URL (which then looks cross-origin). Navigating
-        # returns the new realm's id — read the landing URL from that.
-        landed_realm = navigate_client_realm(realm_id, url)
-        landed = (realm_id.zero? ? @current_url.to_s : frame_realm_url(landed_realm).to_s)
-        # A cross-origin result is reported as "no client" — same rule the client registry uses.
-        same_origin = !landed.empty? && url_origin(landed) == url_origin(from)
-        sw_navigate_reply(handle, nav_id, same_origin ? landed : '', nil)
-      rescue StandardError => e
-        sw_navigate_reply(handle, nav_id, '', "navigation failed: #{e.message}")
+        (@sw_pending_client_navs ||= []) << {handle: handle.to_i, client: client_id.to_s, url: url.to_s, nav_id: nav_id.to_i}
+        nil
       end
 
-      private def sw_navigate_reply(handle, nav_id, url, error)
-        w = @workers[handle.to_i] or return nil
-        w[:inbox] << {kind: 'client_navigate_result', nav_id: nav_id.to_i, url: url.to_s, error: error.to_s}
+      def consume_pending_sw_client_nav
+        return if @sw_pending_client_navs.nil? || @sw_pending_client_navs.empty?
+
+        navs = @sw_pending_client_navs
+        @sw_pending_client_navs = nil
+        navs.each {|e| perform_sw_client_navigate(e[:handle], e[:client], e[:url], e[:nav_id]) }
         nil
+      end
+
+      private def perform_sw_client_navigate(handle, client_id, url, nav_id)
+        realm_id = sw_client_realm(client_id)
+        return sw_navigate_reply(handle, nav_id, '', '', 'the client is not a navigable browsing context') if realm_id.nil?
+
+        from = client_realm_url(realm_id)
+        return sw_navigate_reply(handle, nav_id, '', '', 'mixed content is not allowed') if mixed_content_navigation?(from, url)
+
+        # Identify the browsing CONTEXT before navigating — a frame navigation rebuilds its realm,
+        # so the realm id is not stable across it, but the iframe element that owns it is.
+        parent    = realm_id.zero? ? nil : @runtime.frame_realm_parent(realm_id)
+        container = realm_id.zero? ? nil : frame_container_handle(realm_id, parent)
+        navigate_client_realm(realm_id, url)
+        landed_realm = realm_id.zero? ? 0 : (realm_for_container(parent, container) || realm_id)
+        landed       = client_realm_url(landed_realm)
+        # A cross-origin result is reported as "no client": the spec resolves navigate() with null
+        # rather than handing back a client this worker has no business seeing.
+        origin = url_origin(landed)
+        return sw_navigate_reply(handle, nav_id, '', '', nil) if landed.empty? || origin.nil? || origin != url_origin(from)
+
+        # The client id is realm-derived, so the rebuild MOVED it. Reply with the id of the context
+        # as it is NOW — handing back the pre-navigation id would give the worker a client whose
+        # postMessage is silently dropped and whose focus() would point the focus chain at a
+        # discarded realm (see the sw_clientid_model note).
+        sw_navigate_reply(handle, nav_id, landed, sw_client_id(landed_realm), nil)
+      rescue StandardError => e
+        sw_navigate_reply(handle, nav_id, '', '', "navigation failed: #{e.message}")
+      end
+
+      private def sw_navigate_reply(handle, nav_id, url, client_id, error)
+        w = @workers[handle.to_i] or return nil
+        w[:inbox] << {kind: 'client_navigate_result', nav_id: nav_id.to_i, url: url.to_s, client: client_id.to_s, error: error.to_s}
+        nil
+      end
+
+      # The realm currently backing a browsing context, named by the iframe element that owns it.
+      # The element outlives every realm rebuild a navigation causes, so it — not the realm id —
+      # is what identifies the context across one.
+      private def realm_for_container(parent, container)
+        return nil if container.nil? || container.zero? || !@runtime.respond_to?(:frame_realm_ids)
+
+        @runtime.frame_realm_ids.find do |rid|
+          @runtime.frame_realm_alive?(rid) && frame_container_handle(rid, parent) == container
+        rescue StandardError
+          false
+        end
+      end
+
+      private def client_realm_url(realm_id)
+        (realm_id.to_i.zero? ? @current_url : frame_realm_url(realm_id)).to_s
       end
 
       # An https document may not be navigated to an http one (mixed content); the reverse, and
@@ -4282,21 +4328,11 @@ module Capybara
         from.to_s.downcase.start_with?('https://') && to.to_s.downcase.start_with?('http://')
       end
 
-      private def url_origin(url)
-        u = safe_uri(url.to_s) or return nil
-        return nil if u.scheme.nil? || u.host.nil?
-
-        "#{u.scheme}://#{u.host}:#{u.port}"
-      end
-
       # Re-navigate the browsing context behind a client id — the main window or a frame realm.
-      # Returns the realm the client is in AFTERWARDS: a frame navigation builds a fresh realm, so
-      # the id changes (0 = the main window, which keeps its identity across a visit).
       private def navigate_client_realm(realm_id, url)
-        return (visit(url); 0) if realm_id.zero?
+        return visit(url) if realm_id.zero?
 
-        new_id = navigate_realm_self_get(realm_id, url, record: false)
-        new_id.is_a?(Integer) && new_id.positive? ? new_id : realm_id
+        navigate_realm_self_get(realm_id, url, record: false)
       end
 
       # Drop a client whose realm was disposed (frame navigated away / removed) so
@@ -4651,10 +4687,10 @@ module Capybara
         sw_focuses.each do |e|
           rid = sw_client_realm(e[:client]) and note_focused_realm(rid)
         end
-        # `WindowClient.navigate()` — perform the navigation and answer the worker that is awaiting
-        # it. Done here rather than on the pending-navigation queue because the worker's promise
-        # needs the OUTCOME; the realm rebuild this triggers is the same one a frame's own
-        # `location.href = …` takes (navigate_realm_self_get), just initiated from the SW side.
+        # `WindowClient.navigate()` — only QUEUED here (see sw_navigate_client). It must not run
+        # before the sw_msgs / claims / fetch_resps below: the worker emitted those FIRST, and a
+        # navigation discards the realm they address. Queuing preserves the worker's own ordering
+        # and keeps the realm rebuild out of the `@ticking` guard.
         sw_navs.each {|e| sw_navigate_client(e[:handle], e[:client], e[:url], e[:nav_id]) }
         # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
         # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
@@ -6167,7 +6203,7 @@ module Capybara
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the
               # promise it is holding (js/src/workers.js __csim_swClientNavigateResult).
-              rt.call('__csim_swClientNavigateResult', msg[:nav_id], msg[:url], msg[:error])
+              rt.call('__csim_swClientNavigateResult', msg[:nav_id], msg[:url], msg[:client], msg[:error])
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
               # A service worker → THIS worker, which is one of its clients: `client.postMessage`
               # targets the client's `navigator.serviceWorker` 'message' event, which a worker
@@ -7694,6 +7730,7 @@ module Capybara
         end
       end
       def drain_pending_navigation
+        consume_pending_sw_client_nav
         consume_pending_location
         consume_pending_frame_nav
         consume_pending_frame_submit
