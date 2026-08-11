@@ -178,6 +178,10 @@ module Capybara
         # local registration (a different iframe registering an already-active scope) can synthesize a
         # registration reflecting the shared active worker instead of installing a duplicate.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
+        # Does this worker still control any client? An incoming worker may only activate once the
+        # outgoing one controls nothing (or skipWaiting is called) — see _scheduleLifecycle.
+        '__csim_swControlsClients'    => ->(b, *a) { b.sw_worker_controls_clients?(a[0]) },
+        '__csim_swNoteActivationParked' => ->(b, *_) { b.sw_note_activation_parked; nil },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
         # worker handle — reached identically from the client (registration.active._handle) and the
         # worker (__csimWorkerHandle). Get returns {enabled, headerValue}; set leaves a nil field as-is.

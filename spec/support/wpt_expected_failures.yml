@@ -1801,8 +1801,6 @@ service-workers/service-worker/clients-get-resultingClientId.https.html:
 - global cleanup
 service-workers/service-worker/clients-get.https.html:
 - Test unsuccessful Clients.get(FetchEvent.resultingClientId)
-service-workers/service-worker/clients-matchall-exact-controller.https.html:
-- Test Clients.matchAll() with exact controller
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
 service-workers/service-worker/clients-matchall-on-evaluation.https.html:
@@ -2234,8 +2232,6 @@ service-workers/service-worker/performance-timeline.https.html:
 - empty service worker fetch event included in performance timings
 service-workers/service-worker/postmessage-blob-url.https.html:
 - postMessage Blob URL to a ServiceWorker
-service-workers/service-worker/postmessage-from-waiting-serviceworker.https.html:
-- Client.postMessage() from waiting serviceworker.
 service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after DOMContentLoaded event.
 - Messages from ServiceWorker to Client only received after calling startMessages().
@@ -2276,8 +2272,6 @@ service-workers/service-worker/register-default-scope.https.html:
 - null scope
 service-workers/service-worker/register-same-scope-different-script-url.https.html:
 - Register different scripts concurrently
-- Register same-scope new script url effect on controller
-- Register then register new script URL
 - Register then register new script URL that 404s
 - Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
@@ -2553,8 +2547,6 @@ service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
-service-workers/service-worker/skip-waiting.https.html:
-- Test skipWaiting with both active and waiting workers
 service-workers/service-worker/static-router-cross-origin-navigation.https.html:
 - Cross-origin navigation with static router cache rule
 service-workers/service-worker/static-router-fetch-event.https.html:

@@ -4001,6 +4001,17 @@ module Capybara
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
       def sw_active_handle_for_scope(scope) = @sw_registrations[scope.to_s].to_i
 
+      # Does `handle` still control any client? HTML's "try activate" holds an installed worker in
+      # the WAITING slot for exactly as long as the outgoing worker has controllees — that is what
+      # makes `registration.waiting` non-null, which is how every "a new version is available"
+      # banner detects an update.
+      def sw_worker_controls_clients?(handle)
+        h = handle.to_i
+        return false if h.zero?
+
+        @sw_clients.any? {|_id, entry| entry[:handle] == h }
+      end
+
       # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
       # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
       # find its controlling SW even after the destination realm's JS was rebuilt.
@@ -4041,12 +4052,17 @@ module Capybara
       # Ask every live browsing context to announce itself as a service-worker client. Each realm
       # reports its own URL / frame type / controller (js/src/sw-client.js), so nothing here has
       # to model what a realm is — the same broadcast shape as a claim.
-      private def request_client_reports
-        @runtime.call('__csim_swReportClient') rescue nil
+      private def request_client_reports = broadcast_to_realms('__csim_swReportClient')
+
+      # Call a host fn in EVERY live browsing context — the main realm and each frame/window realm.
+      # Service-worker registration state is per-realm (each has its own registration objects), so
+      # anything that changes it has to reach all of them.
+      private def broadcast_to_realms(fn, *args)
+        @runtime.call(fn, *args) rescue nil
         return nil unless @runtime.respond_to?(:frame_realm_ids)
 
         @runtime.frame_realm_ids.each do |rid|
-          @runtime.realm_call(rid, '__csim_swReportClient') if @runtime.frame_realm_alive?(rid)
+          @runtime.realm_call(rid, fn, *args) if @runtime.frame_realm_alive?(rid)
         rescue StandardError
           nil
         end
@@ -4349,6 +4365,17 @@ module Capybara
           w = @workers[h] or next
           w[:inbox] << {kind: 'client_unregister', id: client_id}
         end
+        # Losing a controllee can be what finally lets a worker parked in `waiting` activate (the
+        # non-skipWaiting half of "try activate"). Gated on a realm having actually parked one, so
+        # the ordinary client-churn path stays free of a per-unregister broadcast (rule 3).
+        broadcast_to_realms('__csim_swTryActivate') if @sw_activation_parked
+        nil
+      end
+
+      # A realm parked a worker in the waiting slot. Recorded so `unregister_client` knows whether
+      # a try-activate broadcast could possibly matter.
+      def sw_note_activation_parked
+        @sw_activation_parked = true
         nil
       end
 
@@ -4670,7 +4697,8 @@ module Capybara
         port_ends,   rest0b = rest0.partition  {|e| e[:kind] == 'port_endpoint' }
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
-        sw_navs,     rest0d  = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
+        sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
+        skip_waits,  rest0d  = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
         sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
         swacks,      rest2  = rest1.partition  {|e| e[:kind] == 'swack' }
         claims,      rest3  = rest2.partition  {|e| e[:kind] == 'sw_claim' }
@@ -4692,6 +4720,9 @@ module Capybara
         # navigation discards the realm they address. Queuing preserves the worker's own ordering
         # and keeps the realm rebuild out of the `@ticking` guard.
         sw_navs.each {|e| sw_navigate_client(e[:handle], e[:client], e[:url], e[:nav_id]) }
+        # `skipWaiting()` — release a worker parked in the waiting slot. Broadcast, because the
+        # registration objects holding that parked continuation are per-realm.
+        skip_waits.each {|e| broadcast_to_realms('__csim_swSkipWaiting', e[:handle]) }
         # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
         # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
         # sw_client_msg processed just below), BUFFER until port_channel_endpoint_realm flushes.
@@ -6073,6 +6104,8 @@ module Capybara
           # comes back on this worker's inbox keyed by nav_id.
           navigate_client: ->(client_id, url, nav_id) { outbox << {handle: handle, kind: 'sw_client_navigate', client: client_id, url: url.to_s, nav_id: nav_id.to_i} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
+          # skipWaiting() — the waiting slot is client-side, so the request rides the outbox.
+          skip_waiting:   ->                  { outbox << {handle: handle, kind: 'sw_skip_waiting'} },
           fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
           # fetch — rides the outbox in emission order so the client realm reassembles the body
