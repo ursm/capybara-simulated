@@ -85,6 +85,17 @@ RSpec.describe 'Service Worker client enumeration' do
           # assertion about it as a client rests on becoming CONTROLLED and nothing else.
           [200, {'content-type' => 'text/html'}, ['<html><body>main<input id="top"></body></html>']]
         when '/sw.js', '/sw2.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
+        # A worker that snapshots what `clients.matchAll()` sees while its script is still
+        # EVALUATING — before install, before any inbox drain — and replays it on request.
+        when '/sw-early.js'
+          [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+            self.__early = null;
+            self.clients.matchAll({includeUncontrolled: true}).then(cs => {
+              self.__early = cs.map(c => ({url: c.url, focused: c.focused}));
+            });
+            self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+            self.onmessage = e => e.source.postMessage({early: self.__early});
+          JS
         when '/scope/ping' then [200, {'content-type' => 'text/plain'}, ['from-network']]
         # Outside every scope used here — an UNCONTROLLED client.
         when '/outside.html' then [200, {'content-type' => 'text/html'}, ['<html><body>out</body></html>']]
@@ -583,6 +594,42 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(browser.instance_variable_get(:@workers).values.map {|w| w[:service] }).to all(be(true))
     expect(browser.instance_variable_get(:@worker_in_flight)).to eq(0)
     expect(browser.worker_pending?).to be(false)
+  end
+
+  # A service worker can look for clients while its own script is still EVALUATING. The mirror is
+  # seeded at spawn for that, and the FOCUS chain has to ride along: `focused` is browser state the
+  # worker isolate cannot ask for, so without it such a worker sees every client unfocused — and
+  # `matchAll` hands them back in creation order instead of focus-first.
+  it 'lets a worker see clients, and their focus, while its script is still evaluating' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script("document.getElementById('top').focus();")
+    session.execute_script(<<~JS)
+      globalThis.__early = null;
+      navigator.serviceWorker.register('/sw-early.js', {scope: '/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        navigator.serviceWorker.addEventListener('message', e => { globalThis.__early = e.data.early; }, {once: true});
+        globalThis.__armed = true;
+      });
+    JS
+    # `clients.claim()` rides the worker outbox, so activation resolving does not mean this page has
+    # a controller yet — wait for the handover itself before asking.
+    60.times do
+      break if session.evaluate_script('globalThis.__armed === true && !!navigator.serviceWorker.controller')
+
+      sleep 0.02
+    end
+    session.execute_script("navigator.serviceWorker.controller.postMessage('report');")
+    60.times do
+      break if session.evaluate_script('globalThis.__early !== null')
+
+      sleep 0.02
+    end
+    early = session.evaluate_script('globalThis.__early') or raise 'the worker never reported'
+
+    expect(early.map {|c| c['url'] }).to include(a_string_ending_with('/'))
+    expect(early.find {|c| c['url'].end_with?('/') }['focused']).to be(true)
   end
 
   # A dedicated worker is owned by the browsing context that created it: discarding the context

@@ -3894,13 +3894,21 @@ module Capybara
         @worker_init_lock.synchronize { @worker_initializing += 1 }
         # A SERVICE worker may call `clients.matchAll()` while its script is still EVALUATING —
         # before install, before any inbox drain — so its mirror has to be populated before the
-        # script runs. Snapshot the registry here, on the main thread that owns it, and let
-        # run_worker inject it pre-eval.
-        seed_clients = service ? @sw_clients.values.map {|e| e[:rec].merge('controlled' => false) } : nil
+        # script runs. Snapshot it here, on the main thread that owns the registry, and let
+        # run_worker inject it pre-eval. The FOCUS chain rides along for the same reason
+        # `seed_client_mirror` pairs the two: `focused` is browser state the worker isolate cannot
+        # ask for, so without it an early `matchAll` reports every client unfocused and returns
+        # them in creation rather than focus-first order.
+        seed = service ? {clients: sw_client_records_for(handle), focused: focused_client_ids} : nil
         thread = Thread.new do
           Thread.current.report_on_exception = false
-          run_worker(handle, target, body, inbox, outbox, engine_class, shared: shared, service: service,
-                                                                        creator_key: creator_key, seed_clients: seed_clients)
+          run_worker(
+            handle, target, body, inbox, outbox, engine_class,
+            shared:      shared,
+            service:     service,
+            creator_key: creator_key,
+            seed:        seed
+          )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
         # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
@@ -4039,6 +4047,12 @@ module Capybara
         nil
       end
 
+      # Every known client as `handle` sees it — `controlled` is per-worker, so it is decided here
+      # rather than at each call site.
+      private def sw_client_records_for(handle)
+        @sw_clients.each_value.map {|entry| entry[:rec].merge('controlled' => entry[:handle] == handle) }
+      end
+
       # Fill a newly-registered service worker's client mirror. Two sources, because a client's
       # record has two possible authors: a browsing context describes ITSELF (only the realm knows
       # its URL / frame type / controller), while a worker client has no such voice and is only in
@@ -4046,8 +4060,8 @@ module Capybara
       # simply refreshes its record.
       private def seed_client_mirror(handle)
         if (w = @workers[handle])
-          @sw_clients.each_value do |entry|
-            w[:inbox] << {kind: 'client_register', client: entry[:rec].merge('controlled' => entry[:handle] == handle)}
+          sw_client_records_for(handle).each do |rec|
+            w[:inbox] << {kind: 'client_register', client: rec}
           end
           focused = focused_client_ids
           w[:inbox] << {kind: 'client_focus', ids: focused} if focused.any?
@@ -6066,7 +6080,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed_clients: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6155,7 +6169,10 @@ module Capybara
         rt.eval('__csim_installServiceWorkerScope();') if service
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a
         # real pattern (clients-matchall-on-evaluation), and an empty mirror there returns nothing.
-        seed_clients&.each {|rec| rt.call('__csim_swRegisterClient', rec) }
+        if seed
+          seed[:clients].each {|rec| rt.call('__csim_swRegisterClient', rec) }
+          rt.call('__csim_swNoteFocusedClient', seed[:focused]) if seed[:focused].any?
+        end
         rt.eval(body)
         rt.drain_microtasks
         # Drive the service worker's lifecycle: fire `install`, then `activate`, draining each
