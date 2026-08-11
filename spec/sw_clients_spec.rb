@@ -31,7 +31,26 @@ RSpec.describe 'Service Worker client enumeration' do
         // ServiceWorkerGlobalScope must EXPOSE these — real worker code brand-checks with them.
         isClient: c instanceof Client, isWindowClient: c instanceof WindowClient
       });
+      // WindowClient.navigate(): find the client whose url ends with `on` and send it to `navigate`.
+      // Reports what the promise did — the spec resolves with the client (same-origin), with null
+      // (cross-origin), or rejects with TypeError.
+      self.addEventListener('message', e => {
+        const nav = e.data && e.data.navigate;
+        if (!nav) return;
+        e.waitUntil(self.clients.matchAll({includeUncontrolled: true}).then(async cs => {
+          const target = cs.find(c => c.url.endsWith(e.data.on));
+          let report;
+          try {
+            const got = await target.navigate(nav);
+            report = {resolved: true, isNull: got === null, url: got && got.url, isWindowClient: got instanceof WindowClient};
+          } catch (err) {
+            report = {resolved: false, name: err && err.constructor && err.constructor.name};
+          }
+          e.source.postMessage({navigateReport: report});
+        }));
+      });
       self.onmessage = e => {
+        if (e.data && e.data.navigate) return;
         const cmd  = e.data && e.data.focus;
         const to   = e.data && e.data.postTo;
         const opts = (e.data && e.data.options) || undefined;
@@ -443,6 +462,59 @@ RSpec.describe 'Service Worker client enumeration' do
 
     expect(urls.size).to eq(1)
     expect(urls.first).to start_with('blob:')
+  end
+
+  # `WindowClient.navigate()` — how a service worker sends a client somewhere ("open the article
+  # the notification was about"). Unlike focus(), the worker is waiting on the OUTCOME, so this is
+  # a real worker→host→worker round trip: the host navigates and reports where the client LANDED.
+  # A frame navigation rebuilds its realm, so reading the landing URL from the realm id we started
+  # from gives '' — which the same-origin check then reads as cross-origin and resolves null.
+  def navigate_report(session, via:, on:, to:)
+    session.execute_script(<<~JS)
+      globalThis.__nav = null;
+      const win = document.getElementById(#{via.inspect}).contentWindow;
+      win.navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data && e.data.navigateReport) globalThis.__nav = e.data.navigateReport;
+      }, {once: true});
+      win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'navigate' => to, 'on' => on})});
+    JS
+    40.times do
+      break if session.evaluate_script('globalThis.__nav !== null')
+
+      sleep 0.02
+    end
+    session.evaluate_script('globalThis.__nav') or raise 'the worker never reported'
+  end
+
+  it 'navigates a controlled client and resolves with it' do
+    session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
+    report  = navigate_report(session, via: 'b', on: '#a', to: '/scope/page.html?navigated')
+
+    expect(report['resolved']).to be(true)
+    expect(report['isNull']).to be(false)
+    expect(report['isWindowClient']).to be(true)
+    expect(report['url']).to end_with('/scope/page.html?navigated')
+    # The client really moved — not just the record the worker was handed.
+    expect(session.evaluate_script("document.getElementById('a').contentWindow.location.search")).to eq('?navigated')
+  end
+
+  # A client may not be navigated back to its initial about:blank document.
+  it 'rejects a navigate to about:blank with a TypeError' do
+    session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
+    report  = navigate_report(session, via: 'b', on: '#a', to: 'about:blank')
+
+    expect(report['resolved']).to be(false)
+    expect(report['name']).to eq('TypeError')
+  end
+
+  # navigate() is only for clients this worker CONTROLS — an out-of-scope one is a TypeError, even
+  # though `includeUncontrolled` let the worker get hold of it.
+  it 'rejects a navigate on a client it does not control' do
+    session = session_with_frames({'out' => '/outside.html#out', 'b' => '/scope/page.html#b'})
+    report  = navigate_report(session, via: 'b', on: '#out', to: '/outside.html?navigated')
+
+    expect(report['resolved']).to be(false)
+    expect(report['name']).to eq('TypeError')
   end
 
   # Discarding a context must REAP its workers, not merely ask them to stop: the reply-pending

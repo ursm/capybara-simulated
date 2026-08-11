@@ -1785,15 +1785,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
   the client is claimed.
 - fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
   after the client is claimed.
-service-workers/service-worker/client-navigate.https.html:
-- Frame location should not be accessible after cross-origin navigation
-- Frame location should not be accessible after redirect
-- Frame location should update on successful navigation
-- Navigating to about:blank should reject with TypeError
-- Navigating to different origin should resolve with null
-- Navigating to mixed-content iframe should reject with TypeError
-- Redirecting to another origin should resolve with null
-- Return value should be instance of WindowClient
 service-workers/service-worker/client-url-creation-url.https.html:
 - Going back to new document changes creation URL
 service-workers/service-worker/client-url-of-blob-url-worker.https.html:
@@ -2750,7 +2741,6 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 - iframe referrerpolicy="same-origin", origin A
 - iframe referrerpolicy="same-origin", origin B
 service-workers/service-worker/windowclient-navigate.https.html:
-- blank url worker side
 - cross origin url
 - in scope but not controlled test on active worker
 - in scope but not controlled test on installing worker
@@ -2759,7 +2749,6 @@ service-workers/service-worker/windowclient-navigate.https.html:
 - invalid url (http://[example.com])
 - invalid url (view-source://example.com)
 - navigate on a top-level window client
-- normal worker side
 - out of scope
 service-workers/service-worker/worker-client-id.https.html:
 - Verify workers have a unique client id separate from their owning documents window

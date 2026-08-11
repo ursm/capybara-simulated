@@ -1422,6 +1422,7 @@ module Capybara
         # and a controlled fetch's respondWith result. See run_worker for the closures.
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
         c.attach('__csim_swFocusClient',   ->(client_id)       { sw_hooks[:focus_client]&.call(client_id);       nil }) if sw_hooks[:focus_client]
+        c.attach('__csim_swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
         c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil }) if sw_hooks[:fetch_stream]
