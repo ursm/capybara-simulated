@@ -2019,12 +2019,15 @@ module Capybara
         @history << entry.merge(kind: entry[:kind] || :visit)
         @history_idx = @history.size - 1
       end
-      def replay_history_entry(entry)
+      # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
+      # history TRAVERSAL (`go_back`/`go_forward`) — a controlling SW observes the
+      # difference on `event.request.isReloadNavigation` / `.isHistoryNavigation`.
+      def replay_history_entry(entry, is_reload: false)
         return unless entry
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, initiator: nil)
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil)
         else
-          navigate(entry[:url], from_history: true, initiator: nil)   # user traversal: site 'none'
+          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil)   # user traversal: site 'none'
         end
       end
       def active_element_handle
@@ -2927,17 +2930,54 @@ module Capybara
         body << "\r\n"
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, referer: @current_url, initiator: @current_url, site_seed: nil)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         unless from_history || depth > 0
           capture_outgoing_form_state
           record_history({method: :post, url: url, body: body, content_type: content_type})
         end
+        # A controlled top-level POST navigation (form submission) goes to the SW's fetch
+        # event first — same model as `navigate` (the SW reads the body via
+        # `event.request.text()`); respondWith serves the document, nil falls through to
+        # the network POST below. The wire Content-Type carries the same urlencoded
+        # default the network path applies, so `event.request.headers` matches Chrome.
+        nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s),
+                                                     content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
+                                                     is_reload: is_reload, is_history: from_history && !is_reload,
+                                                     dest: 'document', referrer_source: initiator, site_seed: site_seed))
+          # Same post-response pipeline as the network POST below: a network error commits
+          # an error document at the target URL; 307/308 re-POST, other redirects GET;
+          # an attachment downloads.
+          if sw['networkError']
+            @current_url = url
+            record_response(0, {'content-type' => 'text/html'})
+            boot_response_into_ctx('')
+            return
+          end
+          sw_headers = sw['headers'] || {}
+          if (loc = redirect_location(sw['status'].to_i, sw_headers))
+            next_url = resolve_against_current(loc)
+            if [307, 308].include?(sw['status'].to_i)
+              return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            end
+
+            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+          end
+          @current_url = url
+          if download_response?(sw_headers)
+            save_downloaded_response(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)])
+            return
+          end
+          record_response(sw['status'] || 200, sw_headers)
+          boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
+          return
+        end
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
         # Top-level form-submission Fetch metadata — same model as `navigate` (the
-        # SameSite gate reads it; a POST never qualifies for the Lax exception).
-        nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+        # SameSite gate reads it; a POST never qualifies for the Lax exception;
+        # `nav_site` precomputed above).
         env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
         env['HTTP_SEC_FETCH_DEST'] ||= 'document'
         env['HTTP_SEC_FETCH_SITE'] ||= nav_site
@@ -4545,6 +4585,61 @@ module Capybara
         nil
       end
 
+      # Whether THIS browser hosts the registration controlling a navigation to `url`
+      # (Driver#sw_navigation_fetch probes each window's Browser with this).
+      def sw_controls_navigation?(url) = !!sw_controller_for_navigation(url)
+
+      # The scopes whose registered service worker thread is still alive — what a
+      # navigation can actually be routed to (Driver#sw_navigation_fetch dedup +
+      # parked-browser reclaim read this).
+      def sw_live_scopes
+        @sw_registrations.select {|_scope, h| @workers[h]&.[](:thread)&.alive? }.keys
+      end
+
+      # Whether this browser still hosts a live service-worker registration — a closing
+      # window with one is parked by the driver (registrations outlive their documents)
+      # rather than disposed. A live SERVICE worker thread counts even before its scope
+      # is mirrored into @sw_registrations (the mirror arrives from the client-side
+      # lifecycle JS on a settle — a page that registers and closes immediately must
+      # not have its SW disposed by the race).
+      def sw_registrations_active?
+        !sw_live_scopes.empty? || @workers.any? {|_h, w| w[:service] && w[:thread]&.alive? }
+      end
+
+      # Trimmed teardown for a browser being PARKED (window closed, live SW kept): kill
+      # everything DOCUMENT-scoped — non-service workers, SSE / WebSocket / hijacked-
+      # fetch reader threads — and drop the dead document (and its workers) from the SW
+      # client set, so `clients.matchAll` stops returning a destroyed client. What
+      # survives is exactly what sw_navigation_fetch needs: the SW worker threads, the
+      # scope registry, and the driver-shared jars. A parked browser's message pump
+      # never runs again (see Driver#sw_navigation_fetch's dead-letter drop; its
+      # BroadcastChannel fan-out membership also ends — a parked SW's BC listener is
+      # unreachable, a documented gap with no in-scope observer).
+      def park_for_service_workers!
+        @workers.reject {|_h, w| w[:service] }.keys.each {|h| worker_terminate(h) }
+        reset_event_sources
+        reset_websockets
+        reset_hijacked_fetches
+        @sw_clients.keys.each {|id| unregister_client(id) }
+      end
+
+      # Drop the parked browser's queued worker→main messages (claims, client
+      # postMessages, port frames): nobody pumps a parked browser, so they'd otherwise
+      # accumulate for the session — and their audience (the closed document) is gone.
+      # The navigation respondWith rides its own @sw_nav_outbox, already consumed.
+      def drop_dead_letter_worker_messages
+        @worker_outbox.clear
+      end
+
+      # Route a navigation through the controlling SW across the WHOLE window set (the
+      # registration may live in another window's Browser — or a parked one). Falls back
+      # to this browser's own registry when driverless (unit specs build bare Browsers).
+      def any_window_sw_navigation_fetch(url, **kw)
+        return @driver.sw_navigation_fetch(url, **kw) if @driver.respond_to?(:sw_navigation_fetch)
+
+        service_worker_navigation_fetch(url, **kw)
+      end
+
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
       private def sw_controller_for_navigation(url)
@@ -4570,7 +4665,7 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil, site_seed: nil, origin_null: false)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -4581,6 +4676,9 @@ module Capybara
         # exactly once. (EARNED GAP: if the SW instead FALLS THROUGH, this method returns nil and the
         # caller re-fetches from the network — a second hit; the spec reuses the preload response for
         # the fall-through. No vendored subtest enables preload then falls through.)
+        # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
+        # the preload request must report the navigation's own Sec-Fetch-Dest — the SameSite
+        # Lax cookie gate only applies to a top-level document GET.
         preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(handle)
           navigation_preload_response(
             url,
@@ -4588,7 +4686,9 @@ module Capybara
             referrer_policy,
             site_seed,
             origin_null,
-            nav_preload_state(handle)['headerValue']
+            nav_preload_state(handle)['headerValue'],
+            dest:              dest,
+            cookie_cross_site: cookie_cross_site
           )
         end
         # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
@@ -4602,7 +4702,11 @@ module Capybara
           headers:             headers,
           body_b64:            body_b64.to_s,
           mode:                'navigate',
-          destination:         'document',
+          # The navigation's real destination — 'document' for a top-level navigation,
+          # 'iframe' for a frame's (event.request.destination distinguishes them, and a
+          # passthrough re-fetch reports it as Sec-Fetch-Dest + gates the Lax cookie
+          # exception, which is top-level-only).
+          destination:         dest.to_s,
           isReloadNavigation:  is_reload,
           isHistoryNavigation: is_history,
           # A reload navigation revalidates (cache mode 'no-cache'); a fresh/history load is 'default'.
@@ -4624,6 +4728,11 @@ module Capybara
           initiator:           url_origin(referrer_source),
           siteSeed:            site_seed,
           originNull:          origin_null,
+          # The ancestor-chain cookie verdict of the frame this navigation commits into
+          # (RFC 6265bis site-for-cookies). A property of the TARGET FRAME, not the
+          # request: it survives a SW's `new Request(event.request, init)` rewrite —
+          # unlike the initiator, which the copy resets to the SW's own origin.
+          cookieCrossSite:     cookie_cross_site,
           # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler
           # as `event.preloadResponse`.
           preloadResponse:     preload
@@ -4637,6 +4746,9 @@ module Capybara
           resp = JSON.parse(ev[:resp])
           return nil                        if resp['fallthrough']    # no respondWith → load from the network
           return {'networkError' => true}   if resp['networkError']   # respondWith(Response.error()) → failed navigation
+          # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
+          # is a network error — a document can never commit from a no-cors response.
+          return {'networkError' => true}   if resp['type'] == 'opaque'
 
           return resp
         end
@@ -6581,7 +6693,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -6754,6 +6866,10 @@ module Capybara
           # override the policy for the next hop — see below). `hop_referer` also becomes
           # the source the NEXT hop strips from.
           hop_referer = compute_referrer(ref_policy, ref_source, target)
+          # The ancestor-chain cookie verdict (a SW-re-fetched navigation into a frame
+          # with a cross-site ancestor): flag the env BEFORE cookies attach so the
+          # SameSite gate in apply_default_request_env sees it, like a navigation would.
+          env['csim.cookie_cross_site'] = true if cookie_cross_site
           apply_default_request_env(env, referer: hop_referer, force: false)
           # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
           # cross-origin to every real target; otherwise compare the target to the
@@ -6802,9 +6918,11 @@ module Capybara
           # the nil-mode internal callers — ESM / asset GET / beacon — are left alone). Sec-Fetch-Site
           # widens across the redirect chain vs the loop-invariant `sec_initiator` (see above). -Mode
           # is the request mode (a SW's `fetch(event.request)` re-issues a 'navigate'-mode request,
-          # `new Request(…,{mode})` a 'same-origin' one); -Dest is 'empty' for a script-initiated fetch
-          # — the only navigate-mode path here (a navigation emits its own 'iframe'/'document' dest +
-          # -User via navigation_request_headers, never reaching rack_fetch).
+          # `new Request(…,{mode})` a 'same-origin' one); -Dest is 'empty' for a script-initiated
+          # fetch — INCLUDING a SW's navigate-mode passthrough: navigation-headers.https pins
+          # that a `fetch(event.request)` re-fetch reports `sec-fetch-dest: empty`, not the
+          # navigation's destination. The navigation's dest ('document'/'iframe', threaded as
+          # `nav_dest`) still drives the SameSite Lax gate below, which is top-level-only.
           if cors_mode
             sec_site = widen_sec_fetch_site(sec_site, sec_fetch_site(sec_initiator, target))
             env['HTTP_SEC_FETCH_SITE'] = sec_site
@@ -6827,11 +6945,18 @@ module Capybara
                             cookie_client ||= doc_origin || sec_initiator
                             cookie_site = widen_sec_fetch_site(cookie_site, sec_fetch_site(cookie_client, target))
                           end
+            # The ancestor-chain verdict (a SW re-fetch of a navigation into a frame with
+            # a cross-site ancestor — see frame_ancestor_cross_site?) overrides: it's a
+            # property of the target frame, cross-site whoever issues the request.
+            cookie_site = 'cross-site' if cookie_cross_site
             if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
+              # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an
+              # iframe navigation or an ancestor-cross frame navigation
+              # (cookie_cross_site) sheds Lax like any cross-site subresource.
               ck = cookie_header_for(env_cookie_host(env),
                                      secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
                                      cross_site: true,
-                                     lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET')
+                                     lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site)
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
             end
           end
@@ -7593,7 +7718,7 @@ module Capybara
         # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
         # the initial load uses. A respondWith serves the document; a network error fails the
         # navigation; nil falls through to the network below.
-        if (sw = service_worker_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
+        if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
                                                       **post_args))
           return if sw['networkError']
@@ -7698,11 +7823,15 @@ module Capybara
         # away — the fetch's cookie / server side effects would fire for a navigation that never commits.
         return unless @runtime.frame_realm_alive?(realm_id)
         invalidate_find_cache
+        # The frame's ancestor-chain cookie verdict (see frame_ancestor_cross_site?) —
+        # a property of the frame the document commits into, so it rides the SW fetch
+        # event too (a rewritten request keeps it; the initiator latch doesn't apply).
+        cookie_cross = frame_ancestor_cross_site?(realm_id, get_url)
         # A controlled navigation goes to the SW's fetch event first (mode 'navigate'); respondWith
         # serves the document, a network error fails it, nil falls through to the network GET below.
-        if (sw = service_worker_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
+        if (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
                                                           referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
-                                                          site_seed: site_seed, origin_null: origin_null))
+                                                          site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
           return if sw['networkError']
 
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
@@ -7711,11 +7840,12 @@ module Capybara
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
         status, headers, resp_body = dispatch_navigation_request(
           get_url,
-          method:          'GET',
-          initiator:       initiator,
-          referrer_policy: frame_document_referrer_policy(realm_id),
-          site:            site,
-          origin_null:     origin_null
+          method:            'GET',
+          initiator:         initiator,
+          referrer_policy:   frame_document_referrer_policy(realm_id),
+          site:              site,
+          origin_null:       origin_null,
+          cookie_cross_site: cookie_cross
         )
         if (loc = redirect_location(status, headers))
           next_url = resolve_against(loc, get_url)
@@ -7747,12 +7877,14 @@ module Capybara
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame_post(url, body, content_type, entry: entry) if entry
         invalidate_find_cache
+        # The frame's ancestor-chain cookie verdict — same as navigate_realm_self_get.
+        cookie_cross = frame_ancestor_cross_site?(realm_id, url)
         # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
         # POST — the SW reads the body via event.request.text()); respondWith serves the document,
         # a network error fails it, nil falls through to the network POST below.
-        if (sw = service_worker_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
+        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
-                                                      site_seed: site_seed, origin_null: origin_null))
+                                                      site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
           return if sw['networkError']
 
           tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
@@ -7767,13 +7899,14 @@ module Capybara
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
         status, headers, resp_body = dispatch_navigation_request(
           url,
-          method:          'POST',
-          initiator:       initiator,
-          referrer_policy: frame_document_referrer_policy(realm_id),
-          site:            site,
-          origin_null:     origin_null,
-          body:            body,
-          content_type:    content_type
+          method:            'POST',
+          initiator:         initiator,
+          referrer_policy:   frame_document_referrer_policy(realm_id),
+          site:              site,
+          origin_null:       origin_null,
+          body:              body,
+          content_type:      content_type,
+          cookie_cross_site: cookie_cross
         )
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -7869,7 +8002,7 @@ module Capybara
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
       def refresh
-        replay_history_entry(@history[@history_idx])
+        replay_history_entry(@history[@history_idx], is_reload: true)
       end
       # `history.pushState(state, '', '/path')` ships the URL through
       # `__setCurrentUrl` and lands here. Tab controllers / SPA frameworks
@@ -8289,7 +8422,7 @@ module Capybara
         ct.to_s.empty? ? 'text/html' : ct.to_s
       end
 
-      def navigate(url, depth: 0, referer: @current_url, from_history: false, initiator: @current_url, site_seed: nil)
+      def navigate(url, depth: 0, referer: @current_url, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Capture the entry referer (the page initiating this navigation,
@@ -8330,12 +8463,44 @@ module Capybara
             capture_outgoing_form_state
             record_history({method: :get, url: url})
           end
+          # A controlled top-level navigation goes to the controlling SW's fetch event
+          # first (mode 'navigate', dest 'document') — the registration may live in ANY
+          # window's Browser (they're profile-wide; see Driver#sw_navigation_fetch).
+          # respondWith serves the document; nil falls through to the network GET below.
+          # Mirrors the frame-navigation model (navigate_realm_self_get).
+          nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+          if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: from_history && !is_reload, dest: 'document',
+                                                       referrer_source: initiator, site_seed: site_seed))
+            # A network-error respondWith FAILS the navigation. Chrome still commits an
+            # error document at the target URL (the history entry above stands), so the
+            # URL moves even though nothing loaded.
+            if sw['networkError']
+              @current_url = url
+              record_response(0, {'content-type' => 'text/html'})
+              boot_response_into_ctx('')
+              return
+            end
+            # An SW-served response joins the same post-response pipeline as a network
+            # one: a redirect is followed (re-entering SW interception at the new URL),
+            # an attachment downloads — never booted as the document.
+            sw_headers = sw['headers'] || {}
+            if (loc = redirect_location(sw['status'].to_i, sw_headers))
+              return navigate(carry_fragment(url, resolve_against_current(loc)), depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            end
+            @current_url = url
+            if download_response?(sw_headers)
+              return save_downloaded_response(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)])
+            end
+            record_response(sw['status'] || 200, sw_headers)
+            boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
+            return
+          end
           env = Rack::MockRequest.env_for(url, method: 'GET')
           # Top-level navigation Fetch metadata: Sec-Fetch-Site is the initiator↔target
-          # relationship, widened across the redirect chain (site_seed) exactly like the
-          # frame-navigation model — the SameSite cookie gate in apply_default_request_env
-          # reads it. No initiator (driver visit / address bar) → 'none' (not cross-site).
-          nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+          # relationship, widened across the redirect chain (site_seed, precomputed as
+          # `nav_site` above) exactly like the frame-navigation model — the SameSite
+          # cookie gate in apply_default_request_env reads it. No initiator (driver
+          # visit / address bar) → 'none' (not cross-site).
           env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
           env['HTTP_SEC_FETCH_DEST'] ||= 'document'
           env['HTTP_SEC_FETCH_SITE'] ||= nav_site
@@ -8577,7 +8742,11 @@ module Capybara
         # SameSite context from the request's own Fetch metadata (set by
         # navigation_request_headers before cookies attach). No metadata — internal
         # asset/ESM/beacon callers — stays same-site, today's permissive behavior.
-        cross_site = env['HTTP_SEC_FETCH_SITE'] == 'cross-site'
+        # `csim.cookie_cross_site` is the ANCESTOR-CHAIN verdict (RFC 6265bis "site for
+        # cookies"): a navigation into a frame with a cross-site ancestor is cross-site
+        # for cookies even when its initiator is same-origin — while Sec-Fetch-Site
+        # stays initiator-based. Cookie-only, never a header.
+        cross_site = env['HTTP_SEC_FETCH_SITE'] == 'cross-site' || env['csim.cookie_cross_site'] == true
         # The Lax exception is TOP-LEVEL navigations only (dest 'document'): a cross-site
         # iframe GET is mode navigate too, but Chrome's Lax-by-default blocks it there.
         lax_ok     = env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document' && env['REQUEST_METHOD'] == 'GET'
@@ -8625,8 +8794,32 @@ module Capybara
       # caller's already-widened Sec-Fetch-Site (threaded across the redirect chain it owns);
       # `extra_headers` carries any request-specific CGI header (the preload marker). Returns
       # [status, headers, resp_body] — the caller handles redirects / reload / the preload wire.
-      def dispatch_navigation_request(url, method:, initiator:, referrer_policy:, site:, origin_null:, body: nil, content_type: nil, extra_headers: nil)
+      # RFC 6265bis "site for cookies": a frame's cookie site folds its ANCESTOR chain.
+      # A navigation into frame `realm_id` is cross-site for cookies when ANY ancestor
+      # document (the frame's parents up to the top window) is cross-site with the
+      # target — even if the navigation's own initiator is same-origin. Top-level
+      # navigations have no ancestors and never fold (their strict/lax split is the
+      # initiator-based Sec-Fetch-Site latch).
+      private def frame_ancestor_cross_site?(realm_id, target_url)
+        rid = realm_id.to_i
+        # A WINDOW realm (same-isolate popup) is itself a top-level navigable: it has
+        # no ancestors of its own, and its OPENER must never fold in — the loop guard
+        # stops both a popup's self-navigation (no iterations) and an iframe chain
+        # inside a popup (the popup's document is compared as the chain's top, then
+        # the walk ends there instead of crossing into the opener via parent 0).
+        while rid.positive? && !top_level_realm?(rid)
+          parent       = @runtime.frame_realm_parent(rid).to_i
+          ancestor_url = parent.positive? ? frame_realm_url(parent) : @current_url
+          return true if sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
+
+          rid = parent
+        end
+        false
+      end
+
+      def dispatch_navigation_request(url, method:, initiator:, referrer_policy:, site:, origin_null:, body: nil, content_type: nil, extra_headers: nil, dest: 'iframe', cookie_cross_site: false)
         env = Rack::MockRequest.env_for(url, method: method, input: body || '')
+        env['csim.cookie_cross_site'] = true if cookie_cross_site
         if content_type
           env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
           env['CONTENT_LENGTH'] = body.to_s.bytesize.to_s
@@ -8636,7 +8829,7 @@ module Capybara
           method:          method,
           initiator_url:   initiator,
           target:          url.to_s,
-          dest:            'iframe',
+          dest:            dest,
           referrer_policy: referrer_policy,
           site_override:   site,
           origin_null:     origin_null
@@ -8654,16 +8847,18 @@ module Capybara
       # Preload` header carrying the registration's header value. The SW intercepts the FINAL URL (a
       # pre-SW network redirect already happened + widened `site_seed`), so this is a single hop — no
       # redirect loop. Returns the response wire hash for the fetch-event JSON, or nil on a hard error.
-      def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value)
+      def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value, dest: 'iframe', cookie_cross_site: false)
         site = widen_sec_fetch_site(site_seed, sec_fetch_site(referrer_source, url))
         status, headers, resp_body = dispatch_navigation_request(
           url,
-          method:          'GET',
-          initiator:       referrer_source,
-          referrer_policy: referrer_policy,
-          site:            site,
-          origin_null:     origin_null,
-          extra_headers:   {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
+          method:            'GET',
+          initiator:         referrer_source,
+          referrer_policy:   referrer_policy,
+          site:              site,
+          origin_null:       origin_null,
+          dest:              dest,
+          cookie_cross_site: cookie_cross_site,
+          extra_headers:     {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
         )
         {
           'status'     => status,

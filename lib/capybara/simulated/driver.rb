@@ -89,6 +89,13 @@ module Capybara
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
         @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
+        # Browsers whose WINDOW closed while they still host an active service-worker
+        # registration. A registration is profile-wide state independent of the document
+        # that created it (a page registers, closes, and the SW keeps controlling
+        # navigations elsewhere), so the Browser is parked — keeping its SW worker
+        # thread + scope registry alive for sw_navigation_fetch — instead of disposed.
+        # Reclaimed by reset_windows!.
+        @sw_parked       = []
         @active_handle   = nil
         @next_window_seq = 0
         # Driver-level blob URL partition map: url => {browser:, site:}. A blob URL's
@@ -301,6 +308,8 @@ module Capybara
       def reset_windows!
         @aux_windows.each {|w| w[:browser].dispose rescue nil }
         @aux_windows.clear
+        @sw_parked.each {|b| b.dispose rescue nil }
+        @sw_parked.clear
         @active_handle = nil
         @blob_partitions_lock.synchronize { @blob_partitions.clear }
       end
@@ -677,11 +686,69 @@ module Capybara
         return if h == PRIMARY_HANDLE
         @aux_windows.reject! {|w|
           next false unless w[:handle] == h
-          drop_blob_partitions_for(w[:browser])   # don't leave entries pointing at a disposed VM
-          w[:browser].dispose rescue nil
+          if w[:browser].sw_registrations_active?
+            # Still hosting a live service-worker registration — park (see @sw_parked):
+            # tear down the document-scoped machinery, retire older parked browsers
+            # whose scopes this one re-registered (the newest registration for a scope
+            # is THE registration, as in a real profile), and keep the browser alive.
+            w[:browser].park_for_service_workers!
+            retire_shadowed_parked(w[:browser])
+            @sw_parked << w[:browser]
+          else
+            drop_blob_partitions_for(w[:browser])   # don't leave entries pointing at a disposed VM
+            w[:browser].dispose rescue nil
+          end
           true
         }
         @active_handle = nil if @active_handle == h
+      end
+
+      # Dispose parked browsers whose live scopes are ALL re-registered by `newcomer` —
+      # their registrations are replaced, so keeping the old worker would let a stale
+      # SW shadow the new one in sw_navigation_fetch. A partially-overlapping parked
+      # browser stays (its non-shadowed scopes are still the live registrations; the
+      # newest-first search below picks the newcomer for the shared ones).
+      private def retire_shadowed_parked(newcomer)
+        fresh = newcomer.sw_live_scopes
+        @sw_parked.reject! {|b|
+          scopes = b.sw_live_scopes
+          next false if scopes.empty? || !(scopes - fresh).empty?
+          drop_blob_partitions_for(b)
+          b.dispose rescue nil
+          true
+        }
+      end
+
+      # Dispose parked browsers whose service workers have all died since parking
+      # (the SW unregistered itself / closed) — nothing routes to them anymore, and
+      # each pins a whole V8 isolate until reset otherwise.
+      private def sweep_dead_parked
+        @sw_parked.reject! {|b|
+          next false if b.sw_registrations_active?
+          drop_blob_partitions_for(b)
+          b.dispose rescue nil
+          true
+        }
+      end
+
+      # The fetch-event round-trip for a controlled NAVIGATION, resolved across the whole
+      # window set: a service-worker registration is profile-wide, so the Browser hosting
+      # the controlling SW may be any window's — or a parked one whose window already
+      # closed (searched newest-parked first: a re-registered scope's newest worker is
+      # the active registration). Returns the owner's respondWith wire hash, or nil
+      # (uncontrolled → load from the network).
+      def sw_navigation_fetch(url, **kw)
+        sweep_dead_parked
+        owner = ([@browser] + @aux_windows.map {|w| w[:browser] } + @sw_parked.reverse).find {|b|
+          b.sw_controls_navigation?(url)
+        }
+        return nil unless owner
+
+        resp = owner.service_worker_navigation_fetch(url, **kw)
+        # Nobody pumps a parked browser — drop what the handler queued for its dead
+        # clients so the outbox can't grow across a long test.
+        owner.drop_dead_letter_worker_messages if @sw_parked.include?(owner)
+        resp
       end
 
       # Drop every blob-partition entry created by `browser` — its isolate is being
