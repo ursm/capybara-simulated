@@ -58058,7 +58058,7 @@ service-workers/service-worker/partitioned-matchAll.tentative.https.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/partitioned.tentative.https.html:
-- name: Services workers with cross-site ancestors are partitioned.
+- name: Services workers under different top-level sites are partitioned.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

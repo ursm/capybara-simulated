@@ -149,7 +149,7 @@ module Capybara
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i) },
         # navigator.serviceWorker.register (universal-server only) — spawn a worker
         # running the SW script as an executor context. Returns its handle.
-        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1]) },
+        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
@@ -190,6 +190,7 @@ module Capybara
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
         '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },

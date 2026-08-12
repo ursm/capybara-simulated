@@ -2958,7 +2958,7 @@ module Capybara
           end
           sw_headers = sw['headers'] || {}
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
-            next_url = resolve_against_current(loc)
+            next_url = carry_fragment(url, resolve_against_current(loc))
             if [307, 308].include?(sw['status'].to_i)
               return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
             end
@@ -3928,7 +3928,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil)
         handle       = (@worker_seq += 1)
         target       = resolve_against_current(url.to_s)
         # A worker script from a blob: URL in a DIFFERENT storage partition than this
@@ -3968,7 +3968,8 @@ module Capybara
             shared:      shared,
             service:     service,
             creator_key: creator_key,
-            seed:        seed
+            seed:        seed,
+            sw_scope:    sw_scope
           )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
@@ -4640,6 +4641,92 @@ module Capybara
         service_worker_navigation_fetch(url, **kw)
       end
 
+      # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build
+      # (GET) and a form submission to a named frame (POST, fetch.js mode 'navigate'):
+      # per hop, consult the controlling SW across the whole window set (a redirect
+      # out of one SW's scope can land in another registration's — or on the
+      # network), then fall through to a network navigation request; FOLLOW
+      # redirects by re-entering interception at each new URL (301/302 of a POST and
+      # 303 of a non-GET/HEAD rewrite the next hop to a bodyless GET — Fetch
+      # "HTTP-redirect fetch" — so a redirected form POST "must clear body"; 307/308
+      # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
+      # reads body / headers / url / redirected / charset), or nil for a failed
+      # navigation (respondWith network error / redirect loop).
+      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body_b64: '', content_type: nil)
+        target      = url.to_s
+        initiator   = referrer_source
+        meth        = method.to_s.empty? ? 'GET' : method.to_s.upcase
+        req_b64     = body_b64.to_s
+        req_ct      = content_type
+        site        = nil
+        origin_null = false
+        redirected  = false
+        (MAX_FETCH_REDIRECTS + 1).times do
+          resp_body = nil
+          # A service worker only controls a client whose EVERY ancestor is a secure
+          # context: an httpS frame anywhere under an http document loads from the
+          # network (secure-context.https). Gated on the target being https — a scope
+          # prefix-matches its client URL, so this is exactly "an https REGISTRATION
+          # never controls an insecure context" — because the driver's model treats a
+          # plain-http world (the app suites at http://www.example.com, where
+          # isSecureContext is hard-true) as secure by fiat. The JS caller computes
+          # the ancestor chain (it IS the chain — the building realm is the parent).
+          if (secure_ancestors || !target.start_with?('https://')) &&
+             (sw = any_window_sw_navigation_fetch(target, method: meth, body_b64: req_b64, content_type: req_ct, is_reload: is_reload,
+                                                          referrer_source: initiator, site_seed: site, origin_null: origin_null))
+            return nil if sw['networkError']
+
+            status  = (sw['status'] || 200).to_i
+            headers = sw['headers'] || {}
+            body    = Base64.decode64(sw['body_b64'].to_s)
+          else
+            status, headers, resp_body = dispatch_navigation_request(
+              target,
+              method:          meth,
+              initiator:       initiator,
+              referrer_policy: nil,
+              site:            widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
+              origin_null:     origin_null,
+              body:            req_b64.empty? ? nil : Base64.decode64(req_b64),
+              content_type:    req_ct
+            )
+            body = nil   # read only for the terminal hop, below
+          end
+          if (loc = redirect_location(status, headers))
+            resp_body.close if resp_body.respond_to?(:close)
+            site        = widen_sec_fetch_site(site, sec_fetch_site(initiator, target))
+            next_url    = carry_fragment(target, resolve_against(loc, target))
+            origin_null = redirect_taints_origin?(origin_null, initiator, target, next_url)
+            if ([301, 302].include?(status) && meth == 'POST') || (status == 303 && !%w[GET HEAD].include?(meth))
+              meth    = 'GET'
+              req_b64 = ''
+              req_ct  = nil
+            end
+            target      = next_url
+            redirected  = true
+            next
+          end
+          body ||= read_rack_body(resp_body)
+          return response_hash(status, headers, body, target, redirected)
+        end
+        nil   # redirect loop → failed navigation
+      end
+
+      # A frame's document is a SECURE CONTEXT only when every ANCESTOR document is
+      # https — a service worker never controls (nor intercepts navigations of) a
+      # frame anywhere under an http document (secure-context.https). Walks the
+      # realm parent chain; the tree root is the window document itself. The
+      # frame's OWN scheme needs no check here: an http frame URL can't match an
+      # https registration scope anyway.
+      private def secure_frame_ancestors?(realm_id)
+        parent = @runtime.respond_to?(:frame_realm_parent) ? @runtime.frame_realm_parent(realm_id).to_i : 0
+        while parent.positive?
+          return false if frame_realm_url(parent).to_s.start_with?('http://')
+          parent = @runtime.frame_realm_parent(parent).to_i
+        end
+        !@current_url.to_s.start_with?('http://')
+      end
+
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
       private def sw_controller_for_navigation(url)
@@ -4709,6 +4796,11 @@ module Capybara
           destination:         dest.to_s,
           isReloadNavigation:  is_reload,
           isHistoryNavigation: is_history,
+          # A navigation request's redirect mode is 'manual' (Fetch "create navigation request"):
+          # `event.request.redirect === 'manual'`, and a passthrough `fetch(event.request)` of a
+          # redirecting URL yields an opaqueredirect — which the navigation normalization below
+          # FOLLOWS (the private redirect_loc channel), so the SW observes every hop.
+          redirect:            'manual',
           # A reload navigation revalidates (cache mode 'no-cache'); a fresh/history load is 'default'.
           cache:               is_reload ? 'no-cache' : 'default',
           # The navigation's referrer is the initiating document, resolved under ITS Referrer-Policy
@@ -4749,7 +4841,27 @@ module Capybara
           # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
           # is a network error — a document can never commit from a no-cors response.
           return {'networkError' => true}   if resp['type'] == 'opaque'
-
+          # An opaque-REDIRECT respondWith: the navigation processes the real redirect the
+          # filtered surface (status 0 / empty headers) hides, carried on the private wire
+          # fields (opaque_redirect_hash). Rewrite the real values in, so every caller's
+          # existing redirect-follow / document-commit pipeline works unchanged: a Location →
+          # the chain re-enters interception at it (real status drives the 307/308 re-POST
+          # split); a redirect status with NO Location → the body commits as the document at
+          # the request URL (Chrome's behavior — navigation-redirect "No location redirect").
+          if resp['type'] == 'opaqueredirect'
+            resp = if resp['redirect_loc'].to_s.empty?
+              resp.merge(
+                'status'   => resp['redirect_status'].to_i,
+                'headers'  => {'content-type' => resp['redirect_ct'].to_s},
+                'body_b64' => resp['render_b64'].to_s
+              )
+            else
+              resp.merge(
+                'status'  => resp['redirect_status'].to_i,
+                'headers' => {'location' => resp['redirect_loc'].to_s}
+              )
+            end
+          end
           return resp
         end
         nil   # SW never answered within budget → load from the network
@@ -6216,7 +6328,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6301,8 +6413,15 @@ module Capybara
           end
         rt.eval("globalThis.__csimOriginKey = #{JSON.generate(worker_origin_key)};") if worker_origin_key
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
-        # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs.
-        rt.eval('__csim_installServiceWorkerScope();') if service
+        # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
+        # registration SCOPE rides in first — `self.registration.scope` must be the
+        # registration's scope URL, not the script URL (two registrations sharing one
+        # script are distinct registrations; anything keyed on the scope, e.g. a
+        # per-registration cache name, must not collide).
+        if service
+          rt.eval("globalThis.__csimSwScope = #{JSON.generate(sw_scope.to_s)};") unless sw_scope.to_s.empty?
+          rt.eval('__csim_installServiceWorkerScope();')
+        end
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a
         # real pattern (clients-matchall-on-evaluation), and an empty mirror there returns nothing.
         if seed
@@ -6833,7 +6952,7 @@ module Capybara
               # method rewrite / origin taint.
               raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
               if redirect_mode != 'follow'
-                return response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
+                return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
               end
               if (loc = redirect_location(cache_entry.status, cache_entry.headers))
                 trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
@@ -7012,13 +7131,21 @@ module Capybara
           # check above runs first, so a cross-origin redirect that fails CORS is a network
           # error either way (redirect-mode / -location).
           if redirect_mode != 'follow' && REDIRECT_STATUSES.include?(status.to_i)
-            resp_body.close if resp_body.respond_to?(:close)
-            raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
+            if redirect_mode == 'error'
+              resp_body.close if resp_body.respond_to?(:close)
+              raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode'
+            end
             # A no-cors request may not even opaquely expose a CROSS-origin redirect — a
             # no-cors non-follow redirect to a cross-origin target is a network error,
             # while a same-origin one still yields an opaque-redirect.
-            return nil if no_cors_mode && crossed
-            return response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
+            if no_cors_mode && crossed
+              resp_body.close if resp_body.respond_to?(:close)
+              return nil
+            end
+            # The render bytes must be the DECODED body (like the terminal hop below) — a
+            # no-Location 3xx served with Content-Encoding otherwise commits gzip bytes
+            # as the document when a navigation renders them.
+            return opaque_redirect_hash(target, status, resp_headers, decode_content_encoding(read_rack_body(resp_body), resp_headers))
           end
           if (loc = redirect_location(status, resp_headers))
             # Log this hop (3xx) before method/body are rewritten for the next.
@@ -7295,6 +7422,28 @@ module Capybara
         # cost is one base64 per opaque response, off any hot path.
         out['opaque_render_b64'] = Base64.strict_encode64(opaque_render) if opaque_render && !opaque_render.empty?
         out
+      end
+
+      # An opaque-redirect filtered response (redirect mode 'manual'): status 0, empty
+      # headers, hidden body — that's all script may see. A NAVIGATION consuming it must
+      # still process the REAL redirect the filter hides (a controlled frame's SW does
+      # `respondWith(fetch(new Request(url, {redirect: 'manual'})))` and the navigation
+      # follows the Location — or, a redirect-status response with NO Location, commits
+      # the body as the document, as Chrome does). The unfiltered values ride private
+      # wire fields no public accessor reads (the `opaque_render_b64` pattern), so they
+      # survive the SW respondWith wire and a Cache put/match round-trip
+      # (serializeResponseWire copies them from `_raw`). Consumed by the navigation
+      # normalization in service_worker_navigation_fetch.
+      private def opaque_redirect_hash(target, status, resp_headers, body_str)
+        o_r = response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
+        o_r['redirect_status'] = status.to_i
+        if (loc = redirect_location(status, resp_headers))
+          o_r['redirect_loc'] = resolve_against(loc, target)
+        else
+          o_r['redirect_ct']       = (resp_headers['content-type'] || resp_headers['Content-Type']).to_s
+          o_r['opaque_render_b64'] = Base64.strict_encode64(body_str.to_s) unless body_str.to_s.empty?
+        end
+        o_r
       end
 
       # Strip + decode a single leading byte-order mark, returning
@@ -7717,8 +7866,13 @@ module Capybara
         # A traversal / reload is a navigation: route it through the controlling SW's fetch event
         # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
         # the initial load uses. A respondWith serves the document; a network error fails the
-        # navigation; nil falls through to the network below.
-        if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
+        # navigation; nil falls through to the network below. Same secure-ancestors gate as
+        # navigate_realm_self_get. KNOWN GAP: an SW-served REDIRECT here commits the redirect
+        # response's body instead of following it (no vendored test reloads into a redirecting
+        # respondWith; following would need the entry/restore plumbing threaded through the
+        # re-entry) — extend when a test pins the behavior.
+        if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+           (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
                                                       **post_args))
           return if sw['networkError']
@@ -7829,11 +7983,26 @@ module Capybara
         cookie_cross = frame_ancestor_cross_site?(realm_id, get_url)
         # A controlled navigation goes to the SW's fetch event first (mode 'navigate'); respondWith
         # serves the document, a network error fails it, nil falls through to the network GET below.
-        if (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
+        # Skipped when an https navigation sits under an insecure ancestor (see
+        # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
+        if (!get_url.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+           (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
                                                           referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
                                                           site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
           return if sw['networkError']
 
+          # An SW-served redirect is FOLLOWED like a network one (the recursion
+          # re-enters interception at the new URL — a redirect out of this SW's scope
+          # lands on the network or another registration's SW, as in the top-level
+          # navigate path). The chain latches Sec-Fetch-Site exactly like the network
+          # redirect branch below.
+          if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
+            init     = frame_realm_url(realm_id)
+            next_url = carry_fragment(get_url, resolve_against(loc, get_url))
+            return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: record,
+                                                     site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(init, get_url)),
+                                                     origin_null: redirect_taints_origin?(origin_null, init, get_url, next_url))
+          end
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
         end
         initiator = frame_realm_url(realm_id)
@@ -7848,7 +8017,7 @@ module Capybara
           cookie_cross_site: cookie_cross
         )
         if (loc = redirect_location(status, headers))
-          next_url = resolve_against(loc, get_url)
+          next_url = carry_fragment(get_url, resolve_against(loc, get_url))
           resp_body.close if resp_body.respond_to?(:close)
           # Latch the redirect chain's Fetch-Metadata: Sec-Fetch-Site widens to include this hop, and
           # a form POST's Origin taints to 'null' per redirect_taints_origin? (moot for GET — no Origin).
@@ -7882,11 +8051,29 @@ module Capybara
         # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
         # POST — the SW reads the body via event.request.text()); respondWith serves the document,
         # a network error fails it, nil falls through to the network POST below.
-        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
+        # Skipped when an https navigation sits under an insecure ancestor (see
+        # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
+        if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+           (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
                                                       site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
           return if sw['networkError']
 
+          # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
+          # as the network branch below, re-entering interception at the new URL.
+          if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
+            init     = frame_realm_url(realm_id)
+            next_url = carry_fragment(url, resolve_against_current(loc))
+            site     = widen_sec_fetch_site(site_seed, sec_fetch_site(init, url.to_s))
+            taint    = redirect_taints_origin?(origin_null, init, url.to_s, next_url)
+            if [307, 308].include?(sw['status'].to_i)
+              return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history,
+                                                         site_seed: site, origin_null: taint)
+            end
+
+            return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: false,
+                                                     site_seed: site, origin_null: taint)
+          end
           tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
           return
@@ -7910,7 +8097,7 @@ module Capybara
         )
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = resolve_against_current(loc)
+          next_url = carry_fragment(url, resolve_against_current(loc))
           resp_body.close if resp_body.respond_to?(:close)
           # 307/308 preserve method + body; 301/302/303 → GET the frame (routed
           # through the realm that OWNS the iframe, as in navigate_realm_self_get). Latch the
@@ -8351,7 +8538,7 @@ module Capybara
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = resolve_against_current(loc)
+          next_url = carry_fragment(url, resolve_against_current(loc))
           resp_body.close if resp_body.respond_to?(:close)
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if [307, 308].include?(status)
