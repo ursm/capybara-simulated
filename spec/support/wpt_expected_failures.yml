@@ -2198,6 +2198,21 @@ service-workers/service-worker/navigation-redirect.https.html:
 - clean up global state
 service-workers/service-worker/navigation-sets-cookie.https.html:
 - Setup service workers
+- Same-site top-level navigation with fallback service worker should be able to set SameSite=* cookies.
+- Same-site top-level navigation with passthrough service worker should be able to set SameSite=* cookies.
+- Same-site top-level navigation with change-request service worker should be able to set SameSite=* cookies.
+- Same-site top-level navigation with navpreload service worker should be able to set SameSite=* cookies.
+- Same-site top-level POST with fallback service worker should be able to set SameSite=* cookies.
+- Same-site top-level POST with passthrough service worker should be able to set SameSite=* cookies.
+- Same-site top-level POST with change-request service worker should be able to set SameSite=* cookies.
+- Cross-site top-level navigation with fallback service worker should be able to set SameSite=* cookies.
+- Cross-site top-level navigation with passthrough service worker should be able to set SameSite=* cookies.
+- Cross-site top-level navigation with change-request service worker should be able to set SameSite=* cookies.
+- Cross-site top-level navigation with navpreload service worker should be able to set SameSite=* cookies.
+- Cross-site top-level with fallback service worker POST should be able to set SameSite=* cookies.
+- Cross-site top-level with passthrough service worker POST should be able to set SameSite=* cookies.
+- Cross-site top-level with change-request service worker POST should be able to set SameSite=* cookies.
+- Cleanup service workers
 service-workers/service-worker/navigation-timing-extended.https.html:
 - Service worker controlled navigation timing
 service-workers/service-worker/navigation-timing-sizes.https.html:

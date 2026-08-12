@@ -136,7 +136,10 @@ const TREES = [
 // harness every generated canvas test pulls in by absolute path. `images` holds
 // the shared PNG/SVG fixtures (`/images/green.png`, …) that canvas drawImage /
 // createPattern / <img>-decode tests fetch by absolute path.
-const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images', 'fonts'];
+// `cookies/resources` backs the SameSite service-worker tests (same-site-cookies.https
+// pulls cookie-helper.sub.js + the set/drop/postToParent .py endpoints by absolute path);
+// the tree is self-contained (helpers.py + the endpoint handlers).
+const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images', 'fonts', 'cookies/resources'];
 // Individual support files (outside the vendored trees) that tests include via
 // `<script src>`. Kept across re-vendoring so local includes resolve.
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument
