@@ -1291,8 +1291,6 @@ fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should fail on 308
 fetch/api/request/destination/fetch-destination-frame.https.html:
 - frame fetches with a "frame" Request.destination
-fetch/api/request/destination/fetch-destination-iframe.https.html:
-- iframe fetches with a "iframe" Request.destination
 fetch/api/request/destination/fetch-destination-no-load-event.https.html:
 - '@import fetches with a "style" Request.destination'
 - Background image fetches with an "image" Request.destination
@@ -1985,9 +1983,6 @@ service-workers/service-worker/fetch-event-within-sw-manual.https.html:
 - Notification requests intercepted both from window and SW
 service-workers/service-worker/fetch-event.https.h2.html:
 - When the streaming request body is used, network fallback fails.
-service-workers/service-worker/fetch-frame-resource.https.html:
-- Basic type response could be loaded in the new window.
-- CORS type response could be loaded in the new window.
 service-workers/service-worker/fetch-mixed-content-to-inscope.https.html:
 - Verify Mixed content of fetch() in a Service Worker
 service-workers/service-worker/fetch-mixed-content-to-outscope.https.html:
@@ -2399,18 +2394,6 @@ service-workers/service-worker/respond-with-body-accessed-response.https.html:
 - 'test: type=opaque&clone=2'
 - 'test: type=opaque&clone=2&passThroughCache=true'
 - 'test: type=opaque&passThroughCache=true'
-service-workers/service-worker/same-site-cookies.https.html:
-- cross-site, window.open with change-request
-- same-origin, window.open with change-request and cross-site redirect
-- same-origin, window.open with change-request, cross-site redirect, and same-origin redirect
-- same-origin, nested set location with cross-site middle frame and no service worker
-- same-origin, nested set location with cross-site middle frame and fallback service worker
-- same-origin, nested set location with cross-site middle frame and passthrough service worker
-- same-origin, nested set location with cross-site middle frame and change-request service worker
-- same-origin, nested set location with cross-site middle frame and navpreload service worker
-- cross-site, form post with change-request
-- same-origin, form post with change-request and cross-site redirect
-- same-origin, form post with change-request, cross-site redirect, and same-origin redirect
 service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 - Fetch request from a worker in a normal iframe
 - Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
@@ -2456,8 +2439,6 @@ service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 service-workers/service-worker/sandboxed-iframe-navigator-serviceworker.https.html:
 - Accessing navigator.serviceWorker in sandboxed iframe should throw.
 - Switching iframe sandbox attribute while loading the iframe
-service-workers/service-worker/secure-context.https.html:
-- Ensure service worker is bypassed in insecure contexts
 service-workers/service-worker/service-worker-csp-connect.https.html:
 - Fetch test for connect-src
 - Redirected fetch test for connect-src
