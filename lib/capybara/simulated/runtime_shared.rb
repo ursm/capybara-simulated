@@ -244,34 +244,18 @@ module Capybara
       # Host fns that route to pure stdlib — no Browser surface,
       # nothing to safe_call, no allocation needed for the wrap. Skip
       # the rescue overhead on every per-find / per-event invocation.
-      # Process-wide cascade-rule cache (mirrors the script bytecode cache). The
-      # built {hide, layout} rules are deterministic per (stylesheet-set,
-      # viewport), so the JS side caches the serialized rules keyed by a digest of
-      # the sheet sources and skips the ~12-15 ms css-tree parse + per-rule
-      # specificity + terminalKey rebuild on every per-visit VM rebuild. Lives in
-      # Ruby (not the VM) so it survives `rebuild_ctx`. Key space is tiny (one app
-      # ships one stylesheet set), so the map stays small; no eviction needed.
-      CASCADE_RULE_CACHE       = {}
-      CASCADE_RULE_CACHE_MUTEX = Mutex.new
-
-      # Process-wide PER-SHEET parse cache (companion to CASCADE_RULE_CACHE). The
-      # built whole-cascade is cached above, but it misses whenever a page's inline
-      # `<style>` changes (Avo injects per-page styles), forcing a rebuild that
-      # re-parses every sheet — including unchanged linked bundles (avo.base.css).
-      # `parseSheet` is pure, so the JS side caches its serialized `{hide,layout}`
-      # keyed by (cssText hash, viewport) here, surviving the per-visit VM rebuild
-      # that wipes the in-VM `__sheetCache` — the CSS analogue of the JS bytecode
-      # cache. Keyed by content, so a content change yields a new key. Capped.
+      # Process-wide PER-SHEET parse cache (the CSS analogue of the JS bytecode
+      # cache). `parseSheet` is pure, so the JS side caches its serialized
+      # `{hide,layout}` here keyed by (cssText hash, viewport), surviving the
+      # per-visit VM rebuild that wipes the in-VM `__sheetCache`. A cascade
+      # rebuild then re-parses only sheets it has never seen (content change =
+      # new key). Content-keyed ONLY — never url-keyed — so freshness stays the
+      # asset cache's call. Capped.
       SHEET_PARSE_CACHE       = {}
       SHEET_PARSE_CACHE_MUTEX = Mutex.new
       SHEET_PARSE_CACHE_MAX   = 2048
 
       STDLIB_HOST_FNS = {
-        '__csimCascadeCacheGet' => ->(*a) { CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] } },
-        '__csimCascadeCachePut' => lambda {|*a|
-          CASCADE_RULE_CACHE_MUTEX.synchronize { CASCADE_RULE_CACHE[a[0].to_s] = a[1].to_s }
-          nil
-        },
         '__csimSheetCacheGet' => ->(*a) { SHEET_PARSE_CACHE_MUTEX.synchronize { SHEET_PARSE_CACHE[a[0].to_s] } },
         '__csimSheetCachePut' => lambda {|*a|
           SHEET_PARSE_CACHE_MUTEX.synchronize {
