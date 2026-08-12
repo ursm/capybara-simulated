@@ -201,7 +201,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, js_engine: nil, cookies: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, js_engine: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -244,6 +244,7 @@ module Capybara
         # see the same auth state and storage as the primary. Tests
         # without a Driver (gem-internal callers) get fresh jars.
         @cookies                      = cookies       || {}
+        @cookie_flags                 = cookie_flags  || {}
         # HTTP Basic-auth credential cache, keyed by target origin: once credentials authenticate an
         # origin, the UA sends them pre-emptively for later credentialed requests to it (RFC 7617
         # §2.2), so a Basic-auth resource loads without re-challenging. Session-scoped (cleared on
@@ -1211,7 +1212,7 @@ module Capybara
         env = Rack::MockRequest.env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
-        ck = cookie_header_for(env_cookie_host(env))
+        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
         env['HTTP_COOKIE']     = ck              unless ck.empty?
         env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
         status, headers, body = @app.call(env)
@@ -2954,6 +2955,7 @@ module Capybara
 
       def reset!
         @cookies.clear
+        @cookie_flags.clear
         @auth_cache.clear
         @local_storage.clear
         @cache_storage.clear
@@ -3297,7 +3299,7 @@ module Capybara
         # Forward the streaming host's cookie jar so the server can
         # authenticate the user the same way the browser would — scoped to
         # the EventSource target's host, like every other request.
-        cookies = cookie_header_for(cookie_host(uri))
+        cookies = cookie_header_for(cookie_host(uri), secure: uri.scheme == 'https' || secure_cookie_channel?(uri.to_s))
         lines << "Cookie: #{cookies}" unless cookies.empty?
         socket.write(lines.join("\r\n") << "\r\n\r\n")
         socket.flush
@@ -4884,11 +4886,13 @@ module Capybara
         )
       end
 
-      # `targetWindow.postMessage(data, origin)` — route to the target window's
-      # inbox, tagged with this window as the source.
-      def post_message_to_window(target_handle, data, origin)
+      # `targetWindow.postMessage(data, targetOrigin)` — route to the target window's
+      # inbox, tagged with this window as the source. `target_origin` gates delivery
+      # on the target side ('*' = any; a '/' was resolved to the sender's origin
+      # JS-side); `sender_origin` becomes the delivered event.origin.
+      def post_message_to_window(target_handle, data, target_origin, sender_origin)
         return unless @driver.respond_to?(:window_post_message)
-        @driver.window_post_message(self, target_handle.to_s, data, origin.to_s)
+        @driver.window_post_message(self, target_handle.to_s, data, target_origin.to_s, sender_origin.to_s)
       end
 
       def window_location_of(handle)   = @driver.respond_to?(:window_location)     ? @driver.window_location(handle.to_s).to_s     : ''
@@ -4950,8 +4954,9 @@ module Capybara
       # Queue a cross-window message for delivery into THIS window's VM (called
       # by the Driver on the target Browser). Delivered as a `message` event the
       # next time this window settles / ticks.
-      def enqueue_window_message(data, origin, source_handle)
-        @window_inbox << {'data' => data, 'origin' => origin.to_s, 'sourceHandle' => source_handle.to_s}
+      def enqueue_window_message(data, target_origin, sender_origin, source_handle)
+        @window_inbox << {'data' => data, 'targetOrigin' => target_origin.to_s, 'origin' => sender_origin.to_s,
+                          'sourceHandle' => source_handle.to_s}
       end
 
       # Covers both cross-window postMessage AND BroadcastChannel — the two
@@ -7914,10 +7919,17 @@ module Capybara
       # TEXT, not binary: jar entries parsed out of Rack's Set-Cookie headers can carry the
       # BINARY tag, which would make the joined string cross into JS as a Uint8Array
       # (`document.cookie.match is not a function`). Cookies are ASCII per RFC 6265.
-      def cookie_header_for(host)
+      # `secure:` is the transport of the REQUEST being built — a Secure-flagged
+      # cookie is omitted from any non-secure one (RFC 6265 §5.4 step 1). REQUIRED
+      # so a new caller can't silently fail open.
+      def cookie_header_for(host, secure:)
         jar = host && @cookies[host]
         return '' if jar.nil? || jar.empty?
-        RuntimeShared.utf8_text(jar.map {|k, v| "#{k}=#{v}" }.join('; '))
+        pairs = jar.filter_map {|k, v|
+          next if !secure && @cookie_flags["#{host}\0#{k}"]&.dig(:secure)
+          "#{k}=#{v}"
+        }
+        RuntimeShared.utf8_text(pairs.join('; '))
       end
 
       # `document.cookie` reads/writes the CURRENT document's host jar.
@@ -7926,7 +7938,7 @@ module Capybara
       end
 
       def document_cookie
-        cookie_header_for(document_cookie_host)
+        cookie_header_for(document_cookie_host, secure: secure_cookie_channel?(current_browsing_context_url))
       end
       def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s)
@@ -7937,10 +7949,21 @@ module Capybara
         parts = (rest || '').split(';').map(&:strip)
         value = parts.shift.to_s
         jar = (@cookies[host] ||= {})
+        key = "#{host}\0#{name.strip}"
+        has_secure = parts.any? {|a| a.split('=', 2).first.to_s.strip.casecmp?('secure') }
+        secure_channel = secure_cookie_channel?(current_browsing_context_url)
+        # Strict Secure Cookies, same as merge_set_cookie above.
+        return if !secure_channel && (has_secure || @cookie_flags[key]&.dig(:secure))
         if cookie_deletion?(parts)
           jar.delete(name.strip)
+          @cookie_flags.delete(key)
         else
           jar[name.strip] = value
+          if has_secure
+            @cookie_flags[key] = {secure: true}
+          else
+            @cookie_flags.delete(key)
+          end
         end
       end
 
@@ -8466,7 +8489,7 @@ module Capybara
         env['HTTP_REFERER'] = referer unless referer.nil? || referer.empty?
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
-        ck = cookie_header_for(env_cookie_host(env))
+        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
         if ck.empty?
           env.delete('HTTP_COOKIE')
         else
@@ -8699,10 +8722,21 @@ module Capybara
         false
       end
 
+      # Is this URL a secure cookie CHANNEL? https, plus the potentially-trustworthy
+      # loopback hosts (Chrome sets and sends Secure cookies on http://localhost /
+      # 127.0.0.1 — app suites run there).
+      def secure_cookie_channel?(url)
+        u = url.to_s
+        return true if u.start_with?('https:', 'wss:')
+        h = (cookie_host(u) || '').sub(/:\d+\z/, '')
+        h == 'localhost' || h == '127.0.0.1' || h == '[::1]'
+      end
+
       def merge_set_cookie(headers, url)
         sc = headers['set-cookie'] || headers['Set-Cookie']
         return if sc.nil? || sc.empty?
         host = cookie_host(url) || document_cookie_host or return
+        secure_channel = secure_cookie_channel?(url)
         jar  = (@cookies[host] ||= {})
         # Rack 2 returns multiple Set-Cookie headers as a single
         # newline-separated string; Rack 3 returns an Array. Treat both
@@ -8715,10 +8749,24 @@ module Capybara
           pair = parts.shift.to_s
           name, value = pair.split('=', 2)
           next if name.nil? || name.empty?
+          key = "#{host}\0#{name.strip}"
+          has_secure = parts.any? {|a| a.split('=', 2).first.to_s.strip.casecmp?('secure') }
+          # RFC 6265bis "Strict Secure Cookies": a non-secure channel can neither STORE a
+          # Secure cookie nor evict/overwrite an existing Secure one of the same name.
+          next if !secure_channel && (has_secure || @cookie_flags[key]&.dig(:secure))
           if cookie_deletion?(parts)
             jar.delete(name.strip)
+            @cookie_flags.delete(key)
           else
             jar[name.strip] = value.to_s.strip
+            # `Secure` attribute sidecar: the jar itself stays name=>value (every reader
+            # depends on that), but the send side must know a cookie is Secure-only —
+            # RFC 6265: a Secure cookie is never sent over non-secure transport.
+            if has_secure
+              @cookie_flags[key] = {secure: true}
+            else
+              @cookie_flags.delete(key)
+            end
           end
         }
       end

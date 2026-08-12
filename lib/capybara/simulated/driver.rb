@@ -74,6 +74,7 @@ module Capybara
         # level and inject them into every per-window Browser. Each
         # Browser still has its own sessionStorage + DOM + JS VM.
         @cookies         = {}
+        @cookie_flags    = {}   # (host \0 name) => {secure: true} — attribute sidecar for the shared jar
         @auth_cache      = {}
         @local_storage   = {}
         # Cache Storage (caches/Cache) is origin-shared like localStorage — owned at the
@@ -108,6 +109,7 @@ module Capybara
                     driver:          self,
                     js_engine:       @js_engine,
                     cookies:         @cookies,
+                    cookie_flags:    @cookie_flags,
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     cache_storage:   @cache_storage,
@@ -536,11 +538,13 @@ module Capybara
         false
       end
 
-      # `targetWindow.postMessage(data, origin)` — queue on the target window's
-      # Browser, tagged with the source window's handle.
-      def window_post_message(source_browser, target_handle, data, _origin)
+      # `targetWindow.postMessage(data, targetOrigin)` — queue on the target window's
+      # Browser, tagged with the source window's handle. The targetOrigin travels with
+      # the message and gates delivery in the target VM (where its current origin is
+      # known); the sender's origin becomes the delivered event.origin.
+      def window_post_message(source_browser, target_handle, data, target_origin, sender_origin)
         target = window_browser(target_handle) or return
-        target.enqueue_window_message(data, _origin, handle_for(source_browser))
+        target.enqueue_window_message(data, target_origin, sender_origin, handle_for(source_browser))
       end
 
       # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels

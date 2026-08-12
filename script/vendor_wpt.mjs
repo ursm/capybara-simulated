@@ -138,8 +138,9 @@ const TREES = [
 // createPattern / <img>-decode tests fetch by absolute path.
 // `cookies/resources` backs the SameSite service-worker tests (same-site-cookies.https
 // pulls cookie-helper.sub.js + the set/drop/postToParent .py endpoints by absolute path);
-// the tree is self-contained (helpers.py + the endpoint handlers).
-const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images', 'fonts', 'cookies/resources'];
+// the tree is self-contained (helpers.py + the endpoint handlers). `cookies/samesite/
+// resources` rides along: cookie-helper's resetSameSiteCookies drives its puppet.html.
+const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images', 'fonts', 'cookies/resources', 'cookies/samesite/resources'];
 // Individual support files (outside the vendored trees) that tests include via
 // `<script src>`. Kept across re-vendoring so local includes resolve.
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument

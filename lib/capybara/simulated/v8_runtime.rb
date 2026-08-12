@@ -1345,6 +1345,18 @@ module Capybara
             // Leading top-level lexical declaration, after optional BOM /
             // whitespace / line+block comments / a "use strict" prologue.
             const LEADS_LEXICAL = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*(?:["']use strict["'];?\\s*)?(?:export\\s+)?(?:const|let|class)[\\s{\\[]/;
+            // A top-level lexical declaration can also sit MID-file (WPT's
+            // cookie-helper.sub.js opens with an IIFE and declares `const
+            // wait_for_message` at line 129) — under `(0, eval)` it block-scopes
+            // and later <script>s see a ReferenceError. Detect it by a
+            // declaration at COLUMN 0 of any line: real top-level declarations
+            // in unminified files start unindented, function-body ones are
+            // indented. Residual known gap: a one-line `stmt; const CFG = …`
+            // (declaration mid-LINE) still takes the fast path and loses the
+            // binding — no observed page does this. A false positive (a template
+            // literal's line starting with `const `) merely routes through the
+            // always-correct ctx.eval path.
+            const MID_LEXICAL = /^(?:const|let|class)[\\s{\\[]/m;
             // A "use strict" directive prologue. A classic <script> evaluates as a
             // top-level Script, where top-level `var` / `function` declarations
             // bind on the global object even in strict mode — but the JS-only
@@ -1356,7 +1368,7 @@ module Capybara
             const LEADS_USE_STRICT = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*["']use strict["']/;
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
-              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body)) return runEval(label || 'csim-eval', body);
+              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
               (0, eval)(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();

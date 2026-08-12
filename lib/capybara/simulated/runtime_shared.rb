@@ -117,7 +117,7 @@ module Capybara
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
         # forces noopener for a cross-partition blob: target.
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(a[0], a[1], a[2]); nil },
-        '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2]); nil },
+        '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2], a[3]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
         # BroadcastChannel isolate-wide, creation-ordered registry (the multi-realm delivery path). A
         # channel registers on construction / unregisters on close; `bc_post` snapshots the eligible

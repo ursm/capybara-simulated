@@ -614,6 +614,11 @@ def main():
     # a shorter x.timeout wins the race (xhr timeout cluster). The handler returns immediately.
     _accum_sleep = [0.0]
     _time_mod.sleep = lambda s=0: _accum_sleep.__setitem__(0, _accum_sleep[0] + (float(s) if s else 0.0))
+    # wptserve runs handlers with the WPT root on sys.path, so a handler can do the
+    # package-style `from cookies.resources.helpers import …` (namespace packages —
+    # no __init__.py needed). Mirror that here or any such import 500s the handler.
+    if doc_root and doc_root not in sys.path:
+        sys.path.insert(0, doc_root)
     spec = importlib.util.spec_from_file_location('wpt_handler', handler_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
