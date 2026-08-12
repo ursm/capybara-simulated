@@ -399,7 +399,7 @@ module Capybara
         opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
           if post
-            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer)
+            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, initiator: source&.raw_current_url)
           else
             navigate_window(existing[:browser], url, source: source)
           end
@@ -417,7 +417,7 @@ module Capybara
           if post
             # A `<form target=_blank method=post>` loads the new window via POST,
             # carrying the opener's URL as referrer (unless rel=noreferrer → '').
-            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer)
+            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, initiator: source&.raw_current_url)
           # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
           # isolate — load the document directly from a click-time snapshot (a
           # deferred target=_blank nav may revoke the URL first) or, failing that,
@@ -425,7 +425,12 @@ module Capybara
           elsif !(url.to_s.start_with?('blob:') && load_blob_into_window(aux, url, source, snapshot: blob_snapshot))
             # A form submission carries a referrer (the opener's URL) unless the
             # form opted out via rel=noreferrer (referrer: '').
-            aux.visit(url, referer: referrer)
+            # The OPENER's document is the navigation initiator — it seeds the popup
+            # load's Sec-Fetch-Site (the SameSite cookie gate reads it).
+            # The OPENER's document is the navigation initiator — it seeds the popup
+            # load's Sec-Fetch-Site (the SameSite cookie gate reads it). raw_current_url:
+            # the ticking `current_url` must not run re-entrantly inside window.open.
+            aux.visit(url, referer: referrer, initiator: source&.raw_current_url)
           end
         end
         handle
@@ -576,7 +581,9 @@ module Capybara
         end
       end
 
-      def window_location(handle)        = (window_browser(handle)&.current_url).to_s
+      # raw_: an identity read — this runs inside host-fn callbacks (a popup's boot
+      # script reading opener.location), where the ticking current_url must not re-enter.
+      def window_location(handle)        = (window_browser(handle)&.raw_current_url).to_s
       # A cross-window property read (`win.foo` / `win.document.foo`) — read the
       # primitive off the target window's VM.
       def window_read(handle, prop, doc: false)
@@ -645,7 +652,9 @@ module Capybara
         if browser.equal?(current_browser)
           browser.location_assign(url)
         else
-          browser.visit(url)
+          # A cross-window navigation's initiator is the SETTING window's document
+          # (seeds Sec-Fetch-Site → the SameSite cookie gate); raw_ — no re-entrant tick.
+          browser.visit(url, initiator: source&.raw_current_url)
         end
       end
 

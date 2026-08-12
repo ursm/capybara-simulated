@@ -348,6 +348,13 @@ class Cookies:
     def get(self, name, default=None):
         return self._d.get(_b(name), default)
 
+    def get_list(self, name):
+        # wptserve's MultiDict.get_list: every value for `name` (cookies/resources/
+        # helpers.py's readCookies iterates it). Our parse keeps one value per name
+        # (last wins, like a browser's Cookie header in practice) — a 0/1-element list.
+        v = self._d.get(_b(name))
+        return [v] if v is not None else []
+
     def __getitem__(self, name):
         # wptserve's request.cookies is a dict subscriptable by name —
         # fetch-access-control.py does `request.cookies[b'cookie'].value`, which raised
