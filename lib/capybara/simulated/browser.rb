@@ -589,8 +589,15 @@ module Capybara
 
       # Address-bar navigation: no Referer, and relative paths resolve
       # against the host root (not the current page's directory).
-      def visit(url, referer: nil)
-        navigate(resolve_visit_url(url), referer: referer)
+      # `initiator:` is the document that caused this top-level navigation (the
+      # OPENER for a window.open'd window) — it seeds the navigation's
+      # Sec-Fetch-Site, which the cookie layer's SameSite gate reads. A plain
+      # driver-initiated visit has none (address-bar semantics, site 'none').
+      def visit(url, referer: nil, initiator: nil)
+        # Explicitly nil for a driver-initiated visit (address-bar semantics, site
+        # 'none') — page-initiated internal callers reach `navigate` directly and
+        # inherit its @current_url default.
+        navigate(resolve_visit_url(url), referer: referer, initiator: initiator)
       end
 
       URL_UNSAFE_CHARS = %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n.freeze
@@ -639,6 +646,12 @@ module Capybara
       # intermediates, falls past the cutoff, and surfaces the
       # current URL directly.
       RECENT_URLS_STALE_AGE_MS = 250
+
+      # The last committed top-level URL with NO event-loop tick — `current_url`
+      # pumps `tick_real_time`, so calling it re-entrantly from inside a host-fn
+      # callback (the driver building an aux window mid-`window.open`) corrupts
+      # the caller's parse/event-loop state. Use this for identity reads.
+      def raw_current_url = @current_url.to_s
 
       def current_url
         tick_real_time
@@ -2009,9 +2022,9 @@ module Capybara
       def replay_history_entry(entry)
         return unless entry
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true)
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, initiator: nil)
         else
-          navigate(entry[:url], from_history: true)
+          navigate(entry[:url], from_history: true, initiator: nil)   # user traversal: site 'none'
         end
       end
       def active_element_handle
@@ -2914,7 +2927,7 @@ module Capybara
         body << "\r\n"
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, referer: @current_url)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, referer: @current_url, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         unless from_history || depth > 0
@@ -2922,6 +2935,12 @@ module Capybara
           record_history({method: :post, url: url, body: body, content_type: content_type})
         end
         env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        # Top-level form-submission Fetch metadata — same model as `navigate` (the
+        # SameSite gate reads it; a POST never qualifies for the Lax exception).
+        nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+        env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
+        env['HTTP_SEC_FETCH_DEST'] ||= 'document'
+        env['HTTP_SEC_FETCH_SITE'] ||= nav_site
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: referer)
@@ -2933,9 +2952,9 @@ module Capybara
           # HTTP semantics: 301/302/303 → method becomes GET; 307/308
           # require the method (and body) to be preserved.
           if [307, 308].include?(status)
-            return navigate_post(next_url, body, content_type, depth: depth + 1)
+            return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
           else
-            return navigate(next_url, depth: depth + 1)
+            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
           end
         end
         if download_response?(headers)
@@ -6785,6 +6804,17 @@ module Capybara
             env['HTTP_SEC_FETCH_SITE'] = sec_site
             env['HTTP_SEC_FETCH_MODE'] = cors_mode
             env['HTTP_SEC_FETCH_DEST'] = 'empty'
+            # SameSite re-filter: cookies attached above (apply_default_request_env ran
+            # before this hop's Sec-Fetch-Site existed) — a cross-site hop must shed
+            # Strict/Lax cookies. `navigate` mode is a SW re-issuing the navigation it
+            # intercepted, which keeps the top-level Lax exception for a GET.
+            if env['HTTP_COOKIE'] && sec_site == 'cross-site'
+              ck = cookie_header_for(env_cookie_host(env),
+                                     secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
+                                     cross_site: true,
+                                     lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET')
+              ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
+            end
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
@@ -7921,12 +7951,24 @@ module Capybara
       # (`document.cookie.match is not a function`). Cookies are ASCII per RFC 6265.
       # `secure:` is the transport of the REQUEST being built — a Secure-flagged
       # cookie is omitted from any non-secure one (RFC 6265 §5.4 step 1). REQUIRED
-      # so a new caller can't silently fail open.
-      def cookie_header_for(host, secure:)
+      # so a new caller can't silently fail open. `cross_site:` is the request's
+      # site relationship (from its own Sec-Fetch-Site metadata): a SameSite=Strict
+      # cookie is withheld from any cross-site request; Lax — and the unspecified
+      # default, which Chrome treats as Lax — additionally rides a cross-site
+      # TOP-LEVEL GET navigation (`lax_ok:`); only SameSite=None crosses freely.
+      def cookie_header_for(host, secure:, cross_site: false, lax_ok: true)
         jar = host && @cookies[host]
         return '' if jar.nil? || jar.empty?
         pairs = jar.filter_map {|k, v|
-          next if !secure && @cookie_flags["#{host}\0#{k}"]&.dig(:secure)
+          flags = @cookie_flags["#{host}\0#{k}"]
+          next if !secure && flags&.dig(:secure)
+          if cross_site
+            case flags&.dig(:same_site)
+            when 'none'   then nil   # always sent (subject to the Secure gate above)
+            when 'strict' then next
+            else               next unless lax_ok
+            end
+          end
           "#{k}=#{v}"
         }
         RuntimeShared.utf8_text(pairs.join('; '))
@@ -7950,21 +7992,35 @@ module Capybara
         value = parts.shift.to_s
         jar = (@cookies[host] ||= {})
         key = "#{host}\0#{name.strip}"
-        has_secure = parts.any? {|a| a.split('=', 2).first.to_s.strip.casecmp?('secure') }
+        flags = cookie_attr_flags(parts)
+        return if flags[:same_site] == 'none' && !flags[:secure]   # None requires Secure
         secure_channel = secure_cookie_channel?(current_browsing_context_url)
         # Strict Secure Cookies, same as merge_set_cookie above.
-        return if !secure_channel && (has_secure || @cookie_flags[key]&.dig(:secure))
+        return if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
         if cookie_deletion?(parts)
           jar.delete(name.strip)
           @cookie_flags.delete(key)
         else
           jar[name.strip] = value
-          if has_secure
-            @cookie_flags[key] = {secure: true}
-          else
+          if flags.empty?
             @cookie_flags.delete(key)
+          else
+            @cookie_flags[key] = flags
           end
         end
+      end
+
+      # The sidecar-worthy attributes of one Set-Cookie's attribute list.
+      def cookie_attr_flags(parts)
+        flags = {}
+        parts.each {|attr|
+          k, v = attr.split('=', 2)
+          case k.to_s.strip.downcase
+          when 'secure'   then flags[:secure] = true
+          when 'samesite' then flags[:same_site] = v.to_s.strip.downcase
+          end
+        }
+        flags
       end
 
       # Web Storage host-fn shims. The Ruby-side hashes survive
@@ -8214,7 +8270,7 @@ module Capybara
         ct.to_s.empty? ? 'text/html' : ct.to_s
       end
 
-      def navigate(url, depth: 0, referer: @current_url, from_history: false)
+      def navigate(url, depth: 0, referer: @current_url, from_history: false, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Capture the entry referer (the page initiating this navigation,
@@ -8256,6 +8312,14 @@ module Capybara
             record_history({method: :get, url: url})
           end
           env = Rack::MockRequest.env_for(url, method: 'GET')
+          # Top-level navigation Fetch metadata: Sec-Fetch-Site is the initiator↔target
+          # relationship, widened across the redirect chain (site_seed) exactly like the
+          # frame-navigation model — the SameSite cookie gate in apply_default_request_env
+          # reads it. No initiator (driver visit / address bar) → 'none' (not cross-site).
+          nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+          env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
+          env['HTTP_SEC_FETCH_DEST'] ||= 'document'
+          env['HTTP_SEC_FETCH_SITE'] ||= nav_site
           apply_default_request_env(env, referer: referer)
           status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
           merge_set_cookie(headers, url)
@@ -8266,7 +8330,9 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
-            return navigate(next_url, depth: depth + 1)
+            # Thread the initiator + widened site so the chain's SameSite verdict
+            # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
+            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
           end
           # Track the navigated URL even for download-shaped responses
           # so an aux window opened on a binary asset (PDF / image
@@ -8489,7 +8555,15 @@ module Capybara
         env['HTTP_REFERER'] = referer unless referer.nil? || referer.empty?
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
-        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
+        # SameSite context from the request's own Fetch metadata (set by
+        # navigation_request_headers before cookies attach). No metadata — internal
+        # asset/ESM/beacon callers — stays same-site, today's permissive behavior.
+        cross_site = env['HTTP_SEC_FETCH_SITE'] == 'cross-site'
+        # The Lax exception is TOP-LEVEL navigations only (dest 'document'): a cross-site
+        # iframe GET is mode navigate too, but Chrome's Lax-by-default blocks it there.
+        lax_ok     = env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document' && env['REQUEST_METHOD'] == 'GET'
+        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
+                                                     cross_site: cross_site, lax_ok: lax_ok)
         if ck.empty?
           env.delete('HTTP_COOKIE')
         else
@@ -8508,6 +8582,13 @@ module Capybara
       # whole chain (a same-site redirect keeps 'same-site' even when the final hop is same-origin),
       # and a form POST's Origin becomes the opaque 'null' once any hop has crossed origin.
       def navigation_request_headers(env, method:, initiator_url:, target:, dest:, referrer_policy: nil, user_activated: false, site_override: nil, origin_null: false)
+        # Fetch metadata FIRST: apply_default_request_env's SameSite cookie gate reads
+        # the request's own Sec-Fetch-Site/Mode/Dest, so they must be on the env before
+        # cookies attach.
+        env['HTTP_SEC_FETCH_SITE'] = site_override || sec_fetch_site(initiator_url, target)
+        env['HTTP_SEC_FETCH_MODE'] = 'navigate'
+        env['HTTP_SEC_FETCH_DEST'] = dest.to_s
+        env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
         apply_default_request_env(env, referer: compute_referrer(referrer_policy, initiator_url, target))
         # Origin is appended to every non-GET/HEAD request (a form POST carries it; a GET navigation
         # does not). From a KNOWN initiating document it's that document's origin serialization, or
@@ -8517,10 +8598,6 @@ module Capybara
         if initiator_url && !initiator_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
           env['HTTP_ORIGIN'] = (!origin_null && url_origin(initiator_url)) || 'null'
         end
-        env['HTTP_SEC_FETCH_SITE'] = site_override || sec_fetch_site(initiator_url, target)
-        env['HTTP_SEC_FETCH_MODE'] = 'navigate'
-        env['HTTP_SEC_FETCH_DEST'] = dest.to_s
-        env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
       end
 
       # Build + dispatch a navigation request (a frame/document load) — the shared core of the GET
@@ -8750,22 +8827,25 @@ module Capybara
           name, value = pair.split('=', 2)
           next if name.nil? || name.empty?
           key = "#{host}\0#{name.strip}"
-          has_secure = parts.any? {|a| a.split('=', 2).first.to_s.strip.casecmp?('secure') }
+          flags = cookie_attr_flags(parts)
+          # SameSite=None without Secure is rejected outright (RFC 6265bis / Chrome 80+):
+          # accepting it would mint the MOST permissive cookie kind from the weakest set.
+          next if flags[:same_site] == 'none' && !flags[:secure]
           # RFC 6265bis "Strict Secure Cookies": a non-secure channel can neither STORE a
           # Secure cookie nor evict/overwrite an existing Secure one of the same name.
-          next if !secure_channel && (has_secure || @cookie_flags[key]&.dig(:secure))
+          next if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
           if cookie_deletion?(parts)
             jar.delete(name.strip)
             @cookie_flags.delete(key)
           else
             jar[name.strip] = value.to_s.strip
-            # `Secure` attribute sidecar: the jar itself stays name=>value (every reader
-            # depends on that), but the send side must know a cookie is Secure-only —
-            # RFC 6265: a Secure cookie is never sent over non-secure transport.
-            if has_secure
-              @cookie_flags[key] = {secure: true}
-            else
+            # Attribute sidecar: the jar itself stays name=>value (every reader depends on
+            # that), but the send side needs Secure (never over non-secure transport) and
+            # SameSite (withheld from cross-site requests — see cookie_header_for).
+            if flags.empty?
               @cookie_flags.delete(key)
+            else
+              @cookie_flags[key] = flags
             end
           end
         }
@@ -9125,7 +9205,7 @@ module Capybara
       # within the `record_action` block, which handles begin/finish
       # step bookkeeping + on-failure DOM snapshot.
       module RecordedActions
-        def visit(url, referer: nil)
+        def visit(url, referer: nil, initiator: nil)
           record_action(:visit, "visit #{url}") { super }
         end
         def refresh
