@@ -6581,7 +6581,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -6619,7 +6619,13 @@ module Capybara
         same_origin_mode = cors_mode == 'same-origin'
         # Only the real fetch request modes carry cross-origin semantics; a 'navigate'
         # (form submission) or a nil-mode internal caller gets a plain readable response.
-        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil
+        # The CLIENT is the realm that called fetch — its own location (a Service
+        # Worker's script URL, a frame document's URL), threaded from JS; the
+        # top-level @current_url is only the fallback. Drives the credentials
+        # same-origin decision and the SameSite cookie client below — NOT the
+        # request's Origin/CORS identity (req_origin), which keeps its own model.
+        client = client_url.to_s.empty? ? @current_url : client_url
+        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(client) : nil
         crossed          = false
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
         # (like the navigation path), computed vs the request's referrer-source origin below. A SW
@@ -6806,9 +6812,22 @@ module Capybara
             env['HTTP_SEC_FETCH_DEST'] = 'empty'
             # SameSite re-filter: cookies attached above (apply_default_request_env ran
             # before this hop's Sec-Fetch-Site existed) — a cross-site hop must shed
-            # Strict/Lax cookies. `navigate` mode is a SW re-issuing the navigation it
-            # intercepted, which keeps the top-level Lax exception for a GET.
-            if env['HTTP_COOKIE'] && sec_site == 'cross-site'
+            # Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch:
+            # a `navigate`-mode request is a SW re-issuing the navigation it
+            # intercepted, which keeps the CHAIN's verdict (and the top-level Lax
+            # exception for a GET) — but any other mode is a script fetch whose
+            # site-for-cookies is its CLIENT's origin vs the target (an SW that
+            # builds a `new Request` fetches as ITSELF: same-site-cookies expects
+            # Strict cookies on the rewritten same-origin request even though the
+            # intercepted navigation was cross-site), widened across this fetch's
+            # own redirect hops.
+            cookie_site = if cors_mode == 'navigate'
+                            sec_site
+                          else
+                            cookie_client ||= doc_origin || sec_initiator
+                            cookie_site = widen_sec_fetch_site(cookie_site, sec_fetch_site(cookie_client, target))
+                          end
+            if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
               ck = cookie_header_for(env_cookie_host(env),
                                      secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
                                      cross_site: true,
