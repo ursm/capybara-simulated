@@ -238,11 +238,19 @@ module WptRunner
   # NOT \v/\f, which headers-some-are-empty preserves), and a field that appears more
   # than once combined with ", " (headers.py's repeated X-Custom-Header-Comma, the
   # `.asis` duplicate-header fixtures). So getResponseHeader sees "1, 2", not "2".
+  # Set-Cookie is the one field that must NOT comma-combine (a cookie's Expires
+  # itself contains a comma, so the join is unsplittable): accumulate it as an
+  # Array — Rack 3's multi-value shape, which merge_set_cookie handles — so a
+  # handler setting four cookies (setSameSite.py) lands four jar entries.
   def combine_headers(pairs)
     Array(pairs).each_with_object({}) do |(name, value), hdrs|
       key = name.to_s.downcase
       val = value.to_s.gsub(/\A[\t\n\r ]+|[\t\n\r ]+\z/, '')
-      hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{val}" : val
+      if key == 'set-cookie'
+        hdrs[key] = Array(hdrs[key]) + [val]
+      else
+        hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{val}" : val
+      end
     end
   end
 
@@ -982,7 +990,10 @@ module WptRunner
     # `.https.` files are served at the canonical HTTPS origin (see SUB_HTTPS_ORIGIN);
     # `.sub.` files at the canonical HTTP origin. Both cross origin off the default
     # www.example.com, so isolate them behind a fresh session on each side.
-    https   = base.include?('.https.')
+    # A `?wpt_flags=https` (or h2 — TLS-only) VARIANT asks for the https origin the
+    # same way the filename suffix does: websockets/cookies/006's wss variant sets a
+    # Secure cookie via document.cookie, which a non-secure page may not store.
+    https   = base.include?('.https.') || query.include?('wpt_flags=https') || query.include?('wpt_flags=h2')
     cross   = sub || https
     drop_session! if cross
     s = session
