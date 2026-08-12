@@ -1972,7 +1972,16 @@ service-workers/service-worker/fetch-canvas-tainting-video.https.html:
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 service-workers/service-worker/fetch-cors-xhr.https.html:
-- Verify CORS XHR of fetch() in a Service Worker
+- 'test 26: https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore
+  with credentials true must be SUCCESS'
+- 'test 31: https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
+  with credentials false must be FAIL'
+- 'test 32: https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
+  with credentials false must be FAIL'
+- 'test 33: https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
+  with credentials false must be FAIL'
+- 'test 34: https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
+  with credentials false must be FAIL'
 service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
@@ -2099,96 +2108,51 @@ service-workers/service-worker/navigation-preload/request-headers.https.html:
 - Navigation Preload request headers.
 service-workers/service-worker/navigation-preload/resource-timing.https.html:
 - Navigation Preload Resource Timing.
-service-workers/service-worker/navigation-redirect-resolution.https.html:
-- test relative opaqueredirect
-- test relative opaqueredirect with CacheStorage
-- test relative opaqueredirect with clone
-service-workers/service-worker/navigation-redirect-to-http.https.html:
-- Verify Service Worker can receive HTTP opaqueredirect response.
+service-workers/service-worker/navigation-preload/samesite-iframe.https.html:
+- Navigation Preload for same site iframe
 service-workers/service-worker/navigation-redirect.https.html:
 - No location redirect response via Cache.
-- No location redirect response via Cache.
-- No location redirect response.
 - No location redirect response.
 - Normal redirect to other-origin scope.
-- Normal redirect to other-origin scope.
-- Normal redirect to same-origin scope with a hash fragment.
 - Normal redirect to same-origin scope with a hash fragment.
 - Normal redirect to same-origin scope with different hash fragments.
-- Normal redirect to same-origin scope with different hash fragments.
-- Normal redirect to same-origin scope.
 - Normal redirect to same-origin scope.
 - Redirect to other-origin in-scope with opaque redirect response which is passed
   through Cache.
-- Redirect to other-origin in-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to other-origin in-scope with opaque redirect response.
 - Redirect to other-origin in-scope with opaque redirect response.
 - Redirect to other-origin out-scope with opaque redirect response which is passed
   through Cache.
-- Redirect to other-origin out-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to other-origin out-scope with opaque redirect response.
 - Redirect to other-origin out-scope with opaque redirect response.
 - Redirect to same-origin other-scope with opaque redirect response which is passed
   through Cache.
-- Redirect to same-origin other-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin other-scope with opaque redirect response.
 - Redirect to same-origin other-scope with opaque redirect response.
 - Redirect to same-origin out-scope with opaque redirect response which is passed
   through Cache.
-- Redirect to same-origin out-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin out-scope with opaque redirect response.
 - Redirect to same-origin out-scope with opaque redirect response.
 - Redirect to same-origin same-scope with opaque redirect response which is passed
   through Cache.
-- Redirect to same-origin same-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin same-scope with opaque redirect response.
 - Redirect to same-origin same-scope with opaque redirect response.
 - SW-fallbacked redirect to other-origin and back to same-origin.
-- SW-fallbacked redirect to other-origin and back to same-origin.
-- SW-fallbacked redirect to other-origin in-scope.
 - SW-fallbacked redirect to other-origin in-scope.
 - SW-fallbacked redirect to other-origin out-scope.
 - SW-fallbacked redirect to same-origin other-scope.
-- SW-fallbacked redirect to same-origin other-scope.
 - SW-fallbacked redirect to same-origin out-scope.
 - SW-fallbacked redirect to same-origin same-scope with a hash fragment.
-- SW-fallbacked redirect to same-origin same-scope with a hash fragment.
-- SW-fallbacked redirect to same-origin same-scope with different hash fragments.
 - SW-fallbacked redirect to same-origin same-scope with different hash fragments.
 - SW-fallbacked redirect to same-origin same-scope.
-- SW-fallbacked redirect to same-origin same-scope.
-- SW-fetched redirect to other-origin in-scope.
 - SW-fetched redirect to other-origin in-scope.
 - SW-fetched redirect to other-origin out-scope.
-- SW-fetched redirect to other-origin out-scope.
-- SW-fetched redirect to same-origin other-scope.
 - SW-fetched redirect to same-origin other-scope.
 - SW-fetched redirect to same-origin out-scope.
-- SW-fetched redirect to same-origin out-scope.
-- SW-fetched redirect to same-origin same-scope.
 - SW-fetched redirect to same-origin same-scope.
 - SW-fetched response from different URL, same-origin same-scope.
-- SW-fetched response from different URL, same-origin same-scope.
-- SW-generated redirect to other-origin in-scope.
 - SW-generated redirect to other-origin in-scope.
 - SW-generated redirect to other-origin out-scope.
-- SW-generated redirect to other-origin out-scope.
-- SW-generated redirect to same-origin other-scope.
 - SW-generated redirect to same-origin other-scope.
 - SW-generated redirect to same-origin out-scope with a hash fragment.
-- SW-generated redirect to same-origin out-scope with a hash fragment.
-- SW-generated redirect to same-origin out-scope with different hash fragments.
 - SW-generated redirect to same-origin out-scope with different hash fragments.
 - SW-generated redirect to same-origin out-scope.
-- SW-generated redirect to same-origin out-scope.
 - SW-generated redirect to same-origin same-scope.
-- SW-generated redirect to same-origin same-scope.
-- clean up global state
 service-workers/service-worker/navigation-timing-extended.https.html:
 - Service worker controlled navigation timing
 service-workers/service-worker/navigation-timing-sizes.https.html:
@@ -2332,8 +2296,6 @@ service-workers/service-worker/registration-updateviacache.https.html:
 - register-with-updateViaCache-undefined-then-none
 - register-with-updateViaCache-undefined-then-undefined
 - updateViaCache is not updated if register() rejects
-service-workers/service-worker/request-end-to-end.https.html:
-- Test FetchEvent.request passed to onfetch
 service-workers/service-worker/resource-timing-bodySize.https.html:
 - 'Response body size: constructed, cors, TAO fail'
 - 'Response body size: constructed, cors, TAO pass'
@@ -2799,8 +2761,6 @@ webstorage/localstorage-about-blank-3P-iframe-opens-3P-window.partitioned.html:
 - 'StorageKey: test 3P about:blank window opened from a 3P iframe'
 webstorage/localstorage-basic-partitioned.sub.html:
 - Simple test for partitioned localStorage
-webstorage/localstorage-cross-origin-iframe.https.window.js:
-- LocalStorage should be accessible on both same_origin and cross_origin iframes
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 webstorage/storage_key.window.js:

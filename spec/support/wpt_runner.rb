@@ -295,8 +295,20 @@ module WptRunner
     http_port2   = sub_family ? SUB_HTTP_PORT2  : '81'
     https_port2  = sub_family ? SUB_HTTPS_PORT2 : '444'
     cur_port     = scheme == 'https' ? https_port : http_port
+    # `location[…]` tokens reflect the REQUEST's own location (real wptserve reads the
+    # Host header), so they keep the requesting host even when `{{host}}` below is
+    # canonicalized to the family root.
     loc_host     = (scheme == 'https' ? https_port == '443' : http_port == '80') ? host : "#{host}:#{cur_port}"
     alt_host     = sub_family ? SUB_ALT_HOST : "alt.#{host}"
+    # Real wptserve substitutes `{{host}}` with the CONFIG host (browser_host), never a
+    # request subdomain: get-host-info.sub.js fetched FROM www1.web-platform.test must
+    # still report ORIGINAL_HOST = web-platform.test — it derives REMOTE_HOST as
+    # 'www1.' + host, so a www1 substitution doubles the prefix and flips every origin
+    # comparison (navigation-redirect's other-origin helper then drops the top window's
+    # messages on its origin filter). A NON-family host (www.example.com) keeps the
+    # request host: its own document origin is the family root there.
+    host = SUB_HOST     if host.end_with?(".#{SUB_HOST}")
+    host = SUB_ALT_HOST if host.end_with?(".#{SUB_ALT_HOST}")
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
