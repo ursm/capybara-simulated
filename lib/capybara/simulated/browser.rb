@@ -4091,8 +4091,9 @@ module Capybara
       # an async respondWith deadlocks (the documented worker-interception lesson); a worker
       # thread parking on a plain Queue is free. The reply bypasses the outbox→main-thread
       # route entirely (@sw_direct_replies, filled by sw_deliver_fetch_response), so delivery
-      # needs no main-thread drain — and no @sw_fetch_pending accounting (nothing on the main
-      # thread waits on it; @worker_initializing already holds worker_pending? true).
+      # needs no main-thread drain; sw_direct_fetch still counts the park in
+      # @sw_fetch_pending so the main thread HOLDS THE VIRTUAL CLOCK over the round trip
+      # (see its comment).
       # Returns {body:, url:, controller:} — see worker_main_script_fetch below.
       # One main-script fetch event dispatched to `sw_handle` — the raw wire hash, or nil
       # when the SW never answered within budget (treated as fall-through). Validation and
@@ -4231,6 +4232,15 @@ module Capybara
       # own thread via a direct-reply queue (@sw_direct_replies — sw_deliver_fetch_response
       # checks it before any outbox routing, so delivery needs no main-thread drain).
       # Returns the parsed wire hash, or nil when the SW never answered within budget.
+      #
+      # Counted in @sw_fetch_pending for the whole park: it IS a controlled fetch awaiting
+      # a respondWith, so the main thread's clock hold (hold_for_sw_fetch) applies — the
+      # virtual clock must not outrun this off-thread round trip, or a slow machine's
+      # scheduling delay burns a test's virtual timeout while two worker threads trade
+      # 50 ms poll slices (the CI-only worker-interception-redirect failures). Bump and
+      # release are both here (the direct reply never rides the outbox, so the
+      # deliver_worker_messages decrement can't double-count it), self-balancing under
+      # `ensure`.
       private def sw_direct_fetch(sw_handle, req_json, client_handle)
         w = @workers[sw_handle.to_i] or return nil
         q   = Thread::Queue.new
@@ -4239,6 +4249,7 @@ module Capybara
           fid = (@sw_direct_seq += 1)
           @sw_direct_replies[[sw_handle.to_i, fid]] = q
         end
+        @worker_init_lock.synchronize { @sw_fetch_pending += 1 }
         w[:inbox] << {kind: 'fetch', req: req_json, fetch_id: fid, realm_id: -client_handle.to_i}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
         resp = nil
@@ -4249,7 +4260,10 @@ module Capybara
       rescue JSON::ParserError
         nil
       ensure
-        @sw_direct_lock.synchronize { @sw_direct_replies.delete([sw_handle.to_i, fid]) } if fid
+        if fid
+          @sw_direct_lock.synchronize { @sw_direct_replies.delete([sw_handle.to_i, fid]) }
+          @worker_init_lock.synchronize { @sw_fetch_pending = [0, @sw_fetch_pending - 1].max }
+        end
       end
 
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
