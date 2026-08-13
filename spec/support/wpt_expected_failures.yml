@@ -2003,10 +2003,6 @@ service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
-service-workers/service-worker/import-scripts-redirect.https.html:
-- an imported script doesn't redirect initially, then redirects during the update
-  check and the body changes
-- an imported script redirects, and the body changes during the update check
 service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
 service-workers/service-worker/indexeddb.https.html:
@@ -2047,8 +2043,6 @@ service-workers/service-worker/navigation-preload/request-headers.https.html:
 - Navigation Preload request headers.
 service-workers/service-worker/navigation-preload/resource-timing.https.html:
 - Navigation Preload Resource Timing.
-service-workers/service-worker/navigation-preload/samesite-iframe.https.html:
-- Navigation Preload for same site iframe
 service-workers/service-worker/navigation-timing-extended.https.html:
 - Service worker controlled navigation timing
 service-workers/service-worker/navigation-timing-sizes.https.html:
@@ -2120,15 +2114,11 @@ service-workers/service-worker/referrer-toplevel-script-fetch.https.html:
 service-workers/service-worker/register-default-scope.https.html:
 - null scope
 service-workers/service-worker/register-same-scope-different-script-url.https.html:
-- Register different scripts concurrently
 - Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
 - register worker that calls waitUntil with a promise that never resolves in oninstall
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
-service-workers/service-worker/registration-mime-types.https.html:
-- Registering script that imports script with bad MIME type
-- Registering script that imports script with no MIME type
 service-workers/service-worker/registration-schedule-job.https.html:
 - different type
 service-workers/service-worker/registration-scope-module-static-import.https.html:
@@ -2136,21 +2126,9 @@ service-workers/service-worker/registration-scope-module-static-import.https.htm
 - static imports redirecting to outside path restriction should be allowed
 - static imports to outside path restriction should be allowed
 service-workers/service-worker/registration-script-module.https.html:
-- Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
-- Registering script including parse error
-- 'Registering script including uncaught exception: module'
-- 'Registering script including undefined error: module'
-- Registering script with module instantiation error
-- Registering script with module instantiation error and top-level await
-- Registering script with top-level await
 service-workers/service-worker/registration-script.https.html:
-- Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
-- Registering script importing malformed script
-- Registering script importing non-existent script
-- 'Registering script including uncaught exception: classic'
-- 'Registering script including undefined error: classic'
 service-workers/service-worker/registration-security-error.https.html:
 - Registering redirected script
 - Registering same scope as the script directory without the last slash
@@ -2323,6 +2301,7 @@ service-workers/service-worker/static-router-subresource.https.html:
 - Subresource cross origin load not matched with URLPattern condition via string
 - Subresource load did not match with the cache and fallback to the network
 - Subresource load matched with RequestMode condition
+- Subresource load matched with URLPattern condition
 - Subresource load matched with URLPattern condition via URLPatternCompatible
 - Subresource load matched with URLPattern condition via string
 - Subresource load matched with ignoreCase URLPattern condition
@@ -2366,22 +2345,11 @@ service-workers/service-worker/update-bytecheck-cors-import.https.html:
 - 'Test module script(main: default, imported: time)'
 - 'Test module script(main: time, imported: default)'
 - 'Test module script(main: time, imported: time)'
-- 'Test(main: default, imported: time)'
-- 'Test(main: time, imported: default)'
-- 'Test(main: time, imported: time)'
 service-workers/service-worker/update-bytecheck.https.html:
 - 'Test module script(main: default, imported: default)'
 - 'Test module script(main: default, imported: time)'
 - 'Test module script(main: time, imported: default)'
 - 'Test module script(main: time, imported: time)'
-- 'Test(main: default, imported: time)'
-- 'Test(main: time, imported: default)'
-- 'Test(main: time, imported: time)'
-service-workers/service-worker/update-import-scripts.https.html:
-- update() should fail when a new worker imports an unavailable script.
-- update() should find an update in an imported script but update() should result
-  in failure due to missing the other imported script.
-- update() should work with cross-origin importScripts.
 service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
 service-workers/service-worker/update-no-cache-request-headers.https.html:
@@ -2395,14 +2363,9 @@ service-workers/service-worker/update-not-allowed.https.html:
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
 service-workers/service-worker/update-registration-with-type.https.html:
-- Does not update the registration with the same script type and the same main script.
-- Update the registration with a different script type (classic => module) and with
-  a same main script.
 - Update the registration with a different script type (classic => module) and with
   a same main script. Expect evaluation failed.
 - Update the registration with a different script type (classic => module).
-- Update the registration with a different script type (module => classic) and with
-  a same main script.
 - Update the registration with a different script type (module => classic) and with
   a same main script. Expect evaluation failed.
 - Update the registration with a different script type (module => classic).

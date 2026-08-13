@@ -159,6 +159,7 @@ module Capybara
         '__csim_swUpdateFetch'         => ->(b, *a) { b.sw_registration_update_fetch(a[0], a[1], a[2].to_i, a[3]) },
         '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
         '__csim_swDropPendingScript'   => ->(b, *a) { b.sw_drop_pending_script(a[0]) },
+        '__csim_swWorkerExtended'      => ->(b, *a) { b.sw_worker_extended?(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },

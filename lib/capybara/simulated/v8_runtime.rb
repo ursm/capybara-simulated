@@ -1446,6 +1446,7 @@ module Capybara
         c.attach('__csim_swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
+        c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
         c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil }) if sw_hooks[:fetch_stream]
         # Cross-isolate MessagePort channel signals (a worker/SW port endpoint + its outbound messages).

@@ -4007,7 +4007,10 @@ module Capybara
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
         # A registration UPDATE parked the bytes it fetched and byte-checked
-        # (sw_registration_update_fetch) — the new version runs exactly those.
+        # (sw_registration_update_fetch) — the new version runs exactly those. The
+        # import PROBE results ride along as its script resource map (importScripts
+        # consume them instead of re-fetching — a 404 the byte-check saw stays a 404).
+        pending_imports = service ? (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_imports) : nil
         body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
           pending
         elsif !sw_script
@@ -4045,7 +4048,8 @@ module Capybara
             creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i),
             # The registration's updateViaCache mode — a SERVICE worker's importScripts
             # reads it ('none' bypasses the HTTP cache).
-            sw_uvc: service ? sw_scope_update_via_cache(sw_scope) : nil
+            sw_uvc: service ? sw_scope_update_via_cache(sw_scope) : nil,
+            sw_imports_map: pending_imports
           )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
@@ -4099,7 +4103,24 @@ module Capybara
         w = @workers[handle.to_i]
         return unless w
         @sw_message_pending += 1
+        # A message the worker hasn't finished dispatching is a PENDING functional
+        # event — it must hold a successor's activation exactly like an unsettled
+        # waitUntil (sw_worker_extended?): the client posts 'wait' and calls update()
+        # in the same turn, so the gate can run before the worker even popped it.
+        w[:sw_msgs] = w[:sw_msgs].to_i + 1
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
+      end
+
+      # Does this worker have PENDING WORK that extends its lifetime — an unsettled
+      # ExtendableMessageEvent.waitUntil (the `extended` hook) or a message it hasn't
+      # finished dispatching? Holds an installed successor's activation EVEN past
+      # skipWaiting (activation.https "skipWaiting bypasses no controllee requirement" —
+      # it bypasses only the controllee half).
+      def sw_worker_extended?(handle)
+        w = @workers[handle.to_i]
+        return false unless w
+
+        !!w[:extended] || w[:sw_msgs].to_i.positive?
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
@@ -4361,8 +4382,16 @@ module Capybara
       def sw_worker_controls_clients?(handle)
         h = handle.to_i
         return false if h.zero?
+        # Try Activate's gate is "no service worker client is USING the registration" —
+        # a client uses it when the registration is its MATCHED one (scope match on the
+        # client URL), controlled or not: an unclaimed in-scope document still blocks
+        # the handover. Matching by URL is also what makes the verdict DETERMINISTIC —
+        # the per-client controller handle is re-reported by realms and can transiently
+        # read stale (the activation.https flake), while the URL and the scope are not.
+        scope = @sw_registrations.key(h)
+        return @sw_clients.any? {|_id, entry| entry[:handle] == h } unless scope
 
-        @sw_clients.any? {|_id, entry| entry[:handle] == h }
+        @sw_clients.any? {|_id, entry| entry[:handle] == h || sw_scope_match(entry[:rec]['url'])&.last == scope }
       end
 
       # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
@@ -4501,6 +4530,7 @@ module Capybara
       # the parked bytes — nothing may spawn from a version that was refused.
       def sw_drop_pending_script(scope)
         @sw_scope_meta[scope.to_s]&.delete(:pending_body)
+        @sw_scope_meta[scope.to_s]&.delete(:pending_imports)
         nil
       end
 
@@ -4538,11 +4568,21 @@ module Capybara
         w       = @workers[newest_handle.to_i]
         body    = res['body'].to_s
         changed = w.nil? || body.b != w[:script_body].to_s.b
+        probed  = {}
         unless changed
           import_mode = uvc == 'none' ? 'no-cache' : 'default'
           (w[:sw_imports] || {}).each do |u, b|
             r2 = rack_fetch('GET', u, '', {}, 'follow', cache_mode: import_mode)
-            nb = r2 && (200..299).cover?(r2['status'].to_i) ? r2['body'].to_s : nil
+            ok = r2 && (200..299).cover?(r2['status'].to_i)
+            # The probe results ARE the new version's script resource map (Chrome
+            # fetches each script ONCE during Update and the new worker runs from
+            # those responses): a 404 seen here must be the 404 its importScripts
+            # sees, not a lucky re-fetch (update-import-scripts "missing the other").
+            # The body crosses into the isolate via JSON.generate — a rack body is
+            # BINARY-tagged and a non-UTF-8 one would raise there, failing the update
+            # a real browser runs with replacement characters.
+            probed[u] = ok ? {'status' => r2['status'], 'headers' => r2['headers'], 'body' => RuntimeShared.utf8_text(r2['body'].to_s.dup)} : {'status' => 404, 'headers' => {}, 'body' => ''}
+            nb = ok ? r2['body'].to_s : nil
             # A FAILING import re-fetch is "no change" for that import (update-import-
             # scripts "treat 404 on imported scripts as no change") — the update must
             # not install a broken version off a transient import failure.
@@ -4552,7 +4592,11 @@ module Capybara
             break
           end
         end
-        (@sw_scope_meta[scope.to_s] ||= {})[:pending_body] = body if changed
+        if changed
+          meta = (@sw_scope_meta[scope.to_s] ||= {})
+          meta[:pending_body]    = body
+          meta[:pending_imports] = probed if probed.any?
+        end
         # The body rides back only for the client's parse check (a script that doesn't
         # compile must reject update() before any new version appears).
         {'changed' => changed, 'body' => changed ? RuntimeShared.utf8_text(body.dup) : nil}
@@ -5428,7 +5472,10 @@ module Capybara
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
         sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
-        skip_waits,  rest0d  = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
+        skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
+        sw_evals,    rest0d1 = rest0d0.partition {|e| e[:kind] == 'sw_eval' }
+        sw_phases,   rest0d2 = rest0d1.partition {|e| e[:kind] == 'sw_phase' }
+        try_acts,    rest0d  = rest0d2.partition {|e| e[:kind] == 'sw_try_activate' }
         sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
         swacks,      rest2  = rest1.partition  {|e| e[:kind] == 'swack' }
         claims,      rest3  = rest2.partition  {|e| e[:kind] == 'sw_claim' }
@@ -5450,9 +5497,23 @@ module Capybara
         # navigation discards the realm they address. Queuing preserves the worker's own ordering
         # and keeps the realm rebuild out of the `@ticking` guard.
         sw_navs.each {|e| sw_navigate_client(e[:handle], e[:client], e[:url], e[:nav_id]) }
+        # A service worker's script-evaluation outcome — settles the register()/update()
+        # promise parked on it. Broadcast: only the registering realm holds the park.
+        # Delivered BEFORE skip_waits: the outcome is what CREATES the realm-side
+        # ServiceWorker objects, and a worker's install-phase skipWaiting() can land in
+        # the same drain batch — addressing it before the objects exist would lose it
+        # (skip-waiting "both active and waiting" hang).
+        sw_evals.each {|e| broadcast_to_realms('__csim_swEvalOutcome', e[:handle], e[:ok], e[:msg]) }
+        # A worker finished a lifecycle phase — the client-side timeline parks its
+        # observable 'activated' on this (its claims arrived earlier in the same FIFO).
+        sw_phases.each {|e| broadcast_to_realms('__csim_swPhaseDone', e[:handle], e[:phase]) }
         # `skipWaiting()` — release a worker parked in the waiting slot. Broadcast, because the
         # registration objects holding that parked continuation are per-realm.
         skip_waits.each {|e| broadcast_to_realms('__csim_swSkipWaiting', e[:handle]) }
+        # A worker's extended-lifetime work drained to 0 — a successor parked in
+        # `waiting` may now activate (the waitUntil half of "try activate"; the
+        # controllee half fires from unregister_client). Same parked gate (rule 3).
+        broadcast_to_realms('__csim_swTryActivate') if try_acts.any? && @sw_activation_parked
         # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
         # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
         # sw_client_msg processed just below), BUFFER until port_channel_endpoint_realm flushes.
@@ -6846,7 +6907,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6894,6 +6955,13 @@ module Capybara
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
           # skipWaiting() — the waiting slot is client-side, so the request rides the outbox.
           skip_waiting:   ->                  { outbox << {handle: handle, kind: 'sw_skip_waiting'} },
+          # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
+          # while any are pending an installed successor keeps waiting (activation.https),
+          # and the 0-transition re-runs try-activate to release it.
+          extended:       ->(n) {
+            (wk = @workers[handle]) && wk[:extended] = n.to_i.positive?
+            outbox << {handle: handle, kind: 'sw_try_activate'} unless n.to_i.positive?
+          },
           fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
           # fetch — rides the outbox in emission order so the client realm reassembles the body
@@ -6966,6 +7034,9 @@ module Capybara
           # The registration's updateViaCache mode — importScripts' cache decision
           # ('none' revalidates every import; 'imports'/'all' read the HTTP cache).
           rt.eval("globalThis.__csimSwUvc = #{JSON.generate(sw_uvc)};") if sw_uvc
+          # The Update probe's import responses — this version's script resource map
+          # (importScripts consume them one-shot instead of re-fetching).
+          rt.eval("globalThis.__csimSwImportMap = #{JSON.generate(sw_imports_map)};") if sw_imports_map
           rt.eval('__csim_installServiceWorkerScope();')
         end
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a
@@ -7008,7 +7079,23 @@ module Capybara
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
-        rt.eval(body)
+        if service
+          # A SERVICE worker's registration is GATED on its script actually evaluating
+          # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
+          # parse error — each fails the Register/Update job). Catch the failure, tell
+          # the registering realm (the client parks register()'s / update()'s promise on
+          # this outcome — sw-client.js __csim_swEvalOutcome), and exit with no
+          # lifecycle: no version was installed.
+          begin
+            rt.eval(body)
+          rescue StandardError => e
+            outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"}
+            return
+          end
+          outbox << {handle: handle, kind: 'sw_eval', ok: true}
+        else
+          rt.eval(body)
+        end
         rt.drain_microtasks
         # Drive the service worker's lifecycle: fire `install`, then `activate`, draining each
         # phase's `waitUntil` promises before the next (the client-side ServiceWorker object plays
@@ -7031,6 +7118,12 @@ module Capybara
             rt.drain_microtasks
             rt.drain_timers
           end
+          # The activate phase is DONE — its side effects (a clients.claim(), cache
+          # warm-up) are already in the outbox AHEAD of this marker (FIFO), so the
+          # client lifecycle can gate its observable 'activated' on it: a page reading
+          # `navigator.serviceWorker.controller` right after `wait_for_state(...,
+          # 'activated')` must see the claim (activation.https setup).
+          outbox << {handle: handle, kind: 'sw_phase', phase: 'activated'}
         end
         # A SharedWorker fires `connect` AFTER its script set `self.onconnect`; the
         # connect handler's port post lands in the outbox before release_init, so
@@ -7083,7 +7176,15 @@ module Capybara
               # `ensure` keeps a raising handler from leaking the counter and hanging settle.
               begin
                 rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url])
+                # A synchronously-resolved waitUntil must settle NOW: its allSettled
+                # continuation flips the extended-lifetime counter back to 0 (the
+                # try-activate release), and nothing else drains this isolate's
+                # microtasks until the next timer-bearing tick.
+                rt.drain_microtasks
               ensure
+                # The message is dispatched — it no longer extends this worker's
+                # lifetime (the counter service_worker_post_message bumped).
+                (wk = @workers[handle]) && wk[:sw_msgs] = [0, wk[:sw_msgs].to_i - 1].max
                 outbox << {handle: handle, kind: 'swack'}
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
@@ -7214,6 +7315,9 @@ module Capybara
           end
         end
       rescue StandardError => e
+        # A SERVICE worker dying before its eval-outcome was posted (engine boot / script
+        # fetch raise) must still settle the parked register()/update() promise.
+        outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"} if service
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       ensure
         # A raise between the busy bump and its matching decrement would strand the
