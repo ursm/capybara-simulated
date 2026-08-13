@@ -164,6 +164,9 @@ module Capybara
         # control is installed, by the realm, because only it knows its own URL, frame type and
         # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
         '__csimNoteClient' => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3]); nil },
+        # A worker client's controller changed (claim adoption inside the worker isolate) —
+        # update the HOST-owned record (a worker must not take the realm-style report path).
+        '__csim_workerNoteController' => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },

@@ -1754,14 +1754,11 @@ service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
 service-workers/service-worker/claim-affect-other-registration.https.html:
 - claim() should affect the originally controlling registration.
-service-workers/service-worker/claim-shared-worker-fetch.https.html:
-- fetch() in SharedWorker should be intercepted after the client is claimed.
 service-workers/service-worker/claim-using-registration.https.html:
 - Test for the waiting worker claims a client which is using the same registration
 service-workers/service-worker/claim-with-redirect.https.html:
 - Claim works after redirection to another origin
 service-workers/service-worker/claim-worker-fetch.https.html:
-- fetch() in Worker should be intercepted after the client is claimed.
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
 - fetch() in nested Worker created from a blob URL Worker should be intercepted after
   the client is claimed.
@@ -1772,8 +1769,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
   after the client is claimed.
 service-workers/service-worker/client-url-creation-url.https.html:
 - Going back to new document changes creation URL
-service-workers/service-worker/client-url-of-blob-url-worker.https.html:
-- Client.url of a blob URL worker should be a blob URL.
 service-workers/service-worker/clients-get-client-types.https.html:
 - Test Clients.get() with window and worker clients
 service-workers/service-worker/clients-matchall-frozen.https.html:
@@ -2042,7 +2037,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 - Same-origin blob URL iframe should intercept fetch().
 - Same-origin blob URL sharedworker should inherit service worker controller.
 - Same-origin blob URL sharedworker should intercept fetch().
-- Same-origin blob URL worker should inherit service worker controller.
 - Same-origin blob URL worker should intercept fetch().
 service-workers/service-worker/multi-globals/url-parsing.https.html:
 - getRegistration should use the relevant global of the object it was called on to
@@ -2547,6 +2541,7 @@ service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #4: sw scope1->out-scope (classic SharedWorker)'
 - 'Case #4: sw scope1->out-scope (module DedicatedWorker)'
 - 'Case #4: sw scope1->out-scope (module SharedWorker)'
+- cleanup global state
 service-workers/service-worker/worker-interception.https.html:
 - Requests on a dedicated worker controlled by a service worker.
 - Requests on a dedicated worker nested in a dedicated worker and controlled by a
@@ -2554,6 +2549,7 @@ service-workers/service-worker/worker-interception.https.html:
 - Requests on a dedicated worker nested in a shared worker and controlled by a service
   worker
 - Requests on a shared worker controlled by a service worker.
+- Unregister a service worker for subresource interception tests.
 - Verify a dedicated worker script request gets correct client Ids
 - Verify a dedicated worker script request issued from a uncontrolled document is
   intercepted by worker's own service worker.

@@ -445,6 +445,14 @@ module Capybara
         @sw_resulting_seq  = 0
         @sw_client_aliases = {}   # adopted client id → realm id
         @sw_realm_aliases  = {}   # realm id → adopted client id
+        # Direct fetch-reply channels for a CONTROLLED WORKER's main-script fetch
+        # (sw_worker_script_fetch): [sw handle, fetch id] → Queue. The reply bypasses the
+        # outbox→main-thread route (the spawning worker's thread parks on the queue), so
+        # sw_deliver_fetch_response checks here first. Ids start far above any per-realm
+        # fetchSeq so they can never collide with a page fetch on the same worker.
+        @sw_direct_lock    = Mutex.new
+        @sw_direct_seq     = 1_000_000_000
+        @sw_direct_replies = {}
         # Service-worker Client registry: realm id → {handle, rec} for every
         # controlled frame/window client, mirrored into the SW's clientsById so
         # matchAll / getClientByURL see the real set. `@sw_realm_controller` records
@@ -2537,7 +2545,8 @@ module Capybara
           'raf'        => !!probe['raf'],
           # A live WS reader counts as async so the drain loop yields the GVL to it each frame — see
           # websocket_reader_active?. Without it a binary echo can be starved past the idle-bail.
-          'async'      => !!probe['async'] || websocket_reader_active?,
+          # Ruby-side worker work counts too (worker_drive_pending?) — the JS probe can't see it.
+          'async'      => !!probe['async'] || websocket_reader_active? || worker_drive_pending?,
           # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
           # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
           # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
@@ -3951,12 +3960,27 @@ module Capybara
         inbox        = Thread::Queue.new
         outbox       = @worker_outbox
         engine_class = @runtime.class
+        # This worker's controlling SW (a dedicated/shared worker is a CLIENT: scope match on
+        # its script URL, or the creator's controller for an opaque blob:/data: script).
+        # Computed once here on the registry-owning thread; run_worker installs it into the
+        # isolate and the registry records it below.
+        ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle).to_i
+        # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
+        # (worker-client-id: the SW synthesizes the script), deferred to run_worker
+        # (`body: nil` + `sw_script:`) — the spawn runs inside a JS host callback where a
+        # synchronous wait deadlocks (the documented worker-interception lesson).
+        # EXPERIMENTAL, default OFF (CSIM_SW_WORKER_SCRIPT=1): with it on, the spawned
+        # worker's first inbox park never returns — the process wedges in a rusty/GVL
+        # scheduling interaction that needs its own investigation. The rest of the
+        # controlled-worker model (controller install, subresource interception, claim)
+        # is independent of this gate.
+        sw_script = ENV['CSIM_SW_WORKER_SCRIPT'] == '1' && !service && target.match?(%r{\Ahttps?://}i) ? sw_controller_for_navigation(target) : nil
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
-        body = fetch_worker_script(target)
+        body = sw_script ? nil : fetch_worker_script(target)
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
         return worker_fail(handle, 'Worker script could not be loaded') if target.start_with?('blob:') && body.to_s.empty?
@@ -3978,7 +4002,9 @@ module Capybara
             service:     service,
             creator_key: creator_key,
             seed:        seed,
-            sw_scope:    sw_scope
+            sw_scope:    sw_scope,
+            controller:  ctrl,
+            sw_script:   sw_script
           )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
@@ -3992,7 +4018,7 @@ module Capybara
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
         # A service worker is not itself a client of anything.
         unless service
-          sw_note_worker_client(handle, target, shared, worker_controller_handle(target, shared, controller_handle))
+          sw_note_worker_client(handle, target, shared, ctrl)
         end
         handle
       end
@@ -4031,13 +4057,61 @@ module Capybara
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
       # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
       # respondWith. If the handle is dead, return false so the client falls back to the network.
+      # A controlled worker's MAIN SCRIPT, served through its controlling SW's fetch event —
+      # called on the SPAWNING worker's own thread (run_worker), never the main thread: the
+      # spawn happens inside a JS host callback (`new Worker()`), where a synchronous wait for
+      # an async respondWith deadlocks (the documented worker-interception lesson); a worker
+      # thread parking on a plain Queue is free. The reply bypasses the outbox→main-thread
+      # route entirely (@sw_direct_replies, filled by sw_deliver_fetch_response), so delivery
+      # needs no main-thread drain — and no @sw_fetch_pending accounting (nothing on the main
+      # thread waits on it; @worker_initializing already holds worker_pending? true).
+      # Returns the script body (binary-tagged), or nil (fall-through / network error /
+      # no answer) — the caller falls back to the network fetch.
+      def sw_worker_script_fetch(sw_handle, url, client_handle)
+        w = @workers[sw_handle.to_i] or return nil
+        q   = Thread::Queue.new
+        fid = nil
+        @sw_direct_lock.synchronize do
+          fid = (@sw_direct_seq += 1)
+          @sw_direct_replies[[sw_handle.to_i, fid]] = q
+        end
+        req = JSON.generate(
+          method:      'GET',
+          url:         url.to_s,
+          headers:     {},
+          body_b64:    '',
+          mode:        'same-origin',
+          destination: 'worker',
+          credentials: 'same-origin',
+          clientId:    sw_worker_client_id(client_handle)
+        )
+        w[:inbox] << {kind: 'fetch', req:, fetch_id: fid, realm_id: -client_handle.to_i}
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        resp = nil
+        while resp.nil? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          resp = pop_with_timeout(q, WORKER_POLL_INTERVAL)
+        end
+        return nil unless resp
+
+        r = JSON.parse(resp)
+        return nil if r['fallthrough'] || r['networkError']
+
+        Base64.decode64(r['body_b64'].to_s)
+      rescue JSON::ParserError
+        nil
+      ensure
+        @sw_direct_lock.synchronize { @sw_direct_replies.delete([sw_handle.to_i, fid]) } if fid
+      end
+
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
         w = @workers[handle.to_i]
         return false unless w
         # Resolve BEFORE bumping the pending counter: a raise here must not strand @sw_fetch_pending
         # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
         req = resolve_sw_fetch_referrer(req_json.to_s)
-        @sw_fetch_pending += 1
+        # A CONTROLLED WORKER's fetch reaches here on the WORKER's thread (host fns run on
+        # their caller); the unsynchronized += would race the main thread's decrement.
+        @worker_init_lock.synchronize { @sw_fetch_pending += 1 }
         # fetch ids are per-realm (so they collide across realms) — carry the ORIGINATING realm so
         # the response is delivered back to it, not the main realm (realm 0 = main/top window).
         w[:inbox] << {kind: 'fetch', req:, fetch_id: fetch_id.to_i, realm_id: realm_id.to_i}
@@ -4076,6 +4150,13 @@ module Capybara
       # general outbox, so it never interleaves with the client-fetch / message reply protocol;
       # a client fetch (positive id) rides the outbox as before, tagged with the originating realm.
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
+        # A DIRECT reply channel (a controlled worker's main-script fetch, parked on its own
+        # thread — sw_worker_script_fetch): hand the reply straight to that queue, bypassing
+        # the outbox→main-thread drain the parked thread can't participate in.
+        if (dq = @sw_direct_lock.synchronize { @sw_direct_replies.delete([handle.to_i, fetch_id.to_i]) })
+          dq << resp
+          return
+        end
         if fetch_id.negative?
           @sw_nav_outbox << {fetch_id: fetch_id, resp: resp}
         else
@@ -4172,6 +4253,13 @@ module Capybara
         @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes)
         @runtime.frame_realm_ids.each do |rid|
           @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes) if @runtime.frame_realm_alive?(rid)
+        end
+        # Worker CLIENTS too (a dedicated/shared worker whose script URL is in scope adopts
+        # the claiming SW): same self-check, run in the worker's isolate via its inbox.
+        @workers.each do |_h, w|
+          next if w[:service] || !w[:thread]&.alive?
+
+          w[:inbox] << {kind: 'claim_client', handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: all_scopes}
         end
         nil
       end
@@ -4328,6 +4416,21 @@ module Capybara
       # URL. Keyed by worker handle, which outlives nothing else and is unique per worker.
       def sw_note_worker_client(handle, url, shared, controller_handle)
         note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle)
+      end
+
+      # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted):
+      # refresh the host-owned record + re-mirror to every SW, the worker-shaped counterpart
+      # of a realm's reportAsClient. Called from the WORKER's thread (host fn) — Hash writes
+      # and inbox pushes are the same cross-thread pattern the outbox protocol already uses.
+      def sw_note_worker_controller(worker_handle, controller_handle)
+        entry = @sw_clients[sw_worker_client_id(worker_handle)] or return
+        ctrl  = controller_handle.to_i
+        entry[:handle] = ctrl.positive? ? ctrl : nil
+        sw_worker_handles.each do |h|
+          w = @workers[h] or next
+          w[:inbox] << {kind: 'client_register', client: entry[:rec].merge('controlled' => h == entry[:handle])}
+        end
+        nil
       end
 
       private def note_client(client_id, url, type, frame_type, controller_handle)
@@ -5099,7 +5202,16 @@ module Capybara
         end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
-        fetch_resps.each {|e| @runtime.realm_call(e[:realm_id].to_i, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp]) }
+        # A NEGATIVE realm_id names a WORKER client (-worker handle, __csimSWInterceptFetch):
+        # its pendingFetch map lives in that worker's isolate, so the response rides its inbox.
+        fetch_resps.each do |e|
+          rid = e[:realm_id].to_i
+          if rid.negative?
+            @workers.dig(-rid, :inbox)&.push({kind: 'sw_fetch_response', fetch_id: e[:fetch_id], resp: e[:resp]})
+          else
+            @runtime.realm_call(rid, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp])
+          end
+        end
         # Streaming respondWith frames — deliver IN EMISSION ORDER (per fetch id: start → chunk* →
         # close/error) so the client reassembles the body ReadableStream correctly. The request's
         # @sw_fetch_pending was counted at fetch time and clears on the terminal frame.
@@ -5114,7 +5226,7 @@ module Capybara
           end
         end
         stream_terminals          = stream_frames.count {|e| e[:kind] == 'fr_close' || e[:kind] == 'fr_error' }
-        @sw_fetch_pending         = [0, @sw_fetch_pending - fetch_resps.size - stream_terminals].max
+        @worker_init_lock.synchronize { @sw_fetch_pending = [0, @sw_fetch_pending - fetch_resps.size - stream_terminals].max }
         @worker_broadcast_pending = [0, @worker_broadcast_pending - acks.size].max
         @sw_message_pending       = [0, @sw_message_pending - swacks.size].max
         # A delivered swack/bcack refreshes the message-wait budget (drain_pending_message_reply), so
@@ -5145,6 +5257,22 @@ module Capybara
       # on these WITHOUT holding the clock (drain_pending_message_reply); the SW-fetch pending is held
       # separately (hold_for_sw_fetch), so it's deliberately excluded here.
       def worker_message_reply_pending? = @worker_broadcast_pending > 0 || @sw_message_pending > 0
+
+      # Worker work that must keep a drain loop ALIVE (run_event_loop_frame's `async`),
+      # invisible to the JS event-loop probe: a worker mid-boot (incl. the deferred
+      # SW-served main-script fetch) or mid-handler, contractual replies owed, anything
+      # already in the outbox, and — the race the counters alone miss — a delivered-but-
+      # not-yet-processed message sitting in a live worker's INBOX (its thread needs a
+      # GVL slice; between the delivery decrementing the pending counter and the worker
+      # picking it up, every counter reads 0). Deliberately NOT the open-ended
+      # @worker_in_flight: a listen-only worker holds that forever and would pin a drain
+      # loop to its max-steps backstop.
+      def worker_drive_pending?
+        !@worker_outbox.empty? || !@worker_outbox_head.nil? ||
+          worker_reply_pending? ||
+          @worker_init_lock.synchronize { @worker_initializing + @worker_busy }.positive? ||
+          @workers.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? }
+      end
 
       # ── Cross-window messaging (window.open / opener / postMessage) ──
       # Each window is a separate Browser/VM/isolate, so a reference to another
@@ -6035,6 +6163,7 @@ module Capybara
         @sw_pending_claims   = []
         @sw_clients          = {}
         @sw_realm_controller = {}
+        @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
         # id uniqueness across the whole process is the invariant the aliases rely on.
         @sw_client_aliases   = {}
@@ -6389,7 +6518,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6408,10 +6537,12 @@ module Capybara
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
         rt = nil
-        raise "worker script not found: #{url}" unless body
+        # A nil body with `sw_script` set is the DEFERRED case — the script is fetched
+        # through the controlling SW below, after the isolate exists.
+        raise "worker script not found: #{url}" unless body || sw_script
         # The worker SCRIPT is text; the Rack-fetched body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
-        body = RuntimeShared.utf8_text(body)
+        body = RuntimeShared.utf8_text(body) if body
         post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         # A worker's BroadcastChannel post rides the same thread-safe outbox; the main thread fans
         # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
@@ -6465,6 +6596,13 @@ module Capybara
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
         rt.eval("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
+        # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
+        # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
+        # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
+        # controlled frame realm gets (create_frame_realm).
+        if !service && controller.to_i.positive? && (cw = @workers[controller.to_i])
+          rt.call('__csim_swSetControllerDirect', controller.to_i, cw[:has_fetch] != false, cw[:script_url].to_s, @sw_registrations.key(controller.to_i).to_s)
+        end
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
@@ -6498,6 +6636,16 @@ module Capybara
         if seed
           seed[:clients].each {|rec| rt.call('__csim_swRegisterClient', rec) }
           rt.call('__csim_swNoteFocusedClient', seed[:focused]) if seed[:focused].any?
+        end
+        # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
+        # script URL): fetch it through that SW's fetch event NOW, on this worker's own thread
+        # (sw_worker_script_fetch). A fall-through / network-error / unanswered fetch falls
+        # back to the plain network fetch, what an uncontrolled spawn would have done.
+        if body.nil? && sw_script
+          body = sw_worker_script_fetch(sw_script, url, handle) || fetch_worker_script(url)
+          raise "worker script not found: #{url}" unless body
+
+          body = RuntimeShared.utf8_text(body)
         end
         rt.eval(body)
         rt.drain_microtasks
@@ -6613,6 +6761,22 @@ module Capybara
               ensure
                 sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, '{"fallthrough":true}', outbox, msg[:realm_id].to_i) unless dispatched
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_fetch_response'
+              # THIS worker is a controlled CLIENT whose fetch went through its SW
+              # (__csimSWInterceptFetch tagged realm -handle): resolve the pending fetch in
+              # this isolate, the mirror of deliver_worker_messages' realm_call for pages.
+              # BUSY for the whole span (like the postMessage branch): the `.then` chain's
+              # observable output isn't posted yet, and every other pending counter reads 0
+              # here — without the hold a drain can bail mid-chain.
+              @worker_init_lock.synchronize { @worker_busy += 1 }
+              busy_held = true
+              rt.call('__csim_swControllerFetchResponse', msg[:fetch_id], msg[:resp])
+              drive_worker_to_quiescence(rt)
+            elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
+              # clients.claim() reaches worker clients too: adopt the claiming SW as this
+              # isolate's controller when this worker's script URL is in scope (the same
+              # self-check pages run — __csim_swClaimClient compares against location).
+              rt.call('__csim_swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch_cancel'
               # The client cancelled this streaming respondWith body — cancel the reader
               # streamDeliver is draining, firing the SW source stream's `cancel()`. Fire-and-forget:
