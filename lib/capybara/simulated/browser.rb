@@ -436,6 +436,15 @@ module Capybara
         @sw_pending_claims = []
         @sw_nav_outbox    = Thread::Queue.new
         @sw_nav_seq       = 0
+        # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
+        # per navigation CHAIN, re-minted when a redirect hop crosses origins (a reserved
+        # client is origin-bound — navigation-redirect tags 'a'→'x' across the hop), and
+        # ADOPTED by the committed document's realm. The alias maps make the adopted id
+        # and the realm resolve to each other (sw_client_id / sw_client_realm), so client
+        # records and SW→client message routing keep working under the adopted identity.
+        @sw_resulting_seq  = 0
+        @sw_client_aliases = {}   # adopted client id → realm id
+        @sw_realm_aliases  = {}   # realm id → adopted client id
         # Service-worker Client registry: realm id → {handle, rec} for every
         # controlled frame/window client, mirrored into the SW's clientsById so
         # matchAll / getClientByURL see the real set. `@sw_realm_controller` records
@@ -4438,6 +4447,14 @@ module Capybara
       def sw_unregister_client(realm_id)
         @sw_realm_controller.delete(realm_id.to_i)
         unregister_client(sw_client_id(realm_id))
+        # Prune the disposed realm's adopted-id alias AFTER the record removal consumed it
+        # (sw_client_id above resolves through the alias). Realm ids are never reused
+        # (rusty's per-isolate counter is monotonic), so a stale pair is only growth —
+        # but frame-realm churn is real (Discourse), so drop it eagerly.
+        if (cid = @sw_realm_aliases.delete(realm_id.to_i))
+          @sw_client_aliases.delete(cid)
+        end
+        nil
       end
 
       private def unregister_client(client_id)
@@ -4521,18 +4538,44 @@ module Capybara
       # client-message router can tell a worker client from a browsing context.
       def sw_worker_client_id(handle) = "client-worker-#{handle.to_i}"
 
-      # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; every
-      # other realm is `client-<realm>`. The same two spellings are produced JS-side by
-      # sw-client.js's clientId() and the FetchEvent clientKey (js/src/workers.js), and read
-      # back by the client-message router below — so they must be minted in exactly one place.
-      def sw_client_id(realm_id) = realm_id.to_i.zero? ? 'client-window' : "client-#{realm_id.to_i}"
+      # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; a realm
+      # that ADOPTED a navigation's reserved client id reports that id; every other realm is
+      # `client-<realm>`. The same spellings are produced JS-side by sw-client.js's clientId()
+      # (which prefers the injected `__csimClientId`) and the FetchEvent clientKey
+      # (js/src/workers.js), and read back by the client-message router below — so they must
+      # be minted in exactly one place.
+      def sw_client_id(realm_id)
+        return 'client-window' if realm_id.to_i.zero?
+
+        @sw_realm_aliases[realm_id.to_i] || "client-#{realm_id.to_i}"
+      end
 
       # The realm a client id names — the inverse of `sw_client_id`, nil for an unrecognized id.
       def sw_client_realm(client_id)
         id = client_id.to_s
         return 0 if id == 'client-window'
+        return @sw_client_aliases[id] if @sw_client_aliases.key?(id)
 
         (m = /\Aclient-(\d+)\z/.match(id)) ? m[1].to_i : nil
+      end
+
+      # One fresh reserved-client id (Service Workers "create a new environment settings
+      # object" for a navigation) — see the @sw_resulting_seq comment.
+      def mint_resulting_client_id = "client-nav#{@sw_resulting_seq += 1}"
+
+      # The committed document's realm ADOPTS the navigation's reserved client id (the
+      # reserved client BECOMES the document's client). A rebuild of the same frame re-adopts
+      # under the new realm id; the superseded alias is dropped so a stale id resolves nothing.
+      def sw_adopt_client_id(realm_id, client_id)
+        cid = client_id.to_s
+        return if cid.empty? || realm_id.to_i.zero?
+
+        if (old = @sw_realm_aliases[realm_id.to_i])
+          @sw_client_aliases.delete(old)
+        end
+        @sw_realm_aliases[realm_id.to_i] = cid
+        @sw_client_aliases[cid]          = realm_id.to_i
+        nil
       end
 
       # The worker handle a client id names, or nil when the id is not a worker client's.
@@ -4661,6 +4704,10 @@ module Capybara
         site        = nil
         origin_null = false
         redirected  = false
+        # The navigation's reserved client id (`event.resultingClientId`): every hop of the
+        # chain carries the SAME id — re-minted when a hop crosses origins (a reserved client
+        # is origin-bound) — and the committed document's realm adopts the final one.
+        rid         = mint_resulting_client_id
         (MAX_FETCH_REDIRECTS + 1).times do
           resp_body = nil
           # A service worker only controls a client whose EVERY ancestor is a secure
@@ -4673,7 +4720,7 @@ module Capybara
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body_b64: req_b64, content_type: req_ct, is_reload: is_reload,
-                                                          referrer_source: initiator, site_seed: site, origin_null: origin_null))
+                                                          referrer_source: initiator, site_seed: site, origin_null: origin_null, resulting_client_id: rid))
             return nil if sw['networkError']
 
             status  = (sw['status'] || 200).to_i
@@ -4702,12 +4749,17 @@ module Capybara
               req_b64 = ''
               req_ct  = nil
             end
+            rid         = mint_resulting_client_id if url_origin(next_url) != url_origin(target)
             target      = next_url
             redirected  = true
             next
           end
           body ||= read_rack_body(resp_body)
-          return response_hash(status, headers, body, target, redirected)
+          out = response_hash(status, headers, body, target, redirected)
+          # The final reserved client id — the JS frame builder hands it to the new realm
+          # (create_frame_realm injects `__csimClientId` + records the adoption).
+          out['resulting_client_id'] = rid if out
+          return out
         end
         nil   # redirect loop → failed navigation
       end
@@ -4752,7 +4804,7 @@ module Capybara
       # queue (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
-      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false)
+      def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body_b64: '', content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false, resulting_client_id: nil)
         handle = sw_controller_for_navigation(url) or return nil
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -4825,6 +4877,11 @@ module Capybara
           # request: it survives a SW's `new Request(event.request, init)` rewrite —
           # unlike the initiator, which the copy resets to the SW's own origin.
           cookieCrossSite:     cookie_cross_site,
+          # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
+          # chain, re-minted across a cross-origin redirect hop, adopted by the committed
+          # document (mint_resulting_client_id / sw_adopt_client_id). nil → the worker falls
+          # back to its realm-derived key (a caller that doesn't thread the chain id yet).
+          resultingClientId:   resulting_client_id,
           # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler
           # as `event.preloadResponse`.
           preloadResponse:     preload
@@ -5978,6 +6035,10 @@ module Capybara
         @sw_pending_claims   = []
         @sw_clients          = {}
         @sw_realm_controller = {}
+        # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
+        # id uniqueness across the whole process is the invariant the aliases rely on.
+        @sw_client_aliases   = {}
+        @sw_realm_aliases    = {}
         @focused_realm_id    = nil
         @port_channels       = {}
         @sw_nav_outbox.clear
@@ -7871,16 +7932,19 @@ module Capybara
         # response's body instead of following it (no vendored test reloads into a redirecting
         # respondWith; following would need the entry/restore plumbing threaded through the
         # re-entry) — extend when a test pins the behavior.
+        # A reload / traversal creates a fresh document, so it gets its own reserved
+        # client id, adopted by the rebuilt realm (same model as a fresh navigation).
+        rid = mint_resulting_client_id
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
-                                                      **post_args))
+                                                      resulting_client_id: rid, **post_args))
           return if sw['networkError']
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
-                                   response_content_type(sw['headers'] || {}), restore_state: restore)
+                                   response_content_type(sw['headers'] || {}), restore_state: restore, client_id: rid)
           return
         end
         env = Rack::MockRequest.env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -7955,9 +8019,12 @@ module Capybara
       # deliberately NOT recorded in frame history yet (see record_frame_nav; history.back there falls
       # through to the top document), and recording them here would push an entry where a
       # `location.replace` must overwrite. A form GET submission (the default) IS a history push.
-      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false)
+      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil)
         raise 'too many redirects' if depth > 10
         record_frame_nav(realm_id, get_url) if record && depth.zero? && !is_reload && !is_history
+        # The navigation's reserved client id — threaded through the redirect re-entries
+        # (re-minted on a cross-origin hop) and adopted by the rebuilt realm on commit.
+        rid = resulting_client_id || mint_resulting_client_id
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame(resolve_against_current(get_url), entry: entry) if entry
         # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
@@ -7988,7 +8055,7 @@ module Capybara
         if (!get_url.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
                                                           referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
-                                                          site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
+                                                          site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
           return if sw['networkError']
 
           # An SW-served redirect is FOLLOWED like a network one (the recursion
@@ -8001,9 +8068,10 @@ module Capybara
             next_url = carry_fragment(get_url, resolve_against(loc, get_url))
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: record,
                                                      site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(init, get_url)),
-                                                     origin_null: redirect_taints_origin?(origin_null, init, get_url, next_url))
+                                                     origin_null: redirect_taints_origin?(origin_null, init, get_url, next_url),
+                                                     resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
           end
-          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
+          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
         end
         initiator = frame_realm_url(realm_id)
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
@@ -8022,12 +8090,13 @@ module Capybara
           # Latch the redirect chain's Fetch-Metadata: Sec-Fetch-Site widens to include this hop, and
           # a form POST's Origin taints to 'null' per redirect_taints_origin? (moot for GET — no Origin).
           return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: record,
-                                                   site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url))
+                                                   site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url),
+                                                   resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
         end
         if download_response?(headers)
           return save_downloaded_response(get_url, headers, resp_body)
         end
-        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers))
+        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -8035,7 +8104,7 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false)
+      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false, resulting_client_id: nil)
         raise 'too many redirects' if depth > 10
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
         # a fresh submission records history. The POST method/body is tagged onto the entry AFTER a
@@ -8046,6 +8115,8 @@ module Capybara
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame_post(url, body, content_type, entry: entry) if entry
         invalidate_find_cache
+        # The navigation's reserved client id — same threading as navigate_realm_self_get.
+        rid = resulting_client_id || mint_resulting_client_id
         # The frame's ancestor-chain cookie verdict — same as navigate_realm_self_get.
         cookie_cross = frame_ancestor_cross_site?(realm_id, url)
         # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
@@ -8056,7 +8127,7 @@ module Capybara
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, method: 'POST', body_b64: Base64.strict_encode64(body.to_s), content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
-                                                      site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross))
+                                                      site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
           return if sw['networkError']
 
           # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
@@ -8066,16 +8137,17 @@ module Capybara
             next_url = carry_fragment(url, resolve_against_current(loc))
             site     = widen_sec_fetch_site(site_seed, sec_fetch_site(init, url.to_s))
             taint    = redirect_taints_origin?(origin_null, init, url.to_s, next_url)
+            next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
             if [307, 308].include?(sw['status'].to_i)
               return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history,
-                                                         site_seed: site, origin_null: taint)
+                                                         site_seed: site, origin_null: taint, resulting_client_id: next_rid)
             end
 
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: false,
-                                                     site_seed: site, origin_null: taint)
+                                                     site_seed: site, origin_null: taint, resulting_client_id: next_rid)
           end
           tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
-          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}))
+          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
           return
         end
         # The initiator is the FRAME's own document (still alive — the rebuild is below), not the
@@ -8104,7 +8176,8 @@ module Capybara
           # redirect chain's Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
           if [307, 308].include?(status)
             return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history,
-                                                       site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, url.to_s, next_url))
+                                                       site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, url.to_s, next_url),
+                                                       resulting_client_id: url_origin(next_url) == url_origin(url.to_s) ? rid : nil)
           end
           parent = @runtime.frame_realm_parent(realm_id)
           return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, next_url)
@@ -8114,7 +8187,7 @@ module Capybara
           return
         end
         tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
-        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers))
+        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid)
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
@@ -8126,11 +8199,11 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, html, content_type, restore_state: nil)
+      def reload_frame_realm_by_id(realm_id, url, html, content_type, restore_state: nil, client_id: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, RuntimeShared.utf8_text(html), content_type, client_id).to_i
         return if new_id.zero?
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)

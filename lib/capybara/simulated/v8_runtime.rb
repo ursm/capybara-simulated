@@ -449,14 +449,14 @@ module Capybara
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
       # keeps the new realm's `parent`/`top` wired to the owning realm. The
       # Browser then re-points the iframe element at the new id (`__csimRebindFrameRealm`).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type)
+      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
         # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
         # a descendant frame's realm would otherwise linger and its contentWindow stay live.
         dispose_frame_realm_tree(old_id)
-        create_frame_realm(ctx, url, body, content_type, parent_id)
+        create_frame_realm(ctx, url, body, content_type, parent_id, nil, nil, nil, nil, nil, nil, client_id)
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -768,8 +768,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -821,7 +821,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -869,6 +869,15 @@ module Capybara
         # HTML / control bytes survive (Ruby's String#inspect is NOT a faithful
         # JS string escaper — it mangles \a, \e, and binary bytes).
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
+        # The navigation's reserved client id — this document's realm ADOPTS it as its
+        # service-worker Client identity (`event.resultingClientId` resolves to THIS
+        # client after commit). Seeded BEFORE the document loads so the realm's own
+        # client reports (sw-client.js clientId()) already carry it; the browser-side
+        # alias keeps message routing and record minting coherent (sw_adopt_client_id).
+        unless client_id.to_s.empty?
+          realm.eval("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
+          @browser.sw_adopt_client_id(realm.id, client_id.to_s)
+        end
         # Set window.name from the container's `name` attribute BEFORE the document
         # loads, so a frame whose load handler reads window.name to identify itself
         # (declarative-shadow declarative-child-frame) sees it.
