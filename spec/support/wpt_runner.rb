@@ -71,6 +71,9 @@ module WptRunner
   # margin without materially slowing a genuinely-idle page's force-timeout (12 × FRAME_MS ≈ 190 ms,
   # still far below testharness's 10 s harness timeout and the DRAIN_MAX_STEPS cap).
   DRAIN_IDLE_BAIL    = 12
+  # Real-time grace rounds after an idle-bail before the force-timeout (see the
+  # drain loop): 10 ms sleep + one frame each, resumed on any progress signal.
+  DRAIN_GRACE_ROUNDS = 20
   # A frame with no rAF / async / due-now work still counts as PROGRESS (resets the
   # idle-bail) while a timer is parked within this horizon — a `step_timeout`-style
   # wait the test is deliberately sitting on (e.g. confirming a `scrollend` does NOT
@@ -1081,7 +1084,33 @@ module WptRunner
         sleep(0.001) if frame['async']
       else
         idle += 1
-        break if idle >= DRAIN_IDLE_BAIL
+        if idle >= DRAIN_IDLE_BAIL
+          # Grace window before declaring the page dead: real cross-thread work (a
+          # worker isolate mid-flow, an SW round-trip between counters) can be
+          # momentarily invisible to every pending signal. Give it bounded REAL
+          # time — a few 10 ms sleeps, one frame each — and resume the normal loop
+          # on any sign of life (a completion landing during the window is honored
+          # too). Gated on a live cross-thread ACTOR: only a worker / WS reader
+          # thread can revive a lifeless page, so the plain-DOM majority pays
+          # nothing; a stalled worker file pays ~200 ms before the force-timeout.
+          revived = false
+          grace_worthy = s.driver.browser.cross_thread_actors?
+          DRAIN_GRACE_ROUNDS.times do
+            break unless grace_worthy
+            sleep 0.01
+            frame = s.driver.run_event_loop_frame(FRAME_MS)
+            res   = s.driver.peek_script('globalThis.__wptResults')
+            break if res
+            nt2 = frame['next_timer']
+            if frame['progressed'] || frame['raf'] || frame['async'] || (nt2 >= 0 && nt2 <= DRAIN_PENDING_TIMER_HORIZON_MS)
+              revived = true
+              break
+            end
+          end
+          break if res
+          break unless revived
+          idle = 0
+        end
       end
     end
 
