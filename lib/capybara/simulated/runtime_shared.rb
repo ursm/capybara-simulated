@@ -167,6 +167,9 @@ module Capybara
         # A worker client's controller changed (claim adoption inside the worker isolate) —
         # update the HOST-owned record (a worker must not take the realm-style report path).
         '__csim_workerNoteController' => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
+        # A controlled worker's importScripts, through its SW's fetch event (synchronous
+        # on the calling worker's thread — sw_import_script_fetch).
+        '__csim_swImportFetch' => ->(b, *a) { b.sw_import_script_fetch(a[0], a[1], a[2]) },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },

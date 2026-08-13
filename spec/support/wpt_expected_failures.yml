@@ -1700,8 +1700,6 @@ input-events/input-events-arrow-key-on-number-input-delete-document.html:
   removes document
 input-events/input-events-get-target-ranges.html:
 - getTargetRanges() returns correct range and cleared after dispatch.
-service-workers/cache-storage/cache-api-nested-worker.https.html:
-- Cache API in nested worker
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
 service-workers/cache-storage/credentials.https.html:
@@ -1760,7 +1758,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
 - fetch() in nested Worker created from a blob URL Worker should be intercepted after
   the client is claimed.
-- fetch() in nested Worker should be intercepted after the client is claimed.
 - fetch() in nested blob URL Worker created from a Worker should be intercepted after
   the client is claimed.
 - fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
@@ -2507,14 +2504,6 @@ service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #4: sw scope1->out-scope (module DedicatedWorker)'
 - 'Case #4: sw scope1->out-scope (module SharedWorker)'
 - cleanup global state
-service-workers/service-worker/worker-interception.https.html:
-- Requests on a dedicated worker controlled by a service worker.
-- Requests on a dedicated worker nested in a dedicated worker and controlled by a
-  service worker
-- Requests on a dedicated worker nested in a shared worker and controlled by a service
-  worker
-- Requests on a shared worker controlled by a service worker.
-- Unregister a service worker for subresource interception tests.
 service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL
 - XHR Document should use the response URL (generated response)
