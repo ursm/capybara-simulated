@@ -159,7 +159,6 @@ module Capybara
         '__csim_swUpdateFetch'         => ->(b, *a) { b.sw_registration_update_fetch(a[0], a[1], a[2].to_i, a[3]) },
         '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
         '__csim_swDropPendingScript'   => ->(b, *a) { b.sw_drop_pending_script(a[0]) },
-        '__csim_swWorkerExtended'      => ->(b, *a) { b.sw_worker_extended?(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
@@ -194,9 +193,10 @@ module Capybara
         # local registration (a different iframe registering an already-active scope) can synthesize a
         # registration reflecting the shared active worker instead of installing a duplicate.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
-        # Does this worker still control any client? An incoming worker may only activate once the
-        # outgoing one controls nothing (or skipWaiting is called) — see _scheduleLifecycle.
-        '__csim_swControlsClients'    => ->(b, *a) { b.sw_worker_controls_clients?(a[0]) },
+        # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
+        # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
+        # host state — see sw_may_activate? and _scheduleLifecycle.
+        '__csim_swMayActivate'        => ->(b, *a) { b.sw_may_activate?(a[0], a[1]) },
         '__csim_swNoteActivationParked' => ->(b, *_) { b.sw_note_activation_parked; nil },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
         # worker handle — reached identically from the client (registration.active._handle) and the

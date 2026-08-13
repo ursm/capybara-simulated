@@ -1741,14 +1741,9 @@ service-workers/service-worker/about-blank-replacement.https.html:
 - Popup initial about:blank is controlled, exposed to clients.matchAll(), and matches
   final Client.
 service-workers/service-worker/activation.https.html:
-- finishing a request triggers activation
 - finishing a request triggers unregister
-- loss of controllees triggers activation
-- skipWaiting bypasses no controllee requirement
 service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
-service-workers/service-worker/claim-affect-other-registration.https.html:
-- claim() should affect the originally controlling registration.
 service-workers/service-worker/claim-using-registration.https.html:
 - Test for the waiting worker claims a client which is using the same registration
 service-workers/service-worker/claim-with-redirect.https.html:

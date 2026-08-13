@@ -4029,6 +4029,21 @@ module Capybara
         # ask for, so without it an early `matchAll` reports every client unfocused and returns
         # them in creation rather than focus-first order.
         seed = service ? {clients: sw_client_records_for(handle), focused: focused_client_ids} : nil
+        # Register the worker's record BEFORE its thread exists: the sw_hooks fire from the
+        # worker thread as early as the script EVAL (a top-level skipWaiting(), the extended
+        # counter) and write through `@workers[handle]` — created after Thread.new, a fast
+        # worker could look itself up before the registry insert and silently drop the write.
+        # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
+        # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
+        # it), and a dedicated/shared worker has no client registry to push into.
+        # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
+        # it and is terminated when it is discarded (terminate_realm_workers).
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker}
+        # The Update algorithm byte-checks a new fetch against the running version's
+        # script (+ its recorded imports — sw_note_import fills that map as the worker
+        # evaluates). SW scripts are small; only service workers pay the retention.
+        record[:script_body] = body if service
+        @workers[handle] = record
         thread = Thread.new do
           Thread.current.report_on_exception = false
           run_worker(
@@ -4052,16 +4067,10 @@ module Capybara
             sw_imports_map: pending_imports
           )
         end
-        # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
-        # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
-        # it), and a dedicated/shared worker has no client registry to push into.
-        # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
-        # it and is terminated when it is discarded (terminate_realm_workers).
-        @workers[handle] = {thread: thread, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker}
-        # The Update algorithm byte-checks a new fetch against the running version's
-        # script (+ its recorded imports — sw_note_import fills that map as the worker
-        # evaluates). SW scripts are small; only service workers pay the retention.
-        @workers[handle][:script_body] = body if service
+        # A nested spawn runs THIS method on a worker thread, so other threads can observe
+        # the record's one-statement `thread: nil` window — every `[:thread]` reader
+        # nil-guards and treats nil as "still spawning".
+        record[:thread] = thread
         # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
         # frameType 'none' — whether or not a service worker's scope covers its script; only the
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
@@ -4107,7 +4116,10 @@ module Capybara
         # event — it must hold a successor's activation exactly like an unsettled
         # waitUntil (sw_worker_extended?): the client posts 'wait' and calls update()
         # in the same turn, so the gate can run before the worker even popped it.
-        w[:sw_msgs] = w[:sw_msgs].to_i + 1
+        # Locked: the worker thread decrements (run_worker's dispatch ensure), and an
+        # unsynchronized read-modify-write can lose an increment — the gate would then
+        # read 0 with a message still queued and activate prematurely.
+        @worker_init_lock.synchronize { w[:sw_msgs] = w[:sw_msgs].to_i + 1 }
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
       end
 
@@ -4121,6 +4133,20 @@ module Capybara
         return false unless w
 
         !!w[:extended] || w[:sw_msgs].to_i.positive?
+      end
+
+      # HTML "try activate", decided in ONE host call (the client-side gate used to make three
+      # reads — extended?, the realm-local skipWaiting flag, controls? — and the splits raced:
+      # a skipWaiting delivered before the realm built its worker objects was lost outright).
+      # The OUTGOING worker's pending extended work holds activation even PAST skipWaiting
+      # (activation.https "skipWaiting bypasses no controllee requirement" — it bypasses only
+      # the controllee half); skipWaiting is read off the CANDIDATE's worker record, where the
+      # worker's own thread set it at post time.
+      def sw_may_activate?(outgoing_handle, candidate_handle)
+        return false if sw_worker_extended?(outgoing_handle)
+        return true if @workers.dig(candidate_handle.to_i, :skip_waiting)
+
+        !sw_worker_controls_clients?(outgoing_handle)
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
@@ -5401,8 +5427,10 @@ module Capybara
         # dead before we revoke its URLs — `Thread#kill` is async, and a worker
         # still running a `createObjectURL` could otherwise re-register a URL after
         # the revoke and leak it.
-        w[:thread].join(WORKER_TERMINATE_GRACE)
-        if w[:thread].alive?
+        # `&.`: a record inserted by worker_spawn before its Thread.new has `thread: nil`
+        # for one statement — treat it as already gone, like every other liveness check.
+        w[:thread]&.join(WORKER_TERMINATE_GRACE)
+        if w[:thread]&.alive?
           w[:thread].kill
           w[:thread].join(WORKER_TERMINATE_GRACE)
         end
@@ -5471,6 +5499,12 @@ module Capybara
         (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
+        # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
+        # false once it's gone, and its scopes were just dropped): that is a hold-clearing
+        # transition like any other, so it must post its wakeup — a candidate parked on a
+        # now-dead outgoing worker would otherwise only resume on unrelated client churn.
+        # Rides the outbox (thread-safe; delivered gated on @sw_activation_parked).
+        @worker_outbox << {handle: handle.to_i, kind: 'sw_try_activate'} if w[:service]
       end
 
       def deliver_worker_messages
@@ -5520,8 +5554,36 @@ module Capybara
         # the same drain batch — addressing it before the objects exist would lose it
         # (skip-waiting "both active and waiting" hang).
         sw_evals.each {|e| broadcast_to_realms('__csim_swEvalOutcome', e[:handle], e[:ok], e[:msg]) }
+        # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
+        # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
+        # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
+        # ahead of its 'sw_phase', and the phase marker is what resumes the client-side
+        # 'activated' step — a claim handled after it would let `wait_for_state(..., 'activated')`
+        # resolve with the claimed frame's controller still unset (the activation.https flake;
+        # a first activation buffers the claim, and only the phase-resumed step's
+        # sw_register_scope flush applies it in time).
+        # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
+        # registration must be installed before the shallower one runs, or a client the shallow claim
+        # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
+        # page would double-fire). A claim whose scope isn't mirrored into @sw_registrations yet — the
+        # worker fires activate→claim() decoupled from the CLIENT-side lifecycle that populates it — is
+        # BUFFERED and flushed by sw_register_scope, so an `activate → clients.claim()` isn't lost.
+        # TRADEOFF: partition processing can't keep both claim<phase and message<claim, so a
+        # worker's same-turn `client.postMessage(x); clients.claim()` now delivers the claim's
+        # controllerchange BEFORE message x (these are separate task sources in a real browser;
+        # no ordering contract is broken, but it inverts the previous within-batch order).
+        claims.map {|e| [e, @sw_registrations.key(e[:handle].to_i)] }
+              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
+              .each do |e, scope|
+          if scope
+            broadcast_claim(e[:handle], e[:has_fetch], scope)
+          else
+            @sw_pending_claims << e
+          end
+        end
         # A worker finished a lifecycle phase — the client-side timeline parks its
-        # observable 'activated' on this (its claims arrived earlier in the same FIFO).
+        # observable 'activated' on this (its claims are handled just above / flushed by the
+        # resumed step's sw_register_scope, so they are in place before the state is observable).
         sw_phases.each {|e| broadcast_to_realms('__csim_swPhaseDone', e[:handle], e[:phase]) }
         # `skipWaiting()` — release a worker parked in the waiting slot. Broadcast, because the
         # registration objects holding that parked continuation are per-realm.
@@ -5563,23 +5625,6 @@ module Capybara
             @runtime.call('__csim_swDeliverClientMessage', e[:data], e[:handle])
           elsif @runtime.frame_realm_alive?(rid)
             @runtime.realm_call(rid, '__csim_swDeliverClientMessage', e[:data], e[:handle])
-          end
-        end
-        # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
-        # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
-        # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
-        # registration must be installed before the shallower one runs, or a client the shallow claim
-        # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
-        # page would double-fire). A claim whose scope isn't mirrored into @sw_registrations yet — the
-        # worker fires activate→claim() decoupled from the CLIENT-side lifecycle that populates it — is
-        # BUFFERED and flushed by sw_register_scope, so an `activate → clients.claim()` isn't lost.
-        claims.map {|e| [e, @sw_registrations.key(e[:handle].to_i)] }
-              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
-              .each do |e, scope|
-          if scope
-            broadcast_claim(e[:handle], e[:has_fetch], scope)
-          else
-            @sw_pending_claims << e
           end
         end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
@@ -5907,7 +5952,10 @@ module Capybara
         # never drain its inbox, so pushing would leak. Counted in a dedicated pending tally so `settle`
         # waits until the worker acks the delivery (a `bcack`).
         @workers.each do |h, w|
-          next if h == from_worker || !w[:thread].alive?
+          # A nil thread is a worker still SPAWNING (worker_spawn registers the record just
+          # before Thread.new): its inbox exists and the thread will drain it — deliver.
+          thread = w[:thread]
+          next if h == from_worker || (thread && !thread.alive?)
           @worker_broadcast_pending += 1
           w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
         end
@@ -6550,9 +6598,12 @@ module Capybara
       def reset_workers
         @workers.each_value do |w|
           w[:inbox] << :terminate
-          w[:thread].kill
+          w[:thread]&.kill
         end
         @workers.clear
+        # The parked-activation latch goes with the realms (reset rebuilds them): leaving it
+        # set would make every later SW message drain broadcast a try-activate forever.
+        @sw_activation_parked = false
         @worker_outbox.clear
         @worker_outbox_head       = nil
         @worker_in_flight         = 0
@@ -6969,8 +7020,15 @@ module Capybara
           # comes back on this worker's inbox keyed by nav_id.
           navigate_client: ->(client_id, url, nav_id) { outbox << {handle: handle, kind: 'sw_client_navigate', client: client_id, url: url.to_s, nav_id: nav_id.to_i} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
-          # skipWaiting() — the waiting slot is client-side, so the request rides the outbox.
-          skip_waiting:   ->                  { outbox << {handle: handle, kind: 'sw_skip_waiting'} },
+          # skipWaiting() — record the flag HERE, on the worker's own thread, before the
+          # broadcast is even queued: the activation gate (sw_may_activate?) reads it from the
+          # worker record, so a broadcast consumed before the registering realm built its
+          # worker objects can no longer lose it (the skip-waiting.https TIMEOUT flake). The
+          # outbox event's only remaining job is resuming a parked activation.
+          skip_waiting:   ->                  {
+            (wk = @workers[handle]) && wk[:skip_waiting] = true
+            outbox << {handle: handle, kind: 'sw_skip_waiting'}
+          },
           # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
           # while any are pending an installed successor keeps waiting (activation.https),
           # and the 0-transition re-runs try-activate to release it.
@@ -7199,8 +7257,26 @@ module Capybara
                 rt.drain_microtasks
               ensure
                 # The message is dispatched — it no longer extends this worker's
-                # lifetime (the counter service_worker_post_message bumped).
-                (wk = @workers[handle]) && wk[:sw_msgs] = [0, wk[:sw_msgs].to_i - 1].max
+                # lifetime (the counter service_worker_post_message bumped). If that
+                # was the LAST hold — no unsettled waitUntil either — post a
+                # try-activate of our own: the extended hook's 0-transition fires
+                # INSIDE the rt.call above (the engine runs a microtask checkpoint at
+                # the call boundary), so its try_activate can be consumed by the main
+                # thread while this counter still reads 1; without a wakeup issued
+                # AFTER the decrement, that release is lost and a parked activation
+                # hangs (activation.https 'finishing a request…' TIMEOUT). Every
+                # hold-clearing transition posts its own try_activate — this one, the
+                # extended 0-transition, unregister_client, skipWaiting, reap_worker —
+                # so the gate's cross-thread reads only ever miss a wakeup that a later
+                # one repeats. Locked against the main thread's increment (a lost
+                # increment would read as "no holds" with a message still queued).
+                if (wk = @workers[handle])
+                  none_left = @worker_init_lock.synchronize {
+                    wk[:sw_msgs] = [0, wk[:sw_msgs].to_i - 1].max
+                    !wk[:extended] && wk[:sw_msgs].zero?
+                  }
+                  outbox << {handle: handle, kind: 'sw_try_activate'} if none_left
+                end
                 outbox << {handle: handle, kind: 'swack'}
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
