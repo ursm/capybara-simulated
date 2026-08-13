@@ -1787,16 +1787,12 @@ service-workers/service-worker/client-url-of-blob-url-worker.https.html:
 - Client.url of a blob URL worker should be a blob URL.
 service-workers/service-worker/clients-get-client-types.https.html:
 - Test Clients.get() with window and worker clients
-service-workers/service-worker/clients-get-cross-origin.https.html:
-- Test Clients.get() cross origin
 service-workers/service-worker/clients-get-resultingClientId.https.html:
 - get(resultingClientId) for document sandboxed by CSP header
 - get(resultingClientId) for document sandboxed by CSP header with allow-same-origin
 - get(resultingClientId) for same-origin document
 - get(resultingClientId) on cross-origin redirect
 - global cleanup
-service-workers/service-worker/clients-get.https.html:
-- Test unsuccessful Clients.get(FetchEvent.resultingClientId)
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
 service-workers/service-worker/clients-matchall-order.https.html:
@@ -2110,49 +2106,6 @@ service-workers/service-worker/navigation-preload/resource-timing.https.html:
 - Navigation Preload Resource Timing.
 service-workers/service-worker/navigation-preload/samesite-iframe.https.html:
 - Navigation Preload for same site iframe
-service-workers/service-worker/navigation-redirect.https.html:
-- No location redirect response via Cache.
-- No location redirect response.
-- Normal redirect to other-origin scope.
-- Normal redirect to same-origin scope with a hash fragment.
-- Normal redirect to same-origin scope with different hash fragments.
-- Normal redirect to same-origin scope.
-- Redirect to other-origin in-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to other-origin in-scope with opaque redirect response.
-- Redirect to other-origin out-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to other-origin out-scope with opaque redirect response.
-- Redirect to same-origin other-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin other-scope with opaque redirect response.
-- Redirect to same-origin out-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin out-scope with opaque redirect response.
-- Redirect to same-origin same-scope with opaque redirect response which is passed
-  through Cache.
-- Redirect to same-origin same-scope with opaque redirect response.
-- SW-fallbacked redirect to other-origin and back to same-origin.
-- SW-fallbacked redirect to other-origin in-scope.
-- SW-fallbacked redirect to other-origin out-scope.
-- SW-fallbacked redirect to same-origin other-scope.
-- SW-fallbacked redirect to same-origin out-scope.
-- SW-fallbacked redirect to same-origin same-scope with a hash fragment.
-- SW-fallbacked redirect to same-origin same-scope with different hash fragments.
-- SW-fallbacked redirect to same-origin same-scope.
-- SW-fetched redirect to other-origin in-scope.
-- SW-fetched redirect to other-origin out-scope.
-- SW-fetched redirect to same-origin other-scope.
-- SW-fetched redirect to same-origin out-scope.
-- SW-fetched redirect to same-origin same-scope.
-- SW-fetched response from different URL, same-origin same-scope.
-- SW-generated redirect to other-origin in-scope.
-- SW-generated redirect to other-origin out-scope.
-- SW-generated redirect to same-origin other-scope.
-- SW-generated redirect to same-origin out-scope with a hash fragment.
-- SW-generated redirect to same-origin out-scope with different hash fragments.
-- SW-generated redirect to same-origin out-scope.
-- SW-generated redirect to same-origin same-scope.
 service-workers/service-worker/navigation-timing-extended.https.html:
 - Service worker controlled navigation timing
 service-workers/service-worker/navigation-timing-sizes.https.html:
