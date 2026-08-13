@@ -1719,18 +1719,7 @@ service-workers/service-worker/ServiceWorkerGlobalScope/close.https.html:
 - ServiceWorkerGlobalScope close operation
 service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
 - Verify error event is received
-service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event-constructor.https.html:
-- "`bubbles` is specified"
-- "`cancelable` is specified"
-- "`data` is specified"
-- "`lastEventId` is specified"
-- "`origin` is specified"
-- "`ports` is specified"
-- "`source` is specified"
-- all initial values are specified
-- no initializer specified
 service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
-- Post an extendable message from a nested client
 - Post an extendable message from a top-level client
 - Post extendable messages among service workers
 - Post loopback extendable messages
@@ -1787,12 +1776,6 @@ service-workers/service-worker/client-url-of-blob-url-worker.https.html:
 - Client.url of a blob URL worker should be a blob URL.
 service-workers/service-worker/clients-get-client-types.https.html:
 - Test Clients.get() with window and worker clients
-service-workers/service-worker/clients-get-resultingClientId.https.html:
-- get(resultingClientId) for document sandboxed by CSP header
-- get(resultingClientId) for document sandboxed by CSP header with allow-same-origin
-- get(resultingClientId) for same-origin document
-- get(resultingClientId) on cross-origin redirect
-- global cleanup
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
 service-workers/service-worker/clients-matchall-order.https.html:
@@ -1838,28 +1821,12 @@ service-workers/service-worker/embed-and-object-are-not-intercepted.https.html:
 service-workers/service-worker/extendable-event-async-waituntil.https.html:
 - Test calling waitUntil after the current extension expired in a different task fails
 - Test calling waitUntil asynchronously inside microtask of respondWith promise (event
-  is being dispatched).
-- Test calling waitUntil asynchronously inside microtask of respondWith promise (event
   is not being dispatched).
-- Test calling waitUntil asynchronously with pending respondWith promise.
-- Test calling waitUntil at the end of an existing extension promise handler succeeds
-  (event is still being dispatched)
-- Test calling waitUntil in a different task an existing extension succeeds
-- Test calling waitUntil in a microtask at the end of an existing extension promise
-  handler succeeds (event is still being dispatched)
 - Test calling waitUntil in a microtask at the end of an existing extension promise
   handler throws (event is not being dispatched)
-- Test calling waitUntil in a microtask at the end of the event handler without an
-  existing extension suceeds
 - Test calling waitUntil in a task at the end of the event handler without an existing
   extension throws
-- Test calling waitUntil in an existing extension promise handler succeeds (event
-  is not being dispatched)
 - Test calling waitUntil on a script constructed ExtendableEvent throws exception
-- Test calling waitUntil synchronously inside microtask of respondWith promise (event
-  is being dispatched).
-- Test calling waitUntil synchronously inside microtask of respondWith promise (event
-  is not being dispatched).
 service-workers/service-worker/extendable-event-waituntil.https.html:
 - Test ExtendableEvent waitUntil reject precedence.
 - Test activate event waitUntil fulfilled
