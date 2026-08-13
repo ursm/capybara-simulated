@@ -4463,6 +4463,13 @@ module Capybara
       # install-time fetch-listener snapshot, so a claimed client routes its fetches.
       private def broadcast_claim(handle, has_fetch, scope)
         script_url = @workers.dig(handle.to_i, :script_url).to_s
+        # The claim IS the controller assignment: record it host-side for every client
+        # whose MATCHED registration is this scope, so the activation gate
+        # (sw_worker_controls_clients?) and matchAll never depend on the realm
+        # re-report round trip that can race a load-time report (activation.https).
+        @sw_clients.each do |_id, entry|
+          entry[:handle] = handle.to_i if sw_scope_match(entry[:rec]['url'])&.last == scope
+        end
         # The authoritative registration scope set — the claim's longest-registration-wins check runs
         # against this, not a realm-local map that can lag under load (claim-not-using-registration).
         all_scopes = @sw_registrations.keys
@@ -4782,6 +4789,15 @@ module Capybara
       private def note_client(client_id, url, type, frame_type, controller_handle)
         ctrl = controller_handle.to_i
         ctrl = nil if ctrl.zero?
+        # Within one document a controller is only ever GAINED (a claim / register
+        # install) — never detached. A SAME-URL re-report carrying none is therefore a
+        # stale racer (a load-time report overtaking the claim's install — the
+        # activation.https flake), not a real loss: keep the recorded controller while
+        # its worker lives. A NAVIGATED report (different URL) resets as before.
+        if ctrl.nil? && (prev = @sw_clients[client_id]) && prev[:handle] &&
+           prev[:rec]['url'] == url.to_s && @workers.dig(prev[:handle], :thread)&.alive?
+          ctrl = prev[:handle]
+        end
         rec  = {'id' => client_id, 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
         @sw_clients[client_id] = {handle: ctrl, rec: rec}
         focused = focused_client_ids
