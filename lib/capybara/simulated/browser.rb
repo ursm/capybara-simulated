@@ -6455,6 +6455,16 @@ module Capybara
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval("globalThis.__csimWorkerHandle = #{handle.to_i};")
+        # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
+        # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
+        # the SAME id as this isolate's client identity (clientId() prefers __csimClientId), so
+        # a worker's own `ServiceWorker.postMessage` names itself correctly as the source and an
+        # SW's `client.postMessage` reply routes back to THIS isolate (sw_client_worker) instead
+        # of falling back to 'client-window' → the main realm. (Subresource interception FROM a
+        # worker isolate would also want this id, but no controller is ever installed into a
+        # worker isolate today — that's the controlled-worker follow-up, not this line.)
+        # A SERVICE worker is not a client.
+        rt.eval("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
