@@ -150,6 +150,15 @@ module Capybara
         # navigator.serviceWorker.register (universal-server only) — spawn a worker
         # running the SW script as an executor context. Returns its handle.
         '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2]) },
+        # Registration update surface: the updateViaCache mode is REGISTRATION-wide state
+        # (scope-keyed, host-owned — a frame's registration object must see the mode the
+        # top window set), and __csim_swUpdateFetch is the Update algorithm's fetch +
+        # byte-check (sw_registration_update_fetch).
+        '__csim_swSetUpdateViaCache'   => ->(b, *a) { b.sw_set_update_via_cache(a[0], a[1]) },
+        '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0]) },
+        '__csim_swUpdateFetch'         => ->(b, *a) { b.sw_registration_update_fetch(a[0], a[1], a[2].to_i, a[3]) },
+        '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
+        '__csim_swDropPendingScript'   => ->(b, *a) { b.sw_drop_pending_script(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },

@@ -421,6 +421,13 @@ module Capybara
         # is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off the general outbox)
         # keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with client-fetch replies.
         @sw_registrations = {}
+        # Per-registration UPDATE state, scope-href-keyed (registration-wide, so a frame's
+        # registration object sees the mode the top window set): `uvc` = the registration's
+        # updateViaCache mode, `pending_body` = the bytes the Update algorithm just fetched
+        # and byte-checked, consumed by the next service worker_spawn at this scope (the new
+        # version must run EXACTLY those bytes, not a re-fetch that could hit the HTTP cache
+        # or a newer server response).
+        @sw_scope_meta    = {}
         # Navigation Preload state, per active-worker HANDLE (the registration's active worker — the
         # client's `registration.active._handle` and the worker's own `__csimWorkerHandle` are the
         # same id, so both isolates key here identically). {enabled:, header:}; absent → the spec
@@ -3999,7 +4006,13 @@ module Capybara
         # blob registry; calling into the main runtime from a
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound; quickjs.rb's VM is similarly per-thread).
-        body = sw_script ? nil : fetch_worker_script(target)
+        # A registration UPDATE parked the bytes it fetched and byte-checked
+        # (sw_registration_update_fetch) — the new version runs exactly those.
+        body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
+          pending
+        elsif !sw_script
+          fetch_worker_script(target)
+        end
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
         return worker_fail(handle, 'Worker script could not be loaded') if target.start_with?('blob:') && body.to_s.empty?
@@ -4029,7 +4042,10 @@ module Capybara
             module_worker: script_type.to_s == 'module',
             # The creating context's client id — the worker MAIN-SCRIPT fetch's clientId
             # (the PARENT WORKER's own client id for a nested spawn).
-            creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i)
+            creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i),
+            # The registration's updateViaCache mode — a SERVICE worker's importScripts
+            # reads it ('none' bypasses the HTTP cache).
+            sw_uvc: service ? sw_scope_update_via_cache(sw_scope) : nil
           )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
@@ -4038,6 +4054,10 @@ module Capybara
         # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
         # it and is terminated when it is discarded (terminate_realm_workers).
         @workers[handle] = {thread: thread, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker}
+        # The Update algorithm byte-checks a new fetch against the running version's
+        # script (+ its recorded imports — sw_note_import fills that map as the worker
+        # evaluates). SW scripts are small; only service workers pay the retention.
+        @workers[handle][:script_body] = body if service
         # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
         # frameType 'none' — whether or not a service worker's scope covers its script; only the
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
@@ -4458,7 +4478,110 @@ module Capybara
 
       def sw_unregister_scope(scope)
         @sw_registrations.delete(scope.to_s)
+        @sw_scope_meta.delete(scope.to_s)
         nil
+      end
+
+      # ── Registration update (registration.update() / re-register with a changed
+      # updateViaCache) ──
+
+      # The registration's updateViaCache mode, or nil when the scope holds none (never
+      # set, or unregistered — the CLIENT defaults to 'imports' and keeps its last echo
+      # on a dead registration, so the host must not synthesize a default here).
+      def sw_scope_update_via_cache(scope) = @sw_scope_meta.dig(scope.to_s, :uvc)
+
+      # Set at register()/update() time from the client realm (the Register job sets the
+      # mode BEFORE the Update algorithm runs — its cache decisions below read it).
+      def sw_set_update_via_cache(scope, uvc)
+        (@sw_scope_meta[scope.to_s] ||= {})[:uvc] = uvc.to_s
+        nil
+      end
+
+      # A client-side rejection AFTER the update fetch (the classic parse check) drops
+      # the parked bytes — nothing may spawn from a version that was refused.
+      def sw_drop_pending_script(scope)
+        @sw_scope_meta[scope.to_s]&.delete(:pending_body)
+        nil
+      end
+
+      # A SERVICE worker's importScripts, recorded on its worker registry entry
+      # (URL → bytes) so the Update algorithm can byte-check the imports when the main
+      # script came back identical. Called from the WORKER's thread (host fns run on
+      # their caller) — the same cross-thread registry-write pattern the SW hooks use.
+      def sw_note_import(handle, url, body)
+        (w = @workers[handle.to_i]) && (w[:sw_imports] ||= {})[url.to_s] = body.to_s
+        nil
+      end
+
+      # The Update algorithm's fetch + byte-check ("Soft Update" core): re-fetch the MAIN
+      # script — through the HTTP cache only in 'all' mode, else revalidating (no-cache) —
+      # and, when it comes back byte-identical, each recorded IMPORTED script ('none'
+      # bypasses the cache; 'imports'/'all' read it). ANY difference ⇒ a new version
+      # installs; the fetched main bytes are parked for its spawn. Failure classes map to
+      # update()'s rejections: 'redirect' (a SW script fetch must not redirect) and
+      # 'network' are TypeErrors, 'mime' a SecurityError.
+      # `uvc_override` carries a register() call's OWN mode before it is committed — a
+      # failing register must leave the stored mode untouched ("updateViaCache is not
+      # updated if register() rejects"), so the fetch reads the override, and the client
+      # stores it only once the pipeline succeeded.
+      def sw_registration_update_fetch(scope, script_url, newest_handle, uvc_override = nil)
+        uvc = uvc_override || sw_scope_update_via_cache(scope) || 'imports'
+        # The MAIN script request carries `Service-Worker: script` (Update algorithm —
+        # servers gate SW scripts on it); imported scripts must NOT (service-worker-header).
+        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', cache_mode: uvc == 'all' ? 'default' : 'no-cache')
+        return {'error' => 'network'} unless res
+        return {'error' => 'redirect'} if res['redirect_loc'] || res['redirect_status']
+        return {'error' => 'network'} unless (200..299).cover?(res['status'].to_i)
+        ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+        return {'error' => 'mime'} unless js_mime_type?(ct)
+
+        w       = @workers[newest_handle.to_i]
+        body    = res['body'].to_s
+        changed = w.nil? || body.b != w[:script_body].to_s.b
+        unless changed
+          import_mode = uvc == 'none' ? 'no-cache' : 'default'
+          (w[:sw_imports] || {}).each do |u, b|
+            r2 = rack_fetch('GET', u, '', {}, 'follow', cache_mode: import_mode)
+            nb = r2 && (200..299).cover?(r2['status'].to_i) ? r2['body'].to_s : nil
+            # A FAILING import re-fetch is "no change" for that import (update-import-
+            # scripts "treat 404 on imported scripts as no change") — the update must
+            # not install a broken version off a transient import failure.
+            next if nb.nil? || nb.b == b.b
+
+            changed = true
+            break
+          end
+        end
+        (@sw_scope_meta[scope.to_s] ||= {})[:pending_body] = body if changed
+        # The body rides back only for the client's parse check (a script that doesn't
+        # compile must reject update() before any new version appears).
+        {'changed' => changed, 'body' => changed ? RuntimeShared.utf8_text(body.dup) : nil}
+      end
+
+      # The JavaScript MIME type essences ("fetch a classic worker script" requires one;
+      # a service worker script with any other Content-Type fails with a SecurityError).
+      JS_MIME_ESSENCES = %w[
+        application/ecmascript
+        application/javascript
+        application/x-ecmascript
+        application/x-javascript
+        text/ecmascript
+        text/javascript
+        text/javascript1.0
+        text/javascript1.1
+        text/javascript1.2
+        text/javascript1.3
+        text/javascript1.4
+        text/javascript1.5
+        text/jscript
+        text/livescript
+        text/x-ecmascript
+        text/x-javascript
+      ].freeze
+      private_constant :JS_MIME_ESSENCES
+
+      private def js_mime_type?(content_type)
+        JS_MIME_ESSENCES.include?(content_type.to_s.split(';', 2).first.to_s.strip.downcase)
       end
 
       # The registration handle controlling `url` — the one whose serialized scope is the longest
@@ -6363,6 +6486,7 @@ module Capybara
         @sw_fetch_wait_deadline   = nil
         @sw_msg_wait_deadline     = nil
         @sw_registrations.clear
+        @sw_scope_meta       = {}
         @sw_navpreload       = {}
         @sw_pending_claims   = []
         @sw_clients          = {}
@@ -6722,7 +6846,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6839,6 +6963,9 @@ module Capybara
         # per-registration cache name, must not collide).
         if service
           rt.eval("globalThis.__csimSwScope = #{JSON.generate(sw_scope.to_s)};") unless sw_scope.to_s.empty?
+          # The registration's updateViaCache mode — importScripts' cache decision
+          # ('none' revalidates every import; 'imports'/'all' read the HTTP cache).
+          rt.eval("globalThis.__csimSwUvc = #{JSON.generate(sw_uvc)};") if sw_uvc
           rt.eval('__csim_installServiceWorkerScope();')
         end
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a

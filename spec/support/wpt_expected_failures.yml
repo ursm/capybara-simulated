@@ -1777,8 +1777,6 @@ service-workers/service-worker/controlled-iframe-postMessage.https.html:
 - Verify frame does get messages in order
 - Verify frame gets early messages if setting synchronously message event listener
 service-workers/service-worker/credentials.https.html:
-- Imported script should have credentials
-- Main script should have credentials
 - Module with an imported statement should not have credentials
 - Script with service worker served as modules should not have credentials
 service-workers/service-worker/data-iframe.html:
@@ -2035,8 +2033,6 @@ service-workers/service-worker/multipart-image.https.html:
 - cross-origin multipart image via SW with approved CORS should be readable
 - cross-origin multipart image with no-cors via SW should not be readable
 - same-origin multipart image via SW should be readable
-service-workers/service-worker/multiple-update.https.html:
-- Trigger multiple updates.
 service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
@@ -2125,22 +2121,16 @@ service-workers/service-worker/register-default-scope.https.html:
 - null scope
 service-workers/service-worker/register-same-scope-different-script-url.https.html:
 - Register different scripts concurrently
-- Register then register new script URL that 404s
 - Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
 - register worker that calls waitUntil with a promise that never resolves in oninstall
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
-- register method should use the "relevant global object" to parse its scriptURL and
-  scope - error case
 service-workers/service-worker/registration-mime-types.https.html:
 - Registering script that imports script with bad MIME type
 - Registering script that imports script with no MIME type
-- Registering script with bad MIME type
-- Registering script with no MIME type
 service-workers/service-worker/registration-schedule-job.https.html:
 - different type
-- different updateViaCache
 service-workers/service-worker/registration-scope-module-static-import.https.html:
 - imported-module-script.js works when used as top-level
 - static imports redirecting to outside path restriction should be allowed
@@ -2148,7 +2138,6 @@ service-workers/service-worker/registration-scope-module-static-import.https.htm
 service-workers/service-worker/registration-script-module.https.html:
 - Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
-- Registering non-existent script
 - Registering script including parse error
 - 'Registering script including uncaught exception: module'
 - 'Registering script including undefined error: module'
@@ -2158,10 +2147,8 @@ service-workers/service-worker/registration-script-module.https.html:
 service-workers/service-worker/registration-script.https.html:
 - Registering invalid chunked encoding script
 - Registering invalid chunked encoding script with flush
-- Registering non-existent script
 - Registering script importing malformed script
 - Registering script importing non-existent script
-- Registering script including parse error
 - 'Registering script including uncaught exception: classic'
 - 'Registering script including undefined error: classic'
 service-workers/service-worker/registration-security-error.https.html:
@@ -2170,32 +2157,6 @@ service-workers/service-worker/registration-security-error.https.html:
 - Registration scope outside the script directory
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
-service-workers/service-worker/registration-updateviacache.https.html:
-- access-updateViaCache-after-unregister-all
-- access-updateViaCache-after-unregister-imports
-- access-updateViaCache-after-unregister-none
-- access-updateViaCache-after-unregister-undefined
-- register-with-updateViaCache-all
-- register-with-updateViaCache-all-then-all
-- register-with-updateViaCache-all-then-imports
-- register-with-updateViaCache-all-then-none
-- register-with-updateViaCache-all-then-undefined
-- register-with-updateViaCache-imports
-- register-with-updateViaCache-imports-then-all
-- register-with-updateViaCache-imports-then-imports
-- register-with-updateViaCache-imports-then-none
-- register-with-updateViaCache-imports-then-undefined
-- register-with-updateViaCache-none
-- register-with-updateViaCache-none-then-all
-- register-with-updateViaCache-none-then-imports
-- register-with-updateViaCache-none-then-none
-- register-with-updateViaCache-none-then-undefined
-- register-with-updateViaCache-undefined
-- register-with-updateViaCache-undefined-then-all
-- register-with-updateViaCache-undefined-then-imports
-- register-with-updateViaCache-undefined-then-none
-- register-with-updateViaCache-undefined-then-undefined
-- updateViaCache is not updated if register() rejects
 service-workers/service-worker/resource-timing-bodySize.https.html:
 - 'Response body size: constructed, cors, TAO fail'
 - 'Response body size: constructed, cors, TAO pass'
@@ -2420,12 +2381,7 @@ service-workers/service-worker/update-import-scripts.https.html:
 - update() should fail when a new worker imports an unavailable script.
 - update() should find an update in an imported script but update() should result
   in failure due to missing the other imported script.
-- update() should succeed when the old imported script no longer exist but the new
-  worker doesn't import it.
-- update() should treat 404 on imported scripts as no change.
 - update() should work with cross-origin importScripts.
-service-workers/service-worker/update-missing-import-scripts.https.html:
-- Update service worker with new script that's missing importScripts()
 service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
 service-workers/service-worker/update-no-cache-request-headers.https.html:
@@ -2450,14 +2406,6 @@ service-workers/service-worker/update-registration-with-type.https.html:
 - Update the registration with a different script type (module => classic) and with
   a same main script. Expect evaluation failed.
 - Update the registration with a different script type (module => classic).
-service-workers/service-worker/update.https.html:
-- update() should fail when a new script contains a syntax error.
-- update() should fail when a response for the main script is redirect.
-- update() should fail when mime type is invalid.
-- update() should fail when the pending uninstall flag is set.
-- update() should resolve when the install event throws.
-- update() should succeed when new script is available.
-- update() should succeed when the script shrinks.
 service-workers/service-worker/websocket-in-service-worker.https.html:
 - Verify WebSockets can be created in a Service Worker
 service-workers/service-worker/websocket.https.html:
