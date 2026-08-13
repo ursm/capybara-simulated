@@ -446,7 +446,7 @@ module Capybara
         @sw_client_aliases = {}   # adopted client id → realm id
         @sw_realm_aliases  = {}   # realm id → adopted client id
         # Direct fetch-reply channels for a CONTROLLED WORKER's main-script fetch
-        # (sw_worker_script_fetch): [sw handle, fetch id] → Queue. The reply bypasses the
+        # (worker_main_script_fetch): [sw handle, fetch id] → Queue. The reply bypasses the
         # outbox→main-thread route (the spawning worker's thread parks on the queue), so
         # sw_deliver_fetch_response checks here first. Ids start far above any per-realm
         # fetchSeq so they can never collide with a page fetch on the same worker.
@@ -3954,7 +3954,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -4024,6 +4024,9 @@ module Capybara
             sw_scope:    sw_scope,
             controller:  ctrl,
             sw_script:   sw_script,
+            # `new Worker(url, {type: 'module'})` — the observable module/classic split
+            # (importScripts is classic-only) rides into the isolate as a flag.
+            module_worker: script_type.to_s == 'module',
             # The creating context's client id — the worker MAIN-SCRIPT fetch's clientId
             # (the PARENT WORKER's own client id for a nested spawn).
             creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i)
@@ -4090,9 +4093,11 @@ module Capybara
       # route entirely (@sw_direct_replies, filled by sw_deliver_fetch_response), so delivery
       # needs no main-thread drain — and no @sw_fetch_pending accounting (nothing on the main
       # thread waits on it; @worker_initializing already holds worker_pending? true).
-      # Returns the script body (binary-tagged), or nil (fall-through / network error /
-      # no answer) — the caller falls back to the network fetch.
-      def sw_worker_script_fetch(sw_handle, url, client_handle, shared: false, creator_client: nil)
+      # Returns {body:, url:, controller:} — see worker_main_script_fetch below.
+      # One main-script fetch event dispatched to `sw_handle` — the raw wire hash, or nil
+      # when the SW never answered within budget (treated as fall-through). Validation and
+      # the redirect chain live in worker_main_script_fetch.
+      private def sw_script_fetch_event(sw_handle, url, client_handle, shared:, creator_client:)
         req = JSON.generate(
           method:      'GET',
           url:         url.to_s,
@@ -4108,18 +4113,88 @@ module Capybara
           clientId:    creator_client || sw_worker_client_id(client_handle),
           resultingClientId: sw_worker_client_id(client_handle)
         )
-        r = sw_direct_fetch(sw_handle, req, client_handle) or return nil
-        return nil if r['fallthrough']
-        # A network-error respondWith FAILS the worker start (like the type validation
-        # below) — it must not fall back to the network.
-        return :error if r['networkError']
-        # Handle Fetch response validation for a 'same-origin'-mode request: a SW handing
-        # back a cors / opaque(redirect) response is a NETWORK ERROR — the worker must
-        # FAIL TO START (worker-interception "cors/no-cors … fails worker start"), never
-        # fall through to the network. :error tells the caller to fail the spawn.
-        return :error if %w[cors opaque opaqueredirect].include?(r['type'].to_s)
+        sw_direct_fetch(sw_handle, req, client_handle)
+      end
 
-        Base64.decode64(r['body_b64'].to_s)
+      # A controlled worker's MAIN SCRIPT fetch, following the redirect chain the way
+      # Fetch does for a worker script request (mode 'same-origin', redirect 'follow').
+      # Each hop is re-matched against the registrations and dispatched to that scope's
+      # SW — an SW-provided redirect re-enters interception (HTTP-redirect fetch re-runs
+      # main fetch; worker-interception-redirect Case #3) — EXCEPT once a hop fell back
+      # to the network: from then on no SW sees the chain (Handle Fetch sets the
+      # request's service-workers mode to 'none'; Cases #1/#2).
+      #
+      # Returns {body:, url:, controller:}:
+      #   `url`        — the FINAL RESPONSE URL, which becomes the worker's self.location
+      #                  and the base its importScripts()/fetch() resolve against (a SW
+      #                  respondWith(fetch(elsewhere)) moves it — Case #3's subdir).
+      #   `controller` — the SW that got the LAST fetch event; it controls the worker
+      #                  even when the final URL left every scope (the spec's "final
+      #                  service worker that got a fetch event"), or nil (all-network).
+      # Returns nil when the final response is an HTTP error (the worker fails to load),
+      # or :error when the load is BLOCKED (network-error respondWith, a response type
+      # same-origin mode forbids, a cross-origin / non-http Location, a redirect loop) —
+      # it must fail the worker start, never fall back to the network.
+      def worker_main_script_fetch(sw_handle, url, client_handle, shared: false, creator_client: nil)
+        current    = url.to_s
+        sw         = sw_handle.to_i
+        sw_allowed = true
+        last_sw    = nil
+        hops       = 0
+        loop do
+          # Attempts = redirects + 1, so exactly MAX_FETCH_REDIRECTS follows succeed
+          # (the same accounting rack_fetch documents at its own loop).
+          return :error if (hops += 1) > MAX_FETCH_REDIRECTS + 1
+          sw = sw_controller_for_navigation(current) if hops > 1 && sw_allowed
+          if sw_allowed && sw
+            last_sw = sw
+            r = sw_script_fetch_event(sw, current, client_handle, shared:, creator_client:)
+            if r && !r['fallthrough']
+              # Handle Fetch response validation for a 'same-origin'-mode request: a
+              # network-error respondWith, or a cors / opaque(redirect) response, is a
+              # NETWORK ERROR — the worker must FAIL TO START (worker-interception
+              # "cors/no-cors … fails worker start").
+              return :error if r['networkError'] || %w[cors opaque opaqueredirect].include?(r['type'].to_s)
+              status = r['status'].to_i
+              if REDIRECT_STATUSES.include?(status) && (loc = redirect_location(status, r['headers'] || {}))
+                current = resolve_against(loc, r['url'].to_s.empty? ? current : r['url'])
+                return :error unless same_origin_script_hop?(current, url)
+                next
+              end
+              # "Fetch a classic worker script" requires an OK status whoever produced the
+              # response — an SW respondWith'ing its 404 page must fail the load (a clean
+              # `error` event), not start a worker that evals HTML. A redirect status
+              # WITHOUT a Location lands here too, and 3xx is not ok.
+              return nil unless (200..299).cover?(status)
+              return {
+                body:       Base64.decode64(r['body_b64'].to_s),
+                url:        r['url'].to_s.empty? ? current : r['url'],
+                controller: last_sw
+              }
+            end
+            # No respondWith (or no answer): fall back to the network for THIS hop.
+          end
+          res = rack_fetch('GET', current, '', {}, 'manual') or return :error
+          if (loc = res['redirect_loc'])
+            # A redirect received FROM THE NETWORK: no SW intercepts it or any later hop.
+            sw_allowed = false
+            current    = loc
+            return :error unless same_origin_script_hop?(current, url)
+            next
+          end
+          # 'manual' wraps every 3xx as an opaqueredirect (status 0): one WITHOUT a
+          # Location carries `redirect_status` but no `redirect_loc` — not ok, load fails
+          # (never start a worker on the empty filtered body). Everything else needs the
+          # same OK status the SW branch enforces.
+          return nil if res['redirect_status'] || !(200..299).cover?(res['status'].to_i)
+          return {body: res['body'].to_s, url: current, controller: last_sw}
+        end
+      end
+
+      # A worker-script redirect hop must stay http(s) and same-origin (the request's
+      # mode is 'same-origin'); anything else is a network error for the chain.
+      private def same_origin_script_hop?(next_url, original_url)
+        next_url.to_s.match?(%r{\Ahttps?://}i) && url_origin(next_url) == url_origin(original_url.to_s)
       end
 
       # A controlled worker's `importScripts(url)`, routed through its SW's fetch event —
@@ -4225,7 +4300,7 @@ module Capybara
       # a client fetch (positive id) rides the outbox as before, tagged with the originating realm.
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
         # A DIRECT reply channel (a controlled worker's main-script fetch, parked on its own
-        # thread — sw_worker_script_fetch): hand the reply straight to that queue, bypassing
+        # thread — sw_direct_fetch): hand the reply straight to that queue, bypassing
         # the outbox→main-thread drain the parked thread can't participate in.
         if (dq = @sw_direct_lock.synchronize { @sw_direct_replies.delete([handle.to_i, fetch_id.to_i]) })
           dq << resp
@@ -5340,7 +5415,22 @@ module Capybara
         nested.group_by {|e| @workers.dig(e[:handle].to_i, :parent_worker) }.each do |pw, evs|
           @workers.dig(pw, :inbox)&.push({kind: 'nested_worker_msgs', events: evs})
         end
-        @runtime.call('__csim_deliverWorkerMessages', direct) unless direct.empty?
+        # Each worker→parent message fires from its OWN task, with a microtask
+        # checkpoint between (HTML: the message event is fired from a queued task).
+        # The awaited-receive pattern — resolve a promise, re-assign onmessage in the
+        # continuation — depends on that checkpoint running between two messages;
+        # dispatching a batch in one call fires the second message before the
+        # continuation re-attached the handler and silently drops it. The common
+        # single-message delivery keeps its one-call shape (the drain that follows
+        # this method covers its checkpoint).
+        if direct.size == 1
+          @runtime.call('__csim_deliverWorkerMessages', direct)
+        else
+          direct.each do |e|
+            @runtime.call('__csim_deliverWorkerMessages', [e])
+            @runtime.drain_microtasks
+          end
+        end
         events.size
       end
 
@@ -6618,7 +6708,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6698,6 +6788,10 @@ module Capybara
         rt.eval("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
         # The worker KIND, for the global-scope brand checks (workers.js Symbol.hasInstance).
         rt.eval("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
+        # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
+        # (importScripts throws a TypeError). The script itself still evaluates on the
+        # classic path — real module-graph loading for workers is the ESM follow-up.
+        rt.eval('globalThis.__csimWorkerModule = true;') if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
@@ -6740,17 +6834,38 @@ module Capybara
           rt.call('__csim_swNoteFocusedClient', seed[:focused]) if seed[:focused].any?
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
-        # script URL): fetch it through that SW's fetch event NOW, on this worker's own thread
-        # (sw_worker_script_fetch). A fall-through / network-error / unanswered fetch falls
-        # back to the plain network fetch, what an uncontrolled spawn would have done.
+        # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
+        # (worker_main_script_fetch) — per-hop interception, network fall-back included.
         if body.nil? && sw_script
-          fetched = sw_worker_script_fetch(sw_script, url, handle, shared: shared, creator_client: creator_client)
+          fetched = worker_main_script_fetch(sw_script, url, handle, shared: shared, creator_client: creator_client)
           raise "worker script blocked: #{url}" if fetched == :error
+          raise "worker script not found: #{url}" unless fetched
 
-          body = fetched || fetch_worker_script(url)
-          raise "worker script not found: #{url}" unless body
-
-          body = RuntimeShared.utf8_text(body)
+          body = RuntimeShared.utf8_text(fetched[:body])
+          # Across a redirect chain the worker's identity moves: its location becomes the
+          # FINAL RESPONSE URL (the base importScripts()/fetch() resolve against), and its
+          # controller the SW that saw the LAST fetch event — which can differ from the
+          # spawn-time scope match on the REQUEST URL (worker-interception-redirect: a
+          # scope1 request network-redirected to scope2 stays controlled by sw1; an
+          # sw1-redirect re-intercepted by sw2 hands control to sw2).
+          final_url  = fetched[:url].to_s
+          final_ctrl = fetched[:controller].to_i
+          if final_url != url || final_ctrl != controller.to_i
+            if final_url != url
+              url = final_url
+              rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url)});")
+            end
+            if final_ctrl != controller.to_i
+              controller = final_ctrl
+              if controller.positive? && (cw = @workers[controller])
+                rt.call('__csim_swSetControllerDirect', controller, cw[:has_fetch] != false, cw[:script_url].to_s, @sw_registrations.key(controller).to_s)
+              end
+            end
+            # Refresh the host-owned client record (URL + controller) and re-mirror it to
+            # every SW — called from this worker's thread, the same cross-thread pattern
+            # sw_note_worker_controller documents.
+            sw_note_worker_client(handle, url, shared, controller)
+          end
         end
         rt.eval(body)
         rt.drain_microtasks
@@ -6782,6 +6897,19 @@ module Capybara
         if shared
           rt.eval('typeof __csimFireSharedWorkerConnect === "function" && __csimFireSharedWorkerConnect();')
           rt.drain_microtasks
+        end
+        # Fire any timer the initial script parked BEFORE releasing the init hold — the
+        # same gated drain the poll loop runs per tick. `__csimFetch` defers its body to a
+        # setTimeout(0), so a fetch() issued by the initial script / connect handler is,
+        # at this point, ONLY a due timer: once the init hold drops, nothing pending-
+        # visible remains until the first poll tick (50 ms away), and a runner that
+        # force-timeouts on idle kills the test inside that blind window
+        # (worker-interception-redirect's last case). Draining here runs the fetch's
+        # dispatch on this thread while `@worker_initializing` still covers it, so the
+        # follow-on pending (@sw_fetch_pending / outbox) is counted before the release.
+        if rt.call('__nextTimerDelay').to_f >= 0
+          rt.drain_microtasks
+          rt.drain_timers
         end
         # Initial script has run (and any immediate postMessage is in the outbox).
         release_init.call
@@ -6884,7 +7012,13 @@ module Capybara
               # counter covers the gap (same shape as sw_fetch_response).
               @worker_init_lock.synchronize { @worker_busy += 1 }
               busy_held = true
-              rt.call('__csim_deliverWorkerMessages', msg[:events])
+              # One task + microtask checkpoint PER message, like the window-side
+              # delivery — a batch dispatched in one call drops the second message
+              # of an awaited-receive sequence (see deliver_worker_messages).
+              msg[:events].each do |e|
+                rt.call('__csim_deliverWorkerMessages', [e])
+                rt.drain_microtasks if msg[:events].size > 1
+              end
               drive_worker_to_quiescence(rt)
             elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
               # clients.claim() reaches worker clients too: adopt the claiming SW as this

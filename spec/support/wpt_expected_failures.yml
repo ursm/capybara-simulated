@@ -1150,7 +1150,6 @@ fetch/api/basic/keepalive.any.js:
 - "[keepalive] simple GET request on 'unload' [no payload]"
 - "[keepalive] simple POST request on 'pagehide' [no payload]"
 - "[keepalive] simple POST request on 'unload' [no payload]"
-- simple keepalive test for web workers
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
 fetch/api/basic/request-headers-nonascii.any.js:
@@ -2485,25 +2484,6 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 - iframe referrerpolicy="same-origin", origin B
 service-workers/service-worker/windowclient-navigate.https.html:
 - navigate on a top-level window client worker side
-service-workers/service-worker/worker-interception-redirect.https.html:
-- 'Case #1: network scope1->scope2 (classic DedicatedWorker)'
-- 'Case #1: network scope1->scope2 (classic DedicatedWorker, importScripts())'
-- 'Case #1: network scope1->scope2 (classic SharedWorker)'
-- 'Case #1: network scope1->scope2 (module DedicatedWorker)'
-- 'Case #1: network scope1->scope2 (module SharedWorker)'
-- 'Case #2: network scope1->out-scope (classic DedicatedWorker)'
-- 'Case #2: network scope1->out-scope (classic SharedWorker)'
-- 'Case #2: network scope1->out-scope (module DedicatedWorker)'
-- 'Case #2: network scope1->out-scope (module SharedWorker)'
-- 'Case #3: sw scope1->scope2 (classic DedicatedWorker)'
-- 'Case #3: sw scope1->scope2 (classic SharedWorker)'
-- 'Case #3: sw scope1->scope2 (module DedicatedWorker)'
-- 'Case #3: sw scope1->scope2 (module SharedWorker)'
-- 'Case #4: sw scope1->out-scope (classic DedicatedWorker)'
-- 'Case #4: sw scope1->out-scope (classic SharedWorker)'
-- 'Case #4: sw scope1->out-scope (module DedicatedWorker)'
-- 'Case #4: sw scope1->out-scope (module SharedWorker)'
-- cleanup global state
 service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL
 - XHR Document should use the response URL (generated response)
