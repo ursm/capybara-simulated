@@ -3556,6 +3556,12 @@ module Capybara
       # binary echo that only lands AFTER the idle-bail is exactly the flake this prevents. Zero-alloc
       # on the common no-WS path (the `empty?` short-circuit); a handful of threads otherwise.
       def websocket_reader_active? = !@websocket_threads.empty? && @websocket_threads.each_value.any?(&:alive?)
+      
+      # Any live cross-thread actor (a worker / service-worker thread, or a WebSocket
+      # reader) — the only things that can revive an apparently-idle page from OUTSIDE
+      # the JS event loop. The WPT runner's post-idle-bail grace window gates on this,
+      # so the plain-DOM majority of files never pays the real-time wait.
+      def cross_thread_actors? = @workers.any? {|_h, w| w[:thread]&.alive? } || websocket_reader_active?
 
       def deliver_websocket_events
         return 0 if @websocket_threads.empty? && @websocket_queue_head.nil? && @websocket_queue.empty?
@@ -3968,13 +3974,11 @@ module Capybara
         # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
         # (worker-client-id: the SW synthesizes the script), deferred to run_worker
         # (`body: nil` + `sw_script:`) — the spawn runs inside a JS host callback where a
-        # synchronous wait deadlocks (the documented worker-interception lesson).
-        # EXPERIMENTAL, default OFF (CSIM_SW_WORKER_SCRIPT=1): with it on, the spawned
-        # worker's first inbox park never returns — the process wedges in a rusty/GVL
-        # scheduling interaction that needs its own investigation. The rest of the
-        # controlled-worker model (controller install, subresource interception, claim)
-        # is independent of this gate.
-        sw_script = ENV['CSIM_SW_WORKER_SCRIPT'] == '1' && !service && target.match?(%r{\Ahttps?://}i) ? sw_controller_for_navigation(target) : nil
+        # synchronous wait deadlocks (the documented worker-interception lesson). While the
+        # deferred fetch runs, @worker_initializing keeps the drain loops pumping
+        # (worker_drive_pending?); the runner's post-idle-bail grace window covers the
+        # POST-init autonomous worker work the counters can't see.
+        sw_script = !service && target.match?(%r{\Ahttps?://}i) ? sw_controller_for_navigation(target) : nil
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
@@ -4004,7 +4008,9 @@ module Capybara
             seed:        seed,
             sw_scope:    sw_scope,
             controller:  ctrl,
-            sw_script:   sw_script
+            sw_script:   sw_script,
+            # The creating context's client id — the worker MAIN-SCRIPT fetch's clientId.
+            creator_client: sw_client_id(realm_id.to_i)
           )
         end
         # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
@@ -4034,7 +4040,10 @@ module Capybara
 
       def worker_post_to_worker(handle, data)
         w = @workers[handle.to_i]
-        return unless w
+        # A worker whose thread died (script blocked / load raise → __error → onerror) keeps
+        # its registry entry until an explicit terminate; a post to it must be a NO-OP (as in
+        # real browsers) — counting it would strand @worker_in_flight forever.
+        return unless w && w[:thread]&.alive?
         # Counted globally (what settle reads) AND per worker, so a worker that dies still owing
         # replies can hand back exactly what it holds. A LISTEN-ONLY worker never answers at all,
         # so without the per-worker tally its share is only released by the reset that fires when
@@ -4067,7 +4076,7 @@ module Capybara
       # thread waits on it; @worker_initializing already holds worker_pending? true).
       # Returns the script body (binary-tagged), or nil (fall-through / network error /
       # no answer) — the caller falls back to the network fetch.
-      def sw_worker_script_fetch(sw_handle, url, client_handle)
+      def sw_worker_script_fetch(sw_handle, url, client_handle, shared: false, creator_client: nil)
         w = @workers[sw_handle.to_i] or return nil
         q   = Thread::Queue.new
         fid = nil
@@ -4081,9 +4090,16 @@ module Capybara
           headers:     {},
           body_b64:    '',
           mode:        'same-origin',
-          destination: 'worker',
+          destination: shared ? 'sharedworker' : 'worker',
           credentials: 'same-origin',
-          clientId:    sw_worker_client_id(client_handle)
+          # The main-script request's CLIENT is the CREATING document (the page that called
+          # `new Worker` — worker-interception "correct client Ids"); the worker's own id is
+          # what the request will CREATE (the wire's resultingClientId, consumed for non-nav
+          # dispatches too).
+          clientId:    creator_client || sw_worker_client_id(client_handle),
+          # …and what it CREATES is the worker's own client (a reserved-client analogue —
+          # `event.resultingClientId` must be a non-empty id for a worker-script request).
+          resultingClientId: sw_worker_client_id(client_handle)
         )
         w[:inbox] << {kind: 'fetch', req:, fetch_id: fid, realm_id: -client_handle.to_i}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
@@ -4095,6 +4111,11 @@ module Capybara
 
         r = JSON.parse(resp)
         return nil if r['fallthrough'] || r['networkError']
+        # Handle Fetch response validation for a 'same-origin'-mode request: a SW handing
+        # back a cors / opaque(redirect) response is a NETWORK ERROR — the worker must
+        # FAIL TO START (worker-interception "cors/no-cors … fails worker start"), never
+        # fall through to the network. :error tells the caller to fail the spawn.
+        return :error if %w[cors opaque opaqueredirect].include?(r['type'].to_s)
 
         Base64.decode64(r['body_b64'].to_s)
       rescue JSON::ParserError
@@ -6518,7 +6539,7 @@ module Capybara
       # `build_worker` factory, evaluates the worker script, then
       # loops draining microtasks + timers + inbox until `:terminate`
       # lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil)
+      private def run_worker(handle, url, body, inbox, outbox, engine_class, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -6596,6 +6617,8 @@ module Capybara
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
         rt.eval("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
+        # The worker KIND, for the global-scope brand checks (workers.js Symbol.hasInstance).
+        rt.eval("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
@@ -6642,7 +6665,10 @@ module Capybara
         # (sw_worker_script_fetch). A fall-through / network-error / unanswered fetch falls
         # back to the plain network fetch, what an uncontrolled spawn would have done.
         if body.nil? && sw_script
-          body = sw_worker_script_fetch(sw_script, url, handle) || fetch_worker_script(url)
+          fetched = sw_worker_script_fetch(sw_script, url, handle, shared: shared, creator_client: creator_client)
+          raise "worker script blocked: #{url}" if fetched == :error
+
+          body = fetched || fetch_worker_script(url)
           raise "worker script not found: #{url}" unless body
 
           body = RuntimeShared.utf8_text(body)

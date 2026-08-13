@@ -1252,24 +1252,25 @@ fetch/api/cors/cors-keepalive.any.js:
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
-- fetching "top.txt" with CORS allowing null origin should be allowed.
 - fetching "top.txt" without ACAO should be rejected.
-- fetching data url script should be allowed.
 fetch/api/cors/data-url-worker.html:
-- fetching "top.txt" with CORS allowing null origin should be allowed.
 - fetching "top.txt" without ACAO should be rejected.
-- fetching data url script should be allowed.
 fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - fetch() with all valid values
+fetch/api/policies/csp-blocked-worker.html:
+- Fetch is blocked by CSP, got a TypeError
 fetch/api/policies/csp-blocked.html:
 - Fetch is blocked by CSP, got a TypeError
 fetch/api/policies/referrer-origin-service-worker.https.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
 fetch/api/policies/referrer-origin-when-cross-origin-service-worker.https.html:
+- Request's referrer is origin
+fetch/api/policies/referrer-origin-worker.html:
+- Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
@@ -1302,9 +1303,6 @@ fetch/api/request/destination/fetch-destination-no-load-event.https.html:
 - sendBeacon() fetches with an empty string Request.destination
 fetch/api/request/destination/fetch-destination-prefetch.https.html:
 - HTMLLinkElement with rel=prefetch fetches with an empty string Request.destination
-fetch/api/request/destination/fetch-destination-worker.https.html:
-- DedicatedWorker fetches with a "worker" Request.destination
-- SharedWorker fetches with a "sharedworker" Request.destination
 fetch/api/request/destination/fetch-destination.https.html:
 - AudioWorklet module fetches with a "audioworklet" Request.destination
 - EventSource() fetches with an empty string Request.destination
@@ -1769,8 +1767,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
   after the client is claimed.
 service-workers/service-worker/client-url-creation-url.https.html:
 - Going back to new document changes creation URL
-service-workers/service-worker/clients-get-client-types.https.html:
-- Test Clients.get() with window and worker clients
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - Test Clients.matchAll()
 service-workers/service-worker/clients-matchall-order.https.html:
@@ -1798,7 +1794,6 @@ service-workers/service-worker/data-iframe.html:
 service-workers/service-worker/dedicated-worker-service-worker-interception.https.html:
 - Dynamic import should be intercepted by a service worker.
 - Static import should be intercepted by a service worker.
-- Top-level module loading should be intercepted by a service worker.
 service-workers/service-worker/detached-context.https.html:
 - accessing a ServiceWorker object from a removed iframe
 - accessing a ServiceWorkerRegistration from a removed iframe
@@ -2037,7 +2032,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 - Same-origin blob URL iframe should intercept fetch().
 - Same-origin blob URL sharedworker should inherit service worker controller.
 - Same-origin blob URL sharedworker should intercept fetch().
-- Same-origin blob URL worker should intercept fetch().
 service-workers/service-worker/multi-globals/url-parsing.https.html:
 - getRegistration should use the relevant global of the object it was called on to
   resolve the script URL
@@ -2271,38 +2265,15 @@ service-workers/service-worker/respond-with-body-accessed-response.https.html:
 - 'test: type=opaque&clone=2&passThroughCache=true'
 - 'test: type=opaque&passThroughCache=true'
 service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
-- Fetch request from a worker in a normal iframe
-- Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
-  and allow-same-origin flag
-- Fetch request from a worker in iframe sandboxed by an attribute with allow-scripts
-  flag
-- Fetch request from iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin
-  flag
-- Fetch request from iframe sandboxed by CSP HTTP header with allow-scripts flag
-- Fetch request from iframe sandboxed by an attribute with allow-scripts and allow-same-origin
-  flag
-- Fetch request from iframe sandboxed by an attribute with allow-scripts flag
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
-  and allow-same-origin flag
-- Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
   flag
 - Request for an iframe in the iframe sandboxed by an attribute with allow-scripts
-  and allow-same-origin flag
-- Request for an iframe in the iframe sandboxed by an attribute with allow-scripts
-  flag
-- Request for an iframe in the normal iframe
-- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
-  the iframe sandboxed by CSP HTTP header with allow-scripts and allow-same-origin
   flag
 - Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
   the iframe sandboxed by CSP HTTP header with allow-scripts flag
 - Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
   the iframe sandboxed by an attribute with allow-scripts flag
-- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
-  the iframe sandboxed by attribute with allow-scripts and allow-same-origin flag
-- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
-  the normal iframe
 - Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
   by CSP HTTP header with allow-scripts and allow-same-origin flag
 - Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
@@ -2517,15 +2488,9 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 - iframe referrerpolicy="same-origin", origin B
 service-workers/service-worker/windowclient-navigate.https.html:
 - navigate on a top-level window client worker side
-service-workers/service-worker/worker-client-id.https.html:
-- Verify workers have a unique client id separate from their owning documents window
-service-workers/service-worker/worker-in-sandboxed-iframe-by-csp-fetch-event.https.html:
-- Fetch request from a worker in iframe sandboxed by CSP HTTP header allow-scripts
-  flag
-- Fetch request from a worker in iframe sandboxed by CSP HTTP header with allow-scripts
-  and allow-same-origin flag
 service-workers/service-worker/worker-interception-redirect.https.html:
 - 'Case #1: network scope1->scope2 (classic DedicatedWorker)'
+- 'Case #1: network scope1->scope2 (classic DedicatedWorker, importScripts())'
 - 'Case #1: network scope1->scope2 (classic SharedWorker)'
 - 'Case #1: network scope1->scope2 (module DedicatedWorker)'
 - 'Case #1: network scope1->scope2 (module SharedWorker)'
@@ -2550,15 +2515,6 @@ service-workers/service-worker/worker-interception.https.html:
   worker
 - Requests on a shared worker controlled by a service worker.
 - Unregister a service worker for subresource interception tests.
-- Verify a dedicated worker script request gets correct client Ids
-- Verify a dedicated worker script request issued from a uncontrolled document is
-  intercepted by worker's own service worker.
-- Verify a same-origin worker script served by a service worker succeeds in starting
-  a dedicated worker.
-- Verify a same-origin worker script served by a service worker succeeds in starting
-  a shared worker.
-- Verify a shared worker script request issued from a uncontrolled document is intercepted
-  by worker's own service worker.
 service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL
 - XHR Document should use the response URL (generated response)
@@ -2740,6 +2696,12 @@ xhr/open-url-multi-window-6.htm:
   should throw'
 xhr/open-url-multi-window.htm:
 - 'XMLHttpRequest: open() resolving URLs (multi-Window; 1)'
+xhr/open-url-redirected-worker-origin.htm:
+- Referer header
+- Request URL test
+xhr/open-url-worker-origin.htm:
+- Referer header
+- Request URL test
 xhr/open-url-worker-simple.htm:
 - 'XMLHttpRequest: relative URLs in worker scripts resolved by script URL'
 xhr/overridemimetype-blob.html:
@@ -2757,6 +2719,10 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
+xhr/responseType-document-in-worker.html:
+- Setting XMLHttpRequest responseType to 'document' in a worker should have no effect.
+xhr/responseXML-unavailable-in-worker.html:
+- XMLHttpRequest's responseXML property should not be exposed in workers.
 xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 - CORS request with setRequestHeader auth to URL NOT accepting Authorization header
 xhr/send-authentication-prompt-2-manual.htm:
@@ -2769,5 +2735,13 @@ xhr/send-conditional-cors.htm:
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
+xhr/xmlhttprequest-timeout-worker-overrides.html:
+- 'Timeout test: timeout overrides load after a delay, original timeout at 5000, reset
+  at 1000 to 2000'
+xhr/xmlhttprequest-timeout-worker-simple.html:
+- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
 xhr/xmlhttprequest-timeout-worker-synconworker.html:
 - 'Timeout test: timeout hit before load, timeout scheduled at 2000'
+xhr/xmlhttprequest-timeout-worker-twice.html:
+- 'Timeout test: timeout fires normally with same timeout set twice, original timeout
+  at 2000, reset at 1000 to 2000'
