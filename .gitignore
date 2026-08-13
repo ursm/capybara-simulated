@@ -5,6 +5,7 @@
 /node_modules/
 /pkg/
 /save_path_tmp/
+/scratchpad/
 /screenshots/
 /spec/fixtures/hotwire/
 /tmp/
