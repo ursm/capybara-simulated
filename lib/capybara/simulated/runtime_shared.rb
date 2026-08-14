@@ -43,6 +43,9 @@ module Capybara
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15]) },
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0]) },
+        # A controlled document's external classic script → its controller's fetch
+        # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
+        '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include') },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0]); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
         # A nested browsing context navigating its OWN location (a[1] = the frame's
