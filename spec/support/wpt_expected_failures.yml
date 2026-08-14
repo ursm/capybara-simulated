@@ -1740,8 +1740,6 @@ service-workers/service-worker/about-blank-replacement.https.html:
   and matches final Client.
 - Popup initial about:blank is controlled, exposed to clients.matchAll(), and matches
   final Client.
-service-workers/service-worker/activation.https.html:
-- finishing a request triggers unregister
 service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
 service-workers/service-worker/claim-using-registration.https.html:
@@ -1809,16 +1807,6 @@ service-workers/service-worker/extendable-event-waituntil.https.html:
 - Test install event waitUntil rejected
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
-service-workers/service-worker/fetch-canvas-tainting-image-cache.https.html:
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&cache=true&Auth&ignore"
-  with crossOrigin "" should be TAINTED
-service-workers/service-worker/fetch-canvas-tainting-image.https.html:
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore"
-  with crossOrigin "use-credentials" should be NOT_TAINTED
-- url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?PNGIMAGE&Auth&ignore"
-  with crossOrigin "" should be TAINTED
 service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
 - url "https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&cache=true&Auth&ignore"
   with crossOrigin "" should be NOT_TAINTED
@@ -1910,8 +1898,6 @@ service-workers/service-worker/fetch-canvas-tainting-video.https.html:
 - url "https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?VIDEO&mode=same-origin&url=https%3A%2F%2Fweb-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FVIDEO"
   with crossOrigin "use-credentials" should be NOT_TAINTED
 service-workers/service-worker/fetch-cors-xhr.https.html:
-- 'test 26: https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?Auth&ACAOrigin=https://web-platform.test:8443&ACACredentials=true&ignore
-  with credentials true must be SUCCESS'
 - 'test 31: https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
   with credentials false must be FAIL'
 - 'test 32: https://web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?mode=no-cors&url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py
@@ -1962,38 +1948,9 @@ service-workers/service-worker/fetch-request-xhr-sync.https.html:
 service-workers/service-worker/fetch-request-xhr.https.html:
 - FetchEvent#request.body contains XHR request data (blob)
 - XHR with form data
-service-workers/service-worker/fetch-response-taint.https.html:
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"same-origin" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"include" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"omit" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/?url=https%3A%2F%2Fwww1.web-platform.test%3A8443%2Fservice-workers%2Fservice-worker%2Fresources%2Ffetch-access-control.py%3FACAOrigin%3Dhttps%3A%2F%2Fweb-platform.test%3A8443%26ACACredentials%3Dtrue&mode=cors&credentials=include&"
-  mode:"no-cors" credentials:"same-origin" should succeed.
-- fetching url:"https://www1.web-platform.test:8443/service-workers/service-worker/resources/fetch-access-control.py?ACAOrigin=https://web-platform.test:8443&ACACredentials=true"
-  mode:"cors" credentials:"include" should succeed.
 service-workers/service-worker/fetch-waits-for-activate.https.html:
 - Navigation fetch events should wait for the activate event to complete.
 - Subresource fetch events should wait for the activate event to complete.
-service-workers/service-worker/getregistrations.https.html:
-- Register then Unregister with controlled frame then getRegistrations
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
@@ -2309,9 +2266,6 @@ service-workers/service-worker/static-router-subresource.https.html:
 - Subresource load not matched with `or` condition
 - Subresource load should match with a file other than not
 - Subresource load should not match with the not condition
-service-workers/service-worker/unregister-controller.https.html:
-- Unregister does not affect existing controller
-- Unregister prevents control of subsequent navigations
 service-workers/service-worker/unregister-immediately-during-extendable-events.https.html:
 - Clear-Site-Data must fail pending subresource fetch events.
 service-workers/service-worker/unregister-immediately.https.html:
@@ -2322,10 +2276,8 @@ service-workers/service-worker/unregister-immediately.https.html:
 - Clear-Site-Data must unregister an activated registration with an update waiting.
 - Clear-Site-Data must unregister an activated registration with controlled clients.
 service-workers/service-worker/unregister-then-register-new-script.https.html:
-- Registering a new script URL that 404s does not resurrect unregistered registration
 - Registering a new script URL that fails to install does not resurrect unregistered
   registration
-- Registering a new script URL while an unregistered registration is in use
 service-workers/service-worker/update-after-navigation-fetch-event.https.html:
 - Update should be triggered after a navigation (fetch event worker).
 - Update should be triggered after a navigation (network error).
@@ -2565,16 +2517,10 @@ xhr/open-url-multi-window-5.htm:
 xhr/open-url-multi-window-6.htm:
 - 'XMLHttpRequest: open() in document that is not fully active (but may be active)
   should throw'
-xhr/open-url-multi-window.htm:
-- 'XMLHttpRequest: open() resolving URLs (multi-Window; 1)'
 xhr/open-url-redirected-worker-origin.htm:
 - Referer header
-- Request URL test
 xhr/open-url-worker-origin.htm:
 - Referer header
-- Request URL test
-xhr/open-url-worker-simple.htm:
-- 'XMLHttpRequest: relative URLs in worker scripts resolved by script URL'
 xhr/overridemimetype-blob.html:
 - Loading data…
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
@@ -2606,13 +2552,3 @@ xhr/send-conditional-cors.htm:
 xhr/send-entity-body-document.htm:
 - HTML document, shift-jis
 - XML document, windows-1252
-xhr/xmlhttprequest-timeout-worker-overrides.html:
-- 'Timeout test: timeout overrides load after a delay, original timeout at 5000, reset
-  at 1000 to 2000'
-xhr/xmlhttprequest-timeout-worker-simple.html:
-- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
-xhr/xmlhttprequest-timeout-worker-synconworker.html:
-- 'Timeout test: timeout hit before load, timeout scheduled at 2000'
-xhr/xmlhttprequest-timeout-worker-twice.html:
-- 'Timeout test: timeout fires normally with same timeout set twice, original timeout
-  at 2000, reset at 1000 to 2000'
