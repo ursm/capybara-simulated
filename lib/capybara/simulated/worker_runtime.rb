@@ -6,12 +6,12 @@ module Capybara
     # class (`V8Runtime`, `QuickJSRuntime`) has a `build_worker` class
     # method that constructs the engine-specific Context/VM and wires
     # it through these five callbacks. Worker thread doesn't care
-    # which engine it's running on; it just calls `eval` / `call` /
+    # which engine it's running on; it just calls `eval_void` / `call` /
     # `drain_microtasks` / `drain_timers` / `has_ready_timer?` /
     # `dispose`.
     class WorkerRuntime
-      def initialize(eval_fn:, call_fn:, drain_microtasks:, drain_timers:, has_ready_timer:, dispose:, eval_module_graph: nil)
-        @eval              = eval_fn
+      def initialize(eval_void_fn:, call_fn:, drain_microtasks:, drain_timers:, has_ready_timer:, dispose:, eval_module_graph: nil)
+        @eval_void         = eval_void_fn
         @call              = call_fn
         @drain_microtasks  = drain_microtasks
         @drain_timers      = drain_timers
@@ -20,7 +20,7 @@ module Capybara
         @eval_module_graph = eval_module_graph
       end
 
-      def eval(src)                  = @eval.call(src)
+      def eval_void(src)             = @eval_void.call(src)
       def call(name, *args)          = @call.call(name, *args)
       def drain_microtasks           = @drain_microtasks.call
       def drain_timers               = @drain_timers.call

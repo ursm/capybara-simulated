@@ -14,6 +14,14 @@ require 'fileutils'
 require 'uri'
 require 'rusty_racer'
 
+# The engine is a SOFT dependency (the gemspec names no version), so say what
+# we need here rather than letting it surface as a NoMethodError from inside
+# `rebuild_ctx`'s warm-reset rescue, which would report it as a failed reset.
+# 0.2.1: Context#eval_void / Script#run_void. 0.2.0: Module#graph_async?.
+unless RustyRacer::Context.method_defined?(:eval_void)
+  raise LoadError, "capybara-simulated needs rusty_racer >= 0.2.1 (found #{RustyRacer::VERSION})"
+end
+
 require_relative 'runtime_shared'
 require_relative 'script_cache'
 require_relative 'worker_runtime'
@@ -28,7 +36,7 @@ begin
   # 8900×8900 fixture through the transfer-buffer path). Match
   # Discourse's own testem flag of 4 GB so the test fits.
   #
-  # rusty_racer >= 0.1.4 installs a near-heap-limit callback on every isolate,
+  # rusty_racer installs a near-heap-limit callback on every isolate,
   # so EXCEEDING this cap raises a catchable `RustyRacer::V8OutOfMemoryError`
   # (and the isolate recovers) instead of V8 aborting the whole process with a
   # fatal "Reached heap limit". So this value doubles as the memory backstop: a
@@ -154,8 +162,8 @@ module Capybara
         def terminate                        = @iso.terminate
         def dispose                          = @iso.dispose
         def perform_microtask_checkpoint     = @iso.perform_microtask_checkpoint
-        # V8 heap accounting + a forced full GC (rusty >= 0.1.9, the gem's
-        # floor). Used by the per-visit heap-pressure relief in `rebuild_ctx`.
+        # V8 heap accounting + a forced full GC. Used by the per-visit
+        # heap-pressure relief in `rebuild_ctx`.
         def heap_statistics                  = @iso.heap_statistics
         def low_memory_notification          = @iso.low_memory_notification
 
@@ -338,6 +346,7 @@ module Capybara
       end
 
       def eval(code)         = ctx.eval(code.to_s)
+      def eval_void(code)    = ctx.eval_void(code.to_s)
       def call(name, *args)
         result = ctx.call(name, *args)
         ScriptCache.warm_pending!
@@ -728,7 +737,7 @@ module Capybara
       # occasional JS-side infinite loop would otherwise stall the whole
       # run; the timeout converts the hang into a
       # `RustyRacer::ScriptTerminatedError` on that one example — whose
-      # `#message` / `#js_backtrace` (rusty >= 0.1.10) name the looping JS
+      # `#message` / `#js_backtrace` name the looping JS
       # frame (function + source position), so an in-V8 hang is diagnosable
       # from the failure alone, no live debugger attach needed. The
       # terminate escalates through any nested frames (it is
@@ -1481,7 +1490,7 @@ module Capybara
         c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
         c.eval_void('__csim_installWorkerScope();')
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { c.eval(s.to_s) },
+          eval_void_fn:      ->(s)     { c.eval_void(s.to_s) },
           call_fn:           ->(n, *a) { c.call(n.to_s, *a) },
           drain_microtasks:  ->        { c.perform_microtask_checkpoint },
           drain_timers:      ->        { c.call('__drainTimers', 50) },

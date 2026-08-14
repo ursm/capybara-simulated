@@ -358,3 +358,53 @@ RSpec.describe 'postMessage cross-document origin' do
     expect(ran).to be(true)
   end
 end
+
+# An inline `<script>`'s completion value is nobody's answer, but the two Ruby-side
+# execution paths (leading-lexical → shared-lexical eval; ≥64KB → bytecode cache)
+# used to hand it back across the V8→Ruby boundary, where rusty_racer marshals it —
+# and marshalling RUNS JS. A script ending in an expression whose read throws (a
+# getter, a Proxy trap) therefore FAILED after running to completion: the bridge
+# saw the raise, fired the script's `error` event and reported `_ok=false`, for a
+# value nobody wanted. `eval_void` / `run_void` don't read it at all.
+#
+# The same mechanism took out iframe building entirely (the frame boot eval
+# evaluates to the parent's WindowProxy, whose `ownKeys` trap throws SecurityError
+# at a cross-origin parent) — that path needs the WPT service-worker corpus, which
+# is vendored but not gated, so this pins the class of bug where the suite can see it.
+RSpec.describe 'inline script with a hostile completion value' do
+  before { skip 'the Ruby-side script paths are V8-only' unless CsimEngine.v8? }
+
+  # `const` first → the shared-lexical eval path. The 70KB pad pushes the second
+  # one past SCRIPT_CACHE_MIN_BYTES → the compile + bytecode-cache path.
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!doctype html><meta charset=utf-8><body><script>
+          // A parser-inserted script that throws is reported to the console
+          // ("[csim] script threw in …"), so that is what proves it ran clean.
+          window.__errors = [];
+          const __ce = console.error;
+          console.error = function () { window.__errors.push(String(arguments[0])); __ce.apply(console, arguments); };
+        </script>
+        <script>
+          const lexical = 'ran';
+          window.__lexical = lexical;
+          new Proxy({}, {ownKeys() { throw new Error('completion boom'); }});
+        </script>
+        <script>
+          // #{'x' * 70_000}
+          window.__big = 'ran';
+          new Proxy({}, {ownKeys() { throw new Error('completion boom'); }});
+        </script></body>
+      HTML
+    end
+  }
+  let(:session) { simulated_session(app) }
+
+  it 'runs to completion and reports no error' do
+    session.visit '/'
+    expect(session.evaluate_script('window.__lexical')).to eq('ran')
+    expect(session.evaluate_script('window.__big')).to eq('ran')
+    expect(session.evaluate_script('window.__errors')).to eq([])
+  end
+end
