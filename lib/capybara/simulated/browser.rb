@@ -540,7 +540,7 @@ module Capybara
         # worker-reachable via OffscreenCanvas, like decode_image).
         @font_vmetrics_lock   = Mutex.new
         @font_vmetrics        = {}
-        # Zero-copy postMessage transfer tokens (rusty_racer >= 0.1.6
+        # Zero-copy postMessage transfer tokens (rusty_racer
         # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
         # crosses isolates by token (no byte copy), its source detached. A token
         # parked but never imported pins its backing store PROCESS-WIDE, so we
@@ -1920,7 +1920,7 @@ module Capybara
       def push_user_agent_to_js
         ua = @default_user_agent or return
         return unless @runtime
-        @runtime.eval("try { Object.defineProperty(navigator, 'userAgent', { value: #{ua.to_json}, configurable: true }); } catch (_) {}")
+        @runtime.eval_void("try { Object.defineProperty(navigator, 'userAgent', { value: #{ua.to_json}, configurable: true }); } catch (_) {}")
       end
 
       def set_viewport(w, h)
@@ -1931,7 +1931,7 @@ module Capybara
         # `[Replaceable]` accessors over it, the `@media` cascade and the layout engine read it
         # directly, and the setter re-pushes every live frame's content box — a frame lays out
         # against its container, which just changed size too.
-        @runtime.eval("globalThis.__csimSetViewport(#{@viewport_width}, #{@viewport_height});")
+        @runtime.eval_void("globalThis.__csimSetViewport(#{@viewport_width}, #{@viewport_height});")
         # Recompute the cascade `@media` rules against the new
         # viewport so visibility checks (Capybara `visible?`,
         # `getComputedStyle().display`) re-reflect mobile-breakpoint
@@ -1948,7 +1948,7 @@ module Capybara
         @runtime.call('__csimViewportChanged') if @document_handle.to_i > 0
         # Re-fire a `resize` event so libraries that re-layout on
         # resize (responsive nav, sidebar collapse) see the new size.
-        @runtime.eval("try { (globalThis.dispatchEvent || function(){})(new Event('resize')); } catch (_) {}")
+        @runtime.eval_void("try { (globalThis.dispatchEvent || function(){})(new Event('resize')); } catch (_) {}")
         nil
       end
       def viewport_width                  ; @viewport_width  || SCREEN_SIZE[0] ; end
@@ -7539,7 +7539,7 @@ module Capybara
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
-        rt.eval("globalThis.__csimWorkerHandle = #{handle.to_i};")
+        rt.eval_void("globalThis.__csimWorkerHandle = #{handle.to_i};")
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
         # the SAME id as this isolate's client identity (clientId() prefers __csimClientId), so
@@ -7549,15 +7549,15 @@ module Capybara
         # worker isolate would also want this id, but no controller is ever installed into a
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
-        rt.eval("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
+        rt.eval_void("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
         # The worker KIND, for the global-scope brand checks (workers.js Symbol.hasInstance).
-        rt.eval("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
+        rt.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError). A SERVICE worker's module script evaluates
         # as a real module graph below (eval_module_graph, V8); a dedicated/shared
         # module worker — and every QuickJS worker — still evaluates on the classic
         # path (that ESM follow-up remains).
-        rt.eval('globalThis.__csimWorkerModule = true;') if module_worker
+        rt.eval_void('globalThis.__csimWorkerModule = true;') if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
@@ -7569,7 +7569,7 @@ module Capybara
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
         # the snapshot-time `http://placeholder/`.
-        rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
+        rt.eval_void("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
         # A worker's BroadcastChannel origin KEY (its agent-cluster identity). A blob: worker
         # INHERITS the creating context's origin (the blob URL carries no real origin of its own);
         # a data: worker gets a FRESH opaque origin, unique per worker, so it never cross-talks with
@@ -7582,7 +7582,7 @@ module Capybara
           elsif url.to_s.start_with?('data:')
             "opaque:worker#{handle}"
           end
-        rt.eval("globalThis.__csimOriginKey = #{JSON.generate(worker_origin_key)};") if worker_origin_key
+        rt.eval_void("globalThis.__csimOriginKey = #{JSON.generate(worker_origin_key)};") if worker_origin_key
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
         # registration SCOPE rides in first — `self.registration.scope` must be the
@@ -7590,17 +7590,17 @@ module Capybara
         # script are distinct registrations; anything keyed on the scope, e.g. a
         # per-registration cache name, must not collide).
         if service
-          rt.eval("globalThis.__csimSwScope = #{JSON.generate(sw_scope.to_s)};") unless sw_scope.to_s.empty?
+          rt.eval_void("globalThis.__csimSwScope = #{JSON.generate(sw_scope.to_s)};") unless sw_scope.to_s.empty?
           # The registration's updateViaCache mode — importScripts' cache decision
           # ('none' revalidates every import; 'imports'/'all' read the HTTP cache).
-          rt.eval("globalThis.__csimSwUvc = #{JSON.generate(sw_uvc)};") if sw_uvc
+          rt.eval_void("globalThis.__csimSwUvc = #{JSON.generate(sw_uvc)};") if sw_uvc
           # The Update probe's import responses — this version's script resource map
           # (importScripts consume them one-shot instead of re-fetching).
-          rt.eval("globalThis.__csimSwImportMap = #{JSON.generate(sw_imports_map)};") if sw_imports_map
+          rt.eval_void("globalThis.__csimSwImportMap = #{JSON.generate(sw_imports_map)};") if sw_imports_map
           # The registration's active version at spawn — `self.registration.active`
           # while THIS version installs (registration-attribute's newer worker).
-          rt.eval("globalThis.__csimSwPrevActiveUrl = #{JSON.generate(sw_prev_active)};") if sw_prev_active
-          rt.eval('__csim_installServiceWorkerScope();')
+          rt.eval_void("globalThis.__csimSwPrevActiveUrl = #{JSON.generate(sw_prev_active)};") if sw_prev_active
+          rt.eval_void('__csim_installServiceWorkerScope();')
         end
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a
         # real pattern (clients-matchall-on-evaluation), and an empty mirror there returns nothing.
@@ -7628,7 +7628,7 @@ module Capybara
           if final_url != url || final_ctrl != controller.to_i
             if final_url != url
               url = final_url
-              rt.eval("globalThis.__csimUpdateLocation(#{JSON.generate(url)});")
+              rt.eval_void("globalThis.__csimUpdateLocation(#{JSON.generate(url)});")
             end
             if final_ctrl != controller.to_i
               controller = final_ctrl
@@ -7686,7 +7686,7 @@ module Capybara
               end
               rt.eval_module_graph(body, url, sw_import_fetch)
             else
-              rt.eval(body)
+              rt.eval_void(body)
             end
           rescue StandardError => e
             outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"}
@@ -7694,7 +7694,7 @@ module Capybara
           end
           outbox << {handle: handle, kind: 'sw_eval', ok: true}
         else
-          rt.eval(body)
+          rt.eval_void(body)
         end
         rt.drain_microtasks
         # Drive the service worker's lifecycle: fire `install`, then `activate`, each phase
@@ -7721,7 +7721,7 @@ module Capybara
             w[:script_url] = url.to_s
           end
           sw_fire_phase = lambda do |phase|
-            rt.eval("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
+            rt.eval_void("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
             # Drain microtasks AND timers: a `waitUntil` promise may settle off a
             # setTimeout (e.g. a delayed cache warm-up), so advance the worker clock too.
             rt.drain_microtasks
@@ -7758,7 +7758,7 @@ module Capybara
         # connect handler's port post lands in the outbox before release_init, so
         # worker_pending? stays true until it's delivered.
         if shared
-          rt.eval('typeof __csimFireSharedWorkerConnect === "function" && __csimFireSharedWorkerConnect();')
+          rt.eval_void('typeof __csimFireSharedWorkerConnect === "function" && __csimFireSharedWorkerConnect();')
           rt.drain_microtasks
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the

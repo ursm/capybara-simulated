@@ -150,6 +150,17 @@ module Capybara
         normalize(result)
       end
 
+      # Run `code` for its EFFECT, skipping the completion value. Mirrors
+      # `V8Runtime#eval_void` (which is where it earns its keep — rusty_racer
+      # marshals a completion value by RUNNING JS on it, so a discarded value
+      # can fail the eval); here it just skips `normalize`.
+      def eval_void(code)
+        v = vm
+        v.eval_code(code.to_s)
+        v.drain_jobs!
+        nil
+      end
+
       # the V8 engine drains its microtask queue at
       # the end of every call (V8's default microtask policy). QuickJS
       # does not: `js_std_await` only pumps pending jobs while it's
@@ -428,7 +439,7 @@ module Capybara
         vm.eval_code('__csim_installWorkerScope();')
         vm.drain_jobs!
         WorkerRuntime.new(
-          eval_fn:           ->(s)     { v = vm.eval_code(s.to_s); vm.drain_jobs!; v },
+          eval_void_fn:      ->(s)     { vm.eval_code(s.to_s); vm.drain_jobs!; nil },
           call_fn:           ->(n, *a) { v = vm.call(n.to_s, *a); vm.drain_jobs!; v },
           drain_microtasks:  ->        { vm.drain_jobs! },
           drain_timers:      ->        { vm.call('__drainTimers', 50) },
