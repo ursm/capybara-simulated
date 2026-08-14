@@ -466,6 +466,12 @@ module Capybara
         # extended work is pending (see sw_note_uninstalling / try_clear_uninstalls).
         @sw_pending_uninstalls = []
         @sw_nav_outbox    = Thread::Queue.new
+        # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] → :open/:claimed
+        # (first delivery wins — see sw_deliver_fetch_response). The lock also covers
+        # writes from the network-leg threads and the worker's respondWith thread.
+        @sw_raced_fetches = {}
+        @sw_race_threads  = []
+        @sw_race_lock     = Mutex.new
         @sw_nav_seq       = 0
         # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
         # per navigation CHAIN, re-minted when a redirect hop crosses origins (a reserved
@@ -4433,7 +4439,93 @@ module Capybara
       # service_worker_navigation_fetch) is awaited SYNCHRONOUSLY on a dedicated queue, off the
       # general outbox, so it never interleaves with the client-fetch / message reply protocol;
       # a client fetch (positive id) rides the outbox as before, tagged with the originating realm.
+      # Start the NETWORK LEG of a race-network-and-fetch-handler route. The worker
+      # posts this (its own thread) just before dispatching the fetch event; the leg
+      # runs on a fresh host thread so a handler that synchronously blocks the worker
+      # (the WPT busy-wait) can still lose the race. A ≥400/failed network response is
+      # simply never delivered — the handler's response wins by default ("server
+      # faster, but not found" uses the handler's 200). For a NAVIGATION (negative id)
+      # the race marker rides the nav outbox: the parked nav thread runs the leg
+      # itself (it owns that queue). Direct-reply fids (worker main-script fetches)
+      # are not raced.
+      private def sw_race_network(handle, fetch_id, realm_id, url, method)
+        fid = fetch_id.to_i
+        return if fid >= SW_DIRECT_FID_BASE
+        # Only GET/HEAD race: the leg re-issues the request WITHOUT the original
+        # body/headers, so racing a POST would run its side effect twice — once
+        # mutilated. (Chromium's race source is effectively GET-shaped too; a
+        # non-GET race-matched request simply behaves as fetch-event.)
+        m = method.to_s.empty? ? 'GET' : method.to_s.upcase
+        return unless %w[GET HEAD].include?(m)
+        if fid.negative?
+          @sw_nav_outbox << {fetch_id: fid, race_url: url.to_s, race_method: m}
+          return
+        end
+        key = [realm_id.to_i, fid]
+        @sw_race_lock.synchronize do
+          @sw_raced_fetches[key] = :open
+          @sw_race_threads << Thread.new do
+            begin
+              r = begin
+                rack_fetch(m, url.to_s, '', {}, 'follow')
+              rescue StandardError
+                nil
+              end
+              if r && r['status'].to_i < 400
+                sw_deliver_fetch_response(handle.to_i, fid, JSON.generate(sw_race_wire(r)), @worker_outbox, realm_id.to_i)
+              else
+                # The leg is NOT delivering — finalize its claim entry so it can't
+                # poison a later fetch that reuses this per-VM fetch id: an :open
+                # entry would wrongly "claim" an unrelated winner, a :claimed one
+                # (the handler already won) would wrongly drop a later delivery.
+                @sw_race_lock.synchronize { @sw_raced_fetches.delete(key) }
+              end
+            ensure
+              @sw_race_lock.synchronize { @sw_race_threads.delete(Thread.current) }
+            end
+          end
+        end
+        nil
+      end
+
+      # Kill in-flight race network legs and drop their claim bookkeeping. Called on
+      # every per-visit VM rebuild AND on session reset: fetch ids are PER-VM (the
+      # client's fetchSeq restarts), so a surviving entry or leg would poison a later
+      # fetch that reuses its id — a legitimate delivery dropped as a "loser", or a
+      # dead test's response resolving a new test's same-numbered fetch.
+      private def reset_sw_race_state
+        @sw_race_lock.synchronize do
+          @sw_race_threads.each(&:kill)
+          @sw_race_threads.clear
+          @sw_raced_fetches.clear
+        end
+      end
+
+      # rack_fetch's hash as the SW respondWith wire: the client reads bytes from
+      # `body_b64` only, and rack_fetch omits it for pure-ASCII text bodies.
+      private def sw_race_wire(r)
+        r = r.merge('type' => r['type'] || 'basic')
+        r['body_b64'] ||= Base64.strict_encode64(r['body'].to_s.b)
+        r
+      end
+
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
+        # A RACED fetch delivers exactly once: the first arrival (network leg or the
+        # handler's respondWith) claims it, the second is dropped BEFORE any outbox
+        # push — a double delivery would double-decrement @sw_fetch_pending and hand
+        # the client a second resolution its one-shot pendingFetch can't take.
+        # (A :claimed entry whose loser never arrives — the network leg erred or was
+        # ≥400 — lingers until reset; bounded, per-raced-fetch.)
+        if fetch_id.to_i.positive?
+          key   = [realm_id.to_i, fetch_id.to_i]
+          state = @sw_race_lock.synchronize do
+            case @sw_raced_fetches[key]
+            when :open    then (@sw_raced_fetches[key] = :claimed; :winner)
+            when :claimed then (@sw_raced_fetches.delete(key); :loser)
+            end
+          end
+          return if state == :loser
+        end
         # A DIRECT reply channel (a controlled worker's main-script fetch, parked on its own
         # thread — sw_direct_fetch): hand the reply straight to that queue, bypassing
         # the outbox→main-thread drain the parked thread can't participate in.
@@ -5645,6 +5737,23 @@ module Capybara
         while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
           ev = pop_with_timeout(@sw_nav_outbox, WORKER_POLL_INTERVAL) or next
           next unless ev[:fetch_id] == fetch_id   # discard a stale response from a timed-out nav
+
+          # A race-network-and-fetch-handler route matched this navigation: run the
+          # network leg on its own thread (this thread stays parked here), delivering
+          # a usable (<400) response back onto this same queue — whichever of it and
+          # the handler's respondWith arrives first is the one this loop returns; the
+          # later one is discarded as stale by the next nav's loop.
+          if ev[:race_url]
+            Thread.new do
+              r = begin
+                rack_fetch(ev[:race_method].to_s.empty? ? 'GET' : ev[:race_method].to_s, ev[:race_url].to_s, '', {}, 'follow')
+              rescue StandardError
+                nil
+              end
+              @sw_nav_outbox << {fetch_id: fetch_id, resp: JSON.generate(sw_race_wire(r))} if r && r['status'].to_i < 400
+            end
+            next
+          end
 
           resp = JSON.parse(ev[:resp])
           return nil                        if resp['fallthrough']    # no respondWith → load from the network
@@ -6944,6 +7053,7 @@ module Capybara
         @sw_registrations.clear
         @sw_registered_scopes.clear
         @sw_activating_scopes.clear
+        reset_sw_race_state
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}
         @sw_navpreload       = {}
@@ -7340,6 +7450,9 @@ module Capybara
         # spec records fetch-handler presence at install time) so a claim can tell the client
         # whether intercepting is worth the cross-isolate round-trip at all.
         sw_has_fetch = false
+        # Streams a race-network leg already beat — their remaining frames are
+        # swallowed by the fetch_stream hook (this worker's thread only).
+        sw_race_dropped_streams = {}
         sw_hooks = {
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
           # WindowClient.focus() — moving the focus chain is cross-realm browser state, so the
@@ -7364,6 +7477,10 @@ module Capybara
           # so the job runs on the main thread (process_worker_unregister); the reply rides
           # this worker's inbox as 'unregister_result'.
           unregister:     ->                  { outbox << {handle: handle, kind: 'sw_unregister'} },
+          # A race-network-and-fetch-handler route matched: run the network leg on a
+          # host thread concurrently with the fetch-event dispatch the worker is
+          # about to (possibly synchronously-blocking) run. See sw_race_network.
+          race_network:   ->(fetch_id, realm_id, url2, method) { sw_race_network(handle, fetch_id, realm_id, url2, method) },
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
@@ -7382,7 +7499,33 @@ module Capybara
           # fetch — rides the outbox in emission order so the client realm reassembles the body
           # stream incrementally (deliver_worker_messages). The request's @sw_fetch_pending stays up
           # for the whole stream and clears on the terminal (close / error) frame.
-          fetch_stream:   ->(fetch_id, kind, payload, realm_id) { outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fetch_id.to_i, payload: payload.to_s, realm_id: realm_id.to_i} },
+          # A RACED fetch's stream must run the same first-delivery-wins claim the
+          # single-shot path does (sw_deliver_fetch_response) — its frames bypass that
+          # fn, so an unclaimed stream head would let BOTH the handler's stream and the
+          # network leg resolve the fetch (double @sw_fetch_pending decrement, the
+          # claim entry stranded). A losing stream is dropped whole: head, chunks, and
+          # terminal — an outboxed terminal would decrement a pending this stream
+          # never owned. `sw_race_dropped_streams` is touched only on THIS worker's
+          # thread (the hook's caller), so it needs no lock.
+          fetch_stream:   ->(fetch_id, kind, payload, realm_id) {
+            fid = fetch_id.to_i
+            key = [realm_id.to_i, fid]
+            if fid.positive?
+              if kind.to_s == 'start'
+                state = @sw_race_lock.synchronize do
+                  case @sw_raced_fetches[key]
+                  when :open    then (@sw_raced_fetches[key] = :claimed; :winner)
+                  when :claimed then (@sw_raced_fetches.delete(key); :loser)
+                  end
+                end
+                (sw_race_dropped_streams[key] = true; next) if state == :loser
+              elsif sw_race_dropped_streams[key]
+                sw_race_dropped_streams.delete(key) if %w[close error].include?(kind.to_s)
+                next
+              end
+            end
+            outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fid, payload: payload.to_s, realm_id: realm_id.to_i}
+          },
           # Cross-isolate MessagePort channel: this worker's port endpoint + its outbound messages
           # ride the outbox (delivered by deliver_worker_messages → the peer client realm).
           port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },
@@ -10031,6 +10174,10 @@ module Capybara
         # pending timers"). A real browser lets the outgoing page's in-flight init
         # finish before the next document loads; this is the in-process analogue.
         flush_outgoing_page_init if @timers_active
+        # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
+        # a leg delivering after this point would resolve the NEW page's same-
+        # numbered fetch with the old page's response.
+        reset_sw_race_state
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.

@@ -1448,6 +1448,7 @@ module Capybara
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
         c.attach('__csim_swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
+        c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method); nil }) if sw_hooks[:race_network]
         c.attach('__csim_swUnregisterRequest',  ->             { sw_hooks[:unregister]&.call; nil }) if sw_hooks[:unregister]
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
@@ -1491,29 +1492,6 @@ module Capybara
           # specifier is a resolution failure per the spec.
           eval_module_graph: lambda {|src, url, fetch_import|
             src_text = RuntimeShared.utf8_text(src.to_s.dup)
-            # Top-level await is disallowed in a service worker module ("Run Service
-            # Worker" fails the script; Chrome rejects the registration). There is no
-            # V8 surface for it here — per ES2022 a module's status is :evaluated the
-            # moment Evaluate() is called, async or not — so detect it by COMPILE
-            # probes (compile-only, nothing runs): a source that compiles as a classic
-            # script cannot contain top-level await; one that fails classic but
-            # compiles inside an async-function wrapper has await at its top level
-            # (import/export declarations fail BOTH probes — those sources fall
-            # through, and a TLA hiding next to imports is caught only when its
-            # instantiation error rejects first; the vendored combined case is
-            # exactly that). This lambda serves service workers only — a dedicated
-            # module worker, where TLA is legal, would need the check parameterized.
-            begin
-              c.compile(src_text)
-            rescue RustyRacer::ParseError
-              tla = begin
-                c.compile("(async()=>{\n#{src_text}\n})")
-                true
-              rescue RustyRacer::ParseError
-                false
-              end
-              raise 'Top-level await is disallowed in a service worker' if tla
-            end
             handles = {}
             root = c.compile_module(src_text, filename: url.to_s)
             handles[url.to_s] = root
@@ -1529,6 +1507,35 @@ module Capybara
                 end
               handles[resolved] ||= c.compile_module(RuntimeShared.utf8_text(fetch_import.call(resolved).to_s.dup), filename: resolved)
             end
+            # Top-level await is disallowed in a service worker module ("Run Service
+            # Worker" fails the script; Chrome rejects the registration). V8's
+            # IsGraphAsync (rusty >= 0.2.0, Module#graph_async?) answers it for the
+            # WHOLE instantiated graph — TLA hiding in an imported module fails too.
+            # (When rusty_v8 exposes HasTopLevelAwait, a per-module check could
+            # pinpoint the offender; graph-level is spec-sufficient here.) On rusty
+            # 0.1.x — the current pin, while a 0.2.0 frame-realm regression is
+            # investigated — fall back to compile probes: a source failing classic
+            # compile but compiling inside an async-function wrapper has top-level
+            # await (imports fail both probes; a TLA next to VALID imports slips
+            # through there — the graph_async? path has no such gap). This lambda
+            # serves service workers only — a dedicated module worker, where TLA is
+            # legal, would need the check parameterized.
+            if root.respond_to?(:graph_async?)
+              raise 'Top-level await is disallowed in a service worker' if root.graph_async?
+            else
+              begin
+                c.compile(src_text)
+              rescue RustyRacer::ParseError
+                tla = begin
+                  c.compile("(async()=>{\n#{src_text}\n})")
+                  true
+                rescue RustyRacer::ParseError
+                  false
+                end
+                raise 'Top-level await is disallowed in a service worker' if tla
+              end
+            end
+
             root.evaluate
             nil
           }
