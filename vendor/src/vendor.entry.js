@@ -90,6 +90,12 @@ const parse5 = { Parser: Parse5Parser };
 // parse, convert to sRGB, channel-clamp to an opaque #rrggbb (NOT OKLCH gamut-
 // mapping — HTML clamps; verified against the WPT color tests).
 import { useMode, modeRgb, modeHsl, modeHwb, modeP3, parse as culoriParse, formatHex as culoriFormatHex } from 'culori/fn';
+
+// URLPattern (the URL Pattern spec) — the reference polyfill, imported via its
+// pure subpath (the package root's index.js side-effect-installs a global; the
+// bridge decides where and whether to expose it, like every other vendor piece).
+// First consumer: the ServiceWorker Static Routing API's `urlPattern` conditions.
+import { URLPattern } from 'urlpattern-polyfill/urlpattern';
 const culoriRgb = useMode(modeRgb);   // registers 'rgb' (+ named + hex parsers); returns the rgb converter
 useMode(modeHsl);                     // registers 'hsl' / 'hsla'
 useMode(modeHwb);                     // registers 'hwb' (browsers flatten it to rgb in computed style)
@@ -129,4 +135,4 @@ function cssColorComputed(str) {
 }
 const color = { toHex: cssColorToHex, computed: cssColorComputed };
 
-export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color };
+export { cssSelect, cssWhat, xpathway, cssTree, urlEngine, mimeType, streams, parse5, color, URLPattern };

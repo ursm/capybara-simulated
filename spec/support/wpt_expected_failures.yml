@@ -2156,88 +2156,21 @@ service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
-service-workers/service-worker/static-router-cross-origin-navigation.https.html:
-- Cross-origin navigation with static router cache rule
-service-workers/service-worker/static-router-fetch-event.https.html:
-- Main resource matched the rule with fetch-event source
-- Subresource load matched the rule fetch-event source
-service-workers/service-worker/static-router-invalid-rules.https.html:
-- addRoutes should raise for forbidden request method.
-- addRoutes should raise for invalid ByteString request method.
-- addRoutes should raise for invalid HTTP request method.
-- addRoutes should raise if not condition exceeds the depth limit
-- addRoutes should raise if or condition exceeds the depth limit
-- addRoutes should raise if the conditon does not exist in the rule
-- addRoutes should raise if the number of router rules exceeds the length limit
-- addRoutes should raise if the source does not exiswt in the rule
-service-workers/service-worker/static-router-main-resource.https.html:
-- Main resource fallback to the network when there is no cache entry
-- Main resource load matched with the cache source
-- Main resource load matched with the cache source, with specifying the cache name
-- Main resource load matched with the condition
-- Main resource load matched with the ignore case condition
-- Main resource load matched without the ignore case condition
-- Main resource load not matched with the condition
-- Main resource load should match the condition without not
-- Main resource load should not match the condition with not
-service-workers/service-worker/static-router-multiple-router-registrations.https.html:
-- Main reosurce load matched with the service worker having multiple rules
-- Resource load matched with the rule registered in the imported service worker
 service-workers/service-worker/static-router-mutiple-conditions.https.html:
 - Multiple conditions including requestDestination work with `and` operation
-- Multiple conditions work with `and` operation
-service-workers/service-worker/static-router-no-fetch-handler.https.html:
-- The router rule is evaluated without fetch handlers in service worker
-- addRoutes should raise if the fetch-event source is used without onfetch
-- addRoutes should raise if the race-network-and-fetch-handler source is used without
-  onfetch
 service-workers/service-worker/static-router-race-network-and-fetch-handler.https.html:
-- Main resource load matched the rule with race-network-and-fetch-handler source,
-  and the fetch handler response is faster than the server response
-- Main resource load matched the rule with race-network-and-fetch-handler source,
-  and the fetch handler response is faster than the server response while fetch()
-  is triggered inside the fetch handler
 - Main resource load matched the rule with race-network-and-fetch-handler source,
   and the server reseponse is faster than the fetch handler
 - Main resource load matched the rule with race-network-and-fetch-handler source,
   and the server reseponse is faster than the fetch handler while fetch() is triggered
   inside the fetch handler
 - Subresource load matched the rule with race-network-and-fetch-handler source, and
-  the fetch handler response is faster than the server response
-- Subresource load matched the rule with race-network-and-fetch-handler source, and
   the server reseponse is faster than the fetch handler
-- Subresource load matched the rule with race-network-and-fetch-handler source, and
-  the server reseponse is faster than the fetch handler, but not found
 - Subresource load matched the rule with race-network-and-fetch-handler source, and
   the server reseponse with 204 response is faster than the fetch handler
 service-workers/service-worker/static-router-request-destination.https.html:
 - Subreosurce load matched with the requestMethod script condition
 - Subreosurce load not matched with the requestMethod script condition
-service-workers/service-worker/static-router-request-method.https.html:
-- Subresource load matched with the requestMethod DELETE condition
-- Subresource load matched with the requestMethod GET condition
-- Subresource load matched with the requestMethod POST condition
-- Subresource load matched with the requestMethod PUT condition
-service-workers/service-worker/static-router-subresource.https.html:
-- Subresource cross origin load matched with URLPattern condition via constructed
-  object
-- Subresource cross origin load not matched with URLPattern condition via URLPatternCompatible
-- Subresource cross origin load not matched with URLPattern condition via string
-- Subresource load did not match with the cache and fallback to the network
-- Subresource load matched with RequestMode condition
-- Subresource load matched with URLPattern condition
-- Subresource load matched with URLPattern condition via URLPatternCompatible
-- Subresource load matched with URLPattern condition via string
-- Subresource load matched with ignoreCase URLPattern condition
-- Subresource load matched with the cache source rule
-- Subresource load matched with the cache source, with specifying the cache name
-- Subresource load matched with the nested `or` condition
-- Subresource load matched with the next `or` condition
-- Subresource load matched without ignoreCase URLPattern condition
-- Subresource load not matched with URLPattern condition
-- Subresource load not matched with `or` condition
-- Subresource load should match with a file other than not
-- Subresource load should not match with the not condition
 service-workers/service-worker/unregister-immediately-during-extendable-events.https.html:
 - Clear-Site-Data must fail pending subresource fetch events.
 service-workers/service-worker/unregister-immediately.https.html:
