@@ -6399,6 +6399,10 @@ module Capybara
       # Fire an aux window's own window `load` (called by its opener, deferred).
       def fire_aux_window_load(handle)  = (@driver.fire_aux_window_load(handle.to_s) if @driver.respond_to?(:fire_aux_window_load))
       def fire_own_window_load          = (@runtime.call('__csimFireWindowLoad') rescue nil)
+      # The document-teardown pair (pagehide+unload), this window AND its nested
+      # frames, parent-first — fired by the Driver before an explicitly-closed aux
+      # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
+      def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
 
       # Queue a cross-window message for delivery into THIS window's VM (called
       # by the Driver on the target Browser). Delivered as a `message` event the
@@ -7190,8 +7194,12 @@ module Capybara
         @sw_registered_scopes.clear
         @sw_activating_scopes.clear
         reset_sw_race_state
+        # Keepalive threads are NOT killed: surviving teardown is their contract —
+        # an aux window's close-time beacon completes AFTER its browser is disposed
+        # (reset_workers runs from dispose). They self-terminate in ~ms (in-process
+        # Rack; .py delays are virtualized) and self-remove; the per-id size map
+        # makes their late release/finalize generation-safe against these clears.
         @keepalive_lock.synchronize do
-          @keepalive_threads.each(&:kill)
           @keepalive_threads.clear
           @keepalive_results.clear
           @keepalive_inflight_sizes.clear

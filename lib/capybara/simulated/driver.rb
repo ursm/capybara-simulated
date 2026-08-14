@@ -686,6 +686,10 @@ module Capybara
         return if h == PRIMARY_HANDLE
         @aux_windows.reject! {|w|
           next false unless w[:handle] == h
+          # HTML "close a browsing context": the teardown events (pagehide+unload,
+          # this window and every nested frame, parent-first) fire while the VM
+          # still works — a nested iframe's unload keepalive beacon depends on it.
+          w[:browser].fire_document_teardown if w[:browser].respond_to?(:fire_document_teardown)
           if w[:browser].sw_registrations_active?
             # Still hosting a live service-worker registration — park (see @sw_parked):
             # tear down the document-scoped machinery, retire older parked browsers
