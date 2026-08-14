@@ -114,6 +114,7 @@ module Capybara
         # policy), so a returned eval/call has already run its end-of-script
         # microtasks.
         def eval(src)          = @ctx.eval(src)
+        def eval_void(src)     = @ctx.eval_void(src)
         def call(name, *args)  = @ctx.call(name, *args)
 
         # Record every attach so `create_context` can replay them: the bridge
@@ -508,7 +509,7 @@ module Capybara
         # unregister path (its iframe element going away), but a WINDOW realm has no
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
-        ctx.eval("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
+        ctx.eval_void("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         nil
@@ -599,7 +600,7 @@ module Capybara
             # contexts N -> 1). See `relieve_heap_pressure`.
             relieve_heap_pressure
             attach_host_fns(@ctx)
-            @ctx.eval('__csim_installWorker();')
+            @ctx.eval_void('__csim_installWorker();')
             return @ctx
           rescue StandardError => e
             warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
@@ -749,7 +750,7 @@ module Capybara
       def build_ctx
         c = Ctx.new(snapshot: @snapshot || self.class.snapshot, timeout: CALL_TIMEOUT_MS)
         attach_host_fns(c)
-        c.eval('__csim_installWorker();')
+        c.eval_void('__csim_installWorker();')
         c
       end
 
@@ -815,7 +816,7 @@ module Capybara
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm)
         has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
-        realm.eval(RuntimeShared.snapshot_src) unless has_bridge
+        realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
         reseed_realm_js(realm)
@@ -842,7 +843,15 @@ module Capybara
         # `top` propagates up the chain (the main realm's `top` is itself). A
         # nested frame thus reaches its TRUE parent, not unconditionally the
         # main frame. `parent_id` is an integer the marshaller carries verbatim.
-        realm.eval(<<~JS)
+        #
+        # eval_void, and not by preference: a statement list's completion value is
+        # its last statement's, so this block evaluates to the WindowProxy it just
+        # assigned — and marshalling a value RUNS JS, so the proxy's `ownKeys` trap
+        # throws SecurityError at a cross-origin parent. That lands after every
+        # write here has already succeeded, aborting the rest of the frame's boot
+        # (leaving it on the snapshot's default origin) over a value we never asked
+        # for. Every eval below whose value we discard is spelled the same way.
+        realm.eval_void(<<~JS)
           if (globalThis.#{HOST_NAMESPACE_NAME} && typeof globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal === 'function') {
             var __parentWin = globalThis.#{HOST_NAMESPACE_NAME}.contextGlobal(#{parent_id.to_i});
             if (__parentWin) {
@@ -876,7 +885,7 @@ module Capybara
         # client reports (sw-client.js clientId()) already carry it; the browser-side
         # alias keeps message routing and record minting coherent (sw_adopt_client_id).
         unless client_id.to_s.empty?
-          realm.eval("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
+          realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
           @browser.sw_adopt_client_id(realm.id, client_id.to_s)
         end
         # Set window.name from the container's `name` attribute BEFORE the document
@@ -993,7 +1002,7 @@ module Capybara
         # `window.closed` (flag-backed) and `window.close()` (marks closed; the realm
         # lingers inert until the Browser tears the isolate down — matching a real
         # closed window whose proxy stays valid and reports closed === true).
-        realm.eval(<<~JS)
+        realm.eval_void(<<~JS)
           globalThis.__csimIsWindowRealm = true;
           globalThis.__csimWindowClosedFlag = false;
           try {
@@ -1009,7 +1018,7 @@ module Capybara
         # guard is on nil, not on 0 (0 is falsy but real here). Assigning globalThis.opener
         # routes through the bridge's opener setter (stores the override the getter returns).
         unless opener_id.nil?
-          realm.eval(<<~JS)
+          realm.eval_void(<<~JS)
             if (typeof globalThis.__csimFrameWindowProxyFor === 'function') {
               var __op = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
               if (__op) globalThis.opener = __op;
@@ -1045,7 +1054,7 @@ module Capybara
         # Register with the opener (main) realm's child-realm set so `drainChildRealms`
         # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
-        ctx.eval("(globalThis.__csimChildRealmIds || (globalThis.__csimChildRealmIds = new Set())).add(#{realm.id});")
+        ctx.eval_void("(globalThis.__csimChildRealmIds || (globalThis.__csimChildRealmIds = new Set())).add(#{realm.id});")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
@@ -1249,15 +1258,7 @@ module Capybara
         # pay the rendezvous round-trip.
         c.attach('__csim_runScriptCached', ->(label, body) {
           RuntimeShared.safe_call {
-            # Trailing `;undefined` suppresses the script's COMPLETION VALUE so
-            # `script.run`'s return crosses the V8→Ruby boundary on the trivial
-            # marshalling fast path. Without it, a large inline script ending
-            # in a jQuery-ish expression returns a `ce.fn.init` (array-like,
-            # non-cloneable) that drags through the deep-copy filter —
-            # pure waste, since the value is discarded (`nil` below). The SHA keys
-            # the bytecode cache on the COMPILED source, so the suffix must be
-            # hashed and fed to `queue_warm` too (else cached_data is rejected).
-            src = "#{body}\n;undefined"
+            src = body.to_s
             # No-cd warm path, mirroring `native_module_for`: once this
             # isolate has compiled a (label, bytesize), re-visits compile
             # straight against V8's source-keyed in-memory cache — skipping
@@ -1283,7 +1284,13 @@ module Capybara
               @compiled_script_keys[key] = true if key
             end
             begin
-              script.run
+              # run_void, not run: a `<script>`'s completion value is nobody's
+              # answer, and marshalling it would drag a large inline script's
+              # trailing jQuery-ish expression (a non-cloneable `ce.fn.init`)
+              # through the deep-copy filter for nothing. This is why `src` is
+              # the body verbatim — it used to carry a `;undefined` suffix, which
+              # then had to be hashed into the bytecode-cache key as well.
+              script.run_void
             ensure
               script.dispose
             end
@@ -1325,17 +1332,15 @@ module Capybara
         # as the QuickJS runner does. Swallowing here would turn a
         # throwing leading-`const` inline script into a silent `load`.
         c.attach('__csim_runScriptEval', ->(label, body) {
-          # Trailing `;undefined` makes the script's COMPLETION VALUE undefined so
-          # `c.eval`'s return crosses the V8→Ruby boundary on the trivial
-          # marshalling fast path. Without it, a leading-lexical inline script
-          # ending in a jQuery-ish expression (`const cfg=…; $(…)`) returns a
-          # `ce.fn.init` (array-like, non-cloneable) here, which falls into the
-          # deep-copy filter slow-path — pure waste, since the value
-          # is discarded (`nil` below). The `//# sourceURL` line is a comment and
-          # doesn't affect the completion value; lexical declarations persist as a
+          # A `<script>`'s completion value is nobody's answer, and reading it is
+          # not free: a leading-lexical inline script ending in a jQuery-ish
+          # expression (`const cfg=…; $(…)`) evaluates to a `ce.fn.init`
+          # (array-like, non-cloneable) that drags through the deep-copy filter,
+          # and a hostile getter in there would raise an error this call has no
+          # business raising. `eval_void` says so outright, replacing the trailing
+          # `;undefined` this used to append. Lexical declarations persist as a
           # side effect of eval, independent of the completion value.
-          c.eval("#{body}\n;undefined\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
-          nil
+          c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
         })
         install_run_script_dispatcher(c)
       end
@@ -1347,7 +1352,7 @@ module Capybara
       # run after the attaches it captures (`attach_run_script_with_cache`
       # installs it last for exactly that reason).
       def install_run_script_dispatcher(c)
-        c.eval(<<~JS)
+        c.eval_void(<<~JS)
           (function () {
             const cached    = globalThis.__csim_runScriptCached;
             const runEval   = globalThis.__csim_runScriptEval;
@@ -1391,8 +1396,8 @@ module Capybara
       # `__csim_installWorker()` post-snapshot init; the `__csim_runScript`
       # dispatcher comes from `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c)
-        c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
-        c.eval('__csim_installWorker();')
+        c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
+        c.eval_void('__csim_installWorker();')
       end
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
@@ -1413,7 +1418,7 @@ module Capybara
         # microtask-checkpoint semantics. Alias it to the namespace's native
         # in-isolate checkpoint so callers pay ~sub-µs instead of an
         # attached-fn cross-thread round-trip.
-        c.eval("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
+        c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         # Register the bridge's recorder for V8's promise-reject notifications
         # — the channel that surfaces rejections NO handler ever sees
         # (fire-and-forget async functions, bare `Promise.reject`); the
@@ -1422,7 +1427,7 @@ module Capybara
         # unhandled-rejection.js leaves registration to us. Main realm only —
         # the recorder routes per-realm via `contextGlobal` itself, and a
         # frame-realm registration would dangle once that realm is disposed.
-        c.eval(<<~JS)
+        c.eval_void(<<~JS)
           if (typeof globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler === 'function' &&
               typeof globalThis.__csimPromiseRejected === 'function') {
             globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler(globalThis.__csimPromiseRejected);
@@ -1473,8 +1478,8 @@ module Capybara
         # join the realm's shared global lexical environment where later code sees them.
         # `(0, eval)` would block-scope them to the eval and they'd vanish. `c.eval` is
         # the top-level-script path (same as the worker's own body eval).
-        c.attach('__csim_workerImportEval', ->(src) { c.eval(src.to_s); nil })
-        c.eval('__csim_installWorkerScope();')
+        c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
+        c.eval_void('__csim_installWorkerScope();')
         WorkerRuntime.new(
           eval_fn:           ->(s)     { c.eval(s.to_s) },
           call_fn:           ->(n, *a) { c.call(n.to_s, *a) },
@@ -1509,32 +1514,13 @@ module Capybara
             end
             # Top-level await is disallowed in a service worker module ("Run Service
             # Worker" fails the script; Chrome rejects the registration). V8's
-            # IsGraphAsync (rusty >= 0.2.0, Module#graph_async?) answers it for the
-            # WHOLE instantiated graph — TLA hiding in an imported module fails too.
-            # (When rusty_v8 exposes HasTopLevelAwait, a per-module check could
-            # pinpoint the offender; graph-level is spec-sufficient here.) On rusty
-            # 0.1.x — the current pin, while a 0.2.0 frame-realm regression is
-            # investigated — fall back to compile probes: a source failing classic
-            # compile but compiling inside an async-function wrapper has top-level
-            # await (imports fail both probes; a TLA next to VALID imports slips
-            # through there — the graph_async? path has no such gap). This lambda
-            # serves service workers only — a dedicated module worker, where TLA is
-            # legal, would need the check parameterized.
-            if root.respond_to?(:graph_async?)
-              raise 'Top-level await is disallowed in a service worker' if root.graph_async?
-            else
-              begin
-                c.compile(src_text)
-              rescue RustyRacer::ParseError
-                tla = begin
-                  c.compile("(async()=>{\n#{src_text}\n})")
-                  true
-                rescue RustyRacer::ParseError
-                  false
-                end
-                raise 'Top-level await is disallowed in a service worker' if tla
-              end
-            end
+            # IsGraphAsync (Module#graph_async?) answers it for the WHOLE
+            # instantiated graph, which is what the spec asks: TLA hiding in an
+            # imported module fails too. Per-module `[[HasTLA]]` would name the
+            # offender but not this question — it can't see an imported module's
+            # await. This lambda serves service workers only; a dedicated module
+            # worker, where TLA is legal, would need the check parameterized.
+            raise 'Top-level await is disallowed in a service worker' if root.graph_async?
 
             root.evaluate
             nil
