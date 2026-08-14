@@ -2278,12 +2278,6 @@ service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
 service-workers/service-worker/update-no-cache-request-headers.https.html:
 - headers in no-cache mode
-service-workers/service-worker/update-not-allowed.https.html:
-- ServiceWorkerRegistration.update() from active service worker succeeds while installing
-  service worker.
-- ServiceWorkerRegistration.update() from client succeeds while installing service
-  worker.
-- ServiceWorkerRegistration.update() from installing service worker throws.
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
 service-workers/service-worker/update-registration-with-type.https.html:
