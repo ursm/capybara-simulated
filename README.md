@@ -40,14 +40,14 @@ gem 'rusty_racer', group: :test  # JS engine — pick one
 The gem treats the JS engine as a soft dependency. Pick one of:
 
 ```ruby
-gem 'rusty_racer', '>= 0.1.9'  # V8 (JIT, fastest per spec) — default
+gem 'rusty_racer', '>= 0.2.1'  # V8 (JIT, fastest per spec) — default
 gem 'quickjs', '>= 0.19'       # QuickJS (interpreter, smaller per-VM RAM —
 gem 'quickjs-polyfill-intl'    # wins when scaling parallel workers under
                                # a fixed memory budget). Intl lives in the
                                # companion gem since quickjs 0.19.
 ```
 
-The V8 engine comes from [rusty_racer](https://github.com/ursm/rusty_racer), a rusty_v8-based Ruby binding with the native ES Module API, `ScriptCompiler::CachedData` snapshots, and per-frame realm contexts the driver builds on.
+The V8 engine comes from [rusty_racer](https://github.com/ursm/rusty_racer), a rusty_v8-based Ruby binding with the native ES Module API, `ScriptCompiler::CachedData` snapshots, and per-frame realm contexts the driver builds on. 0.2.1 is the floor: the driver needs `Context#eval_void` (0.2.1) to wire a frame's `parent`/`top` without marshalling the WindowProxy it just assigned, and `Module#graph_async?` (0.2.0) to reject top-level await in a service worker.
 
 The engine is auto-detected at boot; if both gems are present V8 wins. Override explicitly with `CSIM_JS_ENGINE=v8|quickjs` or `Capybara::Simulated::Driver.new(app, js_engine: :quickjs)`.
 

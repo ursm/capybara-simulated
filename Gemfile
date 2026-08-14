@@ -5,10 +5,7 @@ gemspec
 # JS engines: both installed in dev so the spec suite exercises both
 # (CSIM_JS_ENGINE=v8 / =quickjs). Downstream apps add whichever one
 # they want — neither is a hard dependency of the gem itself.
-# 0.2.0 has a frame-realm regression (all iframe builds fail with a spurious
-# cross-origin SecurityError under the race-network machinery) — pinned to 0.1.x
-# until it is root-caused; Module#graph_async? is feature-detected either way.
-gem 'rusty_racer', '~> 0.1.16'
+gem 'rusty_racer', '>= 0.2.1'
 gem 'nokogiri'
 gem 'quickjs', '~> 0.21.0'
 gem 'quickjs-polyfill-intl'
