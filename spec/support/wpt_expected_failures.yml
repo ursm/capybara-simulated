@@ -2100,25 +2100,6 @@ service-workers/service-worker/resource-timing-fetch-variants.https.html:
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 - Non-controlled resource loads
-service-workers/service-worker/respond-with-body-accessed-response.https.html:
-- 'test: type=basic'
-- 'test: type=basic&clone=1'
-- 'test: type=basic&clone=1&passThroughCache=true'
-- 'test: type=basic&clone=2'
-- 'test: type=basic&clone=2&passThroughCache=true'
-- 'test: type=basic&passThroughCache=true'
-- 'test: type=default'
-- 'test: type=default&clone=1'
-- 'test: type=default&clone=1&passThroughCache=true'
-- 'test: type=default&clone=2'
-- 'test: type=default&clone=2&passThroughCache=true'
-- 'test: type=default&passThroughCache=true'
-- 'test: type=opaque'
-- 'test: type=opaque&clone=1'
-- 'test: type=opaque&clone=1&passThroughCache=true'
-- 'test: type=opaque&clone=2'
-- 'test: type=opaque&clone=2&passThroughCache=true'
-- 'test: type=opaque&passThroughCache=true'
 service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
 - Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
@@ -2156,11 +2137,6 @@ service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
-service-workers/service-worker/static-router-mutiple-conditions.https.html:
-- Multiple conditions including requestDestination work with `and` operation
-service-workers/service-worker/static-router-request-destination.https.html:
-- Subreosurce load matched with the requestMethod script condition
-- Subreosurce load not matched with the requestMethod script condition
 service-workers/service-worker/unregister-immediately-during-extendable-events.https.html:
 - Clear-Site-Data must fail pending subresource fetch events.
 service-workers/service-worker/unregister-immediately.https.html:

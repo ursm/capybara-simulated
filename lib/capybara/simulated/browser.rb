@@ -4314,6 +4314,62 @@ module Capybara
       # same-origin mode forbids (importScripts then throws NetworkError), or a
       # resp-shaped hash ({'status', 'headers', 'body'}) the JS MIME-check + eval path
       # consumes exactly like a network response.
+      # A controlled document's external classic `<script src>` fetched through its
+      # controller (destination 'script'), SYNCHRONOUSLY on the calling (main)
+      # thread — the parser blocks on a classic script per HTML, and the navigation
+      # path already proved a host-callback block is safe while the worker thread
+      # answers (the direct-reply queue needs no main-thread drain; this is what the
+      # OLD reverted attempt predated). Returns nil to load from the network
+      # (fallthrough / dead worker), {'blocked' => true} for a networkError
+      # respondWith, {'body' =>} for a served script. An OPAQUE respondWith still
+      # EXECUTES (browsers run opaque classic scripts) — its bytes ride the private
+      # render channel like the image path.
+      def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include')
+        w = @workers[handle.to_i]
+        return nil unless w && w[:thread]&.alive?
+        # A worker still ACTIVATING can't be waited for here — this caller blocks the
+        # main thread synchronously, and the activation may need main-thread JS to
+        # settle (the same deadlock the async fetch path avoids by PARKING). Load
+        # from the network instead, exactly what an uncontrolled load did before
+        # interception existed; the async-parking treatment is the follow-up.
+        return nil unless @worker_init_lock.synchronize { w[:sw_activated] }
+        req = JSON.generate(
+          method:      'GET',
+          url:         url.to_s,
+          headers:     {},
+          body_b64:    '',
+          # The element's `crossorigin` attribute decides these (HTML "fetch a
+          # classic script" / "obtain a stylesheet"): absent → no-cors+include,
+          # anonymous → cors+same-origin, use-credentials → cors+include — the
+          # same mapping the <img> path ships (_imageCorsRequest).
+          mode:        mode.to_s,
+          destination: destination.to_s,
+          credentials: credentials.to_s,
+          clientId:    client_id.to_s,
+          # Policy-resolved like every other controlled fetch (the raw document URL
+          # must not leak into event.request.referrer beyond what the default
+          # policy allows for a cross-origin subresource).
+          referrer:    compute_referrer(nil, referrer.to_s, url.to_s).to_s
+        )
+        r = sw_direct_fetch(handle.to_i, req, handle.to_i) or return nil
+        return nil if r['fallthrough']
+        return {'blocked' => true} if r['networkError']
+
+        # HTML "fetch a classic script" / "obtain a stylesheet": a non-ok response
+        # fails the load (error event, nothing executes) — EXCEPT an opaque one,
+        # which reports status 0 and still executes/applies (its real bytes ride
+        # the private render channel). MIME enforcement is deliberately not added
+        # here yet: the covering css-MIME tests are still allowlisted, and a
+        # `new Response(text)` respondWith (text/plain) serving a stylesheet is
+        # load-bearing for green static-router subtests.
+        type = r['type'].to_s
+        return {'blocked' => true} unless type == 'opaque' || (200..299).cover?((r['status'] || 200).to_i)
+
+        body_b64 = r['body_b64'].to_s
+        body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
+        {'body' => RuntimeShared.utf8_text(Base64.decode64(body_b64))}
+      end
+
       def sw_import_script_fetch(sw_handle, url, client_handle)
         req = JSON.generate(
           method:      'GET',
