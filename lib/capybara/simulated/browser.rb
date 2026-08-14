@@ -421,6 +421,14 @@ module Capybara
         # is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off the general outbox)
         # keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with client-fetch replies.
         @sw_registrations = {}
+        # Every scope with a LIVE registration object, mirrored at Register-job success
+        # (before any worker state exists — the registration is real from the moment
+        # register() resolves). clients.claim()'s longest-registration-wins check runs
+        # against registrations, not workers: a longer scope that is merely REGISTERED
+        # (its first worker still installing) must already shield a client from a
+        # shorter scope's claim (claim-not-using-registration "longer-matched").
+        # scope href => true; dropped by sw_unregister_scope.
+        @sw_registered_scopes = {}
         # Registrations whose active worker is still 'activating' — its activate handler's
         # waitUntil hasn't settled, so the scope isn't in @sw_registrations yet (that mirror
         # waits for the observable 'activated'). Handle Fetch consults this map to PARK a
@@ -4464,6 +4472,14 @@ module Capybara
       # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
       # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
       # find its controlling SW even after the destination realm's JS was rebuilt.
+      # A realm created a live registration object for this scope (Register job success —
+      # register() resolving, or a cross-realm registration synthesized from an existing
+      # active worker). Idempotent; undone by sw_unregister_scope.
+      def sw_note_registered(scope)
+        @sw_registered_scopes[scope.to_s] = true
+        nil
+      end
+
       # The client-side lifecycle reached 'activating' for this registration: the active
       # worker EXISTS from here on (Handle Fetch can find it), but its activate handler's
       # waitUntil hasn't settled — functional events against the scope park until the
@@ -4531,6 +4547,9 @@ module Capybara
         # SECOND registration see them too.
         fresh = !@sw_registrations.value?(handle.to_i)
         @sw_registrations[scope.to_s] = handle.to_i
+        # Invariant: registered ⊇ activated — covers registration objects that reached
+        # activation without the register()-time note (synthesized cross-realm regs).
+        @sw_registered_scopes[scope.to_s] = true
         @sw_activating_scopes.delete(scope.to_s)
         seed_client_mirror(handle.to_i) if fresh
         # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
@@ -4595,23 +4614,26 @@ module Capybara
         # whose MATCHED registration is this scope, so the activation gate
         # (sw_worker_controls_clients?) and matchAll never depend on the realm
         # re-report round trip that can race a load-time report (activation.https).
+        # The claim's longest-registration-wins checks (host record below, realm-side
+        # self-check via all_scopes) must see EVERY registration whose lifecycle has an
+        # active worker — mirrored (@sw_registrations) OR still activating
+        # (@sw_activating_scopes). Claims from activating workers broadcast immediately
+        # now, so a LONGER registration that is itself mid-activation is a real
+        # candidate; comparing against the mirrored set alone lets a shorter scope's
+        # claim transiently seize a client the longer one matches
+        # (claim-not-using-registration under CI load).
+        candidate_scopes = @sw_registrations.keys | @sw_registered_scopes.keys | @sw_activating_scopes.keys | [scope.to_s]
         @sw_clients.each do |_id, entry|
           u       = entry[:rec]['url'].to_s
-          matched = sw_scope_match(u)&.last
+          matched = candidate_scopes.select {|s| u.start_with?(s) }.max_by(&:length)
           # A claim from a still-ACTIVATING worker: its scope isn't in @sw_registrations
-          # yet, so sw_scope_match can't name it — the claim wins any client its scope
-          # covers unless a LONGER registered scope claims that client
-          # (longest-registration-wins). Without this the host-authoritative record is
-          # skipped for exactly this path and the controller falls back to the realm
-          # re-report race the record exists to kill.
-          entry[:handle] = handle.to_i if matched == scope ||
-                                          (u.start_with?(scope) && (matched.nil? || matched.length < scope.length))
+          # yet, so the host record must be written here for exactly this path too, or
+          # the controller falls back to the realm re-report race the record exists to
+          # kill. The claim wins a client only when its scope is that client's longest
+          # match among every candidate registration.
+          entry[:handle] = handle.to_i if matched == scope
         end
-        # The authoritative registration scope set — the claim's longest-registration-wins check runs
-        # against this, not a realm-local map that can lag under load (claim-not-using-registration).
-        # The claiming scope itself rides along: an ACTIVATING registration's scope isn't
-        # mirrored yet, and the realm-side self-check must still see it as a candidate.
-        all_scopes = @sw_registrations.keys | [scope.to_s]
+        all_scopes = candidate_scopes
         @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes)
         @runtime.frame_realm_ids.each do |rid|
           @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes) if @runtime.frame_realm_alive?(rid)
@@ -4653,6 +4675,7 @@ module Capybara
 
       def sw_unregister_scope(scope)
         @sw_registrations.delete(scope.to_s)
+        @sw_registered_scopes.delete(scope.to_s)
         @sw_activating_scopes.delete(scope.to_s)
         @sw_scope_meta.delete(scope.to_s)
         # A navigation parked on this scope's activation must not wait forever for an
@@ -6886,6 +6909,7 @@ module Capybara
         @sw_fetch_wait_deadline   = nil
         @sw_msg_wait_deadline     = nil
         @sw_registrations.clear
+        @sw_registered_scopes.clear
         @sw_activating_scopes.clear
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}

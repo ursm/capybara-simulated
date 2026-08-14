@@ -188,6 +188,9 @@ module Capybara
         # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
+        # A live registration object exists at this scope (Register job success) — claim's
+        # longest-registration-wins must see it before any worker state exists.
+        '__csim_swNoteRegistered'     => ->(b, *a) { b.sw_note_registered(a[0]); nil },
         # The lifecycle reached 'activating': the scope's active worker exists but its
         # activate waitUntil hasn't settled — Handle Fetch parks functional events on it.
         '__csim_swNoteActivating'     => ->(b, *a) { b.sw_note_activating(a[0], a[1]); nil },

@@ -2047,8 +2047,6 @@ service-workers/service-worker/referrer-toplevel-script-fetch.https.html:
 - Referrer of the top-level script fetch should be the document URL
 service-workers/service-worker/register-default-scope.https.html:
 - null scope
-service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
-- register worker that calls waitUntil with a promise that never resolves in oninstall
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
 service-workers/service-worker/registration-schedule-job.https.html:
