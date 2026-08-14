@@ -188,6 +188,9 @@ module Capybara
         # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
+        # The lifecycle reached 'activating': the scope's active worker exists but its
+        # activate waitUntil hasn't settled — Handle Fetch parks functional events on it.
+        '__csim_swNoteActivating'     => ->(b, *a) { b.sw_note_activating(a[0], a[1]); nil },
         '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
         # unregister() parked its Clear Registration: the workers live on until no client is
         # using the registration and no extended work is pending (see sw_note_uninstalling).
@@ -209,7 +212,7 @@ module Capybara
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
         '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6], defer_ok: !!a[7]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },
