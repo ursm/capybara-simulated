@@ -4504,6 +4504,12 @@ module Capybara
         nil
       end
 
+      # A worker worth routing a request through: it has a fetch handler (or the
+      # snapshot is still unknown), or Static Routing rules — which serve
+      # network/cache sources with no fetch handler at all. The single predicate
+      # behind every has_fetch interception gate.
+      private def sw_interception_worthy?(w) = w[:has_fetch] != false || !!w[:has_router_rules]
+
       # The still-activating worker whose registration scope covers `url`, or nil. A worker
       # whose activated marker was already PROCESSED (record flag set, scope mirror imminent
       # in the same drain) no longer defers; a dead one can't answer, so don't park on it.
@@ -4518,7 +4524,7 @@ module Capybara
 
         handle = @sw_activating_scopes[scope]
         w = @workers[handle] or return nil
-        return nil if w[:sw_activated] || w[:has_fetch] == false || !w[:thread]&.alive?
+        return nil if w[:sw_activated] || !sw_interception_worthy?(w) || !w[:thread]&.alive?
 
         handle
       end
@@ -4624,6 +4630,10 @@ module Capybara
       # scope (__csim_swClaimClient) so no realm→URL map is needed here. has_fetch = the SW's
       # install-time fetch-listener snapshot, so a claimed client routes its fetches.
       private def broadcast_claim(handle, has_fetch, scope)
+        # The claim's has_fetch snapshot predates install — a router-rules-only SW
+        # (no fetch handler; addRoutes during install) must still make its claimed
+        # clients route, so the worker-side router can serve its sources.
+        has_fetch ||= !!@workers.dig(handle.to_i, :has_router_rules)
         script_url = @workers.dig(handle.to_i, :script_url).to_s
         # The claim IS the controller assignment: record it host-side for every client
         # whose MATCHED registration is this scope, so the activation gate
@@ -4924,7 +4934,9 @@ module Capybara
         w = @workers[handle] or return nil
         return nil unless w[:thread]&.alive?
 
-        [handle, w[:has_fetch] != false, w[:script_url].to_s, scope]
+        # Static Routing rules make a fetch-handler-less SW interception-worthy: the
+        # client must route so the worker-side router can serve network/cache sources.
+        [handle, sw_interception_worthy?(w), w[:script_url].to_s, scope]
       end
 
       # The handle of the service worker controlling a newly spawned worker, or nil.
@@ -5529,10 +5541,12 @@ module Capybara
         # into a freshly-activated registration can read it as nil (unknown) — race-prone for the
         # 2nd+ registration, whose initial load fires before the publish. Treat unknown as "maybe":
         # route through and let the fetch dispatch fall through if the SW turns out to have no
-        # handler. Skip only a KNOWN-false (messaging/push-only) SW, or one whose thread is already
-        # DEAD (crashed during eval / closed) — routing there would just stall the nav for the full
+        # handler. Skip only a KNOWN-false (messaging/push-only) SW — unless it registered
+        # Static Routing rules, which route requests with no fetch handler at all
+        # (static-router-no-fetch-handler) — or one whose thread is already DEAD (crashed
+        # during eval / closed) — routing there would just stall the nav for the full
         # round-trip budget with no one to answer.
-        return nil if w[:has_fetch] == false || !w[:thread]&.alive?
+        return nil if !sw_interception_worthy?(w) || !w[:thread]&.alive?
 
         handle
       end
@@ -7350,6 +7364,12 @@ module Capybara
           # so the job runs on the main thread (process_worker_unregister); the reply rides
           # this worker's inbox as 'unregister_result'.
           unregister:     ->                  { outbox << {handle: handle, kind: 'sw_unregister'} },
+          # The install handler registered Static Routing API rules (addRoutes) — the
+          # rules themselves live in the worker isolate (evaluated at its dispatch
+          # point); the host records only their EXISTENCE, which keeps a router SW
+          # with no fetch handler dispatchable (the has_fetch gates all consult it).
+          # Recorded on the worker's own thread at post time, like skip_waiting.
+          router:         ->                  { (wk = @workers[handle]) && wk[:has_router_rules] = true },
           # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
           # while any are pending an installed successor keeps waiting (activation.https),
           # and the 0-transition re-runs try-activate to release it.
@@ -7400,7 +7420,7 @@ module Capybara
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
         # controlled frame realm gets (create_frame_realm).
         if !service && controller.to_i.positive? && (cw = @workers[controller.to_i])
-          rt.call('__csim_swSetControllerDirect', controller.to_i, cw[:has_fetch] != false, cw[:script_url].to_s, @sw_registrations.key(controller.to_i).to_s)
+          rt.call('__csim_swSetControllerDirect', controller.to_i, sw_interception_worthy?(cw), cw[:script_url].to_s, @sw_registrations.key(controller.to_i).to_s)
         end
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
@@ -7470,7 +7490,7 @@ module Capybara
             if final_ctrl != controller.to_i
               controller = final_ctrl
               if controller.positive? && (cw = @workers[controller])
-                rt.call('__csim_swSetControllerDirect', controller, cw[:has_fetch] != false, cw[:script_url].to_s, @sw_registrations.key(controller).to_s)
+                rt.call('__csim_swSetControllerDirect', controller, sw_interception_worthy?(cw), cw[:script_url].to_s, @sw_registrations.key(controller).to_s)
               end
             end
             # Refresh the host-owned client record (URL + controller) and re-mirror it to
