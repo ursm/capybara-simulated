@@ -1726,11 +1726,6 @@ service-workers/service-worker/ServiceWorkerGlobalScope/registration-attribute.h
 - Verify registration attributes on ServiceWorkerGlobalScope of the newer worker
 service-workers/service-worker/ServiceWorkerGlobalScope/service-worker-error-event.https.html:
 - Error handlers inside serviceworker should see the attributes of ErrorEvent
-service-workers/service-worker/ServiceWorkerGlobalScope/unregister.https.html:
-- Unregister controlling service worker
-- Unregister on activate event
-- Unregister on installing event
-- Unregister on script evaluation
 service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
 - Update a registration on ServiceWorkerGlobalScope
 service-workers/service-worker/about-blank-replacement.https.html:

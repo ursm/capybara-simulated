@@ -4042,7 +4042,9 @@ module Capybara
         # it), and a dedicated/shared worker has no client registry to push into.
         # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
         # it and is terminated when it is discarded (terminate_realm_workers).
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker}
+        # `sw_scope`: a SERVICE worker's registration scope — process_worker_unregister
+        # (the worker's own registration.unregister()) resolves the scope from it.
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -4561,6 +4563,43 @@ module Capybara
       def sw_note_uninstalling(key, active_handle, handles)
         @sw_pending_uninstalls << {key: key.to_i, active: active_handle.to_i, handles: handles.map(&:to_i)}
         try_clear_uninstalls
+        nil
+      end
+
+      # A service worker's own `registration.unregister()` (rode the outbox as
+      # 'sw_unregister'). Same job as the client-side call: unmap the scope host-side,
+      # tell every realm to drop its registration object and start the deferred
+      # uninstall, and answer the worker's parked promise with the had-status. A worker
+      # whose eval outcome hasn't been DELIVERED yet (a top-level unregister drained
+      # ahead of its 'sw_eval') has no realm objects to drop — buffer on the record and
+      # replay after the outcome lands (deliver_worker_messages). A worker whose
+      # sw_eval was DEAD-LETTERED (parked-window outbox teardown) never replays —
+      # deliberately matching the dead-letter semantics of its realm's equally
+      # stranded register() promise.
+      private def process_worker_unregister(handle)
+        w = @workers[handle]
+        # A non-service worker can't reach registration.unregister() (no `registration`
+        # in its global), but if it ever did, buffering would strand it forever (it
+        # posts no sw_eval) — keep the invariant local.
+        return unless w && w[:service]
+
+        unless w[:eval_delivered]
+          # COUNTED, not flagged: two unregister() calls buffered in the same pre-eval
+          # drain park two waiters in the worker — each needs its own replay + reply.
+          w[:pending_unregister] = w[:pending_unregister].to_i + 1
+          return
+        end
+        scope = w[:sw_scope].to_s
+        scope = @sw_registrations.key(handle) if scope.empty?
+        had   = !scope.to_s.empty? && (@sw_registrations.key?(scope) || @sw_scope_meta.key?(scope))
+        if had
+          sw_unregister_scope(scope)
+          broadcast_to_realms('__csim_swScopeUnregistered', scope)
+        end
+        # The reply may never be consumed: an uncontrolled registration's uninstall
+        # clears IMMEDIATELY inside the broadcast above, terminating this very worker —
+        # the promise dies with the isolate, like a real terminated worker's.
+        (wk = @workers[handle]) && wk[:inbox] << {kind: 'unregister_result', ok: had}
         nil
       end
 
@@ -5569,7 +5608,8 @@ module Capybara
         sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
         sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
         skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
-        sw_evals,    rest0d1 = rest0d0.partition {|e| e[:kind] == 'sw_eval' }
+        sw_unregs,   rest0d0b = rest0d0.partition {|e| e[:kind] == 'sw_unregister' }
+        sw_evals,    rest0d1 = rest0d0b.partition {|e| e[:kind] == 'sw_eval' }
         sw_phases,   rest0d2 = rest0d1.partition {|e| e[:kind] == 'sw_phase' }
         try_acts,    rest0d  = rest0d2.partition {|e| e[:kind] == 'sw_try_activate' }
         sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
@@ -5599,7 +5639,30 @@ module Capybara
         # ServiceWorker objects, and a worker's install-phase skipWaiting() can land in
         # the same drain batch — addressing it before the objects exist would lose it
         # (skip-waiting "both active and waiting" hang).
-        sw_evals.each {|e| broadcast_to_realms('__csim_swEvalOutcome', e[:handle], e[:ok], e[:msg]) }
+        sw_evals.each do |e|
+          # Marks the realm-side registration objects as EXISTING (the outcome broadcast
+          # creates them synchronously) — what a buffered worker-side unregister waits on.
+          (w = @workers[e[:handle].to_i]) && w[:eval_delivered] = true
+          broadcast_to_realms('__csim_swEvalOutcome', e[:handle], e[:ok], e[:msg])
+        end
+        # A SERVICE WORKER's own `registration.unregister()` — the same job the client-side
+        # call runs, on the main thread. Processed AFTER the eval outcomes: a top-level
+        # `registration.unregister()` rides the outbox ahead of its own 'sw_eval', and the
+        # job needs the realm-side registration objects the outcome creates. One that
+        # arrives in an EARLIER drain than its eval outcome is buffered on the worker
+        # record and replayed here right after the outcome lands (same lost-delivery class
+        # as the host-recorded skipWaiting flag).
+        sw_unregs.each {|e| process_worker_unregister(e[:handle].to_i) }
+        sw_evals.each do |e|
+          w = @workers[e[:handle].to_i]
+          next unless w && (n = w.delete(:pending_unregister))
+
+          # Replayed for FAILED evals too: the Unregister job was queued during
+          # evaluation and is scope-keyed, so a re-register script that unregisters
+          # then throws still unregisters the scope's EXISTING registration — and the
+          # same-batch path (eval_delivered already set) behaves that way already.
+          n.to_i.times { process_worker_unregister(e[:handle].to_i) }
+        end
         # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
         # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
         # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
@@ -7078,6 +7141,10 @@ module Capybara
             (wk = @workers[handle]) && wk[:skip_waiting] = true
             outbox << {handle: handle, kind: 'sw_skip_waiting'}
           },
+          # self.registration.unregister() — the registration is host + client-realm state,
+          # so the job runs on the main thread (process_worker_unregister); the reply rides
+          # this worker's inbox as 'unregister_result'.
+          unregister:     ->                  { outbox << {handle: handle, kind: 'sw_unregister'} },
           # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
           # while any are pending an installed successor keeps waiting (activation.https),
           # and the 0-transition re-runs try-activate to release it.
@@ -7353,6 +7420,13 @@ module Capybara
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the
               # promise it is holding (js/src/workers.js __csim_swClientNavigateResult).
               rt.call('__csim_swClientNavigateResult', msg[:nav_id], msg[:url], msg[:client], msg[:error])
+            elsif msg.is_a?(Hash) && msg[:kind] == 'unregister_result'
+              # The main thread ran this worker's own `registration.unregister()` job — settle
+              # the parked promise. Drain: its continuation is what posts the test's reply
+              # (`unregister().then(() => port.postMessage(...))`), and nothing else drains
+              # this isolate's microtasks until the next timer-bearing tick.
+              rt.call('__csim_swUnregisterResult', msg[:ok])
+              rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
               # A service worker → THIS worker, which is one of its clients: `client.postMessage`
               # targets the client's `navigator.serviceWorker` 'message' event, which a worker

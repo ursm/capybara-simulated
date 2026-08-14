@@ -410,6 +410,7 @@ module Capybara
         vm.define_function('__csim_swPostToClient') {|client_id, data| sw_hooks[:post_to_client]&.call(client_id, data); nil } if sw_hooks[:post_to_client]
         vm.define_function('__csim_swFocusClient')  {|client_id|       sw_hooks[:focus_client]&.call(client_id);       nil } if sw_hooks[:focus_client]
         vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
+        vm.define_function('__csim_swUnregisterRequest') { sw_hooks[:unregister]&.call; nil } if sw_hooks[:unregister]
         vm.define_function('__csim_swExtendedChanged') {|n| sw_hooks[:extended]&.call(n); nil } if sw_hooks[:extended]
         vm.define_function('__csim_swFetchRespond') {|fetch_id, resp, realm_id| sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil } if sw_hooks[:fetch_respond]
         vm.define_function('__csim_swFetchStream') {|fetch_id, kind, payload, realm_id| sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil } if sw_hooks[:fetch_stream]
