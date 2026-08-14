@@ -412,6 +412,7 @@ module Capybara
         vm.define_function('__csim_swClaim') { sw_hooks[:claim]&.call; nil } if sw_hooks[:claim]
         vm.define_function('__csim_swUnregisterRequest') { sw_hooks[:unregister]&.call; nil } if sw_hooks[:unregister]
         vm.define_function('__csim_swNoteRouterRules') { sw_hooks[:router]&.call; nil } if sw_hooks[:router]
+        vm.define_function('__csim_swRaceNetwork') {|fetch_id, realm_id, url, method| sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method); nil } if sw_hooks[:race_network]
         vm.define_function('__csim_swExtendedChanged') {|n| sw_hooks[:extended]&.call(n); nil } if sw_hooks[:extended]
         vm.define_function('__csim_swFetchRespond') {|fetch_id, resp, realm_id| sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil } if sw_hooks[:fetch_respond]
         vm.define_function('__csim_swFetchStream') {|fetch_id, kind, payload, realm_id| sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil } if sw_hooks[:fetch_stream]

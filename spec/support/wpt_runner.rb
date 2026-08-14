@@ -22,6 +22,8 @@ module WptRunner
   ROOT              = File.expand_path('../wpt', __dir__)
   # The generic WPT `.py` request-handler executor (a minimal wptserve shim).
   PY_HANDLER        = File.expand_path('../../script/wpt_py_handler.py', __dir__)
+  # One .py handler subprocess at a time — see the capture2 call site.
+  PY_EXEC_LOCK      = Mutex.new
   EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
   OUT_OF_SCOPE_PATH = File.expand_path('wpt_out_of_scope.yml', __dir__)
   SKIP_PATH         = File.expand_path('wpt_skip.yml', __dir__)
@@ -219,7 +221,13 @@ module WptRunner
       'WPT_STASH_DIR' => STASH_DIR,
       'PYTHONDONTWRITEBYTECODE' => '1'   # no __pycache__ in the vendored WPT tree
     }
-    out, status = Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true)
+    # Serialized: concurrent capture2 from multiple driver threads (a race-network
+    # leg's rack_fetch racing the page's own .py fetches) hits an MRI pipe-fd race
+    # (the child's BrokenPipeError at stdout.flush — surfaced by rusty 0.2.0's GVL
+    # scheduling, latent before). The race semantics never need two .py handlers
+    # IN PARALLEL — the leg races the worker's in-isolate busy-wait, not other IO —
+    # and .py handlers are subsecond, so a mutex is the whole fix.
+    out, status = PY_EXEC_LOCK.synchronize { Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true) }
     return nil unless status.success?
     nl = out.index("\n".b)
     return nil unless nl

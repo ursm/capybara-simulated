@@ -2158,16 +2158,6 @@ service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
 service-workers/service-worker/static-router-mutiple-conditions.https.html:
 - Multiple conditions including requestDestination work with `and` operation
-service-workers/service-worker/static-router-race-network-and-fetch-handler.https.html:
-- Main resource load matched the rule with race-network-and-fetch-handler source,
-  and the server reseponse is faster than the fetch handler
-- Main resource load matched the rule with race-network-and-fetch-handler source,
-  and the server reseponse is faster than the fetch handler while fetch() is triggered
-  inside the fetch handler
-- Subresource load matched the rule with race-network-and-fetch-handler source, and
-  the server reseponse is faster than the fetch handler
-- Subresource load matched the rule with race-network-and-fetch-handler source, and
-  the server reseponse with 204 response is faster than the fetch handler
 service-workers/service-worker/static-router-request-destination.https.html:
 - Subreosurce load matched with the requestMethod script condition
 - Subreosurce load not matched with the requestMethod script condition
