@@ -189,6 +189,9 @@ module Capybara
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
         '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
+        # unregister() parked its Clear Registration: the workers live on until no client is
+        # using the registration and no extended work is pending (see sw_note_uninstalling).
+        '__csim_swNoteUninstalling'   => ->(b, *a) { b.sw_note_uninstalling(a[0], a[1], a[2] || []); nil },
         # The active worker handle at an EXACT scope (0 if none), so a register() from a realm with no
         # local registration (a different iframe registering an already-active scope) can synthesize a
         # registration reflecting the shared active worker instead of installing a duplicate.

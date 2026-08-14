@@ -441,6 +441,10 @@ module Capybara
         # clients.claim() events that arrived before their scope was mirrored into @sw_registrations
         # (activate→claim() races the client-side lifecycle) — buffered here, flushed by sw_register_scope.
         @sw_pending_claims = []
+        # Unregistered registrations whose Clear Registration is deferred: unregister only unmaps
+        # the scope, and the workers live on until no client is using the registration and no
+        # extended work is pending (see sw_note_uninstalling / try_clear_uninstalls).
+        @sw_pending_uninstalls = []
         @sw_nav_outbox    = Thread::Queue.new
         @sw_nav_seq       = 0
         # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
@@ -4544,6 +4548,46 @@ module Capybara
         nil
       end
 
+      # An unregistered registration parked its Clear Registration here (spec "Try Clear
+      # Registration"): the workers stay live — an existing controllee keeps its controller
+      # and interception — until no client is USING the registration (controller == its
+      # active worker) and none of its workers has pending extended work. The verdict is
+      # host state, so the clear rides the same wakeup invariant as the activation gate:
+      # every hold-clearing transition (client teardown, extended drain, message dispatch,
+      # worker reap) funnels through unregister_client / the try_activate delivery point,
+      # and both re-run this check.
+      # `key` is the realm's uninstallingRegs map key, echoed back verbatim in the clear
+      # broadcast (an installing-only registration has no active handle to key by).
+      def sw_note_uninstalling(key, active_handle, handles)
+        @sw_pending_uninstalls << {key: key.to_i, active: active_handle.to_i, handles: handles.map(&:to_i)}
+        try_clear_uninstalls
+        nil
+      end
+
+      # "No client is using the registration and no extended work is pending". A client
+      # record still holding a DEAD active handle keeps the entry parked until that
+      # client departs (records are only pruned on client teardown / the last-worker
+      # reset) — bounded by the client's lifetime, and nothing outside try_clear itself
+      # kills an uninstalling registration's worker today.
+      private def sw_registration_clearable?(entry)
+        return false if entry[:active].positive? && @sw_clients.any? {|_id, e| e[:handle] == entry[:active] }
+
+        entry[:handles].none? {|h| sw_worker_extended?(h) }
+      end
+
+      private def try_clear_uninstalls
+        return if @sw_pending_uninstalls.empty?
+
+        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|e| sw_registration_clearable?(e) }
+        ready.each do |e|
+          # Realm side first (workers go redundant, slots empty — statechange fires from
+          # still-wired objects), then the isolates die host-side.
+          broadcast_to_realms('__csim_swClearRegistration', e[:key])
+          e[:handles].each {|h| worker_terminate(h) }
+        end
+        nil
+      end
+
       # ── Registration update (registration.update() / re-register with a changed
       # updateViaCache) ──
 
@@ -4959,6 +5003,8 @@ module Capybara
         # non-skipWaiting half of "try activate"). Gated on a realm having actually parked one, so
         # the ordinary client-churn path stays free of a per-unregister broadcast (rule 3).
         broadcast_to_realms('__csim_swTryActivate') if @sw_activation_parked
+        # The departed client may have been the last one USING an unregistered registration.
+        try_clear_uninstalls
         nil
       end
 
@@ -5592,6 +5638,8 @@ module Capybara
         # `waiting` may now activate (the waitUntil half of "try activate"; the
         # controllee half fires from unregister_client). Same parked gate (rule 3).
         broadcast_to_realms('__csim_swTryActivate') if try_acts.any? && @sw_activation_parked
+        # The drained work may also have been the last hold on a deferred unregister's clear.
+        try_clear_uninstalls if try_acts.any?
         # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
         # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
         # sw_client_msg processed just below), BUFFER until port_channel_endpoint_realm flushes.
@@ -6604,6 +6652,7 @@ module Capybara
         # The parked-activation latch goes with the realms (reset rebuilds them): leaving it
         # set would make every later SW message drain broadcast a try-activate forever.
         @sw_activation_parked = false
+        @sw_pending_uninstalls = []
         @worker_outbox.clear
         @worker_outbox_head       = nil
         @worker_in_flight         = 0
@@ -7652,14 +7701,28 @@ module Capybara
         # internal asset GET) pass nil → no CORS and no mode semantics. The document's
         # origin is the request's origin; a different target origin is cross-origin.
         cors        = cors_mode == 'cors'
-        # The request's origin (document origin) for EVERY fetch mode — Fetch appends an
-        # Origin header to every non-GET/HEAD request regardless of mode (a same-origin or
-        # no-cors POST/PUT still carries it, for the server's CSRF/Origin check). CORS
+        # The CLIENT is the realm that called fetch/XHR — its own location (a Service
+        # Worker's script URL, a frame document's URL), threaded from JS; the top-level
+        # @current_url is only the fallback. It is the request's SINGLE origin identity:
+        # URL resolution (JS-side, vs the realm's baseURI), the response-taint verdict
+        # (doc_origin), CORS enforcement and the Origin header (req_origin) must all
+        # agree, or a frame's request to its OWN origin is judged cross-origin vs the
+        # top document (the cross-origin login iframe's Basic-auth XHR pre-flighted
+        # and died — fetch-canvas-tainting &Auth; an SW's own fetch() likewise judges
+        # vs its OWN script origin, not the page it controls).
+        # Only a REAL http(s) client URL carries origin identity; an opaque-origin
+        # context (about:blank / javascript: / data: realm reporting its own location)
+        # falls back to the top document, keeping the creator-inherited behavior those
+        # contexts had before client threading.
+        client = client_url.to_s.match?(%r{\Ahttps?://}i) ? client_url : @current_url
+        # The request's origin for EVERY fetch mode — Fetch appends an Origin header to
+        # every non-GET/HEAD request regardless of mode (a same-origin or no-cors
+        # POST/PUT still carries it, for the server's CSRF/Origin check). CORS
         # enforcement itself stays gated on `cors` below; a nil-mode internal caller
         # (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW
         # re-issuing a navigation via `fetch(event.request)`) is the request's origin for
         # ALL modes — so a passthrough 'navigate'-mode POST still carries its Origin.
-        req_origin  = initiator || (%w[cors no-cors same-origin].include?(cors_mode) ? url_origin(@current_url) : nil)
+        req_origin  = initiator || (%w[cors no-cors same-origin].include?(cors_mode) ? url_origin(client) : nil)
         # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
         # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
         # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
@@ -7668,14 +7731,6 @@ module Capybara
         # any hop leaves the document origin.
         no_cors_mode     = cors_mode == 'no-cors'
         same_origin_mode = cors_mode == 'same-origin'
-        # Only the real fetch request modes carry cross-origin semantics; a 'navigate'
-        # (form submission) or a nil-mode internal caller gets a plain readable response.
-        # The CLIENT is the realm that called fetch — its own location (a Service
-        # Worker's script URL, a frame document's URL), threaded from JS; the
-        # top-level @current_url is only the fallback. Drives the credentials
-        # same-origin decision and the SameSite cookie client below — NOT the
-        # request's Origin/CORS identity (req_origin), which keeps its own model.
-        client = client_url.to_s.empty? ? @current_url : client_url
         doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(client) : nil
         crossed          = false
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
