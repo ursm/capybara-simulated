@@ -472,6 +472,14 @@ module Capybara
         @sw_raced_fetches = {}
         @sw_race_threads  = []
         @sw_race_lock     = Mutex.new
+        # keepalive_start machinery: detached request threads + their results + the
+        # 64 KiB in-flight payload quota. Survives per-visit rebuilds by design.
+        @keepalive_threads  = []
+        @keepalive_results  = {}
+        @keepalive_inflight_sizes = {}
+        @keepalive_inflight = 0
+        @keepalive_seq      = 0
+        @keepalive_lock     = Mutex.new
         @sw_nav_seq       = 0
         # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
         # per navigation CHAIN, re-minted when a redirect hop crosses origins (a reserved
@@ -4544,6 +4552,78 @@ module Capybara
         nil
       end
 
+      # `fetch(…, {keepalive: true})`: the request is dispatched EAGERLY on a detached
+      # host thread at fetch() time, so it survives the death of the realm that issued
+      # it (the whole point — an unload/pagehide handler's beacon must reach the server
+      # after its iframe is removed; the WPT keepalive family stashes a token the NEXT
+      # page polls for). The issuing realm, if it stays alive, collects the result by
+      # polling keepalive_take on its normal deferred tick. Threads are NOT killed on
+      # per-visit rebuild — surviving navigation is the contract — only at session
+      # reset (reset_workers), when the Rack app itself goes away. The Fetch keepalive
+      # quota (64 KiB of in-flight request payload) is enforced at start: -1 = over
+      # quota, the caller rejects with TypeError synchronously, like a browser.
+      KEEPALIVE_QUOTA = 65_536
+
+      def keepalive_start(method, url, body, headers, redirect, mode, credentials, referrer_policy, referrer, cache_mode, client_url)
+        # The quota reserves the PAYLOAD size. A b64-marked body is the base64
+        # encoding of the real bytes (Request-input / stream bodies always are) —
+        # reserve the DECODED length, or a ~49KiB binary body would falsely
+        # over-quota at the ~4/3-inflated wire size.
+        raw  = body.to_s
+        b64  = headers && (headers['X-Csim-Body-B64'] || headers['x-csim-body-b64'])
+        size = b64 ? (raw.bytesize * 3 / 4) - raw[-2, 2].to_s.count('=') : raw.bytesize
+        id   = nil
+        # ONE critical section for reserve + spawn: a reset between them would
+        # leave the spawned thread outside the kill list.
+        @keepalive_lock.synchronize do
+          return -1 if @keepalive_inflight + size > KEEPALIVE_QUOTA
+
+          @keepalive_inflight += size
+          id = (@keepalive_seq += 1)
+          @keepalive_results[id]        = :pending
+          @keepalive_inflight_sizes[id] = size
+          @keepalive_threads << Thread.new do
+            r = nil
+            begin
+              r = begin
+                rack_fetch(method.to_s, url.to_s, raw, headers || {}, redirect.to_s.empty? ? 'follow' : redirect.to_s,
+                           mode, credentials: credentials || 'same-origin', referrer_policy: referrer_policy,
+                           referrer: referrer, cache_mode: cache_mode || 'default', client_url: client_url)
+              rescue StandardError
+                nil
+              end
+            ensure
+              # Release + finalize under `ensure`: an escaping non-StandardError (or a
+              # kill) must not strand the reservation for the session, nor leave a
+              # live page's poll parked on :pending forever. The per-id size map makes
+              # the release GENERATION-SAFE: a thread completing after reset_workers
+              # cleared the maps finds no entry and subtracts nothing from the next
+              # session's tally.
+              @keepalive_lock.synchronize do
+                if (sz = @keepalive_inflight_sizes.delete(id))
+                  @keepalive_inflight = [0, @keepalive_inflight - sz].max
+                end
+                @keepalive_results[id] = r if @keepalive_results[id] == :pending
+                @keepalive_threads.delete(Thread.current)
+              end
+            end
+          end
+        end
+        id
+      end
+
+      # One-shot: {pending: true} while the thread runs; the response wire hash (or
+      # nil = network error) once done, deleting the slot.
+      def keepalive_take(id)
+        @keepalive_lock.synchronize do
+          r = @keepalive_results[id.to_i]
+          return {'pending' => true} if r == :pending
+
+          @keepalive_results.delete(id.to_i)
+          r
+        end
+      end
+
       # Kill in-flight race network legs and drop their claim bookkeeping. Called on
       # every per-visit VM rebuild AND on session reset: fetch ids are PER-VM (the
       # client's fetchSeq restarts), so a surviving entry or leg would poison a later
@@ -7110,6 +7190,13 @@ module Capybara
         @sw_registered_scopes.clear
         @sw_activating_scopes.clear
         reset_sw_race_state
+        @keepalive_lock.synchronize do
+          @keepalive_threads.each(&:kill)
+          @keepalive_threads.clear
+          @keepalive_results.clear
+          @keepalive_inflight_sizes.clear
+          @keepalive_inflight = 0
+        end
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}
         @sw_navpreload       = {}
@@ -8363,7 +8450,9 @@ module Capybara
         # EVERY sub-request this fetch makes — the CORS preflight AND every redirect hop — since the
         # `timeout` a client applies spans them all and a redirect/preflight must not reset it
         # (timeout-multiple-fetches). Reset per fetch; the final response carries the total.
-        @fetch_server_delay_ms = 0
+        # THREAD-LOCAL: keepalive/race legs run rack_fetch concurrently with the main
+        # thread — a shared ivar would cross-contaminate their delay totals.
+        Thread.current[:csim_fetch_server_delay_ms] = 0
         # An author conditional (If-None-Match / …) means the caller is doing its own
         # revalidation, so the UA cache must step aside (computed once — the headers
         # carrying it survive every redirect hop unchanged).
@@ -8544,7 +8633,7 @@ module Capybara
           end
           env.merge!(env_extras) if env_extras
           status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
-          @fetch_server_delay_ms += server_delay_ms_of(resp_headers)
+          Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
           # Transparent HTTP Basic auth (RFC 7617): a request carrying CHALLENGE credentials (open()
           # user/pass / URL userinfo) that gets a 401 "Basic" challenge — and hasn't already sent an
           # Authorization (an explicit setRequestHeader / a pre-emptively-attached cached credential) —
@@ -8698,7 +8787,7 @@ module Capybara
           # every redirect hop): the client reads the TOTAL to time its async deferral, but it must
           # never be cached or replayed on a cache hit — strip it from the traced/stored response and
           # expose the total to the CLIENT only (added after CORS filtering, so it always survives).
-          total_delay      = @fetch_server_delay_ms.to_i
+          total_delay      = Thread.current[:csim_fetch_server_delay_ms].to_i
           resp_headers      = resp_headers.reject {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
           exposed_headers   = cross_origin ? cors_exposed_headers(resp_headers, with_credentials) : resp_headers
           exposed_headers   = exposed_headers.merge('X-Csim-Server-Delay-Ms' => total_delay.to_s) if total_delay > 0
@@ -9773,7 +9862,10 @@ module Capybara
       def cookie_header_for(host, secure:, cross_site: false, lax_ok: true)
         jar = host && @cookies[host]
         return '' if jar.nil? || jar.empty?
-        pairs = jar.filter_map {|k, v|
+        # Snapshot: a keepalive/race/hijack thread's Set-Cookie writes into this jar
+        # concurrently; iterating the live Hash would raise in the WRITER ("can't add
+        # a new key into hash during iteration") and silently drop its beacon.
+        pairs = jar.dup.filter_map {|k, v|
           flags = @cookie_flags["#{host}\0#{k}"]
           next if !secure && flags&.dig(:secure)
           if cross_site
@@ -10990,7 +11082,7 @@ module Capybara
         status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
         pbody.close if pbody.respond_to?(:close)
         # A slow preflight counts toward the client's timeout too (timeout-multiple-fetches).
-        @fetch_server_delay_ms += server_delay_ms_of(ph) if @fetch_server_delay_ms
+        Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(ph) if Thread.current[:csim_fetch_server_delay_ms]
         return nil unless (200..299).include?(status.to_i)
         acao = cors_header(ph, 'access-control-allow-origin')
         # A credentialed preflight can't be allowed by the wildcard origin and must carry
