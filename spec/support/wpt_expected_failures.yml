@@ -1106,6 +1106,10 @@ dom/nodes/attributes-namednodemap-cross-document.window.js:
 dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
 - 'Insertion steps: load event fires synchronously *after* iframe DOM insertion, as
   part of the iframe element''s insertion steps'
+- 'Removing steps (innerHTML): script does not run synchronously during iframe destruction'
+- 'Removing steps (remove): script does not run synchronously during iframe destruction'
+- 'Removing steps (replaceChildren): script does not run synchronously during iframe
+  destruction'
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
 fetch/api/abort/keepalive.html:
@@ -1145,11 +1149,6 @@ fetch/api/basic/error-after-response.any.js:
   resolving fetch promise
 fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
-fetch/api/basic/keepalive.any.js:
-- "[keepalive] simple GET request on 'pagehide' [no payload]"
-- "[keepalive] simple GET request on 'unload' [no payload]"
-- "[keepalive] simple POST request on 'pagehide' [no payload]"
-- "[keepalive] simple POST request on 'unload' [no payload]"
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
 fetch/api/basic/request-headers-nonascii.any.js:
@@ -1167,87 +1166,6 @@ fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
 fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
-fetch/api/cors/cors-keepalive.any.js:
-- "[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid
-  CORS]; setting up"
-- "[keepalive] Cross domain basic usage GET request in unload [cors mode]; setting
-  up"
-- "[keepalive] Cross domain basic usage GET request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain basic usage GET request in unload [no-cors mode]; setting
-  up"
-- "[keepalive] Cross domain basic usage POST request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain basic usage POST request in unload [cors mode]; setting
-  up"
-- "[keepalive] Cross domain basic usage POST request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain basic usage POST request in unload [no-cors mode]; setting
-  up"
-- "[keepalive] Cross domain different port GET request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain different port GET request in unload [cors mode]; setting
-  up"
-- "[keepalive] Cross domain different port GET request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain different port GET request in unload [no-cors mode]; setting
-  up"
-- "[keepalive] Cross domain different port POST request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain different port POST request in unload [cors mode]; setting
-  up"
-- "[keepalive] Cross domain different port POST request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain different port POST request in unload [no-cors mode];
-  setting up"
-- "[keepalive] Cross domain different protocol GET request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Cross domain different protocol GET request in unload [cors mode];
-  setting up"
-- "[keepalive] Cross domain different protocol GET request in unload [no-cors mode,
-  server forbid CORS]; setting up"
-- "[keepalive] Cross domain different protocol GET request in unload [no-cors mode];
-  setting up"
-- "[keepalive] Cross domain different protocol POST request in unload [cors mode,
-  server forbid CORS]; setting up"
-- "[keepalive] Cross domain different protocol POST request in unload [cors mode];
-  setting up"
-- "[keepalive] Cross domain different protocol POST request in unload [no-cors mode,
-  server forbid CORS]; setting up"
-- "[keepalive] Cross domain different protocol POST request in unload [no-cors mode];
-  setting up"
-- "[keepalive] Same domain different port GET request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Same domain different port GET request in unload [cors mode]; setting
-  up"
-- "[keepalive] Same domain different port GET request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Same domain different port GET request in unload [no-cors mode]; setting
-  up"
-- "[keepalive] Same domain different port POST request in unload [cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Same domain different port POST request in unload [cors mode]; setting
-  up"
-- "[keepalive] Same domain different port POST request in unload [no-cors mode, server
-  forbid CORS]; setting up"
-- "[keepalive] Same domain different port POST request in unload [no-cors mode]; setting
-  up"
-- "[keepalive] Same domain different protocol different port GET request in unload
-  [cors mode, server forbid CORS]; setting up"
-- "[keepalive] Same domain different protocol different port GET request in unload
-  [cors mode]; setting up"
-- "[keepalive] Same domain different protocol different port GET request in unload
-  [no-cors mode, server forbid CORS]; setting up"
-- "[keepalive] Same domain different protocol different port GET request in unload
-  [no-cors mode]; setting up"
-- "[keepalive] Same domain different protocol different port POST request in unload
-  [cors mode, server forbid CORS]; setting up"
-- "[keepalive] Same domain different protocol different port POST request in unload
-  [cors mode]; setting up"
-- "[keepalive] Same domain different protocol different port POST request in unload
-  [no-cors mode, server forbid CORS]; setting up"
-- "[keepalive] Same domain different protocol different port POST request in unload
-  [no-cors mode]; setting up"
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -1337,9 +1255,7 @@ fetch/api/request/destination/fetch-destination.https.html:
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
 fetch/api/request/request-keepalive-quota.html:
-- A Keep-Alive fetch() should not be allowed if the Quota is used up.
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
-- A Keep-Alive fetch() with a body over the Quota Limit should reject.
 fetch/api/response/multi-globals/url-parsing.html:
 - should parse the redirect Location URL relative to the current settings object
 fetch/api/response/response-arraybuffer-realm.window.js:

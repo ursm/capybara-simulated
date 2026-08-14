@@ -43,6 +43,9 @@ module Capybara
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15]) },
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0]) },
+        # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
+        '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10]) },
+        '__csim_keepaliveTake'       => ->(b, *a) { b.keepalive_take(a[0]) },
         # A controlled document's external classic script → its controller's fetch
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
         '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include') },
