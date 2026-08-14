@@ -2049,12 +2049,6 @@ service-workers/service-worker/register-default-scope.https.html:
 - null scope
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
-service-workers/service-worker/registration-schedule-job.https.html:
-- different type
-service-workers/service-worker/registration-scope-module-static-import.https.html:
-- imported-module-script.js works when used as top-level
-- static imports redirecting to outside path restriction should be allowed
-- static imports to outside path restriction should be allowed
 service-workers/service-worker/registration-script-module.https.html:
 - Registering invalid chunked encoding script with flush
 service-workers/service-worker/registration-script.https.html:
@@ -2262,29 +2256,12 @@ service-workers/service-worker/update-after-navigation-redirect.https.html:
 service-workers/service-worker/update-after-oneday.https.html:
 - Update should be triggered after a functional event when last update time is over
   24 hours
-service-workers/service-worker/update-bytecheck-cors-import.https.html:
-- 'Test module script(main: default, imported: default)'
-- 'Test module script(main: default, imported: time)'
-- 'Test module script(main: time, imported: default)'
-- 'Test module script(main: time, imported: time)'
-service-workers/service-worker/update-bytecheck.https.html:
-- 'Test module script(main: default, imported: default)'
-- 'Test module script(main: default, imported: time)'
-- 'Test module script(main: time, imported: default)'
-- 'Test module script(main: time, imported: time)'
 service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
 service-workers/service-worker/update-no-cache-request-headers.https.html:
 - headers in no-cache mode
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
-service-workers/service-worker/update-registration-with-type.https.html:
-- Update the registration with a different script type (classic => module) and with
-  a same main script. Expect evaluation failed.
-- Update the registration with a different script type (classic => module).
-- Update the registration with a different script type (module => classic) and with
-  a same main script. Expect evaluation failed.
-- Update the registration with a different script type (module => classic).
 service-workers/service-worker/websocket-in-service-worker.https.html:
 - Verify WebSockets can be created in a Service Worker
 service-workers/service-worker/websocket.https.html:

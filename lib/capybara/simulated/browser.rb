@@ -4069,6 +4069,11 @@ module Capybara
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
         record[:script_body] = body if service
+        # The version's script TYPE — a SECOND realm synthesizing a registration for
+        # this scope must reflect it (sw_scope_worker_type): update()/re-register from
+        # there would otherwise parse-check module source as classic and respawn the
+        # module worker under 'classic'.
+        record[:script_type] = (script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
         @workers[handle] = record
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -4450,6 +4455,16 @@ module Capybara
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
       def sw_active_handle_for_scope(scope) = @sw_registrations[scope.to_s].to_i
 
+      # The registration's committed script type at an EXACT scope — a realm
+      # synthesizing a registration object for a scope another realm registered
+      # (cross-realm register / a directly-wired controller) mirrors it into
+      # reg._workerType so a later update()/re-register from that realm runs the
+      # right parse check and respawns under the right type.
+      def sw_scope_worker_type(scope)
+        h = @sw_registrations[scope.to_s].to_i
+        (h.positive? && @workers.dig(h, :script_type)) || 'classic'
+      end
+
       # Does `handle` still control any client? HTML's "try activate" holds an installed worker in
       # the WAITING slot for exactly as long as the outgoing worker has controllees — that is what
       # makes `registration.waiting` non-null, which is how every "a new version is available"
@@ -4789,7 +4804,11 @@ module Capybara
       # script came back identical. Called from the WORKER's thread (host fns run on
       # their caller) — the same cross-thread registry-write pattern the SW hooks use.
       def sw_note_import(handle, url, body)
-        (w = @workers[handle.to_i]) && (w[:sw_imports] ||= {})[url.to_s] = body.to_s
+        # Copy-on-write: this can run on the WORKER's thread (a late importScripts /
+        # module-graph fetch) while the main thread's Update probe iterates the map
+        # (sw_registration_update_fetch) — an in-place insert there raises "can't add
+        # a new key into hash during iteration".
+        (w = @workers[handle.to_i]) && w[:sw_imports] = (w[:sw_imports] || {}).merge(url.to_s => body.to_s)
         nil
       end
 
@@ -7371,8 +7390,10 @@ module Capybara
         # The worker KIND, for the global-scope brand checks (workers.js Symbol.hasInstance).
         rt.eval("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
-        # (importScripts throws a TypeError). The script itself still evaluates on the
-        # classic path — real module-graph loading for workers is the ESM follow-up.
+        # (importScripts throws a TypeError). A SERVICE worker's module script evaluates
+        # as a real module graph below (eval_module_graph, V8); a dedicated/shared
+        # module worker — and every QuickJS worker — still evaluates on the classic
+        # path (that ESM follow-up remains).
         rt.eval('globalThis.__csimWorkerModule = true;') if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
@@ -7466,7 +7487,44 @@ module Capybara
           # this outcome — sw-client.js __csim_swEvalOutcome), and exit with no
           # lifecycle: no version was installed.
           begin
-            rt.eval(body)
+            if module_worker && rt.module_graph?
+              # A `{type: 'module'}` service worker evaluates as a REAL module graph:
+              # static imports are fetched here, on this worker's own thread, and each
+              # failure (404, non-JS MIME, unresolvable bare specifier) fails the whole
+              # evaluation — exactly the classic importScripts contract, spec'd for
+              # modules at fetch time. Each import is recorded (sw_note_import) so the
+              # Update byte-check probes the graph, and the Update PROBE's own recorded
+              # responses are consumed first (the fetch-once script resource map — a
+              # changed import the probe saw must be the bytes this version runs,
+              # update-bytecheck's time-varying imports).
+              sw_import_fetch = lambda do |abs|
+                rec  = sw_imports_map && sw_imports_map[abs]
+                if rec
+                  raise "module import failed: #{abs} (#{rec['status']})" unless (200..299).cover?(rec['status'].to_i)
+
+                  ct   = (rec['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+                  body2 = rec['body'].to_s
+                else
+                  r = rack_fetch('GET', abs, '', {}, 'follow', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default')
+                  raise "module import failed: #{abs}" unless r && (200..299).cover?(r['status'].to_i)
+
+                  ct   = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+                  body2 = r['body'].to_s
+                end
+                # Strict (unlike classic importScripts' allHostsLocal-gated check, the
+                # Mastodon-Tesseract concession): Chrome enforces JS MIME for module
+                # scripts unconditionally, and service workers only exist under the
+                # universal-server context anyway (register() rejects elsewhere), so
+                # the app-pragmatic concern that motivated the classic gate can't arise.
+                raise "module import has an unsupported MIME type: #{abs}" unless js_mime_type?(ct)
+
+                sw_note_import(handle, abs, body2)
+                body2
+              end
+              rt.eval_module_graph(body, url, sw_import_fetch)
+            else
+              rt.eval(body)
+            end
           rescue StandardError => e
             outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"}
             return

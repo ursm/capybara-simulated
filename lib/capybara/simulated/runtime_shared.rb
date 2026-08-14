@@ -149,7 +149,7 @@ module Capybara
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5]) },
         # navigator.serviceWorker.register (universal-server only) — spawn a worker
         # running the SW script as an executor context. Returns its handle.
-        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2]) },
+        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2], script_type: a[3]) },
         # Registration update surface: the updateViaCache mode is REGISTRATION-wide state
         # (scope-keyed, host-owned — a frame's registration object must see the mode the
         # top window set), and __csim_swUpdateFetch is the Update algorithm's fetch +
@@ -202,6 +202,9 @@ module Capybara
         # local registration (a different iframe registering an already-active scope) can synthesize a
         # registration reflecting the shared active worker instead of installing a duplicate.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
+        # The committed script type at that scope — the synthesized registration's
+        # reg._workerType (module SWs observed from a second realm).
+        '__csim_swScopeWorkerType'      => ->(b, *a) { b.sw_scope_worker_type(a[0]) },
         # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
         # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
         # host state — see sw_may_activate? and _scheduleLifecycle.
