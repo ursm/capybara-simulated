@@ -11,6 +11,7 @@
 
 require 'digest'
 require 'fileutils'
+require 'uri'
 require 'rusty_racer'
 
 require_relative 'runtime_shared'
@@ -1478,7 +1479,58 @@ module Capybara
           drain_microtasks:  ->        { c.perform_microtask_checkpoint },
           drain_timers:      ->        { c.call('__drainTimers', 50) },
           has_ready_timer:   ->        { !!c.call('__hasReadyTimer') },
-          dispose:           ->        { c.dispose rescue nil }
+          dispose:           ->        { c.dispose rescue nil },
+          # A `{type: 'module'}` service worker's main script + static import graph,
+          # via V8's native module API (the same surface the main realm's
+          # eval_esm_module uses). The whole graph resolves through the root's
+          # instantiate callback (V8 calls it per unresolved edge, transitively);
+          # `fetch_import` runs on the worker's own thread and raises to fail the
+          # evaluation. Specifier resolution is PLAIN URL resolution — a worker has
+          # no document, so the page's importmap does not apply, and a bare
+          # specifier is a resolution failure per the spec.
+          eval_module_graph: lambda {|src, url, fetch_import|
+            src_text = RuntimeShared.utf8_text(src.to_s.dup)
+            # Top-level await is disallowed in a service worker module ("Run Service
+            # Worker" fails the script; Chrome rejects the registration). There is no
+            # V8 surface for it here — per ES2022 a module's status is :evaluated the
+            # moment Evaluate() is called, async or not — so detect it by COMPILE
+            # probes (compile-only, nothing runs): a source that compiles as a classic
+            # script cannot contain top-level await; one that fails classic but
+            # compiles inside an async-function wrapper has await at its top level
+            # (import/export declarations fail BOTH probes — those sources fall
+            # through, and a TLA hiding next to imports is caught only when its
+            # instantiation error rejects first; the vendored combined case is
+            # exactly that). This lambda serves service workers only — a dedicated
+            # module worker, where TLA is legal, would need the check parameterized.
+            begin
+              c.compile(src_text)
+            rescue RustyRacer::ParseError
+              tla = begin
+                c.compile("(async()=>{\n#{src_text}\n})")
+                true
+              rescue RustyRacer::ParseError
+                false
+              end
+              raise 'Top-level await is disallowed in a service worker' if tla
+            end
+            handles = {}
+            root = c.compile_module(src_text, filename: url.to_s)
+            handles[url.to_s] = root
+            root.instantiate do |spec, ref|
+              s = spec.to_s
+              resolved =
+                if s.match?(%r{\A[a-z]+://}i)
+                  s
+                elsif s.start_with?('/', './', '../')
+                  URI.join((ref || url).to_s, s).to_s
+                else
+                  raise "Failed to resolve module specifier '#{s}'"
+                end
+              handles[resolved] ||= c.compile_module(RuntimeShared.utf8_text(fetch_import.call(resolved).to_s.dup), filename: resolved)
+            end
+            root.evaluate
+            nil
+          }
         )
       end
     end
