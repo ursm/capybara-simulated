@@ -1721,9 +1721,6 @@ service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event
 service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
 - Post loopback messages
 - Post messages among service workers
-service-workers/service-worker/ServiceWorkerGlobalScope/registration-attribute.https.html:
-- Verify registration attributes on ServiceWorkerGlobalScope
-- Verify registration attributes on ServiceWorkerGlobalScope of the newer worker
 service-workers/service-worker/ServiceWorkerGlobalScope/service-worker-error-event.https.html:
 - Error handlers inside serviceworker should see the attributes of ErrorEvent
 service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
@@ -1795,11 +1792,6 @@ service-workers/service-worker/extendable-event-async-waituntil.https.html:
 - Test calling waitUntil in a task at the end of the event handler without an existing
   extension throws
 - Test calling waitUntil on a script constructed ExtendableEvent throws exception
-service-workers/service-worker/extendable-event-waituntil.https.html:
-- Test ExtendableEvent waitUntil reject precedence.
-- Test activate event waitUntil fulfilled
-- Test activate event waitUntil rejected.
-- Test install event waitUntil rejected
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-video-cache.https.html:
@@ -1943,9 +1935,6 @@ service-workers/service-worker/fetch-request-xhr-sync.https.html:
 service-workers/service-worker/fetch-request-xhr.https.html:
 - FetchEvent#request.body contains XHR request data (blob)
 - XHR with form data
-service-workers/service-worker/fetch-waits-for-activate.https.html:
-- Navigation fetch events should wait for the activate event to complete.
-- Subresource fetch events should wait for the activate event to complete.
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
@@ -2009,8 +1998,6 @@ service-workers/service-worker/nested-blob-url-workers.https.html:
 service-workers/service-worker/next-hop-protocol.https.html:
 - nextHopProtocol reports H1 correctly when routed via a service worker.
 - nextHopProtocol reports H2 correctly when routed via a service worker.
-service-workers/service-worker/oninstall-script-error.https.html:
-- install handler throws an error in the waitUntil
 service-workers/service-worker/opaque-response-preloaded.https.html:
 - Opaque responses should not be reused for XHRs, done case
 - Opaque responses should not be reused for XHRs, loading case
@@ -2060,8 +2047,6 @@ service-workers/service-worker/referrer-toplevel-script-fetch.https.html:
 - Referrer of the top-level script fetch should be the document URL
 service-workers/service-worker/register-default-scope.https.html:
 - null scope
-service-workers/service-worker/register-same-scope-different-script-url.https.html:
-- Register then register new script that does not install
 service-workers/service-worker/register-wait-forever-in-install-worker.https.html:
 - register worker that calls waitUntil with a promise that never resolves in oninstall
 service-workers/service-worker/registration-iframe.https.html:
@@ -2270,9 +2255,6 @@ service-workers/service-worker/unregister-immediately.https.html:
   state.
 - Clear-Site-Data must unregister an activated registration with an update waiting.
 - Clear-Site-Data must unregister an activated registration with controlled clients.
-service-workers/service-worker/unregister-then-register-new-script.https.html:
-- Registering a new script URL that fails to install does not resurrect unregistered
-  registration
 service-workers/service-worker/update-after-navigation-fetch-event.https.html:
 - Update should be triggered after a navigation (fetch event worker).
 - Update should be triggered after a navigation (network error).
