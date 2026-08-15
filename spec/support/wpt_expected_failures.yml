@@ -171,31 +171,17 @@ custom-elements/Document-createElementNS.html:
   valid custom element name'
 custom-elements/adopted-callback.html:
 - Inserting a custom element into a detached shadow tree that belongs to the document
-  of an iframe must enqueue and invoke adoptedCallback
-- Inserting a custom element into a detached shadow tree that belongs to the document
   of the template elements must enqueue and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in the document of an iframe must
-  enqueue and invoke adoptedCallback
 - Inserting a custom element into a shadow tree in the document of the template elements
   must enqueue and invoke adoptedCallback
-- Inserting a custom element into the document of an iframe must enqueue and invoke
-  adoptedCallback
 - Inserting a custom element into the document of the template elements must enqueue
-  and invoke adoptedCallback
-- Inserting an ancestor of custom element into the document of an iframe must enqueue
   and invoke adoptedCallback
 - Inserting an ancestor of custom element into the document of the template elements
   must enqueue and invoke adoptedCallback
-- Inserting the shadow host of a custom element into the document of an iframe must
-  enqueue and invoke adoptedCallback
 - Inserting the shadow host of a custom element into the document of the template
   elements must enqueue and invoke adoptedCallback
-- Moving a custom element from the owner document into the document of an iframe must
-  enqueue and invoke adoptedCallback
 - Moving a custom element from the owner document into the document of the template
   elements must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into the document of
-  an iframe must enqueue and invoke adoptedCallback
 - Moving an ancestor of custom element from the owner document into the document of
   the template elements must enqueue and invoke adoptedCallback
 - Moving the <template>'s content of a custom element from the owner document into
@@ -210,8 +196,6 @@ custom-elements/adopted-callback.html:
   an HTML document fetched by XHR must enqueue and invoke adoptedCallback
 - Moving the <template>'s content of a custom element from the owner document into
   the document of an iframe must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into the document
-  of an iframe must enqueue and invoke adoptedCallback
 - Moving the shadow host of a custom element from the owner document into the document
   of the template elements must enqueue and invoke adoptedCallback
 - Moving the shadow host's shadow of a custom element from the owner document into
@@ -259,15 +243,6 @@ custom-elements/connected-callbacks-html-fragment-parsing.html:
   invoke its constructor
 - Inserting a custom element into the document using HTML fragment parsing must enqueue
   a custom element upgrade reaction, not synchronously invoke its constructor
-custom-elements/connected-callbacks.html:
-- Inserting a custom element into a shadow tree in the document of an iframe must
-  enqueue and invoke connectedCallback
-- Inserting a custom element into the document of an iframe must enqueue and invoke
-  connectedCallback
-- Inserting an ancestor of custom element into the document of an iframe must enqueue
-  and invoke connectedCallback
-- Inserting the shadow host of a custom element into the document of an iframe must
-  enqueue and invoke connectedCallback
 custom-elements/cross-realm-callback-report-exception.html:
 - adoptedCallback
 - attributeChangedCallback
@@ -283,15 +258,6 @@ custom-elements/custom-element-reaction-queue.html:
   disconnected during upgrading
 - Upgrading a disconnected custom element must not invoke connectedCallback if the
   element is connected during upgrading
-custom-elements/disconnected-callbacks.html:
-- Removing a custom element from a shadow tree in the document of an iframe must enqueue
-  and invoke disconnectedCallback
-- Removing a custom element from the document of an iframe must enqueue and invoke
-  disconnectedCallback
-- Removing an ancestor of custom element from the document of an iframe must enqueue
-  and invoke disconnectedCallback
-- Removing the shadow host of a custom element from athe document of an iframe must
-  enqueue and invoke disconnectedCallback
 custom-elements/element-internals-shadowroot.html:
 - ElementInternals *can* be called after constructor, upgrade case
 - ElementInternals cannot be called before constructor, upgrade case
@@ -413,8 +379,6 @@ custom-elements/parser/parser-uses-constructed-element.html:
   of the one created before super() call
 - HTML parser must use the returned value of the custom element constructor instead
   using the one created in super() call
-custom-elements/parser/parser-uses-registry-of-owner-document.html:
-- HTML parser must use the registry of window.document in a document created by document.implementation.createXHTMLDocument()
 custom-elements/perform-microtask-checkpoint-before-construction-xml-parser.xhtml:
 - XML parser must perform a microtask checkpoint before constructing a custom element
 custom-elements/perform-microtask-checkpoint-before-construction.html:
@@ -480,181 +444,27 @@ custom-elements/reactions/HTMLOutputElement.html:
   a custom element
 - value on HTMLOutputElement must enqueue disconnectedCallback when removing a custom
   element
-custom-elements/reactions/HTMLTableElement.html:
-- caption on HTMLTableElement must enqueue connectedCallback when inserting a custom
-  element
-- tFoot on HTMLTableElement must enqueue connectedCallback when inserting a custom
-  element
-- tHead on HTMLTableElement must enqueue connectedCallback when inserting a custom
-  element
 custom-elements/reactions/HTMLTitleElement.html:
 - text on HTMLTitleElement must enqueue disconnectedCallback when removing a custom
   element
-custom-elements/reactions/Range.html:
-- createContextualFragment on Range must construct a custom element
 custom-elements/reactions/Selection.html:
 - deleteFromDocument on Selection must enqueue a disconnected reaction
 custom-elements/reactions/ShadowRoot.html:
-- innerHTML on ShadowRoot must enqueue connectedCallback on newly upgraded custom
-  elements when the shadow root is connected
 - innerHTML on ShadowRoot must enqueue disconnectedCallback when removing a custom
   element
-- innerHTML on ShadowRoot must upgrade a custom element
-custom-elements/registries/Construct.html:
-- A constructor with only a scoped custom element registry definition should fail
-  upon construction
-custom-elements/registries/CustomElementRegistry-initialize.html:
-- initialize does not set descendants whose customElementRegistry already uses a different
-  registry
-- initialize does not set the registry of nested shadow tree to a scoped registry
-- initialize does not set the registry of nested shadow tree to the global registry
-- initialize is a function on both global and scoped CustomElementRegistry
-- initialize is no-op on a subtree with a non-null registry
-- initialize sets element.customElementRegistry permantently
-- initialize sets element.customElementRegistry to a scoped registry
-- initialize sets element.customElementRegistry to the global registry
-- initialize sets registry on shadow root descendants with no registry
-- initialize throws when the registry scoped is false and the root document already
-  has another registry
-- initialize throws when the registry scoped is false and the root is the document.
-- initialize works on Document
-- initialize works on DocumentFragment
 custom-elements/registries/CustomElementRegistry-upgrade.html:
-- upgrade is a no-op when called on a shadow root with no association
 - upgrade is a no-op when called on an element associated with a different registry
-- upgrade should not upgrade a candidate element not associated with a registry
-- upgrade should upgrade a candidate element when called on a shadow root with an
-  association
-custom-elements/registries/Document-customElementRegistry.html:
-- customElementRegistry on a document without a browsing context should return null
-custom-elements/registries/Document-importNode-cross-document.window.js:
-- Cloning including shadow tree with explicit global registry
-- Cloning including shadow tree with explicit global registry (null registry target)
-- Cloning including shadow tree with global registry
-- Cloning including shadow tree with global registry (null registry target)
-- Cloning including shadow tree with scoped registry
-- Cloning including shadow tree with scoped registry (null registry target)
-- Cloning with explicit global registry
-- Cloning with explicit global registry (null registry target)
-- Cloning with global registry
-- Cloning with global registry (null registry target)
-- Cloning with scoped registry
-- Cloning with scoped registry (null registry target)
-custom-elements/registries/Document-importNode.html:
-- importNode should clone a shadow host with a declarative shadow DOM using a specified
-  scoped registry
-- importNode should clone a template content using a specified scoped registry
-- importNode should clone a template content with a nested template element using
-  a scoped registry
-- importNode should clone using target's registry if non-null, including when it's
-  not the global registry
-- importNode should clone using the specified registry if target's registry is null
-- importNode should preserve null-ness of custom element registry
-- importNode should use the provided fallback registry for null-registry descendants
-  nested under non-null-registry ancestors
-- 'importNode: pass options argument with value { customElementRegistry: null }'
-- 'importNode: pass options argument with value { selfOnly: true }'
 custom-elements/registries/Element-customElementRegistry-exceptions.html:
 - customElementRegistry on a failed custom element created by parser should return
   the specified custom regsitry
-custom-elements/registries/Element-customElementRegistry.html:
-- customElementRegistry inside a custom element constructor should return the correct
-  registry
-- customElementRegistry on a clone of a declarative shadow tree with shadowrootcustomelementregistry
-  should return null
-- customElementRegistry on a clone of a declarative shadow tree with shadowrootcustomelementregistry
-  should return the global registry after getting inserted into a document
-- customElementRegistry on an element inside a declarative shadow DOM with shadowrootcustomelementregistry
-  should return null
-- customElementRegistry on an element inside a declarative shadow DOM with shadowrootcustomelementregistry
-  should return the scoped registry after calling initialize
 custom-elements/registries/Element-innerHTML.html:
 - createContextualFragment on a range inside a template should use null registry even
   when the template has a scoped registry
-- createContextualFragment on a range inside an element with scoped registry should
-  use the scoped registry of the element
-- innerHTML on a disconnected element should use the scoped registry it was created
-  with
-- innerHTML on an inserted element should continue to use the scoped registry it was
-  created with
-- insertAdjacentHTML should use the element's registry even when the registry is null
-- nested descendants in innerHTML on a disconnected element should use the scoped
-  registry the element was created with
-- nested descendants in innerHTML should use the null registry when the container
-  element has null registry
-custom-elements/registries/ShadowRoot-init-customElementRegistry.html:
-- attachShadow() should use the null registry when the shadow host uses null registry
-  and customElementRegistry is null
-custom-elements/registries/ShadowRoot-init-declarative.html:
-- Built-in element inside 'shadowrootcustomelementregistry' declarative shadow root
-  should use document's registry as attachShadow default registry
-- Custom element inside 'shadowrootcustomelementregistry' declarative shadow root
-  should use document's registry as attachShadow default registry
 custom-elements/registries/ShadowRoot-innerHTML.html:
 - innerHTML on a connected shadow root should be able to create an unknown element
-- innerHTML on a connected shadow root should not upgrade a custom element inside
-  a template element
-- innerHTML on a connected shadow root should use the associated scoped registry
-- innerHTML on a shadow root should use the scoped registry
-custom-elements/registries/adoption.window.js:
-- Adoption including shadow root with explicit global registry
-- Adoption including shadow root with explicit global registry (null registry target)
-- Adoption including shadow root with explicit global registry (scoped registry target)
-- Adoption including shadow root with explicit global registry into a scoped registry
-- Adoption including shadow root with explicit global registry into a scoped registry
-  (null registry target)
-- Adoption including shadow root with explicit global registry into a scoped registry
-  (scoped registry target)
-- Adoption including shadow root with global registry
-- Adoption including shadow root with global registry (null registry target)
-- Adoption including shadow root with global registry (scoped registry target)
-- Adoption including shadow root with global registry into a scoped registry
-- Adoption including shadow root with global registry into a scoped registry (null
-  registry target)
-- Adoption including shadow root with global registry into a scoped registry (scoped
-  registry target)
-- Adoption including shadow root with scoped registry (scoped registry target)
-- Adoption including shadow root with scoped registry into a scoped registry
-- Adoption including shadow root with scoped registry into a scoped registry (scoped
-  registry target)
-- Adoption with explicit global registry
-- Adoption with explicit global registry (null registry target)
-- Adoption with explicit global registry (scoped registry target)
-- Adoption with explicit global registry into a scoped registry
-- Adoption with explicit global registry into a scoped registry (null registry target)
-- Adoption with explicit global registry into a scoped registry (scoped registry target)
-- Adoption with global registry
-- Adoption with global registry (null registry target)
-- Adoption with global registry (scoped registry target)
-- Adoption with global registry into a scoped registry
-- Adoption with global registry into a scoped registry (null registry target)
-- Adoption with global registry into a scoped registry (scoped registry target)
-- Adoption with scoped registry (scoped registry target)
-- Adoption with scoped registry into a scoped registry
-- Adoption with scoped registry into a scoped registry (scoped registry target)
 custom-elements/registries/constructor-reentry-with-different-definition.html:
 - Re-entry via direct constructor call after calling super()
-- Re-entry via direct constructor call before calling super()
-- Re-entry via upgrade after calling super()
 - Re-entry via upgrade before calling super()
-custom-elements/registries/element-mutation-null-registry-removal.html:
-- An element's null customElementRegistry should not mutate after removal from a declarative
-  shadow root with shadowrootcustomelementregistry.
-custom-elements/registries/element-mutation.html:
-- An element with scoped registry should not change its registry when run append into
-  another shadow tree with different scoped registry.
-- An element with scoped registry should not change its registry when run append out
-  of the shadow tree.
-- An element with scoped registry should not change its registry when run appendChild
-  into another shadow tree with different scoped registry.
-- An element with scoped registry should not change its registry when run appendChild
-  out of the shadow tree.
-- An element with scoped registry should not change its registry when run prepend
-  into another shadow tree with different scoped registry.
-- An element with scoped registry should not change its registry when run prepend
-  out of the shadow tree.
-- Declarative shadow DOM with shadowrootcustomelementregistry attribute without registry
-  initialized should remain null registry after adoption.
 custom-elements/registries/global.window.js:
 - attachShadow() should throw with global registry from another document
 - createElement() should throw with global registry from another document
@@ -665,9 +475,6 @@ custom-elements/registries/initial-about-blank.window.js:
 - Each navigable document has its own registry
 custom-elements/registries/per-document.html:
 - Navigating from the initial about:blank must replace window.customElements
-custom-elements/registries/pseudo-class-defined.window.js:
-- '"custom" :defined should apply after initialize'
-- '"uncustomized" :defined doesn''t care about your registry'''
 custom-elements/registries/scoped-custom-element-registry-customelementregistry-attribute-in-xhtml.xhtml:
 - XHTML fragment parser should create a custom element candidate with null registry
   if customelementregistry is set
@@ -677,48 +484,6 @@ custom-elements/registries/scoped-custom-element-registry-customelementregistry-
   is set
 - XHTML parser should create a defined custom element with null registry if customelementregistry
   is set
-custom-elements/registries/scoped-custom-element-registry-customelementregistry-attribute.html:
-- Body with customelementregistry attribute during initial parse should have null
-  registry and propagate to children
-- Body with customelementregistry in a complete document structure should have null
-  registry
-- Cloning a builtin element with null regsitry should create an element with null
-  registry
-- Cloning a custom element candidate with null regsitry should create an element with
-  null registry
-- Cloning a custom element with null regsitry should create an element with null registry
-- Custom element candidate child of body with customelementregistry should have null
-  registry during initial parse
-- Descendants of body with customelementregistry should all have null registry during
-  initial parse
-- HTML parser should create a builtin element with null registry if customelementregistry
-  is set
-- HTML parser should create a custom element candidate with null registry if customelementregistry
-  is set
-- HTML parser should create a custom element with null registry if customelementregistry
-  is set
-- 'Initial parse: built-in element with customelementregistry has null registry'
-- 'Initial parse: child of element with customelementregistry inherits null registry'
-- 'Initial parse: custom element candidate child inherits null registry from parent'
-- 'Initial parse: custom element candidate with customelementregistry has null registry'
-- 'Initial parse: deeply nested descendant inherits null registry'
-- 'Initial parse: global registry define only upgrades elements without customelementregistry'
-custom-elements/registries/scoped-registry-append-does-not-upgrade.html:
-- Connecting a custom element candiate in a shadow root with a scoped custom element
-  registry has null registry by default
-- Connecting a custom element candiate with a scoped custom element registry does
-  not change the registry
-- Connecting a custom element candiate with null registry does not set the registry
-- Inserting a custom element candiate with null registry does not change the registry
-- Inserting a node cloned from a template with null registry into a scoped shadow
-  root should set global registry
-- Inserting a node from another document with null registry results in the custom
-  element registry to be set and upgraded.
-- Inserting the shadow host of a shadow root with a scoped custom element registry
-  does not change the registry
-- adoptNode then inserting into a scoped shadow root should preserve global registry
-- customElementRegistry of an upgrade candidate created in a document without a browsing
-  context uses null regsitry by default
 custom-elements/registries/scoped-registry-define-upgrade-criteria.html:
 - Adding definition to scoped registry affects associated shadow roots in all iframes
 - Adding definition to scoped registry affects associated shadow roots in other frame
@@ -728,89 +493,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Upgrade in association order across documents, then tree order in each document
 - Upgrade order is affected by shadow tree adoption across documents
 - Upgrade order is not affected by DOM order between child frames
-custom-elements/registries/scoped-registry-initialize-upgrades.html:
-- CustomElementRegistry.prototype.initialize upgrades already initialized elements
-- CustomElementRegistry.prototype.initialize upgrades custom elements in declarative
-  shadow root when initialize() runs before define()
-- 'Document: CustomElementRegistry.prototype.initialize only upgrades elements beloning
-  to the registry'
-- 'Document: CustomElementRegistry.prototype.initialize should upgrade elements in
-  tree order'
-- 'Document: CustomElementRegistry.prototype.initialize should upgrade the element
-  given to the first argument'
-- 'HTMLDocument: CustomElementRegistry.prototype.initialize only upgrades elements
-  beloning to the registry'
-- 'HTMLDocument: CustomElementRegistry.prototype.initialize should upgrade elements
-  in tree order'
-- 'HTMLDocument: CustomElementRegistry.prototype.initialize should upgrade the element
-  given to the first argument'
-- 'XHTMLDocument: CustomElementRegistry.prototype.initialize only upgrades elements
-  beloning to the registry'
-- 'XHTMLDocument: CustomElementRegistry.prototype.initialize should upgrade elements
-  in tree order'
-- 'XHTMLDocument: CustomElementRegistry.prototype.initialize should upgrade the element
-  given to the first argument'
-custom-elements/registries/scoped-registry-initialize.html:
-- 'Document: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'Document: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'Document: customElementRegistry of an unknown element created with a document without
-  a browsing context uses null regsitry by default'
-- 'Document: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'Document: customElementRegistry of an upgrade candidate connected to a document
-  without a browsing context uses null regsitry by default'
-- 'Document: customElementRegistry of an upgrade candidate created with a document
-  without a browsing context uses null regsitry by default'
-- 'Document: customElementRegistry of an upgrade candidate created with an explicit
-  customElementRegistry argument should return the registry'
-- 'Document: customElementRegistry of document and an upgrade candidate after calling
-  CustomElementRegistry.prototype.initialize should return the registry'
-- 'HTMLDocument: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'HTMLDocument: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'HTMLDocument: customElementRegistry of an unknown element created with a document
-  without a browsing context uses null regsitry by default'
-- 'HTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'HTMLDocument: customElementRegistry of an upgrade candidate connected to a document
-  without a browsing context uses null regsitry by default'
-- 'HTMLDocument: customElementRegistry of an upgrade candidate created with a document
-  without a browsing context uses null regsitry by default'
-- 'HTMLDocument: customElementRegistry of an upgrade candidate created with an explicit
-  customElementRegistry argument should return the registry'
-- 'HTMLDocument: customElementRegistry of document and an upgrade candidate after
-  calling CustomElementRegistry.prototype.initialize should return the registry'
-- 'XHTMLDocument: customElementRegistry of an element created after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'XHTMLDocument: customElementRegistry of an unknown element after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'XHTMLDocument: customElementRegistry of an unknown element created with a document
-  without a browsing context uses null regsitry by default'
-- 'XHTMLDocument: customElementRegistry of an upgrade candidate after calling CustomElementRegistry.prototype.initialize
-  should return the registry'
-- 'XHTMLDocument: customElementRegistry of an upgrade candidate connected to a document
-  without a browsing context uses null regsitry by default'
-- 'XHTMLDocument: customElementRegistry of an upgrade candidate created with a document
-  without a browsing context uses null regsitry by default'
-- 'XHTMLDocument: customElementRegistry of an upgrade candidate created with an explicit
-  customElementRegistry argument should return the registry'
-- 'XHTMLDocument: customElementRegistry of document and an upgrade candidate after
-  calling CustomElementRegistry.prototype.initialize should return the registry'
-custom-elements/registries/template.window.js:
-- Serializing a null registry ShadowRoot with a global registry host (document)
-- Serializing a null registry ShadowRoot with a null registry host (document)
-- Serializing a null registry ShadowRoot with a scoped registry host (document)
-- Serializing a scoped registry ShadowRoot with a global registry host (document)
-- Serializing a scoped registry ShadowRoot with a null registry host (document)
-- Serializing a scoped registry ShadowRoot with a scoped registry host (document)
-- shadowRootCustomElementRegistry reflects as string
-custom-elements/registries/upgrade.html:
-- Elements inside a template contents DocumentFragment node
-- Two elements as shadow-including descendants (and not descendants) of the upgraded
-  node
 custom-elements/state/ElementInternals-states.html:
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
 custom-elements/state/state-pseudo-class.html:
