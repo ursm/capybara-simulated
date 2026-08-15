@@ -46,7 +46,11 @@ RSpec.describe 'Web Worker' do
 
   before { Capybara.app = app }
 
-  def poll_for(session, script, timeout: 2)
+  # The default bound is generous on purpose: it exits on the first truthy
+  # poll, so a healthy run never pays it, while a loaded parallel runner (CI
+  # runs 4 sibling processes; a fresh worker VM's boot competes with them)
+  # gets the wall time it actually needs.
+  def poll_for(session, script, timeout: 10)
     deadline = Time.now + timeout
     last = nil
     until Time.now > deadline
@@ -139,11 +143,7 @@ RSpec.describe 'Web Worker' do
       };
       w.postMessage({cmd: 'echo', value: {arr: [undefined, undefined, 'x'], obj: {u: undefined, v: 1}}});
     JS
-    40.times do
-      break if session.evaluate_script('globalThis.__got !== null')
-
-      sleep 0.02
-    end
+    poll_for(session, 'globalThis.__got !== null') {|v| v }
     got = session.evaluate_script('globalThis.__got') or raise 'the worker never echoed'
 
     expect(got['len']).to eq(3)
