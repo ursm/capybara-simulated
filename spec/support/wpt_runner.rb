@@ -76,6 +76,18 @@ module WptRunner
   # Real-time grace rounds after an idle-bail before the force-timeout (see the
   # drain loop): 10 ms sleep + one frame each, resumed on any progress signal.
   DRAIN_GRACE_ROUNDS = 20
+  # Real-time bounds on the clock-hold while worker cross-thread work is in
+  # flight (the wait-hold branch of the drain loop). Generous — they only bite
+  # on a page whose worker pending never resolves (a wedged counter would
+  # otherwise hold the clock forever); a healthy loaded runner resumes on the
+  # next delivered reply, typically well under a second per stretch.
+  # Per-STRETCH (one uninterrupted run of held frames) — catches a wedge fast.
+  DRAIN_WORKER_WAIT_MAX_S = 10
+  # Cumulative per FILE — a page alternating brief progress with wedged waits
+  # re-arms the stretch bound each time, so without a file-level ceiling its
+  # wall time is only bounded by stretches × 10 s. Far above any legitimate
+  # total (a loaded CI file's holds sum to seconds).
+  DRAIN_WORKER_WAIT_FILE_MAX_S = 120
   # A frame with no rAF / async / due-now work still counts as PROGRESS (resets the
   # idle-bail) while a timer is parked within this horizon — a `step_timeout`-style
   # wait the test is deliberately sitting on (e.g. confirming a `scrollend` does NOT
@@ -1061,7 +1073,18 @@ module WptRunner
 
     res = nil
     idle = 0
-    DRAIN_MAX_STEPS.times do
+    # `steps` counts CLOCK-ADVANCING frames toward DRAIN_MAX_STEPS, so the cap
+    # keeps bounding VIRTUAL time (≈ 10.2 s, just past the normal harness
+    # timeout) rather than frame iterations: a frame spent purely WAITING on
+    # cross-thread worker work advances no virtual time and consumes no budget
+    # (see the wait-hold branch below).
+    steps        = 0
+    advance      = true
+    wait_started = nil   # start of the current uninterrupted hold stretch
+    hold_last    = nil   # previous held frame's timestamp (per-frame charge)
+    hold_spent   = 0.0   # cumulative real seconds this file has held the clock
+    hold_warned  = false
+    while steps < DRAIN_MAX_STEPS
       # Advance the page one real-cadence event-loop frame (quiescence at the
       # current instant, then one frame interval). Advancing the clock by one frame
       # — not the ~100 ms-per-evaluate_script poll tick the old loop incurred three
@@ -1069,7 +1092,8 @@ module WptRunner
       # FRAME_MS / Browser#run_event_loop_frame). Then check OUR completion sentinel
       # (the reporter's `__wptResults`) with a clock-free `peek_script`, so polling
       # it each frame doesn't perturb the cadence the loop maintains.
-      frame = s.driver.run_event_loop_frame(FRAME_MS)
+      frame  = s.driver.run_event_loop_frame(advance ? FRAME_MS : 0)
+      steps += 1 if advance
       # Read OUR completion sentinel (the reporter's `__wptResults`) with the same
       # clock-free `peek_script` — returns the results object once set, nil before —
       # so polling it each frame doesn't perturb the cadence the loop maintains.
@@ -1083,14 +1107,57 @@ module WptRunner
       # below fire it. (`next_timer` is always a Float; -1 means no timer queued.)
       nt = frame['next_timer']
       pending_timer = nt >= 0 && nt <= DRAIN_PENDING_TIMER_HORIZON_MS
-      if frame['progressed'] || frame['raf'] || frame['async'] || pending_timer
+      active = frame['progressed'] || frame['raf'] || pending_timer
+      if active || frame['async']
         idle = 0
         # An async channel in flight is usually a WORKER thread. The drain loop
         # otherwise spins holding the GVL, starving that thread; yield briefly so
         # it makes progress deterministically (otherwise its first postMessage
         # lands non-deterministically — a flaky SharedWorker connect, etc.).
         sleep(0.001) if frame['async']
+        if active
+          advance      = true
+          wait_started = nil
+          hold_last    = nil
+        elsif s.driver.worker_drive_pending?
+          # Async-only frame with worker cross-thread work in flight (an SW
+          # round-trip, a worker mid-boot / mid-message — in ANY window; the
+          # driver aggregate matches the merged `async` above): the page is
+          # WAITING on another thread's wall time, not on virtual time. HOLD the
+          # clock — run 0-advance frames that still pump deliveries at the
+          # current instant — until the work surfaces as real progress.
+          # Advancing here charges virtual time for OS scheduling: on a loaded
+          # runner (CI) the worker threads run slower while the clock races
+          # ahead at 16 ms/frame, the DRAIN_MAX_STEPS budget exhausts mid-file
+          # and the force-jump TIMEOUTs every remaining subtest
+          # (worker-interception-redirect's tail cases — the recurring "SW
+          # flake" this hold removes). Same model as `hold_for_sw_fetch`, one
+          # frame up. Real-time-bounded — per stretch and cumulatively per file
+          # — so a wedged pending counter degrades to the old advancing
+          # behavior instead of hanging the gate.
+          now           = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          hold_spent   += now - hold_last if hold_last && !advance
+          hold_last     = now
+          wait_started ||= now
+          advance = now - wait_started > DRAIN_WORKER_WAIT_MAX_S || hold_spent > DRAIN_WORKER_WAIT_FILE_MAX_S
+          if advance && !hold_warned
+            hold_warned = true
+            warn "wpt_runner: worker clock-hold budget expired on #{rel} " \
+                 "(stretch #{(now - wait_started).round(1)} s, file total #{hold_spent.round(1)} s) — " \
+                 'resuming virtual-clock advance (wedged worker pending?)'
+          end
+        else
+          # Async from a non-worker channel (WS reader, an in-flight page fetch):
+          # keep the clock moving, as before — their completions don't consume
+          # frame budget at worker-poll cadence.
+          advance      = true
+          wait_started = nil
+          hold_last    = nil
+        end
       else
+        advance      = true
+        wait_started = nil
+        hold_last    = nil
         idle += 1
         if idle >= DRAIN_IDLE_BAIL
           # Grace window before declaring the page dead: real cross-thread work (a
