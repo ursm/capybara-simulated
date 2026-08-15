@@ -6679,11 +6679,22 @@ module Capybara
       # (data:/srcdoc/sandboxed — nil origin) is cross-origin to every http(s) image, so any such
       # image taints it.
       private def image_tainted?(key, cors)
-        return false if cors || !key.match?(%r{\Ahttps?://}i)
-        img = url_origin(key)
-        return false unless img
-        doc = url_origin(@current_url)
-        doc.nil? || doc != img
+        origin_tainted?(key, cors)
+      end
+
+      # Whether a successfully-loaded media resource (image / video frame) taints
+      # a canvas it's drawn into: its bytes came cross-origin without CORS
+      # approval. The verdict compares against the fetching CLIENT's document
+      # origin when one is threaded (a frame's own document), else the top
+      # document — the same http(s) gate rack_fetch's client identity uses (an
+      # opaque-origin about:blank / javascript: realm falls back to the top).
+      private def origin_tainted?(url, cors, client_url: nil)
+        return false if cors || !url.to_s.match?(%r{\Ahttps?://}i)
+        res = url_origin(url.to_s)
+        return false unless res
+        base = client_url.to_s.match?(%r{\Ahttps?://}i) ? client_url : @current_url
+        doc  = url_origin(base)
+        doc.nil? || doc != res
       end
 
       # A decoded-image cache entry for `key`, decoding + caching on a miss.
@@ -7505,16 +7516,24 @@ module Capybara
       # so a `<video src>` pointing at a served file decodes the same way a blob: / data:
       # source does. Binary stays Ruby-side; only ASCII base64 crosses into V8. Returns
       # nil when the fetch fails.
-      def video_bytes_b64(url)
-        result = rack_fetch('GET', url, '', {}, 'follow')
+      def video_bytes_b64(url, cors = false, credentials = 'same-origin', client_url = nil)
+        # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
+        # load); a plain one is a no-cors fetch whose cross-origin bytes TAINT a
+        # canvas they're drawn into — the exact <img> model (image_tainted?), with
+        # the fetching CLIENT's document (a frame's own, not the top window's) as
+        # the origin the verdict compares against.
+        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url)
         return nil unless result && result['status'].to_i < 400
         # The RAW bytes ride `body_b64` (see response_hash) for any non-ASCII response;
         # the text `body` field is a UTF-8 re-decode that corrupts binary media. Fall
         # back to base64-of-body only for a pure-ASCII response (byte-identical there).
         b64 = result['body_b64']
-        return b64 unless b64.nil? || b64.empty?
-        body = result['body'].to_s
-        body.empty? ? nil : [body].pack('m0')
+        if b64.nil? || b64.empty?
+          body = result['body'].to_s
+          b64  = body.empty? ? nil : [body].pack('m0')
+        end
+        return nil unless b64
+        {'b64' => b64, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
       end
 
       private def ffprobe_stream(path)
