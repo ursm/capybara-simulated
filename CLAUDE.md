@@ -11,8 +11,9 @@ corner.
 This driver exists to run real app suites in-process, so it has to
 behave like a real browser. The **primary, objective correctness bar is
 spec conformance**, measured by the vendored web-platform-tests gate
-(`spec/wpt_spec.rb` — the same tests Chromium / Firefox hold themselves
-to). Fix the spec contract and every library built on it works for free.
+(`spec/wpt_gate/`, defined in `spec/support/wpt_gate.rb` — the same tests
+Chromium / Firefox hold themselves to). Fix the spec contract and every
+library built on it works for free.
 
 The app suites (Avo / Discourse / Forem / Redmine / Mastodon) are the
 **integration check and regression early-warning** — they catch
@@ -88,7 +89,7 @@ churn. A `.tentative` path/suffix is auto-routed out-of-scope by
 `regen_wpt_expected_failures.rb` and self-heals (ratification changes the
 path → it re-enters in-scope as a fresh failure). An idea-stage **WICG**
 proposal with no `.tentative` in its name is listed explicitly with a
-`[WICG]`-tagged reason; the `wpt_spec` drift check turns the gate RED when
+`[WICG]`-tagged reason; the `wpt_gate` drift check turns the gate RED when
 that test's `<link rel=help>` stops referencing WICG (it standardized), so
 it gets re-audited — the signal the missing suffix can't give. Do **not**
 blanket-exclude every WICG-linked test: a WICG-linked feature we DO support

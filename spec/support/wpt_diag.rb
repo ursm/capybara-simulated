@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Diagnostic CLI: run one or more WPT files through the :simulated driver and
-# print EVERY subtest's status + message — unlike the gate (wpt_spec.rb), which
+# print EVERY subtest's status + message — unlike the gate (spec/support/wpt_gate.rb), which
 # only checks the non-PASS subtest names against the allowlist and discards the
 # assertion messages. Use it to pin the exact failing assertion before touching
 # the driver.

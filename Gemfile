@@ -12,6 +12,8 @@ gem 'quickjs-polyfill-intl'
 
 group :development, :test do
   gem 'launchy'            # required by Capybara's shared save_and_open_page spec
+  gem 'parallel_tests', '~> 5.7' # multi-process spec runs (parallel_rspec); the WPT gate is sharded to feed it.
+                                 # Pinned: Gemfile.lock is gitignored, so an unconstrained major bump would hit CI unbisectably.
   gem 'puma'               # for Capybara's :server tests (also used by spec helper)
   gem 'rack-test'
   gem 'rake',              require: false

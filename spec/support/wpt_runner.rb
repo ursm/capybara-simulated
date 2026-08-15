@@ -10,7 +10,7 @@ require 'digest'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the
-# behavioural-conformance gate (spec/wpt_spec.rb) and the allowlist regenerator
+# behavioural-conformance gate (spec/support/wpt_gate.rb) and the allowlist regenerator
 # (script/regen_wpt_expected_failures.rb).
 #
 # Per file the runner: serves spec/wpt/** through a Rack app, visits the test,
