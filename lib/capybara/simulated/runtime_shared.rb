@@ -48,7 +48,7 @@ module Capybara
         '__csim_keepaliveTake'       => ->(b, *a) { b.keepalive_take(a[0]) },
         # A controlled document's external classic script → its controller's fetch
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
-        '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include') },
+        '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include', binary: a[7] == true, integrity: a[8] || '') },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0]); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
         # A nested browsing context navigating its OWN location (a[1] = the frame's
@@ -224,7 +224,7 @@ module Capybara
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
         '__csim_swNavigationFetch'    => ->(b, *a) { b.service_worker_navigation_fetch(a[0], is_reload: !!a[1], is_history: !!a[2], referrer_source: a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6]) },
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6], defer_ok: !!a[7]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body_b64: a[5] || '', content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe') },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },

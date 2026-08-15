@@ -4332,7 +4332,7 @@ module Capybara
       # respondWith, {'body' =>} for a served script. An OPAQUE respondWith still
       # EXECUTES (browsers run opaque classic scripts) — its bytes ride the private
       # render channel like the image path.
-      def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include')
+      def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include', binary: false, integrity: '')
         w = @workers[handle.to_i]
         return nil unless w && w[:thread]&.alive?
         # A worker still ACTIVATING can't be waited for here — this caller blocks the
@@ -4351,6 +4351,9 @@ module Capybara
           # anonymous → cors+same-origin, use-credentials → cors+include — the
           # same mapping the <img> path ships (_imageCorsRequest).
           mode:        mode.to_s,
+          # The element's raw `integrity` attribute, verbatim: event.request.integrity
+          # reflects it even when unparseable (parsing happens at verification time).
+          integrity:   integrity.to_s,
           destination: destination.to_s,
           credentials: credentials.to_s,
           clientId:    client_id.to_s,
@@ -4375,6 +4378,9 @@ module Capybara
 
         body_b64 = r['body_b64'].to_s
         body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
+        # A binary consumer (video / font bytes) takes the base64 VERBATIM — the
+        # utf8 text funnel would mangle non-UTF-8 byte sequences.
+        return {'body_b64' => body_b64, 'type' => type} if binary
         {'body' => RuntimeShared.utf8_text(Base64.decode64(body_b64))}
       end
 
@@ -5664,7 +5670,7 @@ module Capybara
       # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
-      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body_b64: '', content_type: nil, defer_ok: false)
+      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body_b64: '', content_type: nil, defer_ok: false, dest: 'iframe')
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -5699,7 +5705,7 @@ module Capybara
           # isSecureContext is hard-true) as secure by fiat. The JS caller computes
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
-             (sw = any_window_sw_navigation_fetch(target, method: meth, body_b64: req_b64, content_type: req_ct, is_reload: is_reload,
+             (sw = any_window_sw_navigation_fetch(target, method: meth, body_b64: req_b64, content_type: req_ct, is_reload: is_reload, dest: dest,
                                                           referrer_source: initiator, site_seed: site, origin_null: origin_null, resulting_client_id: rid))
             return nil if sw['networkError']
 
@@ -5715,7 +5721,8 @@ module Capybara
               site:            widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
               origin_null:     origin_null,
               body:            req_b64.empty? ? nil : Base64.decode64(req_b64),
-              content_type:    req_ct
+              content_type:    req_ct,
+              dest:            dest
             )
             body = nil   # read only for the terminal hop, below
           end
@@ -5886,7 +5893,7 @@ module Capybara
               rescue StandardError
                 nil
               end
-              @sw_nav_outbox << {fetch_id: fetch_id, resp: JSON.generate(sw_race_wire(r))} if r && r['status'].to_i < 400
+              @sw_nav_outbox << {fetch_id: fetch_id, race: true, resp: JSON.generate(sw_race_wire(r))} if r && r['status'].to_i < 400
             end
             next
           end
@@ -5894,9 +5901,19 @@ module Capybara
           resp = JSON.parse(ev[:resp])
           return nil                        if resp['fallthrough']    # no respondWith → load from the network
           return {'networkError' => true}   if resp['networkError']   # respondWith(Response.error()) → failed navigation
-          # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
-          # is a network error — a document can never commit from a no-cors response.
-          return {'networkError' => true}   if resp['type'] == 'opaque'
+          # Response-to-request validity applies to a respondWith, NOT to the race
+          # NETWORK leg above — that is the network's own answer: it followed its
+          # redirects itself and commits at the final URL like any network nav.
+          unless ev[:race]
+            # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
+            # is a network error — a document can never commit from a no-cors response.
+            return {'networkError' => true}   if resp['type'] == 'opaque'
+            # HTTP fetch response-to-request validity: a navigation request's redirect mode
+            # is 'manual', so a respondWith whose response was itself REDIRECTED (the SW
+            # re-fetched with redirect 'follow' and a redirect occurred — URL list > 1) is a
+            # network error; only an opaqueredirect (below) may carry a redirect to a nav.
+            return {'networkError' => true}   if resp['redirected']
+          end
           # An opaque-REDIRECT respondWith: the navigation processes the real redirect the
           # filtered surface (status 0 / empty headers) hides, carried on the private wire
           # fields (opaque_redirect_hash). Rewrite the real values in, so every caller's
