@@ -4367,13 +4367,17 @@ module Capybara
         return {'blocked' => true} if r['networkError']
 
         # HTML "fetch a classic script" / "obtain a stylesheet": a non-ok response
-        # fails the load (error event, nothing executes) — EXCEPT an opaque one,
-        # which reports status 0 and still executes/applies (its real bytes ride
-        # the private render channel). MIME enforcement is deliberately not added
-        # here yet: the covering css-MIME tests are still allowlisted, and a
-        # `new Response(text)` respondWith (text/plain) serving a stylesheet is
-        # load-bearing for green static-router subtests.
+        # fails the load (error event, nothing executes) — EXCEPT an opaque one
+        # satisfying a NO-CORS request, which reports status 0 and still
+        # executes/applies (its real bytes ride the private render channel). An
+        # opaque response to a cors-mode request (a module script, a crossorigin
+        # classic script) is a NETWORK ERROR per Handle Fetch — the bytes must
+        # never compile. MIME enforcement is deliberately not added here yet: the
+        # covering css-MIME tests are still allowlisted, and a `new Response(text)`
+        # respondWith (text/plain) serving a stylesheet is load-bearing for green
+        # static-router subtests.
         type = r['type'].to_s
+        return {'blocked' => true} if type == 'opaque' && mode.to_s != 'no-cors'
         return {'blocked' => true} unless type == 'opaque' || (200..299).cover?((r['status'] || 200).to_i)
 
         body_b64 = r['body_b64'].to_s
@@ -8258,8 +8262,15 @@ module Capybara
       # specifier map shipped by `<script type="importmap">`.
       def set_importmap(json)
         @importmap = JSON.parse(json.to_s)
+        @importmap['integrity'] ||= {}
       rescue JSON::ParserError
         @importmap = {'imports' => {}, 'scopes' => {}}
+      end
+
+      # Import-map "integrity" metadata for a RESOLVED module URL ('' when
+      # unmapped) — keys were absolutized at JS ingest (esm-loader.js).
+      def importmap_integrity(url)
+        (@importmap && @importmap['integrity'] && @importmap['integrity'][url.to_s]).to_s
       end
 
       def resolve_module_specifier(specifier, base_url)
