@@ -1,15 +1,3 @@
-# WPT IN-SCOPE backlog — subtests that currently fail but are real driver gaps
-# we intend to fix (the conformance roadmap). Earned out-of-scope failures live
-# in wpt_out_of_scope.yml. The gate (spec/wpt_spec.rb) loads BOTH and checks the
-# union symmetrically: a non-PASS subtest in NEITHER file -> RED; a listed subtest
-# that now PASSes -> RED. New failures default here (in-scope) until shown to be
-# an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
-#
-# Each entry is one file: a list of not-yet-passing subtest names, or the string
-# HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
-#
-# Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
-#
 ---
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
@@ -1422,24 +1410,6 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Messages from ServiceWorker to Client only received after setting onmessage.
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
-service-workers/service-worker/redirected-response.https.html:
-- Fetch should follow the redirect response 20 times
-- Fetch should not follow the redirect response 21 times.
-- The URL for the service worker redirected request should be propagated to response.
-- 'mode: "error", generated redirect response'
-- 'mode: "error", generated relative redirect response'
-- 'mode: "error", manually-generated redirect response'
-- 'mode: "error", mode change: "follow"'
-- 'mode: "follow", generated redirect response'
-- 'mode: "follow", generated relative redirect response'
-- 'mode: "follow", manually-generated redirect response'
-- 'mode: "follow", no mode change'
-- 'mode: "follow", no mode change, no server redirect'
-- 'mode: "manual", generated redirect response'
-- 'mode: "manual", generated relative redirect response'
-- 'mode: "manual", manually-generated redirect response'
-- 'mode: "manual", mode change: "follow"'
-- 'mode: "manual", no mode change'
 service-workers/service-worker/referrer-policy-header.https.html:
 - Referrer for a main resource redirected with a module script with referrer-policy
   (origin) should only have origin.
@@ -1711,19 +1681,6 @@ webstorage/storage_session_window_open.window.js:
   and that they diverge after a change
 webstorage/storage_session_window_reopen.window.js:
 - ensure that re-opening a named window doesn't copy sessionStorage
-webstorage/storage_setitem.window.js:
-- localStorage[] = "U+d800"
-- localStorage[] = "U+d83ca"
-- localStorage[] = "U+dbff"
-- localStorage[] = "U+dc00"
-- localStorage[] = "U+dfff"
-- localStorage[] = "aU+df4d"
-- sessionStorage[] = "U+d800"
-- sessionStorage[] = "U+d83ca"
-- sessionStorage[] = "U+dbff"
-- sessionStorage[] = "U+dc00"
-- sessionStorage[] = "U+dfff"
-- sessionStorage[] = "aU+df4d"
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
