@@ -156,27 +156,24 @@ class Headers:
 
 
 class RequestHeaders(dict):
-    # A DICT SUBCLASS whose base storage is {ORIGINAL-case name: [values]} (first-seen name wins for a
-    # repeated header) — matching wptserve, where `dict(request.headers)` copies {name: [list]} via the
-    # dict fast path (bypassing __getitem__) so a handler can do `dict(request.headers)[name][0]`
-    # (access-control-allow-lists.py). `_lower` maps lower→stored name for case-insensitive lookup;
-    # `_raw` keeps the on-the-wire ordered pairs (case + duplicates) for raw_items()/__str__. Because
-    # __iter__ / keys() are NOT overridden, dict's own — yielding the original-case names in first-seen
-    # order — both feeds that fast path AND is what inspect-headers.py iterates.
+    # A DICT SUBCLASS whose base storage is {LOWERCASED name: [values]} in first-seen order —
+    # exactly wptserve's RequestHeaders (`key = isomorphic_encode(header).lower()`), whose dict
+    # fast path (`dict(request.headers)[name][0]`, access-control-allow-lists.py) and items()
+    # therefore yield lowercase names (test-request-headers-worker reads ["referer"]). The
+    # on-the-wire ordered pairs (original case + duplicates) live in `_raw` for
+    # raw_items()/__str__ — that is where echo-headers' verbatim casing comes from.
     def __init__(self, pairs):
-        self._lower = {}
-        self._raw   = [(_b(k), _b(v)) for k, v in pairs]
+        self._raw = [(_b(k), _b(v)) for k, v in pairs]
         for bk, bv in self._raw:
             lk = bk.lower()
-            if lk in self._lower:
-                dict.__getitem__(self, self._lower[lk]).append(bv)
+            if dict.__contains__(self, lk):
+                dict.__getitem__(self, lk).append(bv)
             else:
-                self._lower[lk] = bk
-                dict.__setitem__(self, bk, [bv])
+                dict.__setitem__(self, lk, [bv])
 
     def _vals(self, name):
-        ok = self._lower.get(_b(name).lower())
-        return dict.__getitem__(self, ok) if ok is not None else None
+        lk = _b(name).lower()
+        return dict.__getitem__(self, lk) if dict.__contains__(self, lk) else None
 
     def get(self, name, default=None):
         v = self._vals(name)
@@ -191,7 +188,7 @@ class RequestHeaders(dict):
         return v[0] if len(v) == 1 else b', '.join(v)
 
     def __contains__(self, name):
-        return _b(name).lower() in self._lower
+        return dict.__contains__(self, _b(name).lower())
 
     def items(self):
         # (name, value) per distinct header — repeated values comma-joined. fetch-access-control.py does

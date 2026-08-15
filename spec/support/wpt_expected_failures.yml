@@ -1779,8 +1779,6 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image (shapeOutside).
 - Verify FetchEvent for css image-set (backgroundImage).
 - Verify FetchEvent for css image-set (shapeOutside).
-service-workers/service-worker/fetch-request-resources.https.html:
-- Verify FetchEvent for resources.
 service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
 - Verify SyncXHR on Worker is intercepted
 service-workers/service-worker/fetch-request-xhr-sync.https.html:
@@ -1886,8 +1884,6 @@ service-workers/service-worker/redirected-response.https.html:
 - 'mode: "manual", manually-generated redirect response'
 - 'mode: "manual", mode change: "follow"'
 - 'mode: "manual", no mode change'
-service-workers/service-worker/referer.https.html:
-- Verify the referer
 service-workers/service-worker/referrer-policy-header.https.html:
 - Referrer for a main resource redirected with a module script with referrer-policy
   (origin) should only have origin.
@@ -1895,9 +1891,6 @@ service-workers/service-worker/referrer-policy-header.https.html:
   have origin.
 - Referrer for fetch requests initiated from a service worker with referrer-policy
   (origin) should only have origin.
-service-workers/service-worker/referrer-toplevel-script-fetch.https.html:
-- Referrer of the module script fetch should be the document URL
-- Referrer of the top-level script fetch should be the document URL
 service-workers/service-worker/register-default-scope.https.html:
 - null scope
 service-workers/service-worker/registration-iframe.https.html:
@@ -2010,8 +2003,6 @@ service-workers/service-worker/update-after-oneday.https.html:
   24 hours
 service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
-service-workers/service-worker/update-no-cache-request-headers.https.html:
-- headers in no-cache mode
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
 service-workers/service-worker/websocket-in-service-worker.https.html:

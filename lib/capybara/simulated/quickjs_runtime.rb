@@ -378,6 +378,9 @@ module Capybara
         # for every `<script type="module">`; V8 registers it too via
         # `V8Runtime#attach_native_module_loader`.
         browser = @browser
+        # The V8 path appends a SW fetch-context tail (moduleSwCtx, bridge.entry.js)
+        # that this block deliberately drops: QuickJS module loads don't dispatch SW
+        # fetch events (the engine runs `--tag ~wpt`; no covered observer).
         v.define_function('__csim_evalEsmEntry') {|url, inline_src|
           RuntimeShared.safe_call { browser.eval_esm_module(url, inline_src) }
           nil

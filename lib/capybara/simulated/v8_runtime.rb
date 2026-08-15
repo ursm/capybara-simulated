@@ -445,6 +445,7 @@ module Capybara
 
       def dispose_frame_realms
         @realm_module_handles&.clear
+        @module_sw_ctxs&.clear
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
         @window_realm_meta&.clear
@@ -510,6 +511,7 @@ module Capybara
         # If it held the focus chain, focus returns to the top-level browsing context.
         @browser.note_realm_discarded(id) rescue nil
         @realm_module_handles&.delete(id)
+        @module_sw_ctxs&.delete(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
         @window_realm_meta&.delete(id)
@@ -987,6 +989,7 @@ module Capybara
         # including any module handles its scripts compiled before the throw.
         if realm
           @realm_module_handles&.delete(realm.id)
+          @module_sw_ctxs&.delete(realm.id)
           realm.dispose rescue nil
         end
         nil
@@ -1093,9 +1096,19 @@ module Capybara
       # by default, or a frame realm + its realm-local cache (Module handles are
       # context-bound; sharing the main cache would link a frame's imports
       # against main-context modules).
-      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil)
+      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, sw: nil)
         target  ||= ctx
         handles ||= native_module_handles
+        # A CONTROLLED document's module-graph source fetches dispatch SW fetch
+        # events (destination 'script', mode 'cors'). The context is recorded per
+        # REALM (not scoped to this call) so a dynamic `import()` resolved later
+        # by the isolate resolver still finds it; `root` carries the entry URL,
+        # whose fetch alone uses the element's own `integrity` attribute.
+        # KNOWN LOSS (documented divergence): one slot per realm means the LAST
+        # evaluated script's fetch options win — a deferred import() from an
+        # earlier script picks up the later script's credentials/root. Spec wants
+        # per-referring-script options; no vendored test observes the difference.
+        module_sw_ctxs[realm_key(target)] = sw&.merge(root: url.to_s)
         m = native_module_for(url, inline_src, target, handles)
         return nil unless m
         begin
@@ -1136,7 +1149,27 @@ module Capybara
       def native_module_for(url, inline_src, target, handles)
         return handles[url] if handles.key?(url)
         url_s = url.to_s
-        src = inline_src || @browser.rack_fetch_body(url_s)
+        src   = inline_src
+        if src.nil? && (sw = module_sw_ctxs[realm_key(target)])
+          # Only the graph's ENTRY fetch carries the element's integrity
+          # attribute; every other module resolves integrity from the import map
+          # (HTML "resolve a module integrity metadata").
+          integ = url_s == sw[:root] ? sw[:integrity].to_s : ''
+          integ = @browser.importmap_integrity(url_s) if integ.empty?
+          r = @browser.sw_script_subresource_fetch(
+            sw[:handle],
+            url_s,
+            sw[:client_id],
+            sw[:referrer],
+            'script',
+            'cors',
+            sw[:credentials] || 'same-origin',
+            integrity: integ
+          )
+          return handles[url] = nil if r && r['blocked']   # respondWith failed the load
+          src = r && r['body']
+        end
+        src ||= @browser.rack_fetch_body(url_s)
         return handles[url] = nil unless src
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
@@ -1192,8 +1225,8 @@ module Capybara
       # realm-correctness as static `<script type=module>` via
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
-        c.attach('__csim_evalEsmEntry', ->(url, inline) {
-          RuntimeShared.safe_call { eval_esm_module(url, inline) }
+        c.attach('__csim_evalEsmEntry', ->(url, inline, *sw) {
+          RuntimeShared.safe_call { eval_esm_module(url, inline, sw: esm_sw_ctx(sw)) }
           nil
         })
         c.dynamic_import_resolver = ->(specifier, referrer, initiating) {
@@ -1219,11 +1252,43 @@ module Capybara
         (@realm_module_handles ||= {})[realm_id] ||= {}
       end
 
+      # realm -> SW fetch context for module-source fetches (see eval_esm_module).
+      # Invalidated exactly like native_module_handles (a service worker OUTLIVES
+      # navigation, so a stale entry would be ACTIVE, not inert: the next page's
+      # dynamic import would dispatch fetch events for an uncontrolled document);
+      # frame-realm entries also drop with their realm in the dispose paths.
+      def module_sw_ctxs
+        @module_sw_ctxs ||= {}
+        key = [ctx.object_id, ctx.generation]
+        if @module_sw_ctxs_key != key
+          @module_sw_ctxs     = {}
+          @module_sw_ctxs_key = key
+        end
+        @module_sw_ctxs
+      end
+
+      def realm_key(target)
+        target.equal?(ctx) ? 0 : target.id
+      end
+
+      # The optional [handle, clientId, referrer, credentials, integrity] tail
+      # moduleSwCtx (bridge.entry.js) appends to __csim_evalEsmEntry, or nil.
+      def esm_sw_ctx(sw)
+        return nil unless sw && sw[0].to_i.positive?
+        {
+          handle:      sw[0].to_i,
+          client_id:   sw[1].to_s,
+          referrer:    sw[2].to_s,
+          credentials: sw[3].to_s,
+          integrity:   sw[4].to_s
+        }
+      end
+
       # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
-        realm.attach('__csim_evalEsmEntry', ->(url, inline) {
+        realm.attach('__csim_evalEsmEntry', ->(url, inline, *sw) {
           RuntimeShared.safe_call {
-            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id))
+            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), sw: esm_sw_ctx(sw))
           }
           nil
         })
