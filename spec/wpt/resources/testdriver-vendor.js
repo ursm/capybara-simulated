@@ -8,24 +8,87 @@
 (function () {
   if (!window.test_driver) return;
 
+  function labelFromRefs(refs) {
+    return Array.from(refs)
+      .map(r => ((r.innerText != null ? r.innerText : r.textContent) || '').trim())
+      .filter(Boolean)
+      .join(' ');
+  }
   function accessibleLabel(element) {
     if (!element) return '';
     // aria-labelledby / ariaLabelledByElements: the accessible name is the
     // space-joined text ("name from content") of the valid referenced elements.
     const refs = element.ariaLabelledByElements;
-    if (refs && refs.length) {
-      return Array.from(refs)
-        .map(r => ((r.innerText != null ? r.innerText : r.textContent) || '').trim())
-        .filter(Boolean)
-        .join(' ');
-    }
+    if (refs && refs.length) return labelFromRefs(refs);
     const ariaLabel = element.getAttribute && element.getAttribute('aria-label');
     if (ariaLabel) return ariaLabel.trim();
+    // A PRESENT labelledby that resolved to no elements (dangling id, refs out
+    // of scope) still SUPERSEDES the internals default — the element is named
+    // "" rather than falling through (element-internals-aria-element-reflection
+    // "should supersede"); only a fully-absent surface consults internals.
+    if (refs != null) return '';
+    // A custom element's ElementInternals supplies the DEFAULT semantics the
+    // element's own attributes didn't override (ElementInternals-role).
+    const internals = element._internals;
+    if (internals) {
+      const irefs = internals.ariaLabelledByElements;
+      if (irefs && irefs.length) return labelFromRefs(irefs);
+      if (internals.ariaLabel) return String(internals.ariaLabel).trim();
+    }
     return '';
   }
 
   window.test_driver.get_computed_label = function (element) {
     return Promise.resolve(accessibleLabel(element));
+  };
+
+  // WebDriver "Get Computed Role": the explicit `role` attribute's first VALID
+  // token wins, else the ElementInternals default role. The returned vocabulary
+  // is the computed one Chrome reports — a couple of authored roles compute to
+  // a different name (img → image, directory → list, presentation → none).
+  // Implicit HTML-AAM roles (tag-derived) are not modeled yet: an element with
+  // neither surface computes to '' — the vendored consumers only exercise
+  // explicit/internals roles.
+  const KNOWN_ROLES = new Set([
+    'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote',
+    'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox',
+    'complementary', 'contentinfo', 'definition', 'deletion', 'dialog',
+    'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic',
+    'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list',
+    'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'menu', 'menubar',
+    'menuitem', 'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation',
+    'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar',
+    'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader',
+    'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton',
+    'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table',
+    'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar',
+    'tooltip', 'tree', 'treegrid', 'treeitem'
+  ]);
+  const COMPUTED_ROLE_ALIASES = { img: 'image', directory: 'list', presentation: 'none' };
+  function validRoleOf(value) {
+    for (const tok of String(value).trim().split(/\s+/)) {
+      const t = tok.toLowerCase();
+      if (KNOWN_ROLES.has(t)) return COMPUTED_ROLE_ALIASES[t] || t;
+    }
+    return '';
+  }
+  function computedRole(element) {
+    if (!element) return '';
+    const attr = element.getAttribute && element.getAttribute('role');
+    if (attr) {
+      const r = validRoleOf(attr);
+      if (r) return r;
+    }
+    const internals = element._internals;
+    if (internals && internals.role != null) {
+      const r = validRoleOf(internals.role);
+      if (r) return r;
+    }
+    return '';
+  }
+
+  window.test_driver.get_computed_role = function (element) {
+    return Promise.resolve(computedRole(element));
   };
 
   // `test_driver.bless(intent, fn)` grants transient user activation (a real

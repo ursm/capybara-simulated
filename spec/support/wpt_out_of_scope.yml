@@ -32982,19 +32982,6 @@ css/cssom/getComputedStyle-sticky-pos-percent.html:
     the div with overflow: hidden'
   reason: getComputedStyle resolved inset (top/right/bottom/left) values are used-values
     that require a layout/box-tree engine; layout deliberately unmodeled (rule 1).
-custom-elements/ElementInternals-accessibility.tentative.html:
-- name: ariaColIndexText is defined in ElementInternals
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: ariaDescription is defined in ElementInternals
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: ariaRowIndexText is defined in ElementInternals
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 custom-elements/element-internals-behaviors.tentative.html:
 - name: Behavior state is preserved across disconnect and reconnect
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
