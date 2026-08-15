@@ -265,6 +265,16 @@ module Capybara
         state
       end
 
+      # Worker cross-thread work in flight in ANY window — the same aggregate scope
+      # as run_event_loop_frame's merged `async` (which folds every window in), so a
+      # caller distinguishing "waiting on a worker thread" from other async channels
+      # (the wpt_runner's clock-hold) sees a popup-hosted worker/SW round trip too,
+      # not just the active window's.
+      def worker_drive_pending?
+        return true if current_browser.worker_drive_pending?
+        @aux_windows.any? {|w| !w[:browser].equal?(current_browser) && w[:browser].worker_drive_pending? }
+      end
+
       # Fold an aux window's frame state into the running aggregate: any window that
       # progressed / has a queued rAF / has an async channel in flight keeps the
       # whole loop live, and `next_timer` becomes the nearest pending timer across
