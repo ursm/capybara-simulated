@@ -167,11 +167,13 @@ const SUPPORT_FILES = [
   // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
   // the file is a plain array of keyword strings (no further includes).
   'css/css-fonts/support/font-family-keywords.js',
-  // service-workers fetch-request-redirect audio subtests load getAudioURI()'s
-  // /media/sound_5.* — vendor just the two small sound files, not the whole
-  // media tree (its movies are megabytes of dead weight for us).
+  // service-workers fetch-request-redirect / fetch-canvas-tainting-video load
+  // getAudioURI()/getVideoURI()'s /media/sound_5.* and fetch-access-control.py's
+  // /media/movie_5.* — vendor the four small files, not the whole media tree.
   'media/sound_5.mp3',
-  'media/sound_5.oga'
+  'media/sound_5.oga',
+  'media/movie_5.mp4',
+  'media/movie_5.webm'
   // NOTE: service-workers/service-worker (vendored above) ships the FULL upstream
   // test-helpers.sub.js — `service_worker_test` and friends run against the real SW runtime.
   // The hand-written minimal helper that used to live at that path (with_iframe only, while SW
