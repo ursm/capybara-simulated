@@ -62,6 +62,28 @@ RSpec.describe 'layout box model' do
     expect(big[3]).to be_within(1).of(23)
   end
 
+  # WHICH FACE a CSS family resolves to decides every width on the page, and
+  # fontconfig makes that harder than it looks: it answers every name, so a name it
+  # SUBSTITUTED (`Arial` → the metric-compatible Liberation Sans, which is what a
+  # browser on the same machine draws) is indistinguishable from a name it ignored
+  # unless you ask it. Getting that wrong is silent — text is simply measured in the
+  # fallback serif — so these are relationships rather than pixel figures, and hold
+  # whatever faces happen to be installed.
+  it 'resolves a font stack to the face a browser would use' do
+    body = %w[Arial sans-serif serif].each_with_index.map {|f, i| %(<span id="f#{i}" style="font-family:#{f}">Wm second</span><br>) }.join +
+           %(<span id="fall" style="font-family:'No Such Family XY', Arial">Wm second</span><br>) +
+           %(<span id="none" style="font-family:'No Such Family XY'">Wm second</span>)
+    arial, sans, serif, fallthrough, unknown = boxes(body, ['#f0', '#f1', '#f2', '#fall', '#none']).map {|b| b[2] }
+    # A browser's default sans IS Arial (Chrome asks fontconfig for exactly that),
+    # and a substituted face measures as itself — not as the serif fallback.
+    expect(arial).to eq(sans)
+    expect(arial).not_to eq(serif)
+    # An unknown family is skipped and the NEXT one in the stack answers…
+    expect(fallthrough).to eq(arial)
+    # …while a stack of nothing but unknowns lands on the standard font, a serif.
+    expect(unknown).to eq(serif)
+  end
+
   # An inline box's padding grows its border box but NOT the line box it sits on
   # (Chrome: a 12px-font pill with 4px vertical padding measures 22 tall inside a
   # ~14px line).

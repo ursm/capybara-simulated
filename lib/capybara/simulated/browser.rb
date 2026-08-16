@@ -561,6 +561,8 @@ module Capybara
         @font_advance_tables  = {}
         @font_glyph_lock      = Mutex.new
         @font_glyph           = {}
+        @fc_strong_lock       = Mutex.new
+        @fc_strong_families   = {}
         # Zero-copy postMessage transfer tokens (rusty_racer
         # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
         # crosses isolates by token (no byte copy), its source detached. A token
@@ -7022,27 +7024,92 @@ module Capybara
         ui-sans-serif ui-serif ui-monospace ui-rounded math emoji fangsong
       ].freeze
 
+      # Blink retries a family it could not resolve under an ALTERNATE NAME — three
+      # pairs, both ways (`font_cache.cc`'s `AlternateFamilyName`). It is why
+      # `font-family: Helvetica` still renders in Arial's face on a Linux box that has
+      # neither: Chrome asks again for Arial, which fontconfig aliases to Liberation
+      # Sans. Without it, Helvetica fell through to the fallback serif.
+      ALTERNATE_FAMILIES = {
+        'arial'           => 'Helvetica',
+        'helvetica'       => 'Arial',
+
+        'courier'         => 'Courier New',
+        'courier new'     => 'Courier',
+
+        'times'           => 'Times New Roman',
+        'times new roman' => 'Times'
+      }.freeze
+
       # Resolve a CSS `font-family` STACK the way a browser does: try each family in
-      # order and take the first one actually installed, falling through to the
-      # generic at the end. `fc-match` never fails — it answers its default for an
-      # unknown name — so a non-generic entry counts as a hit only when the family it
-      # matched is the one asked for. Without that, `font-family: "Inter", Arial,
-      # sans-serif` measured as fontconfig's default rather than Arial.
+      # order (and its alternate name), take the first that resolves, and let the
+      # generic at the end catch what's left.
       private def font_file_for_family(stack, weight_style)
         families = split_font_stack(stack)
         families << 'sans-serif' if families.empty?
         families.each do |fam|
-          generic = GENERIC_FAMILIES.include?(fam.downcase)
-          pattern = GENERIC_FAMILY_DEFAULTS[fam.downcase] || fam
-          file, matched = fc_match(pattern, weight_style)
-          next unless file
-          # A generic (or a mapped generic) takes whatever fontconfig picked; a named
-          # family must actually be the one that matched.
-          return file if generic || font_family_matches?(pattern, matched)
+          key = fam.downcase
+          # A generic always resolves, to whatever fontconfig answers for the family a
+          # browser asks on its behalf (Chrome's default sans IS Arial).
+          if GENERIC_FAMILIES.include?(key)
+            file, = fc_match(GENERIC_FAMILY_DEFAULTS[key] || fam, weight_style)
+            return file if file
+
+            next
+          end
+          file = resolved_family_file(fam, weight_style) ||
+                 resolved_family_file(ALTERNATE_FAMILIES[key], weight_style)
+          return file if file
         end
-        # Nothing in the stack is installed and it named no generic: a browser falls
-        # back to its STANDARD font (Chrome's is Times New Roman), not to nothing.
+        # Nothing in the stack resolved and it named no generic: a browser falls back
+        # to its STANDARD font (Chrome's is Times New Roman), not to nothing.
         fc_match('Times New Roman', weight_style).first
+      end
+
+      # The face fontconfig resolves `family` to — or nil when it has no rule for that
+      # name and merely answered with its fallback.
+      #
+      # The distinction is the whole problem: `fc-match` NEVER fails, so a name it
+      # SUBSTITUTED looks exactly like a name it ignored. Chrome tells them apart the
+      # way Skia does — it expands the request through `FcConfigSubstitute`, drops the
+      # WEAKLY bound families (the generic fallback chain every request ends with), and
+      # accepts the match only if it is one of what's left. That set is the
+      # metric-alias list: `Arial` expands to Arial / Arimo / Liberation Sans / Albany,
+      # `Times New Roman` to Tinos / Liberation Serif, while `Georgia`, `Segoe UI` and
+      # `Inter` expand to nothing but themselves — so a substituted family is accepted
+      # and an unknown one is not, which is what Chrome measures in each case.
+      #
+      # fontconfig prefers a strong family over a weak one, so the single `fc-match`
+      # already answers a strong family whenever one is installed: no iteration needed.
+      private def resolved_family_file(family, weight_style)
+        return nil if family.nil?
+
+        file, matched = fc_match(family, weight_style)
+        return nil unless file
+        return file if font_family_matches?(family, matched)
+
+        strong = fc_strong_families(family)
+        strong&.any? {|fam| font_family_matches?(fam, matched) } ? file : nil
+      end
+
+      # The families `family` expands to under this machine's fontconfig rules, keeping
+      # only the STRONG bindings: `fc-pattern -c` prints the substituted pattern and
+      # marks those `(s)`. nil when the tool isn't there to ask — then nothing counts as
+      # substituted, which is the conservative answer (the stack falls through to its
+      # generic) rather than a wrong one.
+      STRONG_FAMILY_RE = /"((?:[^"\\]|\\.)*)"\(s\)/
+      private def fc_strong_families(family)
+        @fc_strong_lock.synchronize do
+          return @fc_strong_families[family] if @fc_strong_families.key?(family)
+        end
+        out = begin
+          IO.popen(['fc-pattern', '-c', fc_escape(family)], err: File::NULL, &:read)
+        rescue StandardError
+          nil
+        end
+        line = out && out[/^\s*family:.*$/]
+        list = line&.scan(STRONG_FAMILY_RE)&.flatten
+        @fc_strong_lock.synchronize { @fc_strong_families[family] = list }
+        list
       end
 
       # `font-family: "Helvetica Neue", Arial, sans-serif` → the family names, unquoted.
@@ -7050,10 +7117,14 @@ module Capybara
         stack.to_s.split(',').map {|f| f.strip.gsub(/\A["']|["']\z/, '').strip }.reject(&:empty?)
       end
 
+      # fontconfig treats `-`, `:` and `,` as pattern syntax — a family called
+      # "Helvetica-Light" would parse as family "Helvetica" at a size. Escape them.
+      private def fc_escape(pattern)
+        pattern.gsub(/([-:,\\])/) { "\\#{Regexp.last_match(1)}" }
+      end
+
       private def fc_match(pattern, weight_style)
-        # fontconfig treats `-`, `:` and `,` as pattern syntax — a family called
-        # "Helvetica-Light" would parse as family "Helvetica" at a size. Escape them.
-        escaped = pattern.gsub(/([-:,\\])/) { "\\#{Regexp.last_match(1)}" }
+        escaped = fc_escape(pattern)
         escaped += ":#{weight_style}" unless weight_style.to_s.empty?
         out = begin
           IO.popen(['fc-match', escaped, '-f', '%{file}\t%{family}'], &:read)
@@ -7067,8 +7138,12 @@ module Capybara
         [File.exist?(file) ? file : nil, matched.to_s]
       end
 
-      # fontconfig reports every alias of the matched face ("Liberation Sans,Arial"),
-      # so a match is "the requested name is one of them", case-insensitively.
+      # `%{family}` is the matched face's own family list, which for a face that
+      # declares aliases holds more than one name ("Noto Sans,Noto Sans Regular") —
+      # so a match is "the requested name is one of them", case-insensitively. It
+      # does NOT carry the names fontconfig substituted THROUGH to get here (asking
+      # for Arial answers "Liberation Sans", never "Arial"); that case is the
+      # substitution test in `font_file_for_family`.
       private def font_family_matches?(want, matched)
         w = want.to_s.downcase
         matched.to_s.downcase.split(',').any? {|m| m.strip == w }
