@@ -974,6 +974,11 @@ module Capybara
       end
 
       def find_with_timer_fallback(kind, arg, ctx)
+        # OUTSIDE the timer gate below: a page with no active timer never ticks, and a
+        # server-rendered page that wires itself up on `load` is exactly that page — it
+        # would have answered every `find` / `has_css?` from a document whose load had
+        # never fired, while `page.html` showed the handler's work. One ivar test.
+        flush_pending_window_load
         tick_real_time if timer_wait_elapsed?
         # After the first find of a navigation, a later find IS Capybara retrying — arm the pre-tick
         # so subsequent polls advance the clock (a timer-driven element / removal the test awaits).
@@ -2252,6 +2257,9 @@ module Capybara
         s
       end
       def evaluate_script(code, args = [])
+        # The page a script is about to read must have had its `load` — see
+        # `flush_pending_window_load`; the tick below is gated and may not run at all.
+        flush_pending_window_load
         # Drain timers first so ready handlers (jQuery `$(handler)`,
         # framework `DOMContentLoaded` listeners) run before the
         # user's script. Without this, `execute_script` can fire
@@ -2410,11 +2418,6 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        # BEFORE the early return: a document that booted from a path with no drain
-        # of its own (a click that navigated, a submit) still owes its window `load`,
-        # and every driver read comes through here first. The invariant this buys is
-        # simple — the load has fired by the time anything can observe the new page.
-        flush_pending_window_load
         return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
@@ -6513,12 +6516,13 @@ module Capybara
       # left a frame navigation stranded (WPT's
       # event-global-is-still-set-when-coercing-beforeunload-result).
       #
-      # TWO call sites, and between them the invariant is simple: the load has fired
-      # by the time anything can observe the new page.
-      #   - the END of `drain_pending_navigation`, which is where a page-initiated
-      #     navigation (a clicked link, a submitted form) boots its document;
-      #   - the top of `tick_real_time`, the backstop every driver read passes
-      #     through.
+      # The invariant the call sites buy: the load has fired by the time anything can
+      # observe the new page.
+      #   - `drain_pending_navigation`, which both the driver-initiated navigations
+      #     (`visit` / `refresh` / history) and every page-initiated one end in;
+      #   - `find_with_timer_fallback`, ahead of its timer gate — the backstop for a
+      #     page that never ticks at all.
+      # Returns whether this call fired (the drain chains on it).
       #
       # An AUXILIARY window's `load` is its opener's to fire (see
       # `defer_window_load`), so this only clears the marker there.
@@ -6526,18 +6530,37 @@ module Capybara
         return unless @window_load_due
 
         @window_load_due = false
-        return if @defer_window_load
+        # An AUXILIARY window's first load is its opener's to fire — ONE-SHOT, because
+        # only that first document is opened through the opener; everything the window
+        # navigates to afterwards is its own to announce.
+        if @defer_window_load
+          @defer_window_load = false
+          return false
+        end
 
         fire_own_window_load
         # A `load` handler's own navigation is stashed like any other page-initiated
-        # one, so drain it here rather than leaving it for whenever the driver next
-        # happens to tick (the marker is already cleared, so this doesn't re-enter).
-        drain_pending_navigation
+        # one; apply it here rather than leaving the page half-way through what its
+        # load asked for. Only what a HANDLER can queue — this window's own location,
+        # and a frame it navigated or submitted. Not the whole drain: that one chains
+        # back into this method (they recursed until the Ruby stack gave out on two
+        # pages whose load handlers navigate to each other), and it also opens the
+        # auxiliary windows a page asked for, which a `visit` must leave pending.
+        consume_pending_frame_nav
+        consume_pending_frame_submit
+        true
       end
 
       # Fire an aux window's own window `load` (called by its opener, deferred).
       def fire_aux_window_load(handle)  = (@driver.fire_aux_window_load(handle.to_s) if @driver.respond_to?(:fire_aux_window_load))
-      def fire_own_window_load          = (@runtime.call('__csimFireWindowLoad') rescue nil)
+      # A throwing `load` handler (or a frame build that throws while the document's
+      # subresources are flushed) is the page's problem, not the driver's — but it has
+      # to be VISIBLE, or the page simply looks half-wired with no explanation.
+      def fire_own_window_load
+        @runtime.call('__csimFireWindowLoad')
+      rescue StandardError => e
+        log_console('warn', "window load failed: #{e.class}: #{e.message}")
+      end
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, parent-first — fired by the Driver before an explicitly-closed aux
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
@@ -10118,7 +10141,32 @@ module Capybara
           @runtime.realm_call(parent_realm_id, fn, *args)
         end
       end
+      # A page whose `load` handler navigates gets another document, which owes another
+      # load — legitimate, and finite in every real page. This caps the chain.
+      WINDOW_LOAD_CHAIN_MAX = 8
+
       def drain_pending_navigation
+        drain_pending_navigation_once
+        # AFTER the consumes, not before: a page-initiated navigation (a link click, a
+        # form submit) BOOTS its document in one of them, so the marker it leaves is
+        # only there to act on once they have run — firing first meant a clicked link
+        # never fired a load at all.
+        #
+        # ITERATIVE, not recursive: a `load` handler may navigate again, and that
+        # navigation's own document owes another load. Bounded, because a pair of
+        # pages whose load handlers navigate to each other would otherwise recurse
+        # until the Ruby stack gives out (measured: ~5900 document boots).
+        WINDOW_LOAD_CHAIN_MAX.times do
+          break unless flush_pending_window_load
+
+          drained = pending_nav_intent?
+          drain_pending_navigation_once
+          break unless drained
+        end
+      end
+
+      # One pass of the intent drain, without the window-load chaining above.
+      def drain_pending_navigation_once
         consume_pending_sw_client_nav
         consume_pending_location
         consume_pending_frame_nav
@@ -10128,11 +10176,6 @@ module Capybara
         consume_pending_reload
         consume_pending_history_traverse
         consume_pending_aux_window
-        # AFTER the consumes, not before: a page-initiated navigation (a link click,
-        # a form submit) BOOTS its document in one of them, so the marker it leaves
-        # is only there to act on once they have run. Firing first meant a clicked
-        # link never fired a load at all.
-        flush_pending_window_load
       end
 
       # A script-driven `anchor.click()` / `target=_blank` navigation with no
@@ -10813,8 +10856,8 @@ module Capybara
         # Marked, not fired: a `load` handler may navigate — submit a form, point an
         # iframe somewhere — and a navigation started while THIS one is still in
         # flight (`@navigating`) is not the same thing as one started from an idle
-        # page. `flush_pending_window_load` fires it the moment the navigation that
-        # produced the document is done.
+        # page. `flush_pending_window_load` fires it from the drain that ends every
+        # navigation, and failing that from the next find.
         @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
