@@ -554,6 +554,13 @@ module Capybara
         # worker-reachable via OffscreenCanvas, like decode_image).
         @font_vmetrics_lock   = Mutex.new
         @font_vmetrics        = {}
+        # Per-family glyph ADVANCE tables (font_advance_table) — layout's text
+        # metric source. Misses cache as nil, so a box without fontconfig spawns
+        # `fc-match` once per family, not once per measurement.
+        @font_table_lock      = Mutex.new
+        @font_advance_tables  = {}
+        @font_glyph_lock      = Mutex.new
+        @font_glyph           = {}
         # Zero-copy postMessage transfer tokens (rusty_racer
         # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
         # crosses isolates by token (no byte copy), its source detached. A token
@@ -6924,6 +6931,149 @@ module Capybara
         nil
       end
 
+      # Per-character ADVANCE widths (CSS px at font-size 1) for a CSS font family,
+      # plus the mean advance for characters the table doesn't carry. This is what
+      # LAYOUT measures text with: the advances come from the font's own `hmtx`
+      # table, so no glyph is rasterised, the whole table is one host call per
+      # (family, weight/style), and a text run then costs a few lookups in JS
+      # (measured: 2 us/run against 350 us for the rasterising measure path).
+      #
+      # nil when fontconfig can't resolve the family (or isn't installed) — the
+      # caller keeps its own estimate. A nil result is CACHED too, or every miss
+      # would spawn another `fc-match`.
+      def font_advance_table(family, weight_style = nil)
+        key = "#{family} #{weight_style}"
+        @font_table_lock.synchronize do
+          return @font_advance_tables[key] if @font_advance_tables.key?(key)
+        end
+        table = build_font_advance_table(family.to_s, weight_style.to_s)
+        @font_table_lock.synchronize { @font_advance_tables[key] = table }
+        table
+      end
+
+      # fontconfig resolves a CSS family (or a generic like sans-serif) to a real
+      # font FILE; the file's cmap + hmtx give the advances. Printable ASCII covers
+      # the overwhelming majority of what these pages measure; anything else falls
+      # back to the mean.
+      private def build_font_advance_table(family, weight_style)
+        file = font_file_for_family(family, weight_style) or return nil
+        g = font_glyph_data(file) or return nil
+        upm = g[:upm].to_f
+        return nil unless upm.positive?
+
+        adv   = {}
+        total = 0.0
+        (32..126).each do |cp|
+          gid   = g[:cmap][cp]
+          units = gid ? (g[:advances][gid] || 0) : 0
+          px    = units / upm
+          adv[cp.chr] = px
+          total += px
+        end
+        # The font's own vertical metrics (hhea), as per-em factors. A browser rounds
+        # each metric to whole px and then sums, which is why Liberation Sans at 16px
+        # gives an 18px line box (14 + 3 + 1) and a 17px inline content box (14 + 3)
+        # — a single combined factor rounds to the wrong answer for one or the other.
+        {'adv' => adv, 'avg' => total / 95.0}.merge(font_vmetric_factors(file, upm) || {})
+      end
+
+      # `hhea`'s ascender / descender / lineGap as per-em factors: the caller scales
+      # each by the font size, rounds it, and sums — ascent + descent is the inline
+      # content box, plus the gap is `line-height: normal`. nil when the table can't
+      # be read, and the caller falls back to its own constant.
+      private def font_vmetric_factors(fontfile, upm)
+        data = File.binread(fontfile)
+        n = data[4, 2].unpack1('n')
+        tabs = {}
+        12.step(12 + (n - 1) * 16, 16) {|o| tabs[data[o, 4]] = data[o + 8, 4].unpack1('N') }
+        hhea = tabs['hhea'] or return nil
+        asc, desc, gap = data[hhea + 4, 6].unpack('s>s>s>')   # ascender, descender, lineGap
+        return nil unless asc.to_i.positive?
+
+        {'asc' => asc.to_i / upm, 'desc' => -desc.to_i / upm, 'gap' => gap.to_i / upm}
+      rescue StandardError
+        nil
+      end
+
+      # `fc-match` maps a CSS family to a font file — one subprocess per family per
+      # session (the caller memoises hits AND misses).
+      # A browser's default for the proportional generics, NOT fontconfig's: Chrome
+      # asks for Arial / Times New Roman (which fontconfig substitutes with the
+      # metric-compatible Liberation faces), while a bare `fc-match sans-serif` here
+      # answers Noto Sans — measurably different advances (16 "i"s at 16px: Chrome
+      # 56.9, Liberation Sans 56.9, Noto Sans 66.0). `monospace` is deliberately NOT
+      # mapped: Chrome's fixed-width default resolves through fontconfig, and the
+      # measured line boxes match fontconfig's answer, not Courier New's.
+      GENERIC_FAMILY_DEFAULTS = {
+        'sans-serif'    => 'Arial',
+        'system-ui'     => 'Arial',
+        'ui-sans-serif' => 'Arial',
+
+        'serif'         => 'Times New Roman',
+        'ui-serif'      => 'Times New Roman',
+
+        'cursive'       => 'Comic Sans MS',
+        'fantasy'       => 'Impact'
+      }.freeze
+
+      # The GENERIC families, which always resolve (fontconfig's job) and end a stack.
+      GENERIC_FAMILIES = %w[
+        sans-serif serif monospace cursive fantasy system-ui
+        ui-sans-serif ui-serif ui-monospace ui-rounded math emoji fangsong
+      ].freeze
+
+      # Resolve a CSS `font-family` STACK the way a browser does: try each family in
+      # order and take the first one actually installed, falling through to the
+      # generic at the end. `fc-match` never fails — it answers its default for an
+      # unknown name — so a non-generic entry counts as a hit only when the family it
+      # matched is the one asked for. Without that, `font-family: "Inter", Arial,
+      # sans-serif` measured as fontconfig's default rather than Arial.
+      private def font_file_for_family(stack, weight_style)
+        families = split_font_stack(stack)
+        families << 'sans-serif' if families.empty?
+        families.each do |fam|
+          generic = GENERIC_FAMILIES.include?(fam.downcase)
+          pattern = GENERIC_FAMILY_DEFAULTS[fam.downcase] || fam
+          file, matched = fc_match(pattern, weight_style)
+          next unless file
+          # A generic (or a mapped generic) takes whatever fontconfig picked; a named
+          # family must actually be the one that matched.
+          return file if generic || font_family_matches?(pattern, matched)
+        end
+        # Nothing in the stack is installed and it named no generic: a browser falls
+        # back to its STANDARD font (Chrome's is Times New Roman), not to nothing.
+        fc_match('Times New Roman', weight_style).first
+      end
+
+      # `font-family: "Helvetica Neue", Arial, sans-serif` → the family names, unquoted.
+      private def split_font_stack(stack)
+        stack.to_s.split(',').map {|f| f.strip.gsub(/\A["']|["']\z/, '').strip }.reject(&:empty?)
+      end
+
+      private def fc_match(pattern, weight_style)
+        # fontconfig treats `-`, `:` and `,` as pattern syntax — a family called
+        # "Helvetica-Light" would parse as family "Helvetica" at a size. Escape them.
+        escaped = pattern.gsub(/([-:,\\])/) { "\\#{Regexp.last_match(1)}" }
+        escaped += ":#{weight_style}" unless weight_style.to_s.empty?
+        out = begin
+          IO.popen(['fc-match', escaped, '-f', '%{file}\t%{family}'], &:read)
+        rescue StandardError
+          nil
+        end
+        return [nil, nil] if out.nil? || out.strip.empty?
+
+        file, matched = out.split("\t", 2)
+        file = file.to_s.strip
+        [File.exist?(file) ? file : nil, matched.to_s]
+      end
+
+      # fontconfig reports every alias of the matched face ("Liberation Sans,Arial"),
+      # so a match is "the requested name is one of them", case-insensitively.
+      private def font_family_matches?(want, matched)
+        w = want.to_s.downcase
+        matched.to_s.downcase.split(',').any? {|m| m.strip == w }
+      end
+
       # Render a line of text to a coverage mask via libvips (pango / fontconfig),
       # backing the canvas `fillText` / `measureText` surface with real system-font
       # glyphs and metrics — no bundled font, so any installed family works. `font`
@@ -7090,10 +7240,15 @@ module Capybara
       # file, memoized per path: unitsPerEm + typo metrics (head / OS/2), the per-glyph
       # advance widths (hmtx), and a Unicode → glyph-id map (cmap format 4). nil when a
       # required table is missing or malformed.
+      # Reachable from WORKER threads (layout in a worker realm, canvas measureText,
+      # the Update byte-check) — the memo needs the same guard @font_vmetrics has.
       private def font_glyph_data(fontfile)
-        (@font_glyph ||= {})
-        return @font_glyph[fontfile] if @font_glyph.key?(fontfile)
-        @font_glyph[fontfile] = parse_font_glyph_data(fontfile)
+        @font_glyph_lock.synchronize do
+          return @font_glyph[fontfile] if @font_glyph.key?(fontfile)
+        end
+        parsed = parse_font_glyph_data(fontfile)
+        @font_glyph_lock.synchronize { @font_glyph[fontfile] = parsed }
+        parsed
       end
 
       private def parse_font_glyph_data(fontfile)

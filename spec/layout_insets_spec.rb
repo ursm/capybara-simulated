@@ -63,9 +63,9 @@ RSpec.describe 'layout insets' do
     # Chrome: 0 641 200 40 (641 = its 681px viewport − the 40px the child contributes); ours 768−40.
     # The height isn't known until the box's own flow is laid out, so placing it needs a second pass.
     expect(rect_of(s, 'toast')).to eq([0, 728, 200, 40])
-    # Text-only, so the height is the coarse line-height (Chrome measures 18 with real glyphs) —
+    # Text-only, so the height is the font's own line box (18, as Chrome measures) —
     # what matters is that an out-of-flow text box has a non-zero, hittable box at the bottom edge.
-    expect(rect_of(s, 'tip')).to eq([0, 749, 60, 19])
+    expect(rect_of(s, 'tip')).to eq([0, 750, 60, 18])
   end
 
   it 'reads insets off the inline `style` attribute, not just stylesheets' do

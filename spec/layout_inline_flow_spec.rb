@@ -68,36 +68,37 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
 
   it 'puts inline siblings on one line' do
     s = session
-    # Chrome: the container is 18 tall (our line box is 19 — no glyph metrics), and the spans sit
-    # next to each other at x 0 / 39 / 70. Widths come from text length x an average advance.
-    expect(box(s, 'inl')).to eq([0, 0, 1024, 19])
-    expect(box(s, 's1')).to eq([0, 0, 40, 19])      # Chrome 0,0,39,17
-    expect(box(s, 's2')).to eq([40, 0, 32, 19])     # Chrome 39,0,31,17
-    expect(box(s, 's3')).to eq([72, 0, 40, 19])     # Chrome 70,0,53,17 ("gamma" has wide glyphs)
+    # Chrome-exact now that runs are measured with the font's own advances: the
+    # container is one 18px line box and the spans sit at x 0 / 39 / 70, each as
+    # tall as the font's content box (17).
+    expect(box(s, 'inl')).to eq([0, 0, 1024, 18])
+    expect(box(s, 's1')).to eq([0, 0, 39, 17])
+    expect(box(s, 's2')).to eq([39, 0, 31, 17])
+    expect(box(s, 's3')).to eq([70, 0, 53, 17])     # "gamma" really is that much wider
   end
 
   it 'keeps a label and its value on the same line' do
     s = session
-    expect(box(s, 'pair')).to eq([0, 95, 1024, 19])   # Chrome 0,90,1024,18 — ONE line, not two
+    expect(box(s, 'pair')).to eq([0, 90, 1024, 18])   # ONE line, not two
     expect(box(s, 'lb')[0]).to eq(0)
-    expect(box(s, 'vl')[0]).to eq(32)                 # Chrome 43 — follows the label, not below it
+    expect(box(s, 'vl')[0]).to eq(43)                 # follows the label, not below it
   end
 
   it 'flows text and an inline link together' do
     s = session
-    expect(box(s, 'txt')).to eq([0, 133, 1024, 19])
-    # The link starts after the words before it: Chrome 109, ours 112.
-    expect(box(s, 'lnk')[0]).to eq(112)
-    expect(box(s, 'lnk')[1]).to eq(133)
+    expect(box(s, 'txt')).to eq([0, 126, 1024, 18])
+    # The link starts after the words before it — including the collapsed space.
+    expect(box(s, 'lnk')[0]).to eq(109)
+    expect(box(s, 'lnk')[1]).to eq(126)
   end
 
   it 'lays a flex row side by side and a flex column stacked' do
     s = session
-    expect(box(s, 'flexrow')).to eq([0, 19, 1024, 19])   # Chrome 0,18,1024,18 — one row tall
+    expect(box(s, 'flexrow')).to eq([0, 18, 1024, 18])   # one row tall
     expect(box(s, 'f1')[0]).to eq(0)
-    expect(box(s, 'f2')[0]).to eq(24)                    # Chrome 27 — beside f1
+    expect(box(s, 'f2')[0]).to eq(27)                    # beside f1
     # `flex-direction: column` is what block flow already does.
-    expect(box(s, 'flexcol')).to eq([0, 38, 1024, 38])   # Chrome 0,36,1024,36
+    expect(box(s, 'flexcol')).to eq([0, 36, 1024, 36])
     expect(box(s, 'c2')[0]).to eq(0)
   end
 
@@ -169,8 +170,8 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
 
   it 'sizes an auto grid row from its content' do
     s = session
-    # Chrome: 18 tall. This used to answer a flat 100px per row, which inflated every grid.
-    expect(box(s, 'grid2')).to eq([0, 76, 1024, 19])
+    # Chrome-exact: one 18px line box. This used to answer a flat 100px per row.
+    expect(box(s, 'grid2')).to eq([0, 72, 1024, 18])
     expect(box(s, 'g1')[0]).to eq(0)
     expect(box(s, 'g2')[0]).to eq(512)
   end
@@ -178,11 +179,12 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
   it 'puts table cells in a row beside each other' do
     s = session
     # Chrome: 46 tall for two rows. Coarse: cells divide the row evenly (no content-driven column
-    # sizing), so the widths differ from Chrome's shrink-to-fit 33s — the ROW COUNT is the point.
-    expect(box(s, 'tbl')[3]).to eq(38)
+    # sizing) and there is no cell padding/border model, so the height is two line boxes rather
+    # than Chrome's 46 — the ROW COUNT is the point.
+    expect(box(s, 'tbl')[3]).to eq(36)
     expect(box(s, 'td1')[0]).to eq(0)
     expect(box(s, 'td2')[0]).to eq(512)
-    expect(box(s, 'td3')[1]).to eq(171)   # second row, below the first
+    expect(box(s, 'td3')[1]).to eq(162)   # second row, below the first
   end
 
   # Chrome, same markup: a failed-to-load `<img>` with no attributes is 16x16 (its broken-image
@@ -273,9 +275,10 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
 
   it 'lands the end of the page where a browser does' do
     s = session
-    # THE measurement that matters: after all of the above, the last element is at Chrome's exact y.
-    # Before this pass it was at 385 — twice as far down — so anything lazy below it never loaded.
-    expect(box(s, 'tail')[1]).to eq(190)
+    # THE measurement that matters: after all of the above, the last element is close to Chrome's
+    # exact y (190). Before the box model it was at 385 — twice as far down — so anything lazy
+    # below it never loaded. The residual 10px is the unmodelled table (cell padding + borders).
+    expect(box(s, 'tail')[1]).to eq(180)
     # A document shorter than the window is still viewport-tall, as in a browser.
     expect(s.evaluate_script('document.documentElement.scrollHeight')).to eq(768)
   end
