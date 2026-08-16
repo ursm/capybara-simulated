@@ -104,7 +104,17 @@ module Capybara
           }
         end
 
-        def checkout = @queue.pop
+        # Never BLOCK waiting on the warmers: on a loaded runner (parallel CI
+        # — every core already runs a sibling worker process) they can fall
+        # behind a session-per-iteration spec, and a blocking pop then parks
+        # the example until the global spec timeout fires. An empty pool
+        # instead costs the caller one inline `VM.new` — never slower than
+        # waiting for a warmer to build the same VM on a busier thread.
+        def checkout
+          @queue.pop(true)
+        rescue ThreadError
+          @queue.closed? ? nil : Quickjs::VM.new(**@vm_options)
+        end
 
         # SizedQueue#close unblocks pushers + makes future pops return
         # nil — necessary at process exit because a warmer mid-`VM.new`
