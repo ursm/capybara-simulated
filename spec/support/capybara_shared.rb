@@ -154,7 +154,11 @@ RSpec.configure do |config|
     skip reason if reason
   end
 
+  # Hang backstop, not an assertion. 60 s leaves headroom for what a loaded
+  # parallel runner legitimately stacks inside one example — a couple of 10 s
+  # poll_until deadlines, QuickJS VM builds competing with sibling worker
+  # processes — while still killing a genuine wedge long before CI's timeout.
   config.around(:each) do |example|
-    Timeout.timeout(20, Timeout::Error, 'spec exceeded 20s timeout') { example.run }
+    Timeout.timeout(60, Timeout::Error, 'spec exceeded 60s timeout') { example.run }
   end
 end
