@@ -1591,7 +1591,10 @@ module Capybara
         has_xy = opts[:x] || opts[:y]
         center = opts[:offset] == :center || !has_xy
         if has_xy || center
-          rect = dom_call('__csimRect', handle)
+          # The pointer aims at the element's FIRST client rect, which is what WebDriver
+          # measures its in-view centre point on — for a link that wrapped over two lines, the
+          # centre of its BOUNDING box is the paragraph text between them.
+          rect = dom_call('__csimPointerRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
           out['clientX'] = base_x + opts[:x].to_f
