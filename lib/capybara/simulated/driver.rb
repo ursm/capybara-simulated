@@ -427,6 +427,9 @@ module Capybara
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
+        # An auxiliary window's `load` is its OPENER's to fire, one task after the
+        # document boots — see Browser#defer_window_load.
+        aux.defer_window_load = true
         aux.window_handle = handle
         # Register BEFORE visiting: the opened document's own boot scripts read
         # `window.opener`, which resolves through this entry — so the entry
