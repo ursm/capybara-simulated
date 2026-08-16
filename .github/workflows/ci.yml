@@ -43,7 +43,7 @@ jobs:
       # per-worker buckets from the RSpec example-status file (see
       # spec/support/example_persistence.rb), carried across runs by the cache
       # step — a cold cache only costs round-robin balance for that run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: tmp/rspec_examples_v8.txt
           key: rspec-examples-v8-${{ matrix.ruby }}-${{ github.sha }}
@@ -73,7 +73,7 @@ jobs:
 
       # Engine-specific cache: QuickJS runs the same files ~2x slower than V8,
       # so it balances from its own timing file.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: tmp/rspec_examples_quickjs.txt
           key: rspec-examples-quickjs-${{ github.sha }}
