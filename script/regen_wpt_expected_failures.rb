@@ -151,7 +151,7 @@ warn ''
 in_hdr = <<~H
   # WPT IN-SCOPE backlog — subtests that currently fail but are real driver gaps
   # we intend to fix (the conformance roadmap). Earned out-of-scope failures live
-  # in wpt_out_of_scope.yml. The gate (spec/wpt_spec.rb) loads BOTH and checks the
+  # in wpt_out_of_scope.yml. The gate (spec/support/wpt_gate.rb) loads BOTH and checks the
   # union symmetrically: a non-PASS subtest in NEITHER file -> RED; a listed subtest
   # that now PASSes -> RED. New failures default here (in-scope) until shown to be
   # an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
@@ -170,7 +170,7 @@ out_hdr = <<~H
   # edge no real library/app depends on. These are NOT a backlog; each carries the
   # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
   #
-  # The gate (spec/wpt_spec.rb) merges this with the in-scope file and checks the union
+  # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
   # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
   # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
   # or a single {name: HARNESS_ERROR, reason} entry for a whole file whose harness

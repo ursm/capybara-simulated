@@ -1,3 +1,15 @@
+# WPT IN-SCOPE backlog — subtests that currently fail but are real driver gaps
+# we intend to fix (the conformance roadmap). Earned out-of-scope failures live
+# in wpt_out_of_scope.yml. The gate (spec/support/wpt_gate.rb) loads BOTH and checks the
+# union symmetrically: a non-PASS subtest in NEITHER file -> RED; a listed subtest
+# that now PASSes -> RED. New failures default here (in-scope) until shown to be
+# an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
+#
+# Each entry is one file: a list of not-yet-passing subtest names, or the string
+# HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
+#
+# Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
+#
 ---
 FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition dedicated worker
@@ -487,98 +499,6 @@ custom-elements/state/state-pseudo-class.html:
 - ":state() parsing failures"
 - ":state(foo) and ::part()"
 - ":state(foo) serialization"
-custom-elements/throw-on-dynamic-markup-insertion-counter-construct-xml-parser.xhtml:
-- document.close() must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.close() of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.open("text/html") must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.open("text/html") of another document must not throw an InvalidStateError
-  when synchronously constructing a custom element
-- document.open() must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.open() of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.open(URL) must NOT throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.write must throw an InvalidStateError when synchronously constructing a
-  custom element
-- document.write of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.writeln must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.writeln of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-custom-elements/throw-on-dynamic-markup-insertion-counter-construct.html:
-- document.close() must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.close() of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.open("text/html") must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.open("text/html") of another document must not throw an InvalidStateError
-  when synchronously constructing a custom element
-- document.open() must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.open() of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.open(URL) must NOT throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.write must throw an InvalidStateError when synchronously constructing a
-  custom element
-- document.write of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-- document.writeln must throw an InvalidStateError when synchronously constructing
-  a custom element
-- document.writeln of another document must not throw an InvalidStateError when synchronously
-  constructing a custom element
-custom-elements/throw-on-dynamic-markup-insertion-counter-reactions-xml-parser.xhtml:
-- document.close() must throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.close() of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.open("text/html") must throw an InvalidStateError when processing custom
-  element reactions for a synchronous constructed custom element
-- document.open("text/html") of another document must not throw an InvalidStateError
-  when processing custom element reactions for a synchronous constructed custom element
-- document.open() must throw an InvalidStateError when processing custom element reactions
-  for a synchronous constructed custom element
-- document.open() of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.open(URL) must NOT throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.write must throw an InvalidStateError when processing custom element reactions
-  for a synchronous constructed custom element
-- document.write of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.writeln must throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.writeln of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-custom-elements/throw-on-dynamic-markup-insertion-counter-reactions.html:
-- document.close() must throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.close() of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.open("text/html") must throw an InvalidStateError when processing custom
-  element reactions for a synchronous constructed custom element
-- document.open("text/html") of another document must not throw an InvalidStateError
-  when processing custom element reactions for a synchronous constructed custom element
-- document.open() must throw an InvalidStateError when processing custom element reactions
-  for a synchronous constructed custom element
-- document.open() of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.open(URL) must NOT throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.write must throw an InvalidStateError when processing custom element reactions
-  for a synchronous constructed custom element
-- document.write of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
-- document.writeln must throw an InvalidStateError when processing custom element
-  reactions for a synchronous constructed custom element
-- document.writeln of another document must not throw an InvalidStateError when processing
-  custom element reactions for a synchronous constructed custom element
 custom-elements/upgrading.html:
 - Creating an element in the document of the template elements and inserting into
   the document must not enqueue a custom element upgrade reaction
