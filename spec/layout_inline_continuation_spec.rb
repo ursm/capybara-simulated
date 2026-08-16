@@ -17,6 +17,8 @@ require_relative 'support/layout_measure'
 # fragment on the line's baseline (its `<span>` around a 60px image starts 46px down the
 # line); ours sits at the line's top. The SIZES below are Chrome's; that offset is not.
 RSpec.describe 'inline continuation' do
+  include LayoutMeasure
+
   # The headline case: the line breaks inside the `<span>`, and both the span and the
   # block around it are two lines tall rather than one.
   it 'wraps the text inside an inline box and reports the union of its fragments' do
@@ -34,6 +36,20 @@ RSpec.describe 'inline continuation' do
     expect(s[2]).to be_within(0.05).of(w['wrap wrap']) # the widest fragment
   end
 
+  # …and its TOP edge is the first line its content REACHED, not the line it opened on. A
+  # box that opens at the end of a line whose remaining room is too small for its first word
+  # has its whole content on the next one, and Chrome reports only that line.
+  it 'starts at the first line its content reached, not the one it opened on' do
+    body = '<div id="d" style="width:100px">wrap wrap <span id="s">wrapwrap</span></div>' \
+           '<div id="one"><span id="frag">x</span></div>'
+    boxes, w, line = measure(body, ['#s', '#frag'], probes: ['wrap wrap', 'wrap wrap wrapwrap'])
+    s, frag = boxes
+    expect(w['wrap wrap']).to be <= 100                # the span opens at the end of line 1…
+    expect(w['wrap wrap wrapwrap']).to be > 100        # …and none of it fits there
+    expect(s[1]).to eq(line)                           # Chrome: [0, 18, 69.36, 17]
+    expect(s[3]).to eq(frag[3])
+  end
+
   # The width above is the fix for the space AT the break: it advances the line like any
   # other, but a break eats it, so it is not part of what the box covers. Counting it made
   # every wrapped inline exactly one space too wide.
@@ -42,6 +58,14 @@ RSpec.describe 'inline continuation' do
     boxes, w = measure(body, ['#s'], probes: ['wrap wrap', 'wrap wrap '])
     expect(w['wrap wrap ']).to be > w['wrap wrap']
     expect(boxes[0][2]).to be_within(0.05).of(w['wrap wrap'])
+  end
+
+  # …but only a BREAK eats it. A space that ends the box with content still to come on the
+  # same line is ordinary content, and the box covers it.
+  it 'keeps a trailing space that content on the same line followed' do
+    body = '<div id="d" style="width:300px"><span id="s">aaa </span>bbb</div>'
+    boxes, w = measure(body, ['#s'], probes: ['aaa', 'aaa '])
+    expect(boxes[0][2]).to be_within(0.05).of(w['aaa '])   # Chrome: 31.14, not 26.7
   end
 
   # A box that OPENS mid-line reaches the left edge on every line after the first, so its
@@ -61,8 +85,8 @@ RSpec.describe 'inline continuation' do
     body = '<div id="d" style="width:100px"><span id="o">wrap <span id="i">wrap wrap</span></span></div>'
     boxes, w, line = measure(body, ['#o', '#i'], probes: ['wrap wrap'])
     o, i = boxes
-    # Chrome: both are [0, 72, 73.8, 35] — the inner one opens on line 1 after "wrap "
-    # and finishes line 2, so its union reaches the left edge too.
+    # Chrome: both are [0, 0, 73.81, 35] — the inner one opens on line 1 after "wrap " and
+    # finishes line 2, so its union reaches the left edge too.
     expect(o[2]).to be_within(0.05).of(w['wrap wrap'])
     expect(i[2]).to be_within(0.05).of(w['wrap wrap'])
     expect(i[0]).to eq(0)
@@ -120,12 +144,83 @@ RSpec.describe 'inline continuation' do
     expect(b[1]).to eq(5)
   end
 
+  # The union is what the box REPORTS, but not what it covers: the end of the line it opened
+  # on and the start of the line it finished on belong to whatever else is there. A browser
+  # hit-tests the PIECES, and reports one client rect per piece.
+  it 'hit-tests its fragments rather than their union' do
+    body = '<div id="d" style="width:320px"><a id="first" href="#">Dashboard</a> ' \
+           '<a id="second" href="#">Settings and preferences for the account</a></div>'
+    boxes, _w, _line, session = measure(body, ['#first', '#second'])
+    first, second = boxes
+    expect(second[0]).to eq(0)                         # the union reaches back over `first`…
+    expect(second[1]).to eq(first[1])
+    x, y = first[0] + first[2] / 2, first[1] + first[3] / 2
+    expect(session.evaluate_script("(document.elementFromPoint(#{x}, #{y}) || {}).id")).to eq('first')
+  end
+
+  it 'reports one client rect per line it broke over' do
+    body = '<div id="d" style="width:300px">start <a id="s" href="#">a link long enough to wrap ' \
+           'onto a second line here</a> tail</div>'
+    _boxes, _w, _line, session = measure(body, ['#s'])
+    m = JSON.parse(session.evaluate_script(<<~JS))
+      (function () {
+        var el = document.querySelector('#s');
+        return JSON.stringify({
+          rects: [].map.call(el.getClientRects(), function (r) { return [r.x, r.y]; }),
+          offsetLeft: el.offsetLeft
+        });
+      })()
+    JS
+    expect(m['rects'].size).to eq(2)                   # Chrome: 2 rects, offsetLeft 36
+    expect(m['rects'][0][1]).to be < m['rects'][1][1]
+    # …measured from the FIRST piece, and rounded to an integer the way `offset*` is (Chrome
+    # reports 36 for a rect that starts at 35.5625).
+    expect(m['offsetLeft']).to be_within(0.5).of(m['rects'][0][0])
+  end
+
   # An inline box with nothing in it generates no line box at all — Chrome reports an
   # empty rect for it and gives the block around it a height of 0.
   it 'generates no line box for an empty inline' do
     boxes, = measure('<div id="d"><span id="s"></span></div>', ['#d', '#s'])
     expect(boxes[0][3]).to eq(0)
     expect(boxes[1][2, 2]).to eq([0, 0])
+  end
+
+  # …but one that SHARES a line with content sits on that line box, zero-wide and as tall as
+  # the font. `<span class="icon"></span>label` is everywhere, and a page that probes it with
+  # `getClientRects().length` (jQuery's `:visible`) must not read it as absent.
+  it 'gives an empty inline a fragment on a line that exists' do
+    body = '<div id="d"><span id="s"></span>label</div><div id="one"><span id="frag">x</span></div>'
+    boxes, = measure(body, ['#s', '#frag'])
+    s, frag = boxes
+    expect(s[2]).to eq(0)                              # Chrome: [0, 0, 0, 17], one client rect
+    expect(s[3]).to eq(frag[3])
+  end
+
+  # `white-space: nowrap` forbids breaking INSIDE a run, not the break opportunity BEFORE it.
+  # Laid out as one atomic box this came for free; placed as text it has to be kept.
+  it 'moves an unbreakable inline to the next line whole' do
+    body = '<div id="d" style="width:100px">a <span id="s" style="white-space:nowrap">wrap wrap wrap</span></div>'
+    boxes, w, line = measure(body, ['#d', '#s'], probes: ['wrap wrap wrap'])
+    d, s = boxes
+    expect(w['wrap wrap wrap']).to be > 100            # it fits on no line…
+    expect(d[3]).to eq(line * 2)                       # …so it takes one of its own. Chrome: 36
+    expect(s[0]).to eq(0)
+    expect(s[1]).to eq(line)
+    expect(s[2]).to be_within(0.05).of(w['wrap wrap wrap'])  # …and overflows it, unbroken
+  end
+
+  # An out-of-flow box inside an inline is positioned against that inline once it HAS a box —
+  # and from where it would have sat in flow, which mid-line is the line cursor. Placed during
+  # the walk it found no box on its containing block at all, and answered from the viewport.
+  it 'positions an absolute child against the inline box around it' do
+    body = '<div id="d" style="width:400px">stat <span id="s" style="position:relative">anch' \
+           '<span id="a" style="position:absolute;width:10px;height:10px"></span></span></div>'
+    boxes, w = measure(body, ['#s', '#a'], probes: ['stat ', 'anch'])
+    s, a = boxes
+    expect(s[0]).to be_within(0.05).of(w['stat '])
+    expect(a[0]).to be_within(0.05).of(w['stat '] + w['anch'])   # Chrome: 64.94
+    expect(a[1]).to eq(s[1])
   end
 
   # An `inline-block` is ATOMIC: it takes one rectangle on one line whatever its content

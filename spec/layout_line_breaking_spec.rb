@@ -14,6 +14,8 @@ require_relative 'support/layout_measure'
 # expectation is Chrome 137-measured (headless, 1024x768) and written against
 # widths measured in the page itself, so it holds whatever face fontconfig serves.
 RSpec.describe 'line breaking' do
+  include LayoutMeasure
+
   # The greedy rule itself: words go on the line while they fit, and the first one
   # that doesn't starts the next. A break EATS the space it happens at, so a word
   # that fits is not pushed down by its own trailing space — the bug that made a
