@@ -163,9 +163,6 @@ custom-elements/CustomElementRegistry-getName.html:
 - customElements.getName must throw when the element interface is not a constructor
 - customElements.getName returns the name of the entry with the given constructor
   when there is a matching entry.
-custom-elements/Document-createElementNS.html:
-- 'autonomous: document.createElementNS should not create HTMLUnknownElement for a
-  valid custom element name'
 custom-elements/attribute-changed-callback.html:
 - Mutating attributeChangedCallback after calling customElements.define must not affect
   the callback being invoked
@@ -305,34 +302,8 @@ custom-elements/microtasks-and-constructors.html:
   the checks on no attributes to fail
 custom-elements/parser/parser-constructs-custom-element-in-document-write.html:
 - HTML parser should call connectedCallback before appending child nodes inside document.write
-custom-elements/parser/parser-constructs-custom-element-synchronously.html:
-- HTML parser must only append nodes that appear before a custom element before instantiating
-  the custom element
-custom-elements/parser/parser-constructs-custom-elements-with-is.html:
-- HTML parser must create a defined autonomous custom element when customElements.define
-  comes after HTML parser creation
-- HTML parser must create a defined autonomous custom element when customElements.define
-  comes before HTML parser creation
-custom-elements/parser/parser-constructs-custom-elements.html:
-- HTML parser must create a defined custom element before executing inline scripts
-custom-elements/parser/parser-fallsback-to-unknown-element.html:
-- HTML parser must create a fallback HTMLUnknownElement when a custom element constructor
-  does not call super()
-- HTML parser must create a fallback HTMLUnknownElement when a custom element constructor
-  returns a Text node
-- HTML parser must create a fallback HTMLUnknownElement when a custom element constructor
-  returns non-Element object
-- HTML parser must create a fallback HTMLUnknownElement when a custom element constructor
-  throws an exception
 custom-elements/parser/parser-sets-attributes-and-children.html:
-- HTML parser must enqueue attributeChanged reactions
-- HTML parser must set the attributes or append children before calling constructor
 - HTML parser should call connectedCallback before appending child nodes.
-custom-elements/parser/parser-uses-constructed-element.html:
-- HTML parser must use the returned value of the custom element constructor instead
-  of the one created before super() call
-- HTML parser must use the returned value of the custom element constructor instead
-  using the one created in super() call
 custom-elements/perform-microtask-checkpoint-before-construction-xml-parser.xhtml:
 - XML parser must perform a microtask checkpoint before constructing a custom element
 custom-elements/perform-microtask-checkpoint-before-construction.html:
@@ -479,8 +450,6 @@ custom-elements/upgrading/upgrading-enqueue-reactions.html:
 - Upgrading a custom element must not invoke attributeChangedCallback and connectedCallback
   when the element failed to upgrade
 custom-elements/upgrading/upgrading-parser-created-element.html:
-- Element.prototype.createElement must add an unresolved custom element to the upgrade
-  candidates map
 - HTMLElement constructor must throw an TypeError when the top of the construction
   stack is marked AlreadyConstructed due to a custom element constructor constructing
   itself after super() call
