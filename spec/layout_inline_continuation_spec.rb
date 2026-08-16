@@ -105,6 +105,21 @@ RSpec.describe 'inline continuation' do
     expect(s[2]).to eq(20)
   end
 
+  # `position: relative` moves the box AND its content, without moving anything else on
+  # the line. The content is placed BEFORE the offset can be applied to it, so it has to
+  # be carried over afterwards — laying the box out as one rectangle used to do that for
+  # free, by laying its children out inside the shifted box.
+  it 'carries its relative offset onto the content it has already placed' do
+    body = '<div id="d" style="width:300px">before ' \
+           '<span id="s" style="position:relative;left:20px;top:5px">shifted <b id="b">bold</b></span> after</div>'
+    boxes, w = measure(body, ['#s', '#b'], probes: ['before ', 'shifted '])
+    s, b = boxes
+    expect(s[0]).to be_within(0.05).of(w['before '] + 20)   # Chrome: 69.8
+    expect(s[1]).to eq(5)
+    expect(b[0]).to be_within(0.05).of(s[0] + w['shifted '])  # Chrome: 121.4, moved WITH it
+    expect(b[1]).to eq(5)
+  end
+
   # An inline box with nothing in it generates no line box at all — Chrome reports an
   # empty rect for it and gives the block around it a height of 0.
   it 'generates no line box for an empty inline' do
