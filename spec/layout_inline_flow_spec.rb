@@ -176,15 +176,16 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(box(s, 'g2')[0]).to eq(512)
   end
 
+  # Chrome-exact, same markup: the table shrinks to its content (72 wide, not the 1024 a block
+  # would take), each column is as wide as its own cells, and the cells carry the UA padding and
+  # border-spacing. This used to divide the row evenly among the cells and skip both, which put
+  # `td2` at x=512 and made the table two bare line boxes tall.
   it 'puts table cells in a row beside each other' do
     s = session
-    # Chrome: 46 tall for two rows. Coarse: cells divide the row evenly (no content-driven column
-    # sizing) and there is no cell padding/border model, so the height is two line boxes rather
-    # than Chrome's 46 — the ROW COUNT is the point.
-    expect(box(s, 'tbl')[3]).to eq(36)
-    expect(box(s, 'td1')[0]).to eq(0)
-    expect(box(s, 'td2')[0]).to eq(512)
-    expect(box(s, 'td3')[1]).to eq(162)   # second row, below the first
+    expect(box(s, 'tbl')).to eq([0, 144, 72, 46])
+    expect(box(s, 'td1')).to eq([2, 146, 33, 20])
+    expect(box(s, 'td2')).to eq([37, 146, 33, 20])
+    expect(box(s, 'td3')[1]).to eq(168)   # second row, below the first
   end
 
   # Chrome, same markup: a failed-to-load `<img>` with no attributes is 16x16 (its broken-image
@@ -269,16 +270,18 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     # `flex: 2` sets `flex-basis: 0`, which OUTRANKS the declared width — Chrome: 400/200.
     expect(box(s, 'fa')[2]).to eq(400)
     expect(box(s, 'fb')[2]).to eq(200)
-    # A table cell is not a flex item: its declared width stands (Chrome: 102 with borders).
-    expect(box(s, 'c1')[2]).to eq(100)
+    # A table cell is not a flex item: its declared width stands, and the column it sizes takes
+    # no part in sharing out the table's surplus width — Chrome: 102, the declared 100 plus the
+    # UA cell padding, while its auto neighbour absorbs everything left.
+    expect(box(s, 'c1')[2]).to eq(102)
   end
 
   it 'lands the end of the page where a browser does' do
     s = session
-    # THE measurement that matters: after all of the above, the last element is close to Chrome's
-    # exact y (190). Before the box model it was at 385 — twice as far down — so anything lazy
-    # below it never loaded. The residual 10px is the unmodelled table (cell padding + borders).
-    expect(box(s, 'tail')[1]).to eq(180)
+    # THE measurement that matters: after all of the above, the last element lands on Chrome's
+    # exact y. Before the box model it was at 385 — twice as far down — so anything lazy below it
+    # never loaded; the last 10px of the gap was the unmodelled table.
+    expect(box(s, 'tail')[1]).to eq(190)
     # A document shorter than the window is still viewport-tall, as in a browser.
     expect(s.evaluate_script('document.documentElement.scrollHeight')).to eq(768)
   end

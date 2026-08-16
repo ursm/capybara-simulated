@@ -39,9 +39,9 @@ satisfied**, never assumed because a fix looks like work. The default is
 driver bug) only when one of these holds:
 
 1. **It needs a subsystem we deliberately don't model.** A *rendering*
-   engine — glyph metrics (real font advance widths / line breaking),
-   inline flow, flex / grid track sizing, table layout, `display:
-   contents` — a real async runtime, or legacy-multibyte / Unicode-version-tied
+   engine — glyph SHAPING (kerning, ligatures, bidi, the line-BREAKING
+   algorithm), flex / grid track sizing, `display: contents` — a real async
+   runtime, or legacy-multibyte / Unicode-version-tied
    encoding tables (ISO-2022-JP & friends; the *residual* IDNA cases where
    `uri-idna` diverges from the WPT reference — **not IDNA wholesale**: see
    the in-scope note below).
@@ -70,14 +70,21 @@ earned-out before as "a subsystem we don't model", then reverted):
   / `*.localhost` needed. Backlog, not a non-goal. (See the
   `multi-origin-in-scope` memory.)
 - **Box layout is MODELED** (`js/src/layout.js`, since v0.8.0): block flow,
-  absolute / relative / fixed, a coarse grid pass, overflow clipping, the flat
-  tree, cross-realm frames — and the page-visible geometry
+  inline runs, absolute / relative / fixed (shrink-to-fit included), margin
+  collapsing, a coarse grid pass, CSS Tables 3 auto/fixed TABLE layout, overflow
+  clipping, the flat tree, cross-realm frames — and the page-visible geometry
   (`getBoundingClientRect` / `elementFromPoint` / `offset*` / `client*` /
   `scroll*`) reads from it, so there is ONE geometry. Visual hit-testing,
   gBCR truthiness and viewport-clip visibility are therefore IN scope: a
-  failing geometry test is a coarse-model gap to diagnose (does it need real
-  glyph metrics / track sizing, or just a box rule we haven't written?), not
-  an automatic "needs a layout engine" exclusion.
+  failing geometry test is a coarse-model gap to diagnose (does it need glyph
+  SHAPING / track sizing, or just a box rule we haven't written?), not an
+  automatic "needs a layout engine" exclusion.
+- **Text is MEASURED, not estimated** (since v0.8.x): run widths come from the
+  font file's own `hmtx` advances and line boxes from its `hhea` metrics, for
+  the face fontconfig resolves the CSS family to — the same face Chrome gets on
+  the same machine. So a wrong text width is a bug to diagnose, not "we don't
+  have glyph metrics". What is still missing is SHAPING (kerning / ligatures /
+  bidi) and the real line-breaking algorithm.
 - **IDNA, Streams, Workers, EventSource are MODELED** (uri-idna /
   web-streams-polyfill / thread / TCPSocket). A failing IDNA test is usually
   a driver over-/under-rejection bug to fix (e.g. an `xn--` A-label browsers
