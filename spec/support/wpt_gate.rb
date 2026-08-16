@@ -30,17 +30,18 @@ require_relative 'wpt_runner'
 #   bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 # The gate is SHARDED: each spec/wpt_gate/shard_N_spec.rb holds the top-level
-# describe (so per-file runtime attribution — parallel_tests' RuntimeLogger
-# keys on the top-level group's file_path — lands on the shard file) and calls
-# `WptGate.install(self, shard:, shards:)`, which stripes the (sorted) file
-# list by index. A serial `bundle exec rspec` runs every shard in one process
-# (the long-lived WptRunner session is shared — identical to the former
-# monolithic wpt_spec.rb), while `parallel_rspec` distributes the shard FILES
-# across worker processes, which is what lets the dominant cost centre of the
-# suite scale with cores. Striping by index spreads alphabetical neighbours
-# (the expensive canvas/ cluster, .https. SW files) evenly, so shards are
-# naturally runtime-balanced. Per-file results are order-independent (the
-# runner resets the session per file), so the partition is correctness-neutral.
+# describe (so the runner's per-FILE runtime accounting — RSpec's
+# example-status persistence, which flatware balances its workers from — lands
+# on the shard file) and calls `WptGate.install(self, shard:, shards:)`, which
+# stripes the (sorted) file list by index. A serial `bundle exec rspec` runs
+# every shard in one process (the long-lived WptRunner session is shared —
+# identical to the former monolithic wpt_spec.rb), while `bin/flatware-rspec
+# spec` distributes the shard FILES across worker processes, which is what
+# lets the dominant cost centre of the suite scale with cores. Striping by
+# index spreads alphabetical neighbours (the expensive canvas/ cluster,
+# .https. SW files) evenly, so shards are naturally runtime-balanced. Per-file
+# results are order-independent (the runner resets the session per file), so
+# the partition is correctness-neutral.
 #
 # Tagged :wpt so it can be skipped locally with `rspec --tag ~wpt`; CI runs it.
 module WptGate

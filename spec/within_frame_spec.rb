@@ -6,7 +6,7 @@ require_relative 'support/session_teardown'
 # the iframe's own V8 realm (a real nested browsing context). This mirrors
 # Capybara's upstream frame fixtures (within_frames.erb + frame_*.erb) so the
 # behaviour is exercised directly; the upstream shared specs run the same
-# scenarios through capybara_shared_spec once `:frames` is un-skipped.
+# scenarios through the capybara_shared shards once `:frames` is un-skipped.
 RSpec.describe 'within_frame / switch_to_frame' do
   before do
     # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps a

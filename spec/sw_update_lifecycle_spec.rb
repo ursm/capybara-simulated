@@ -5,6 +5,7 @@ require_relative 'support/js_engine'
 require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # The service-worker UPDATE lifecycle: registering a new script at a scope that already has an
 # active worker must NOT hand the new worker the running documents. HTML's "try activate" holds it
@@ -67,13 +68,18 @@ RSpec.describe 'Service Worker update lifecycle' do
         globalThis.__state = 'registered';
       })();
     JS
-    60.times do
-      break if session.evaluate_script("globalThis.__state === 'registered'")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("globalThis.__state === 'registered'") }
     expect(session.evaluate_script('globalThis.__state')).to eq('registered')
     session
+  end
+
+  # The update's install runs on the worker's own thread after register()
+  # resolves — wait for the version to actually reach the waiting slot before
+  # asserting anything about it.
+  def wait_for_waiting(session, version)
+    poll_until {
+      session.evaluate_script("!!(globalThis.__reg.waiting && globalThis.__reg.waiting.scriptURL.includes('v=#{version}'))")
+    }
   end
 
   def slots(session)
@@ -88,6 +94,7 @@ RSpec.describe 'Service Worker update lifecycle' do
 
   it 'holds an update in the waiting slot while the old worker still controls a client' do
     session = session_with_update('/scope/sw.js?v=2')
+    wait_for_waiting(session, 2)
     10.times { session.evaluate_script('1') }   # the gate must HOLD, not merely lag
 
     expect(slots(session)).to eq({'waiting' => '2', 'active' => '1', 'installing' => nil})
@@ -96,11 +103,7 @@ RSpec.describe 'Service Worker update lifecycle' do
   # `skipWaiting()` is the escape hatch every app uses to ship an update immediately.
   it 'activates an update that calls skipWaiting, without waiting for the client to go' do
     session = session_with_update('/scope/sw.js?v=2&skip=1')
-    40.times do
-      break if session.evaluate_script("globalThis.__reg.active && globalThis.__reg.active.scriptURL.includes('v=2')")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("!!(globalThis.__reg.active && globalThis.__reg.active.scriptURL.includes('v=2'))") }
 
     expect(slots(session)['active']).to eq('2')
     expect(slots(session)['waiting']).to be_nil
@@ -110,14 +113,11 @@ RSpec.describe 'Service Worker update lifecycle' do
   # controllee is gone.
   it 'activates a waiting update once the last controlled client goes away' do
     session = session_with_update('/scope/sw.js?v=2')
+    wait_for_waiting(session, 2)
     expect(slots(session)['waiting']).to eq('2')
 
     session.execute_script("document.getElementById('a').remove();")
-    40.times do
-      break if session.evaluate_script("globalThis.__reg.active && globalThis.__reg.active.scriptURL.includes('v=2')")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("!!(globalThis.__reg.active && globalThis.__reg.active.scriptURL.includes('v=2'))") }
 
     expect(slots(session)).to eq({'waiting' => nil, 'active' => '2', 'installing' => nil})
   end

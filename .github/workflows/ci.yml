@@ -36,18 +36,20 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
-      # Multi-process run (worker count = vCPUs). The WPT gate — the dominant
-      # cost centre — is sharded across spec/wpt_gate/ files precisely so it
-      # distributes here; a serial `bundle exec rspec` remains equivalent.
-      # Groups are balanced by the committed runtime log (file-size grouping
-      # packs the tiny-but-heavy wpt shard files into one group); refresh it
-      # with `bundle exec rake parallel_runtime_log` when balance drifts.
-      # Spec files missing from the log are weighted at the average (silent
-      # imbalance), and past 50% missing parallel_tests aborts with
-      # RuntimeLogTooSmallError — a big spec reorganization needs the refresh.
-      # --serialize-stdout keeps each group's output contiguous so a red
-      # group's failure block stays readable in the CI log.
-      - run: bundle exec parallel_rspec spec --group-by runtime --runtime-log spec/support/parallel_runtime_rspec.log --serialize-stdout
+      # Multi-process run (worker count = vCPUs). The WPT and capybara-shared
+      # gates — the dominant cost centres — are sharded across spec/wpt_gate/
+      # and spec/capybara_shared/ files precisely so they distribute here; a
+      # serial `bundle exec rspec` remains equivalent. flatware balances its
+      # per-worker buckets from the RSpec example-status file (see
+      # spec/support/example_persistence.rb), carried across runs by the cache
+      # step — a cold cache only costs round-robin balance for that run.
+      - uses: actions/cache@v4
+        with:
+          path: tmp/rspec_examples_v8.txt
+          key: rspec-examples-v8-${{ matrix.ruby }}-${{ github.sha }}
+          restore-keys: rspec-examples-v8-${{ matrix.ruby }}-
+
+      - run: bin/flatware-rspec spec
 
   # Secondary engine: QuickJS. It shares the JS bridge but has a distinct runtime
   # layer (value marshalling, no per-frame realms), so it needs its own coverage
@@ -69,6 +71,17 @@ jobs:
           ruby-version: '4.0'
           bundler-cache: true
 
-      - run: bundle exec parallel_rspec spec --group-by runtime --runtime-log spec/support/parallel_runtime_rspec.log --serialize-stdout -o '--tag ~wpt'
+      # Engine-specific cache: QuickJS runs the same files ~2x slower than V8,
+      # so it balances from its own timing file.
+      - uses: actions/cache@v4
+        with:
+          path: tmp/rspec_examples_quickjs.txt
+          key: rspec-examples-quickjs-${{ github.sha }}
+          restore-keys: rspec-examples-quickjs-
+
+      # The tag filter reaches the workers via fork inheritance: flatware's
+      # JobBuilder applies the rspec args to the global RSpec configuration
+      # BEFORE forking (workers discard the args themselves).
+      - run: bin/flatware-rspec spec --tag '~wpt'
         env:
           CSIM_JS_ENGINE: quickjs

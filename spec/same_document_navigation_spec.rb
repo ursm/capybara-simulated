@@ -2,6 +2,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Same-document navigation: a fragment change (`location.hash = …`, an in-page anchor) and
 # `history.pushState` / `replaceState`. Two contracts that only show up once you look past the
@@ -17,12 +18,8 @@ RSpec.describe 'same-document navigation' do
     simulated_session(app).tap {|s| s.visit '/' }
   end
 
-  def poll(session, expr, tries = 100)
-    tries.times do
-      break if session.evaluate_script(expr)
-
-      sleep 0.02
-    end
+  def poll(session, expr)
+    poll_until { session.evaluate_script(expr) }
   end
 
   # HTML fires `hashchange` while applying the history step — after the script that navigated has
