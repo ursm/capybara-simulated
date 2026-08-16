@@ -75,20 +75,21 @@ RSpec.describe 'line breaking' do
   # a UA rule — read only the author cascade and the headline feature misses it.
   it 'preserves the newlines in a <pre> without an author rule' do
     # A leading newline right after `<pre>` is dropped by the parser, so this is two
-    # lines of text — but in a monospace UA font, hence the measured line height.
-    boxes, = measure(%(<pre id="d" style="margin:0">\none\ntwo</pre>), ['#d'])
-    expect(boxes[0][3]).to eq(44)                      # Chrome: two 22px monospace lines
+    # lines — measured against a one-line `<pre>`, because a `<pre>`'s line height
+    # comes from the UA's MONOSPACE font, which differs from box to box.
+    boxes, = measure(%(<pre id="d" style="margin:0">\none\ntwo</pre><pre id="one" style="margin:0">one</pre>), ['#d', '#one'])
+    expect(boxes[0][3]).to eq(boxes[1][3] * 2)         # Chrome: two lines, 44 with its monospace
   end
 
   # A word that cannot fit breaks mid-word only where the page asked for it.
   it 'breaks inside a word only for word-break / overflow-wrap' do
     long = 'Supercalifragilisticexpial'
-    plain, = measure(%(<div id="d" style="width:80px">#{long}</div>), ['#d'])
+    plain, _w, line = measure(%(<div id="d" style="width:80px">#{long}</div>), ['#d'])
     all,   = measure(%(<div id="d" style="width:80px;word-break:break-all">#{long}</div>), ['#d'])
     word,  = measure(%(<div id="d" style="width:80px;overflow-wrap:break-word">#{long}</div>), ['#d'])
-    expect(plain[0][3]).to eq(18)                      # Chrome: one line, overflowing
-    expect(all[0][3]).to eq(54)                        # Chrome: three
-    expect(word[0][3]).to eq(54)
+    expect(plain[0][3]).to eq(line)                    # Chrome: one line, overflowing
+    expect(all[0][3]).to eq(line * 3)                  # Chrome: three
+    expect(word[0][3]).to eq(line * 3)
   end
 
   # CJK has no spaces at all: the break opportunity is between the characters, which
