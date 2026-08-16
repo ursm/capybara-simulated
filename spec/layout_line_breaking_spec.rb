@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/layout_measure'
 
 # Line breaking. Text used to wrap by ESTIMATE — the run's total width over the
 # available width — which is right only when the words happen to pack perfectly. A
@@ -13,31 +14,6 @@ require_relative 'support/session_teardown'
 # expectation is Chrome 137-measured (headless, 1024x768) and written against
 # widths measured in the page itself, so it holds whatever face fontconfig serves.
 RSpec.describe 'line breaking' do
-  # `body`, plus a `white-space: pre` probe for measuring strings in the same font
-  # and a plain one-line block for the line height.
-  def measure(body, selectors, probes: [], style: 'margin:0;font:16px Arial')
-    probe   = '<div id="__line">x</div><span id="__probe" style="white-space:pre"></span>'
-    html    = %(<html><head><meta charset="utf-8"></head><body style="#{style}">#{body}#{probe}</body></html>)
-    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
-    session.visit '/'
-    m = JSON.parse(session.evaluate_script(<<~JS))
-      (function () {
-        var probe = document.getElementById('__probe'), text = {};
-        #{probes.to_json}.forEach(function (t) { probe.textContent = t; text[t] = probe.getBoundingClientRect().width; });
-        probe.remove();
-        return JSON.stringify({
-          boxes: #{selectors.to_json}.map(function (sel) {
-            var r = document.querySelector(sel).getBoundingClientRect();
-            return [r.x, r.y, r.width, r.height];
-          }),
-          text: text,
-          line: document.getElementById('__line').getBoundingClientRect().height
-        });
-      })()
-    JS
-    [m['boxes'], m['text'], m['line']]
-  end
-
   # The greedy rule itself: words go on the line while they fit, and the first one
   # that doesn't starts the next. A break EATS the space it happens at, so a word
   # that fits is not pushed down by its own trailing space — the bug that made a

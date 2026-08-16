@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/layout_measure'
 
 # Table layout. A table's geometry falls out of no other formatting context — a
 # column is as wide as the widest cell in that column across EVERY row, and the
@@ -17,45 +18,6 @@ require_relative 'support/session_teardown'
 # it is the formula that this file exists to pin. (The pixel figures are in the
 # comments, from Liberation Sans — what both Chrome and we get on Linux.)
 RSpec.describe 'table layout' do
-  # Lay `body` out and report, in one pass: the boxes of `selectors`, the width of
-  # each string in `probes` in the same font the cells use, and the height of a
-  # plain one-line block. The probes sit at the END of the body, so they add a line
-  # below everything measured and disturb none of it.
-  def measure(body, selectors, probes: [], bold_probes: [], style: 'margin:0;font:16px Arial')
-    probe_markup = +'<div id="__line">x</div><span id="__probe" style="white-space:pre"></span>'
-    html    = %(<html><head><meta charset="utf-8"></head><body style="#{style}">#{body}#{probe_markup}</body></html>)
-    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
-    session.visit '/'
-    js = <<~JS
-      (function () {
-        var probe = document.getElementById('__probe'), text = {};
-        function widths(list, weight) {
-          probe.style.fontWeight = weight;
-          list.forEach(function (t) { probe.textContent = t; text[weight + ' ' + t] = probe.getBoundingClientRect().width; });
-        }
-        widths(#{probes.to_json}, 'normal');
-        widths(#{bold_probes.to_json}, 'bold');
-        probe.remove();
-        return JSON.stringify({
-          boxes: #{selectors.to_json}.map(function (sel) {
-            var r = document.querySelector(sel).getBoundingClientRect();
-            return [r.x, r.y, r.width, r.height];
-          }),
-          text: text,
-          line: document.getElementById('__line').getBoundingClientRect().height
-        });
-      })()
-    JS
-    m = JSON.parse(session.evaluate_script(js))
-    [m['boxes'], Text.new(m['text']), m['line']]
-  end
-
-  # The measured width of a string, and of the widest word in it (its min-content).
-  Text = Struct.new(:table) do
-    def [](s, weight = 'normal') = table.fetch("#{weight} #{s}")
-    def word(s) = s.split.map {|w| self[w] }.max
-  end
-
   # The UA stylesheet's cell padding and table border-spacing, which are in every
   # figure a browser reports for a table.
   PAD     = 2   # 1px on each side of a cell
