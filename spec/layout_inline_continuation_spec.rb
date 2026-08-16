@@ -178,6 +178,61 @@ RSpec.describe 'inline continuation' do
     expect(m['offsetLeft']).to be_within(0.5).of(m['rects'][0][0])
   end
 
+  # The pieces are also what a POINTER aims at. WebDriver measures its in-view centre point on
+  # the element's FIRST client rect, and for a link that wrapped, the centre of its BOUNDING box
+  # is the paragraph text between its two lines — a click there gives page script coordinates
+  # that hit-test to the paragraph.
+  it 'aims a click at the first fragment rather than at the middle of the union' do
+    body = '<div id="d" style="width:420px">Lorem ipsum dolor sit ' \
+           '<a id="a" href="#">a link that is long enough to wrap over two lines here</a> tail.</div>'
+    _boxes, _w, _line, session = measure(body, ['#a'])
+    session.execute_script(<<~JS)
+      window.__hit = null;
+      document.addEventListener('click', function (e) {
+        var el = document.elementFromPoint(e.clientX, e.clientY);
+        window.__hit = el ? el.id || el.tagName : null;
+      }, true);
+    JS
+    session.find(:css, '#a').click
+    expect(session.evaluate_script('window.__hit')).to eq('a')
+  end
+
+  # …and nothing at all once the element stops being rendered. A fragmented inline never goes
+  # through the box path, so the pieces it left behind have to be gated on the way out — a page
+  # that probes `getClientRects().length` (jQuery `:visible`) would otherwise read a hidden
+  # panel's links as visible.
+  it 'has no client rects once it is no longer rendered' do
+    body = '<div id="d" style="width:200px">Hi <a id="a" href="#">a link that also wraps across two lines</a></div>'
+    _boxes, _w, _line, session = measure(body, ['#a'])
+    expect(session.evaluate_script("document.querySelector('#a').getClientRects().length")).to eq(2)
+    session.execute_script("document.querySelector('#d').style.display = 'none'")
+    expect(session.evaluate_script("document.querySelector('#a').getClientRects().length")).to eq(0)
+    expect(session.evaluate_script("document.querySelector('#a').offsetLeft")).to eq(0)
+  end
+
+  # White space collapses across the whole inline formatting context, not per text node: the
+  # space before a `<span>` and one at the start of its text are ONE space. Pretty-printed markup
+  # produces that pair on every indented line.
+  it 'collapses a space against one already on the line' do
+    body = '<div id="d" style="width:400px">Hello <span id="s"> world</span></div>'
+    boxes, w = measure(body, ['#s'], probes: ['world'])
+    expect(boxes[0][2]).to be_within(0.05).of(w['world'])   # Chrome: 38.23, not 42.68
+  end
+
+  # CSS 2.1 §10.1: the containing block a fragmented inline establishes runs from its FIRST
+  # piece, so a dropdown hung off a link that wraps opens under where the link starts — not at
+  # the union's left edge, which is the block's own.
+  it 'establishes a containing block from its first fragment' do
+    body = '<div id="d" style="width:400px">a <span id="s" style="position:relative">' \
+           'a relative span whose text wraps over two lines of its own' \
+           '<i id="tip" style="position:absolute;top:100%;left:0;width:20px;height:8px"></i></span></div>'
+    boxes, w = measure(body, ['#s', '#tip'], probes: ['a '])
+    s, tip = boxes
+    expect(s[0]).to eq(0)                              # the union starts at the block's edge…
+    expect(tip[0]).to be_within(0.05).of(w['a '])      # …the containing block at the first piece
+    expect(tip[1]).to eq(s[1] + s[3])                  # `top: 100%` of that box. Chrome: 71
+  end
+
   # An inline box with nothing in it generates no line box at all — Chrome reports an
   # empty rect for it and gives the block around it a height of 0.
   it 'generates no line box for an empty inline' do
