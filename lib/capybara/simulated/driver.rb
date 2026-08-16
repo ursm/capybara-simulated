@@ -406,7 +406,12 @@ module Capybara
       # matches an existing window navigates that window instead of opening a
       # new one (HTML window-name targeting); `opener_handle` records the
       # opener so the new window's `window.opener` resolves back to it.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil)
+      # `defer_load`: the caller will fire the new window's `load` itself, one task
+      # later, so that a handler either side registers right after `window.open()` is
+      # in place first (platform-globals' `fireAuxLoadSoon`). ONLY the JS `window.open`
+      # path does that — a `target=_blank` click or `open_new_window` hands nobody a
+      # reference to hook, so their window announces its own load like any other.
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, defer_load: false)
         name = name.to_s
         # A blob: URL opened from a different storage partition is forced noopener
         # (cross-partition-navigation), overriding an explicit rel=opener — the new
@@ -427,9 +432,7 @@ module Capybara
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
-        # An auxiliary window's `load` is its OPENER's to fire, one task after the
-        # document boots — see Browser#defer_window_load.
-        aux.defer_window_load = true
+        aux.defer_window_load = defer_load
         aux.window_handle = handle
         # Register BEFORE visiting: the opened document's own boot scripts read
         # `window.opener`, which resolves through this entry — so the entry
@@ -491,7 +494,7 @@ module Capybara
         if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base, about_origin: about_origin))
           return rid
         end
-        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser)
+        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser, defer_load: true)
       end
 
       # The storage-partition site a blob: URL was created in (its creator's top-level
