@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'timeout'
+require 'yaml'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
 require_relative 'js_engine'
@@ -12,15 +13,17 @@ require_relative 'js_engine'
 #
 # SHARDED like the WPT gate (spec/support/wpt_gate.rb): upstream's
 # `Capybara::SpecHelper.run_specs` defines the whole ~1400-example suite as ONE
-# top-level describe created inside the gem, which (a) pins the suite to one
-# process under parallel_rspec — it was the parallel run's wall-clock floor —
-# and (b) mis-attributes its runtime to the gem's path in the runtime log. Each
+# top-level describe created inside the gem, which pinned the suite to one
+# process under the parallel runner — the run's wall-clock floor. Each
 # spec/capybara_shared/shard_N_spec.rb holds its own top-level describe and
-# calls `CapybaraShared.install(self, shard:, shards:)`, which stripes the
-# gem's per-file spec registry (`Capybara::SpecHelper.spec` entries) by index.
-# Every shard describes itself as plain 'Simulated' so example
-# full-descriptions — and the DESCRIPTION_SKIPS prefixes below — stay
-# byte-identical to the former monolith.
+# calls `CapybaraShared.install(self, shard:, shards:)`, which packs the gem's
+# per-file spec registry (`Capybara::SpecHelper.spec` entries) into shards by
+# MEASURED group weight (capybara_group_weights.yml, greedy heaviest-first) —
+# a blind index stripe landed the three heaviest groups (`node`, `#find`,
+# `#click_button`) in one shard, which then dwarfed its siblings. Every shard
+# describes itself as plain 'Simulated' so example full-descriptions — and the
+# DESCRIPTION_SKIPS prefixes below — stay byte-identical to the former
+# monolith.
 #
 # `install` VENDORS the body of run_specs (capybara 3.40.0,
 # lib/capybara/spec/spec_helper.rb) — the describe's includes + its four
@@ -66,6 +69,42 @@ module CapybaraShared
 
   def self.session
     @session ||= Capybara::Session.new(:simulated, TestApp)
+  end
+
+  # Measured per-group seconds (script/regen_capybara_group_weights.rb —
+  # regenerate on a capybara upgrade; the digest guard flags the moment).
+  # Only proportions matter. A group the table doesn't know (added upstream)
+  # gets the median so it neither clusters nor skews a bucket. A MISSING
+  # table (the regen script's own bootstrap measurement) degrades to equal
+  # weights — a valid, merely unbalanced, partition.
+  WEIGHTS = begin
+    YAML.safe_load_file(File.expand_path('capybara_group_weights.yml', __dir__)).freeze
+  rescue Errno::ENOENT
+    {}.freeze
+  end
+  DEFAULT_WEIGHT = WEIGHTS.empty? ? 1.0 : WEIGHTS.values.sort[WEIGHTS.size / 2]
+
+  # Deterministic weighted partition of the registry into `shards` buckets:
+  # heaviest-first greedy onto the lightest bucket, index as tie-break.
+  # Memoized so every shard file loaded into one process agrees on the same
+  # partition (serial runs load all of them).
+  def self.partition(shards)
+    @partition ||= {}
+    @partition[shards] ||= begin
+      buckets = Array.new(shards) { {weight: 0.0, indexes: []} }
+      # Registry names are mostly Strings, a few are Classes — the weight
+      # table keys on the rendered string.
+      weight = ->(name) { WEIGHTS[name.to_s] || DEFAULT_WEIGHT }
+      Capybara::SpecHelper.instance_variable_get(:@specs)
+        .each_with_index
+        .sort_by {|(name, _, _), i| [-weight.call(name), i] }
+        .each do |(name, _, _), i|
+          bucket = buckets.min_by {|b| b[:weight] }
+          bucket[:weight]  += weight.call(name)
+          bucket[:indexes] << i
+        end
+      buckets.map {|b| b[:indexes].sort }
+    end
   end
 
   def self.install(group, shard:, shards:)
@@ -121,8 +160,9 @@ module CapybaraShared
         Capybara.exact = false
       end
 
+      mine = CapybaraShared.partition(shards)[shard - 1]
       Capybara::SpecHelper.instance_variable_get(:@specs).each_with_index do |(spec_name, spec_options, block), i|
-        next unless i % shards == shard - 1
+        next unless mine.include?(i)
         describe spec_name, *spec_options do
           class_eval(&block)
         end

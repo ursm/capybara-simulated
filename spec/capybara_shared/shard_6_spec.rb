@@ -6,5 +6,5 @@ require_relative '../support/capybara_shared'
 # full-descriptions stay identical to the former monolithic file — the
 # DESCRIPTION_SKIPS prefixes and any -e filters depend on them.
 RSpec.describe Capybara::Session, 'Simulated', capybara_skip: CapybaraShared::SKIPPED_TESTS do
-  CapybaraShared.install(self, shard: 1, shards: 8)
+  CapybaraShared.install(self, shard: 6, shards: 8)
 end
