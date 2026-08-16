@@ -18,6 +18,8 @@ require_relative 'support/layout_measure'
 # it is the formula that this file exists to pin. (The pixel figures are in the
 # comments, from Liberation Sans — what both Chrome and we get on Linux.)
 RSpec.describe 'table layout' do
+  include LayoutMeasure
+
   # The UA stylesheet's cell padding and table border-spacing, which are in every
   # figure a browser reports for a table.
   PAD     = 2   # 1px on each side of a cell
