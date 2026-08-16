@@ -466,11 +466,17 @@ module Capybara
         # extended work is pending (see sw_note_uninstalling / try_clear_uninstalls).
         @sw_pending_uninstalls = []
         @sw_nav_outbox    = Thread::Queue.new
-        # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] → :open/:claimed
-        # (first delivery wins — see sw_deliver_fetch_response). The lock also covers
-        # writes from the network-leg threads and the worker's respondWith thread.
+        # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] →
+        # {resp:, server_ms:, t0:} — the network leg's PRE-FETCHED response (run
+        # synchronously on the worker's own thread before the fetch event
+        # dispatches), the server's MODELED delay, and the dispatch start. The
+        # winner is decided at respondWith time by comparing the modeled server
+        # delay against the handler's measured dispatch time — deterministic
+        # under any scheduler, where the old first-delivery-wins thread race
+        # lost the "server faster" leg whenever a saturated runner starved the
+        # leg thread past the handler's 200 ms busy-wait (recurring CI flake).
+        # The lock covers main-thread resets racing the worker-thread writes.
         @sw_raced_fetches = {}
-        @sw_race_threads  = []
         @sw_race_lock     = Mutex.new
         # keepalive_start machinery: detached request threads + their results + the
         # 64 KiB in-flight payload quota. Survives per-visit rebuilds by design.
@@ -4513,15 +4519,16 @@ module Capybara
       # service_worker_navigation_fetch) is awaited SYNCHRONOUSLY on a dedicated queue, off the
       # general outbox, so it never interleaves with the client-fetch / message reply protocol;
       # a client fetch (positive id) rides the outbox as before, tagged with the originating realm.
-      # Start the NETWORK LEG of a race-network-and-fetch-handler route. The worker
-      # posts this (its own thread) just before dispatching the fetch event; the leg
-      # runs on a fresh host thread so a handler that synchronously blocks the worker
-      # (the WPT busy-wait) can still lose the race. A ≥400/failed network response is
-      # simply never delivered — the handler's response wins by default ("server
-      # faster, but not found" uses the handler's 200). For a NAVIGATION (negative id)
-      # the race marker rides the nav outbox: the parked nav thread runs the leg
-      # itself (it owns that queue). Direct-reply fids (worker main-script fetches)
-      # are not raced.
+      # Run the NETWORK LEG of a race-network-and-fetch-handler route — called
+      # by the worker (its own thread) just before dispatching the fetch event,
+      # and the leg runs synchronously right here; the winner is decided later
+      # by the modeled-delay comparison (see the @sw_raced_fetches note at its
+      # initialization and sw_race_take_network_win). A ≥400/failed network
+      # response records nothing — the handler's response wins by default
+      # ("server faster, but not found" uses the handler's 200). For a
+      # NAVIGATION (negative id) the pre-fetched leg rides the nav outbox to
+      # the parked nav thread, which owns that decision. Direct-reply fids
+      # (worker main-script fetches) are not raced.
       private def sw_race_network(handle, fetch_id, realm_id, url, method)
         fid = fetch_id.to_i
         return if fid >= SW_DIRECT_FID_BASE
@@ -4531,35 +4538,88 @@ module Capybara
         # non-GET race-matched request simply behaves as fetch-event.)
         m = method.to_s.empty? ? 'GET' : method.to_s.upcase
         return unless %w[GET HEAD].include?(m)
+        # Run the network leg RIGHT HERE, on the worker's own thread, before the
+        # fetch event dispatches (this hook fires at the top of
+        # __csim_swDispatchFetch). Sequential-on-one-thread makes the race
+        # scheduling-independent; simultaneity is restored at DECISION time: the
+        # leg's cost is the server's MODELED delay (the wpt py shim virtualizes
+        # `time.sleep` and surfaces the total as X-Csim-Server-Delay-Ms; a
+        # response without the header modeled no delay), the handler's cost is
+        # its real dispatch-to-respondWith span, and whichever is smaller wins
+        # (sw_deliver_fetch_response / the fetch_stream hook / the parked nav
+        # loop all apply the same comparison).
+        r = begin
+          rack_fetch(m, url.to_s, '', {}, 'follow')
+        rescue StandardError
+          nil
+        end
+        usable = r && r['status'].to_i < 400
         if fid.negative?
-          @sw_nav_outbox << {fetch_id: fid, race_url: url.to_s, race_method: m}
+          # Navigation: the parked nav thread owns the decision — hand it the
+          # pre-fetched leg (FIFO: this marker precedes the handler's resp).
+          # t0 is stamped HERE, on the worker thread just before dispatch, the
+          # same convention as the fid>0 entry — measuring from the nav
+          # thread's pop would fold a queue-wakeup hop into the handler's span.
+          @sw_nav_outbox << {
+            fetch_id: fid,
+            race_leg: {
+              resp:      usable ? JSON.generate(sw_race_wire(r)) : nil,
+              server_ms: sw_server_delay_ms(r),
+              t0:        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            }
+          }
           return
         end
+        # An unusable leg (error / ≥400) records nothing: the handler serves
+        # alone, exactly the "not found" preference the tests assert.
+        return unless usable
         key = [realm_id.to_i, fid]
         @sw_race_lock.synchronize do
-          @sw_raced_fetches[key] = :open
-          @sw_race_threads << Thread.new do
-            begin
-              r = begin
-                rack_fetch(m, url.to_s, '', {}, 'follow')
-              rescue StandardError
-                nil
-              end
-              if r && r['status'].to_i < 400
-                sw_deliver_fetch_response(handle.to_i, fid, JSON.generate(sw_race_wire(r)), @worker_outbox, realm_id.to_i)
-              else
-                # The leg is NOT delivering — finalize its claim entry so it can't
-                # poison a later fetch that reuses this per-VM fetch id: an :open
-                # entry would wrongly "claim" an unrelated winner, a :claimed one
-                # (the handler already won) would wrongly drop a later delivery.
-                @sw_race_lock.synchronize { @sw_raced_fetches.delete(key) }
-              end
-            ensure
-              @sw_race_lock.synchronize { @sw_race_threads.delete(Thread.current) }
-            end
-          end
+          @sw_raced_fetches[key] = {
+            resp:      JSON.generate(sw_race_wire(r)),
+            server_ms: sw_server_delay_ms(r),
+            t0:        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          }
         end
         nil
+      end
+
+      # The MODELED delay of a rack response: the wpt py shim accumulates the
+      # handler's virtualized `time.sleep` calls into X-Csim-Server-Delay-Ms
+      # (script/wpt_py_handler.py). Absent header → 0, DELIBERATELY: an
+      # in-process rack response with no modeled delay IS effectively instant,
+      # so for a non-shim (app) server the race source resolves to the network
+      # side whenever the handler takes any real time. That bias is the model,
+      # not an accident — revisit only if an app depends on a warm handler
+      # beating its own server.
+      private def sw_server_delay_ms(r)
+        return 0.0 unless r
+        h = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('x-csim-server-delay-ms').zero? }
+        h ? h.last.to_f : 0.0
+      end
+
+      # The race decision at respondWith time: network wins iff the server's
+      # modeled delay undercuts the handler's measured dispatch span (a
+      # fallthrough handler always loses to a usable leg). Consumes the entry
+      # (exactly-once). Returns the winning NETWORK wire JSON, or nil when the
+      # handler's own response should stand.
+      # KNOWN LIMIT (deliberate): the decision happens at HANDLER-outcome time,
+      # so a respondWith promise that never settles strands a won network leg
+      # until reset and the fetch hangs like a plain fetch-event route (real
+      # Chromium resolves with the network response the moment it arrives).
+      # Every vendored handler answers promptly and the nav path has a budget
+      # backstop; build a delivery-on-timeout (with a late-respondWith
+      # tombstone) only if a real consumer hits this.
+      private def sw_race_take_network_win(realm_id, fetch_id, handler_resp: nil)
+        entry = @sw_race_lock.synchronize { @sw_raced_fetches.delete([realm_id.to_i, fetch_id.to_i]) }
+        return nil unless entry
+        # Exact match — every fallthrough producer emits this literal
+        # (workers.js + the dispatch-failure fallback below); a substring sniff
+        # could false-positive on a response HEADER literally named
+        # "fallthrough".
+        return entry[:resp] if handler_resp == '{"fallthrough":true}'
+        handler_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - entry[:t0]) * 1000.0
+        entry[:server_ms] < handler_ms ? entry[:resp] : nil
       end
 
       # `fetch(…, {keepalive: true})`: the request is dispatched EAGERLY on a detached
@@ -4634,43 +4694,35 @@ module Capybara
         end
       end
 
-      # Kill in-flight race network legs and drop their claim bookkeeping. Called on
-      # every per-visit VM rebuild AND on session reset: fetch ids are PER-VM (the
-      # client's fetchSeq restarts), so a surviving entry or leg would poison a later
-      # fetch that reuses its id — a legitimate delivery dropped as a "loser", or a
-      # dead test's response resolving a new test's same-numbered fetch.
+      # Drop pre-fetched race-leg entries. Called on every per-visit VM rebuild
+      # AND on session reset: fetch ids are PER-VM (the client's fetchSeq
+      # restarts), so a surviving entry would poison a later fetch that reuses
+      # its id — a dead test's network response replacing a new test's
+      # same-numbered handler response.
       private def reset_sw_race_state
-        @sw_race_lock.synchronize do
-          @sw_race_threads.each(&:kill)
-          @sw_race_threads.clear
-          @sw_raced_fetches.clear
-        end
+        @sw_race_lock.synchronize { @sw_raced_fetches.clear }
       end
 
       # rack_fetch's hash as the SW respondWith wire: the client reads bytes from
-      # `body_b64` only, and rack_fetch omits it for pure-ASCII text bodies.
+      # `body_b64` only, and rack_fetch omits it for pure-ASCII text bodies. The
+      # shim's internal delay header must not leak to script on a network win.
       private def sw_race_wire(r)
         r = r.merge('type' => r['type'] || 'basic')
         r['body_b64'] ||= Base64.strict_encode64(r['body'].to_s.b)
+        if r['headers'].is_a?(Hash) && (k = r['headers'].keys.find {|h| h.to_s.casecmp('x-csim-server-delay-ms').zero? })
+          r['headers'] = r['headers'].reject {|h, _| h == k }
+        end
         r
       end
 
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
-        # A RACED fetch delivers exactly once: the first arrival (network leg or the
-        # handler's respondWith) claims it, the second is dropped BEFORE any outbox
-        # push — a double delivery would double-decrement @sw_fetch_pending and hand
-        # the client a second resolution its one-shot pendingFetch can't take.
-        # (A :claimed entry whose loser never arrives — the network leg erred or was
-        # ≥400 — lingers until reset; bounded, per-raced-fetch.)
-        if fetch_id.to_i.positive?
-          key   = [realm_id.to_i, fetch_id.to_i]
-          state = @sw_race_lock.synchronize do
-            case @sw_raced_fetches[key]
-            when :open    then (@sw_raced_fetches[key] = :claimed; :winner)
-            when :claimed then (@sw_raced_fetches.delete(key); :loser)
-            end
-          end
-          return if state == :loser
+        # A RACED fetch resolves exactly once, HERE, at the handler's arrival
+        # (respondWith or fallthrough): the pre-fetched network leg wins when the
+        # server's modeled delay undercuts the handler's measured dispatch span
+        # — its wire replaces the handler's. The entry is consumed either way,
+        # so nothing lingers and a later fetch reusing this per-VM id is safe.
+        if fetch_id.to_i.positive? && (win = sw_race_take_network_win(realm_id, fetch_id, handler_resp: resp))
+          resp = win
         end
         # A DIRECT reply channel (a controlled worker's main-script fetch, parked on its own
         # thread — sw_direct_fetch): hand the reply straight to that queue, bypassing
@@ -5881,34 +5933,40 @@ module Capybara
         )
         w[:inbox] << {kind: 'fetch', req:, fetch_id:}
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        # A race-network-and-fetch-handler route's pre-fetched network leg (the
+        # worker posts it just before dispatching the handler — see
+        # sw_race_network): held here until the handler answers, when the
+        # modeled-delay comparison picks the winner.
+        race_leg = nil
         while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
           ev = pop_with_timeout(@sw_nav_outbox, WORKER_POLL_INTERVAL) or next
           next unless ev[:fetch_id] == fetch_id   # discard a stale response from a timed-out nav
 
-          # A race-network-and-fetch-handler route matched this navigation: run the
-          # network leg on its own thread (this thread stays parked here), delivering
-          # a usable (<400) response back onto this same queue — whichever of it and
-          # the handler's respondWith arrives first is the one this loop returns; the
-          # later one is discarded as stale by the next nav's loop.
-          if ev[:race_url]
-            Thread.new do
-              r = begin
-                rack_fetch(ev[:race_method].to_s.empty? ? 'GET' : ev[:race_method].to_s, ev[:race_url].to_s, '', {}, 'follow')
-              rescue StandardError
-                nil
-              end
-              @sw_nav_outbox << {fetch_id: fetch_id, race: true, resp: JSON.generate(sw_race_wire(r))} if r && r['status'].to_i < 400
-            end
+          if ev[:race_leg]
+            race_leg = ev[:race_leg]
             next
           end
 
           resp = JSON.parse(ev[:resp])
-          return nil                        if resp['fallthrough']    # no respondWith → load from the network
+          # The race decision, mirroring sw_race_take_network_win: the network
+          # leg wins when the server's modeled delay undercuts the handler's
+          # measured span, or when the handler fell through with a usable leg.
+          from_network = false
+          if race_leg
+            leg      = race_leg
+            race_leg = nil
+            if leg[:resp] && (resp['fallthrough'] ||
+                              leg[:server_ms].to_f < (Process.clock_gettime(Process::CLOCK_MONOTONIC) - leg[:t0]) * 1000.0)
+              resp         = JSON.parse(leg[:resp])
+              from_network = true
+            end
+          end
+          return nil                        if !from_network && resp['fallthrough']   # no respondWith → load from the network
           return {'networkError' => true}   if resp['networkError']   # respondWith(Response.error()) → failed navigation
           # Response-to-request validity applies to a respondWith, NOT to the race
-          # NETWORK leg above — that is the network's own answer: it followed its
+          # NETWORK leg — that is the network's own answer: it followed its
           # redirects itself and commits at the final URL like any network nav.
-          unless ev[:race]
+          unless from_network
             # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
             # is a network error — a document can never commit from a no-cors response.
             return {'networkError' => true}   if resp['type'] == 'opaque'
@@ -5941,7 +5999,10 @@ module Capybara
           end
           return resp
         end
-        nil   # SW never answered within budget → load from the network
+        # SW never answered within budget: a pre-fetched race leg is the
+        # network's answer already in hand; otherwise nil → the caller loads
+        # from the network itself.
+        race_leg && race_leg[:resp] ? JSON.parse(race_leg[:resp]) : nil
       end
 
       def worker_terminate(handle)
@@ -7690,26 +7751,24 @@ module Capybara
           # fetch — rides the outbox in emission order so the client realm reassembles the body
           # stream incrementally (deliver_worker_messages). The request's @sw_fetch_pending stays up
           # for the whole stream and clears on the terminal (close / error) frame.
-          # A RACED fetch's stream must run the same first-delivery-wins claim the
-          # single-shot path does (sw_deliver_fetch_response) — its frames bypass that
-          # fn, so an unclaimed stream head would let BOTH the handler's stream and the
-          # network leg resolve the fetch (double @sw_fetch_pending decrement, the
-          # claim entry stranded). A losing stream is dropped whole: head, chunks, and
-          # terminal — an outboxed terminal would decrement a pending this stream
-          # never owned. `sw_race_dropped_streams` is touched only on THIS worker's
-          # thread (the hook's caller), so it needs no lock.
+          # A RACED fetch's STREAMING respondWith runs the same modeled-delay
+          # decision the single-shot path does (sw_race_take_network_win) — at
+          # the stream head. A network win delivers the pre-fetched leg through
+          # the normal single-shot path and drops the losing stream WHOLE: head,
+          # chunks, and terminal — an outboxed terminal would decrement a
+          # pending this stream never owned. `sw_race_dropped_streams` is
+          # touched only on THIS worker's thread (the hook's caller), so it
+          # needs no lock.
           fetch_stream:   ->(fetch_id, kind, payload, realm_id) {
             fid = fetch_id.to_i
             key = [realm_id.to_i, fid]
             if fid.positive?
               if kind.to_s == 'start'
-                state = @sw_race_lock.synchronize do
-                  case @sw_raced_fetches[key]
-                  when :open    then (@sw_raced_fetches[key] = :claimed; :winner)
-                  when :claimed then (@sw_raced_fetches.delete(key); :loser)
-                  end
+                if (win = sw_race_take_network_win(realm_id, fid))
+                  sw_race_dropped_streams[key] = true
+                  sw_deliver_fetch_response(handle, fid, win, outbox, realm_id.to_i)
+                  next
                 end
-                (sw_race_dropped_streams[key] = true; next) if state == :loser
               elsif sw_race_dropped_streams[key]
                 sw_race_dropped_streams.delete(key) if %w[close error].include?(kind.to_s)
                 next
