@@ -58751,11 +58751,6 @@ shadow-dom/offsetParent-across-shadow-boundaries.html:
     is assigned to a slot in nested shadow trees of open mode
   reason: offset-parent walk over flat tree needs layout boxes; layout engine not
     modeled
-shadow-dom/offsetTop-offsetLeft-across-shadow-boundaries.html:
-- name: Verifies that HTMLElement.offsetTop accounts for shadow boundaries when nested
-    in multiple shadow roots.
-  reason: offsetTop is a pixel layout metric requiring a rendering engine we deliberately
-    do not model
 shadow-dom/reference-target/tentative/commandfor.html:
 - name: Shadow root reference target works with .commandForElement property.
   reason: Requires tentative non-standard shadowrootreferencetarget feature; README
