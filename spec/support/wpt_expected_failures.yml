@@ -163,55 +163,9 @@ custom-elements/CustomElementRegistry-getName.html:
 - customElements.getName must throw when the element interface is not a constructor
 - customElements.getName returns the name of the entry with the given constructor
   when there is a matching entry.
-custom-elements/Document-createElement.html:
-- document.createElement must report a NotSupportedError when the element is adopted
-  into a the document of the template elements during construction
 custom-elements/Document-createElementNS.html:
 - 'autonomous: document.createElementNS should not create HTMLUnknownElement for a
   valid custom element name'
-custom-elements/adopted-callback.html:
-- Inserting a custom element into a detached shadow tree that belongs to the document
-  of the template elements must enqueue and invoke adoptedCallback
-- Inserting a custom element into a shadow tree in the document of the template elements
-  must enqueue and invoke adoptedCallback
-- Inserting a custom element into the document of the template elements must enqueue
-  and invoke adoptedCallback
-- Inserting an ancestor of custom element into the document of the template elements
-  must enqueue and invoke adoptedCallback
-- Inserting the shadow host of a custom element into the document of the template
-  elements must enqueue and invoke adoptedCallback
-- Moving a custom element from the owner document into the document of the template
-  elements must enqueue and invoke adoptedCallback
-- Moving an ancestor of custom element from the owner document into the document of
-  the template elements must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  a cloned document must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  a document created by createHTMLDocument must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  a new document must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  an HTML document created by createDocument must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  an HTML document fetched by XHR must enqueue and invoke adoptedCallback
-- Moving the <template>'s content of a custom element from the owner document into
-  the document of an iframe must enqueue and invoke adoptedCallback
-- Moving the shadow host of a custom element from the owner document into the document
-  of the template elements must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  a cloned document must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  a document created by createHTMLDocument must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  a new document must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  an HTML document created by createDocument must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  an HTML document fetched by XHR must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  the document of an iframe must enqueue and invoke adoptedCallback
-- Moving the shadow host's shadow of a custom element from the owner document into
-  the document of the template elements must enqueue and invoke adoptedCallback
 custom-elements/attribute-changed-callback.html:
 - Mutating attributeChangedCallback after calling customElements.define must not affect
   the callback being invoked
@@ -500,10 +454,6 @@ custom-elements/state/state-pseudo-class.html:
 - ":state(foo) and ::part()"
 - ":state(foo) serialization"
 custom-elements/upgrading.html:
-- Creating an element in the document of the template elements and inserting into
-  the document must not enqueue a custom element upgrade reaction
-- Creating an element in the document of the template elements must not enqueue a
-  custom element upgrade reaction because the document does not have a browsing context
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
 custom-elements/upgrading/Node-cloneNode.html:
@@ -560,10 +510,6 @@ dom/nodes/NodeList-live-mutations.window.js:
 - 'NodeList live mutations: NodeList ownPropertyNames'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
-dom/nodes/adoption.window.js:
-- appendChild() and DocumentFragment
-- appendChild() and DocumentFragment with host
-- appendChild() and ShadowRoot
 dom/nodes/attributes-namednodemap-cross-document.window.js:
 - Moving an attribute between documents
 - Replacing an attribute across documents
