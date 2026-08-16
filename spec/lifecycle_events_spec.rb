@@ -22,8 +22,13 @@ RSpec.describe 'document lifecycle events' do
             document.addEventListener('DOMContentLoaded', () => {
               window.__lifecycleEvents.push('DOMContentLoaded@' + document.readyState);
             });
-            window.addEventListener('load', () => {
+            window.addEventListener('load', (e) => {
               window.__lifecycleEvents.push('load@' + document.readyState);
+              window.__loadEvent = {
+                target:  e.target === document,
+                current: e.currentTarget === window,
+                trusted: e.isTrusted
+              };
             });
           </script>
         </body></html>
@@ -40,9 +45,22 @@ RSpec.describe 'document lifecycle events' do
   end
 
   it 'still fires DOMContentLoaded and load alongside readystatechange' do
-    pending 'window `load` not yet emitted on a top-level visit ' \
-            '(DOMContentLoaded@interactive now works)'
     events = session.evaluate_script('window.__lifecycleEvents')
     expect(events).to eq(['DOMContentLoaded@interactive', 'load@complete'])
+  end
+
+  # The window `load` event carries the "legacy target override flag": HTML fires
+  # it AT the window, but its `target` is the DOCUMENT (Chrome-measured — page code
+  # routes on it), and it is a UA event, so it is trusted.
+  it 'targets the document, is trusted, and fires exactly once' do
+    expect(session.evaluate_script('window.__loadEvent')).to eq(
+      'target' => true, 'current' => true, 'trusted' => true
+    )
+    # Several places can be the one to fire it (the driver here, the realm builder
+    # for a frame, the WPT harness for a test file) — whoever gets there first
+    # does, and the rest are no-ops.
+    again = session.evaluate_script('__csimFireWindowLoad()')
+    expect(again).to be(false)
+    expect(session.evaluate_script('window.__lifecycleEvents')).to eq(['DOMContentLoaded@interactive', 'load@complete'])
   end
 end

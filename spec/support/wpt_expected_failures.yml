@@ -544,7 +544,109 @@ fetch/api/basic/request-upload.h2.any.js:
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
-fetch/api/basic/stream-safe-creation.any.js: HARNESS_ERROR
+fetch/api/basic/stream-safe-creation.any.js:
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'consumeEmptyRequest'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'consumeEmptyResponse'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'consumeNonEmptyRequest'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'consumeNonEmptyResponse'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'fetch'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'request'
+- Object.prototype.highWaterMark accessor returning invalid value should not affect
+  stream creation by 'response'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyRequest'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyResponse'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyRequest'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyResponse'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'fetch'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'request'
+- Object.prototype.size accessor returning invalid value should not affect stream
+  creation by 'response'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyRequest'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyResponse'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyRequest'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyResponse'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'request'
+- Object.prototype.start accessor returning invalid value should not affect stream
+  creation by 'response'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'consumeEmptyRequest'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'consumeEmptyResponse'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'consumeNonEmptyRequest'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'consumeNonEmptyResponse'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'fetch'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'request'
+- Object.prototype.start function which errors the stream should not affect stream
+  creation by 'response'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyRequest'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'consumeEmptyResponse'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyRequest'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'consumeNonEmptyResponse'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'fetch'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'request'
+- Object.prototype.type accessor returning invalid value should not affect stream
+  creation by 'response'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'consumeEmptyRequest'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'consumeEmptyResponse'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'consumeNonEmptyRequest'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'consumeNonEmptyResponse'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'fetch'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'request'
+- throwing Object.prototype.highWaterMark accessor should not affect stream creation
+  by 'response'
+- throwing Object.prototype.size accessor should not affect stream creation by 'consumeEmptyRequest'
+- throwing Object.prototype.size accessor should not affect stream creation by 'consumeEmptyResponse'
+- throwing Object.prototype.size accessor should not affect stream creation by 'consumeNonEmptyRequest'
+- throwing Object.prototype.size accessor should not affect stream creation by 'consumeNonEmptyResponse'
+- throwing Object.prototype.size accessor should not affect stream creation by 'fetch'
+- throwing Object.prototype.size accessor should not affect stream creation by 'request'
+- throwing Object.prototype.size accessor should not affect stream creation by 'response'
+- throwing Object.prototype.start accessor should not affect stream creation by 'consumeEmptyRequest'
+- throwing Object.prototype.start accessor should not affect stream creation by 'consumeEmptyResponse'
+- throwing Object.prototype.start accessor should not affect stream creation by 'consumeNonEmptyRequest'
+- throwing Object.prototype.start accessor should not affect stream creation by 'consumeNonEmptyResponse'
+- throwing Object.prototype.start accessor should not affect stream creation by 'request'
+- throwing Object.prototype.start accessor should not affect stream creation by 'response'
+- throwing Object.prototype.type accessor should not affect stream creation by 'consumeEmptyRequest'
+- throwing Object.prototype.type accessor should not affect stream creation by 'consumeEmptyResponse'
+- throwing Object.prototype.type accessor should not affect stream creation by 'consumeNonEmptyRequest'
+- throwing Object.prototype.type accessor should not affect stream creation by 'consumeNonEmptyResponse'
+- throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
+- throwing Object.prototype.type accessor should not affect stream creation by 'request'
+- throwing Object.prototype.type accessor should not affect stream creation by 'response'
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -1307,6 +1409,8 @@ service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL (generated response)
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
+shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
+- A_08_01_01_T01
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,

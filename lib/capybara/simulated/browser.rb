@@ -2410,6 +2410,11 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
+        # BEFORE the early return: a document that booted from a path with no drain
+        # of its own (a click that navigated, a submit) still owes its window `load`,
+        # and every driver read comes through here first. The invariant this buys is
+        # simple — the load has fired by the time anything can observe the new page.
+        flush_pending_window_load
         return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
@@ -3093,6 +3098,10 @@ module Capybara
       end
 
       def reset!
+        # A load marked by the outgoing page's boot belongs to a document this reset
+        # is discarding — firing it against the next one would be a load event for a
+        # document that never loaded.
+        @window_load_due = false
         @cookies.clear
         @cookie_flags.clear
         @auth_cache.clear
@@ -6487,6 +6496,45 @@ module Capybara
       def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
       def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
+      # An AUXILIARY window's own `load` is fired by its OPENER, one task after the
+      # document boots (platform-globals' `fireAuxLoadSoon`), so that a handler
+      # either side registers right after `window.open()` — the child reporting back
+      # through `window.opener`, the opener's own `w.onload` — is in place first.
+      # Booting must not pre-empt that, hence the flag; the main window has nobody
+      # to wait for and fires its own at the end of its boot.
+      attr_accessor :defer_window_load
+
+      # Fire the window `load` for a document that has finished booting — once the
+      # navigation that produced it is over AND the driver is back between calls.
+      # Both halves matter: a `load` handler may navigate (submit a form, point an
+      # iframe somewhere), and those intents are stashed for
+      # `drain_pending_navigation`, which applies them only when nothing else is on
+      # the stack. Firing from inside `navigate` instead — even from its `ensure` —
+      # left a frame navigation stranded (WPT's
+      # event-global-is-still-set-when-coercing-beforeunload-result).
+      #
+      # TWO call sites, and between them the invariant is simple: the load has fired
+      # by the time anything can observe the new page.
+      #   - the END of `drain_pending_navigation`, which is where a page-initiated
+      #     navigation (a clicked link, a submitted form) boots its document;
+      #   - the top of `tick_real_time`, the backstop every driver read passes
+      #     through.
+      #
+      # An AUXILIARY window's `load` is its opener's to fire (see
+      # `defer_window_load`), so this only clears the marker there.
+      private def flush_pending_window_load
+        return unless @window_load_due
+
+        @window_load_due = false
+        return if @defer_window_load
+
+        fire_own_window_load
+        # A `load` handler's own navigation is stashed like any other page-initiated
+        # one, so drain it here rather than leaving it for whenever the driver next
+        # happens to tick (the marker is already cleared, so this doesn't re-enter).
+        drain_pending_navigation
+      end
+
       # Fire an aux window's own window `load` (called by its opener, deferred).
       def fire_aux_window_load(handle)  = (@driver.fire_aux_window_load(handle.to_s) if @driver.respond_to?(:fire_aux_window_load))
       def fire_own_window_load          = (@runtime.call('__csimFireWindowLoad') rescue nil)
@@ -10080,6 +10128,11 @@ module Capybara
         consume_pending_reload
         consume_pending_history_traverse
         consume_pending_aux_window
+        # AFTER the consumes, not before: a page-initiated navigation (a link click,
+        # a form submit) BOOTS its document in one of them, so the marker it leaves
+        # is only there to act on once they have run. Firing first meant a clicked
+        # link never fired a load at all.
+        flush_pending_window_load
       end
 
       # A script-driven `anchor.click()` / `target=_blank` navigation with no
@@ -10738,6 +10791,31 @@ module Capybara
             @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           end
         end
+        # The document and everything it deferred are in, so the window `load`
+        # event fires — which for the MAIN document nothing ever did. Frames and
+        # auxiliary windows each fired their own; a page's own
+        # `window.onload` / `$(window).on('load')` init simply never ran, and an
+        # app that defers its wiring to `load` (rather than DOMContentLoaded)
+        # looked inert to a test.
+        #
+        # HERE and not inside `__csimLoadDocument`, because `load` waits for a
+        # document's subresources: the deferred / async chunk scripts drained just
+        # above are exactly those, and a handler that expects them has to run
+        # after they do. Idempotent JS-side, so the WPT harness's own call after a
+        # visit is a no-op rather than a second event.
+        # A document's style sheets are part of what `load` waits for; the JS side
+        # flushes their pending load tasks before dispatching (`sheetLoadTask`),
+        # which is why nothing here advances the clock — an unrelated
+        # `setTimeout(fn, 0)` a page queued during parsing must still be PENDING
+        # when the visit returns (smoke_spec's "queries the DOM before advancing
+        # pending timers").
+        #
+        # Marked, not fired: a `load` handler may navigate — submit a form, point an
+        # iframe somewhere — and a navigation started while THIS one is still in
+        # flight (`@navigating`) is not the same thing as one started from an idle
+        # page. `flush_pending_window_load` fires it the moment the navigation that
+        # produced the document is done.
+        @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
 
