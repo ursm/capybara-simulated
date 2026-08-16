@@ -197,6 +197,21 @@ RSpec.describe 'inline continuation' do
     expect(session.evaluate_script('window.__hit')).to eq('a')
   end
 
+  # An inline box's own padding, border and margin advance the line without being TEXT, so they
+  # take no part in white-space collapsing either — and an unbreakable run placed whole still
+  # ends the line in a space when it ends in one.
+  it 'collapses across an inline box that contributes edges rather than text' do
+    body = '<div style="width:400px"><span id="nw" style="white-space:nowrap">Hello </span> world</div>' \
+           '<div style="width:400px">Hello <b id="pb" style="padding-left:5px"></b> world</div>' \
+           '<div style="width:400px"><span id="plain">Hello </span> world</div>'
+    boxes, w = measure(body, ['#nw', '#pb', '#plain'], probes: ['Hello world', 'Hello '])
+    nw, pb, plain = boxes
+    expect(nw[2]).to be_within(0.05).of(w['Hello '])
+    expect(plain[2]).to be_within(0.05).of(w['Hello '])
+    # One space between the two words on every line, whatever sits between them.
+    expect(pb[0] + pb[2] + (w['Hello world'] - w['Hello '])).to be_within(0.05).of(w['Hello world'] + 5)
+  end
+
   # …and nothing at all once the element stops being rendered. A fragmented inline never goes
   # through the box path, so the pieces it left behind have to be gated on the way out — a page
   # that probes `getClientRects().length` (jQuery `:visible`) would otherwise read a hidden
@@ -231,6 +246,43 @@ RSpec.describe 'inline continuation' do
     expect(s[0]).to eq(0)                              # the union starts at the block's edge…
     expect(tip[0]).to be_within(0.05).of(w['a '])      # …the containing block at the first piece
     expect(tip[1]).to eq(s[1] + s[3])                  # `top: 100%` of that box. Chrome: 71
+  end
+
+  # An out-of-flow box waits for the inline around it to have geometry — and the wait belongs
+  # to the BLOCK that opened that inline, not to whichever block finishes first. A sibling laid
+  # out in between used to release it early, against a containing block that still had none.
+  it 'holds an absolute child until the inline that contains it has settled, whatever follows' do
+    body = '<nav id="d"><span id="s" style="position:relative">Menu' \
+           '<div id="a" style="position:absolute;top:100%;left:0;width:120px;height:40px">item</div></span>' \
+           '<div id="after">rest of page</div></nav>'
+    boxes, = measure(body, ['#s', '#a', '#after'])
+    s, a, after = boxes
+    expect(a[1]).to eq(s[1] + s[3])                    # Chrome: 17, `top: 100%` of the span
+    expect(after[1]).to be > a[1]                      # …and the sibling block is unaffected
+  end
+
+  # It also keeps the paint order it had in the tree: laying it out last would put it above the
+  # boxes that follow it, and the topmost box is what a click lands on.
+  it 'keeps a deferred absolute child below the boxes that follow it' do
+    body = '<div id="d" style="position:relative"><span>t' \
+           '<b id="first" style="position:absolute;left:0;top:0;width:100px;height:100px"></b></span>' \
+           '<i id="second" style="position:absolute;left:0;top:0;width:100px;height:100px"></i></div>'
+    boxes, _w, _line, session = measure(body, ['#second'])
+    x, y = boxes[0][0] + 50, boxes[0][1] + 50
+    expect(session.evaluate_script("(document.elementFromPoint(#{x}, #{y}) || {}).id")).to eq('second')
+  end
+
+  # A line whose only content was a space the break ate leaves no fragment behind. Written
+  # across source lines — the way markup is formatted — the box would otherwise report an empty
+  # rect parked at the end of the line above, and a union that spans both.
+  it 'leaves no fragment on a line the break emptied' do
+    body = %(<div id="d" style="width:300px"><i style="display:inline-block;width:280px"></i>) +
+           %(<a id="s" href="#">
+  wordone wordtwo
+</a></div>)
+    boxes, w, _line, session = measure(body, ['#s'], probes: ['wordone wordtwo'])
+    expect(session.evaluate_script("document.querySelector('#s').getClientRects().length")).to eq(1)
+    expect(boxes[0][2]).to be_within(0.05).of(w['wordone wordtwo'])   # Chrome: 125.41, one line
   end
 
   # An inline box with nothing in it generates no line box at all — Chrome reports an

@@ -1584,16 +1584,16 @@ module Capybara
       # This is exactly what the unified geometry buys: Capybara's own
       # click-offset fixture logs `event.clientX - this.getBoundingClientRect()
       # .left`, which only comes back as the requested offset when the
-      # pointer we synthesize and the rect the page measures are the same
-      # geometry. Two sources disagree by the element's position.
+      # pointer we synthesize and the rect the page measures come from the
+      # same layout. They are not the same BOX, though: WebDriver measures
+      # its in-view centre point on the element's first client rect, which
+      # for an inline that wrapped is its first fragment, not its bounding
+      # box — whose centre is the paragraph text between its two lines.
       def click_event_init(handle, keys, opts)
         out = modifier_flags(keys)
         has_xy = opts[:x] || opts[:y]
         center = opts[:offset] == :center || !has_xy
         if has_xy || center
-          # The pointer aims at the element's FIRST client rect, which is what WebDriver
-          # measures its in-view centre point on — for a link that wrapped over two lines, the
-          # centre of its BOUNDING box is the paragraph text between them.
           rect = dom_call('__csimPointerRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
