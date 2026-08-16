@@ -1,5 +1,6 @@
 require_relative 'spec_helper'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # `canvas.toBlob` must emit the encoded image as raw binary. The libvips
 # encoder hands back a byte buffer; if that buffer is funnelled through a
@@ -42,12 +43,7 @@ RSpec.describe 'canvas.toBlob binary integrity' do
         });
       })()
     JS
-    sig = nil
-    20.times do
-      sig = session.evaluate_script('window.__sig')
-      break if sig
-      sleep 0.02
-    end
+    sig = poll_until { session.evaluate_script('window.__sig') }
     expect(sig).not_to be_nil
     # PNG signature: 137 80 78 71 13 10 26 10 — no leading 0xC2 (194).
     expect(sig['head']).to eq([137, 80, 78, 71, 13, 10, 26, 10])
@@ -73,12 +69,7 @@ RSpec.describe 'canvas.toBlob binary integrity' do
         });
       })()
     JS
-    out = nil
-    20.times do
-      out = session.evaluate_script('window.__dims')
-      break if out
-      sleep 0.02
-    end
+    out = poll_until { session.evaluate_script('window.__dims') }
     expect(out).to eq({'width' => 8, 'height' => 6})
   end
 

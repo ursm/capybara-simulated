@@ -11,9 +11,11 @@ gem 'quickjs', '~> 0.21.0'
 gem 'quickjs-polyfill-intl'
 
 group :development, :test do
-  gem 'launchy'            # required by Capybara's shared save_and_open_page spec
-  gem 'parallel_tests', '~> 5.7' # multi-process spec runs (parallel_rspec); the WPT gate is sharded to feed it.
+  gem 'flatware-rspec', '~> 2.4' # multi-process spec runs (`flatware rspec spec`); the WPT / capybara-shared gates are
+                                 # sharded to feed it, and it self-balances from the RSpec example-status file (see
+                                 # spec/support/example_persistence.rb — includes the fork discipline flatware requires).
                                  # Pinned: Gemfile.lock is gitignored, so an unconstrained major bump would hit CI unbisectably.
+  gem 'launchy'            # required by Capybara's shared save_and_open_page spec
   gem 'puma'               # for Capybara's :server tests (also used by spec helper)
   gem 'rack-test'
   gem 'rake',              require: false

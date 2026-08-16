@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Web Worker round-trip coverage: spawn isolate, post messages each
 # way, terminate. The driver creates a fresh V8 Context / QuickJS VM
@@ -46,21 +47,6 @@ RSpec.describe 'Web Worker' do
 
   before { Capybara.app = app }
 
-  # The default bound is generous on purpose: it exits on the first truthy
-  # poll, so a healthy run never pays it, while a loaded parallel runner (CI
-  # runs 4 sibling processes; a fresh worker VM's boot competes with them)
-  # gets the wall time it actually needs.
-  def poll_for(session, script, timeout: 10)
-    deadline = Time.now + timeout
-    last = nil
-    until Time.now > deadline
-      last = session.evaluate_script(script)
-      return last if yield(last)
-      sleep 0.05
-    end
-    last
-  end
-
   it 'spawns a worker and round-trips a postMessage' do
     session = simulated_session(app)
     session.visit('/')
@@ -70,8 +56,8 @@ RSpec.describe 'Web Worker' do
       w.onmessage = (e) => { window.__r = e.data; };
       w.postMessage({cmd: 'echo', value: 'hello'});
     JS
-    result = poll_for(session, 'window.__r') {|v| v == {'echo' => 'hello'} }
-    expect(result).to eq({'echo' => 'hello'})
+    poll_until { session.evaluate_script('window.__r !== null') }
+    expect(session.evaluate_script('window.__r')).to eq({'echo' => 'hello'})
   end
 
   it 'runs computation in the worker and returns the result' do
@@ -83,8 +69,8 @@ RSpec.describe 'Web Worker' do
       w.onmessage = (e) => { window.__sumRes = e.data; };
       w.postMessage({cmd: 'compute', n: 100});
     JS
-    result = poll_for(session, 'window.__sumRes') {|v| v == {'sum' => 5050} }
-    expect(result).to eq({'sum' => 5050})
+    poll_until { session.evaluate_script('window.__sumRes !== null') }
+    expect(session.evaluate_script('window.__sumRes')).to eq({'sum' => 5050})
   end
 
   it 'supports addEventListener("message") on the worker scope' do
@@ -97,11 +83,9 @@ RSpec.describe 'Web Worker' do
       w.postMessage({cmd: 'addEventListener'});
       w.postMessage({hello: 'world'});
     JS
-    arr = poll_for(session, 'JSON.stringify(window.__res)', timeout: 3) {|raw|
-      a = JSON.parse(raw)
-      a.include?({'addedListener' => true}) && a.any? {|e| e['viaListener'] == {'hello' => 'world'} }
-    }
-    parsed = JSON.parse(arr)
+    # Two separate deliveries — wait for both, then assert on the whole log.
+    poll_until { session.evaluate_script('window.__res.length >= 2') }
+    parsed = JSON.parse(session.evaluate_script('JSON.stringify(window.__res)'))
     expect(parsed).to include({'addedListener' => true})
     expect(parsed).to include({'viaListener' => {'hello' => 'world'}})
   end
@@ -143,7 +127,7 @@ RSpec.describe 'Web Worker' do
       };
       w.postMessage({cmd: 'echo', value: {arr: [undefined, undefined, 'x'], obj: {u: undefined, v: 1}}});
     JS
-    poll_for(session, 'globalThis.__got !== null') {|v| v }
+    poll_until { session.evaluate_script('globalThis.__got !== null') }
     got = session.evaluate_script('globalThis.__got') or raise 'the worker never echoed'
 
     expect(got['len']).to eq(3)

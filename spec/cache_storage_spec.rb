@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Cache Storage API (`caches` / `Cache`) — the WindowOrWorkerGlobalScope surface backed by
 # the Ruby-side origin-partitioned store. Exercises the CacheStorage lifecycle, put/match
@@ -28,10 +29,7 @@ RSpec.describe 'Cache Storage API' do
   # result. Awaits a promise via a settle poll.
   def run_async(session, js)
     session.execute_script("globalThis.__done = false; Promise.resolve((async () => { #{js} })()).then(v => { globalThis.__r = v; globalThis.__done = true; }, e => { globalThis.__r = {__err: String(e && e.name || e)}; globalThis.__done = true; });")
-    10.times do
-      break if session.evaluate_script('globalThis.__done === true')
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__done === true') }
     JSON.parse(session.evaluate_script('JSON.stringify(globalThis.__r)'))
   end
 

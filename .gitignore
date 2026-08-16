@@ -14,3 +14,4 @@
 # Python bytecode from the WPT .py handler executor
 __pycache__/
 *.pyc
+/flatware-sink

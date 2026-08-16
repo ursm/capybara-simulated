@@ -1,5 +1,5 @@
 // Dev-time vendoring: pull a pinned subset of web-platform-tests into
-// spec/wpt/ so the behavioural-conformance gate (spec/wpt_spec.rb) runs
+// spec/wpt/ so the behavioural-conformance gate (spec/wpt_gate/) runs
 // offline, with no Node toolchain — the same "fetch at dev time, commit the
 // artifact" model as gen_idl_surface.mjs and the JS bundles.
 //
@@ -35,7 +35,7 @@ const OUT = join(ROOT, 'spec', 'wpt');
 const REPO = 'web-platform-tests/wpt';
 
 // Pin. Bump deliberately; regenerate the expected-failures allowlist after
-// (`WPT_REGEN=1 bundle exec rspec spec/wpt_spec.rb`).
+// (`WPT_REGEN=1 bundle exec rspec spec/wpt_gate`).
 const PINNED = 'bbe4ce211741e3b36f58ccdcffd6a7c1926fde1b';   // web-platform-tests/wpt @ 2026-06-27
 const REF = process.env.WPT_REF || PINNED;
 
@@ -303,7 +303,7 @@ async function main() {
       `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}\n`
   );
   console.error(`Done. Pinned SHA written to spec/wpt/WPT_VERSION.`);
-  console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_spec.rb  # refresh the allowlist`);
+  console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_gate  # refresh the allowlist`);
 }
 
 main().catch((e) => {

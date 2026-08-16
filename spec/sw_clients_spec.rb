@@ -5,6 +5,7 @@ require_relative 'support/js_engine'
 require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # `clients.matchAll()` enumerates the service worker's CONTROLLED clients — every in-scope
 # browsing context, not merely the ones that happened to postMessage the worker — with each
@@ -178,11 +179,7 @@ RSpec.describe 'Service Worker client enumeration' do
         globalThis.__ready = true;
       });
     JS
-    40.times do
-      break if session.evaluate_script('globalThis.__ready === true')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__ready === true') }
     session
   end
 
@@ -196,11 +193,7 @@ RSpec.describe 'Service Worker client enumeration' do
       win.navigator.serviceWorker.addEventListener('message', e => { globalThis.__report = e.data; }, {once: true});
       win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'focus' => focus, 'options' => options, 'postTo' => post_to}.compact)});
     JS
-    20.times do
-      break if session.evaluate_script('globalThis.__report !== null')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__report !== null') }
     session.evaluate_script('globalThis.__report') or raise 'the service worker never answered'
   end
 
@@ -376,22 +369,14 @@ RSpec.describe 'Service Worker client enumeration' do
         globalThis.__ready = true;
       })();
     JS
-    40.times do
-      break if session.evaluate_script('globalThis.__ready === true')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__ready === true') }
 
     # The top page is outside '/scope/', so it is still controlled by the FIRST worker — asking
     # through it asks the worker that lost the frame.
     # `claim()` rides the worker outbox, so activation resolving does NOT mean the frame has
     # changed hands yet. Wait for the handover itself — otherwise this asserts on whichever
     # order the drain happened to take.
-    20.times do
-      break if session.evaluate_script("((document.getElementById('a').contentWindow.navigator.serviceWorker.controller || {}).scriptURL || '').endsWith('/sw2.js')")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("((document.getElementById('a').contentWindow.navigator.serviceWorker.controller || {}).scriptURL || '').endsWith('/sw2.js')") }
     urls = match_all(session, via: :top).map {|c| c['url'] }
 
     expect(urls).to include(a_string_ending_with('/'))
@@ -410,11 +395,7 @@ RSpec.describe 'Service Worker client enumeration' do
       window.addEventListener('message', e => { globalThis.__boxed = e.data; }, {once: true});
       document.getElementById('boxed').contentWindow.postMessage('report', '*');
     JS
-    20.times do
-      break if session.evaluate_script('globalThis.__boxed !== null')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__boxed !== null') }
     report = session.evaluate_script('globalThis.__boxed') or raise 'the sandboxed frame never reported'
 
     expect(report['origin']).to eq('null')
@@ -465,11 +446,7 @@ RSpec.describe 'Service Worker client enumeration' do
   # worker would come out uncontrolled.
   it 'gives a blob-URL worker the controller of the context that created it' do
     session = session_with_frames({'a' => '/scope/blob-worker-page.html'})
-    40.times do
-      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("document.getElementById('a').contentWindow.__ready === true") }
     # A barrier, not a nap: the client record is registered synchronously by worker_spawn, so
     # without this both specs below would pass even if the worker never ran at all.
     expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
@@ -493,11 +470,7 @@ RSpec.describe 'Service Worker client enumeration' do
       }, {once: true});
       win.navigator.serviceWorker.controller.postMessage(#{JSON.generate({'navigate' => to, 'on' => on})});
     JS
-    40.times do
-      break if session.evaluate_script('globalThis.__nav !== null')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__nav !== null') }
     session.evaluate_script('globalThis.__nav') or raise 'the worker never reported'
   end
 
@@ -561,11 +534,7 @@ RSpec.describe 'Service Worker client enumeration' do
   # the full wait. That cost is invisible to a pass/fail spec, so assert the predicate directly.
   it 'stops reporting pending work once a discarded frame’s workers are gone' do
     session = session_with_frames({'a' => '/scope/blob-worker-page.html'})
-    40.times do
-      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("document.getElementById('a').contentWindow.__ready === true") }
     expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
     # A LISTEN-ONLY worker: it receives and never posts back, so nothing ever releases the
     # in-flight count this message takes out. That is the shape that pins the counter.
@@ -615,17 +584,9 @@ RSpec.describe 'Service Worker client enumeration' do
     JS
     # `clients.claim()` rides the worker outbox, so activation resolving does not mean this page has
     # a controller yet — wait for the handover itself before asking.
-    60.times do
-      break if session.evaluate_script('globalThis.__armed === true && !!navigator.serviceWorker.controller')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__armed === true && !!navigator.serviceWorker.controller') }
     session.execute_script("navigator.serviceWorker.controller.postMessage('report');")
-    60.times do
-      break if session.evaluate_script('globalThis.__early !== null')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__early !== null') }
     early = session.evaluate_script('globalThis.__early') or raise 'the worker never reported'
 
     expect(early.map {|c| c['url'] }).to include(a_string_ending_with('/'))
@@ -637,11 +598,7 @@ RSpec.describe 'Service Worker client enumeration' do
   # nothing can ever reach.
   it 'terminates a frame’s workers when the frame is discarded' do
     session = session_with_frames({'a' => '/scope/blob-worker-page.html', 'b' => '/scope/page.html#b'})
-    40.times do
-      break if session.evaluate_script("document.getElementById('a').contentWindow.__ready === true")
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("document.getElementById('a').contentWindow.__ready === true") }
     # A barrier, not a nap: the client record is registered synchronously by worker_spawn, so
     # without this both specs below would pass even if the worker never ran at all.
     expect(session.evaluate_script("document.getElementById('a').contentWindow.__ready")).to be(true)
@@ -677,11 +634,7 @@ RSpec.describe 'Service Worker client enumeration' do
       globalThis.__w.onmessage = e => { globalThis.__fromWorker = e.data; };
     JS
     worker_report(session, via: 'a', post_to: '/scope/worker.js')
-    20.times do
-      break if session.evaluate_script('globalThis.__fromWorker !== null')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__fromWorker !== null') }
     got = session.evaluate_script('globalThis.__fromWorker') or raise 'the worker never relayed'
 
     expect(got).to eq({'fromSW' => {'relayed' => '/scope/worker.js'}})
@@ -702,11 +655,7 @@ RSpec.describe 'Service Worker client enumeration' do
     JS
     # `clients.claim()` rides the worker outbox, so activation resolving does not mean the top
     # page has a controller yet — wait for the handover itself, not for something near it.
-    40.times do
-      break if session.evaluate_script('globalThis.__ready2 === true && !!navigator.serviceWorker.controller')
-
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('globalThis.__ready2 === true && !!navigator.serviceWorker.controller') }
     # Ask the SECOND worker (it controls the top page, which is outside '/scope/').
     urls = match_all(session, via: :top, options: {'includeUncontrolled' => true}).map {|c| c['url'] }
 

@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require_relative 'support/js_engine'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Frame-document scripts must execute in the FRAME's realm, whichever
 # execution path the runtime routes them through. The leading-lexical and
@@ -259,12 +260,8 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
       document.body.appendChild(f);
       void f.contentWindow;   // cross-origin frames build lazily — force the load
     JS
-    r = nil
-    20.times do
-      r = session.evaluate_script('window.__r')
-      break if r != 'none'
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script("window.__r !== 'none'") }
+    r = session.evaluate_script('window.__r')
     expect(r).to eq('self=http://cross.example.org topOrigin=SecurityError parentDoc=SecurityError')
   end
 end
@@ -300,12 +297,8 @@ RSpec.describe 'postMessage cross-document origin' do
       document.body.appendChild(f);
       void f.contentWindow;
     JS
-    msgs = []
-    20.times do
-      msgs = session.evaluate_script('window.__msgs')
-      break if msgs.length >= 2
-      sleep 0.02
-    end
+    poll_until { session.evaluate_script('window.__msgs.length >= 2') }
+    msgs = session.evaluate_script('window.__msgs')
     # "star" (*) and "match" (origin equals target) delivered; "mismatch" dropped.
     # event.origin is the sender's origin, not ''.
     expect(msgs).to contain_exactly(
@@ -349,13 +342,8 @@ RSpec.describe 'postMessage cross-document origin' do
         setTimeout(() => { window.__attachedRanAtInner = window.__attachedRan; }, 0);
       }, 0);
     JS
-    ran = nil
-    20.times do
-      ran = session.evaluate_script('window.__attachedRanAtInner')
-      break unless ran.nil?
-      sleep 0.02
-    end
-    expect(ran).to be(true)
+    poll_until { session.evaluate_script('window.__attachedRanAtInner !== undefined') }
+    expect(session.evaluate_script('window.__attachedRanAtInner')).to be(true)
   end
 end
 
