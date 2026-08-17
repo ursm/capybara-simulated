@@ -1,5 +1,10 @@
 allowBuilds:
-  esbuild: set this to true or false
+  # Answered so `pnpm install` doesn't fail with ERR_PNPM_IGNORED_BUILDS (and take
+  # `pnpm run build`'s dependency check down with it). FALSE on purpose: esbuild's
+  # install script overwrites its `bin/esbuild` JS shim with the raw platform
+  # binary, which pnpm's `.bin` wrapper then feeds to node — the shim resolves
+  # @esbuild/linux-x64 (a normal optional dependency) by itself.
+  esbuild: false
 minimumReleaseAgeExclude:
   # We own xpathway and pull each release immediately; exclude all versions so
   # the minimum-release-age gate doesn't block freshly-published bumps.
@@ -8,3 +13,4 @@ patchedDependencies:
   css-select@7.0.0: patches/css-select@7.0.0.patch
   css-tree@3.2.1: patches/css-tree@3.2.1.patch
   css-what@8.0.0: patches/css-what@8.0.0.patch
+  whatwg-url@16.0.1: patches/whatwg-url@16.0.1.patch
