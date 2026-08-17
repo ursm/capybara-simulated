@@ -85,3 +85,28 @@ jobs:
       - run: bin/flatware-rspec spec --tag '~wpt'
         env:
           CSIM_JS_ENGINE: quickjs
+
+  # The gem SHIPS the pre-built bundles and never runs npm, so nothing in the spec
+  # run can notice a bundle that no longer matches `vendor/src` / `js/src` — or a
+  # `patches/` edit that was committed without rebuilding. Rebuild and diff.
+  bundles:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Version comes from package.json's `packageManager` field — the bundles are
+      # compared byte for byte, so the builder has to be pinned as well.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+
+      - name: The checked-in bundles must match their sources
+        run: git diff --exit-code vendor/js lib/capybara/simulated/js/bridge.bundle.js

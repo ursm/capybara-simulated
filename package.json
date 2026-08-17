@@ -1,6 +1,7 @@
 {
   "name": "capybara-simulated-vendor",
   "private": true,
+  "packageManager": "pnpm@11.21.0",
   "description": "Build-time bundling for vendored JS deps and the bridge. The gem ships the pre-built bundles (`vendor/js/vendor.bundle.js`, `lib/capybara/simulated/js/bridge.bundle.js`); npm is needed only when updating them.",
   "scripts": {
     "build:vendor": "esbuild vendor/src/vendor.entry.js --bundle --format=iife --keep-names --minify --global-name=__csimVendor --alias:tr46=./vendor/src/tr46-ascii.js --alias:@exodus/bytes/whatwg.js=./vendor/src/exodus-bytes-utf8.js --alias:@exodus/bytes/encoding.js=./vendor/src/exodus-bytes-utf8.js --outfile=vendor/js/vendor.bundle.js",

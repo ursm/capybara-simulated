@@ -9,6 +9,16 @@
 //
 // The output (`vendor/js/vendor.bundle.js`) is checked in and shipped
 // in the gem; consumers never need npm.
+//
+// Four of these deps are LOCALLY PATCHED (pnpm patches, registered in
+// pnpm-workspace.yaml, sources under `patches/`). Read the patch file to see an
+// edit in full; the newer ones also mark themselves `// csim patch:` in the
+// dependency's own source:
+//   css-select  — attribute-name casing, `:any-link`/`:root` scoping
+//   css-what    — selector-escape parsing (`\<EOF>` → U+FFFD, non-ASCII names)
+//   css-tree    — attribute-selector recovery at EOF (`[foo` parses as `[foo]`)
+//   whatwg-url  — parser speed only (bulk opaque-path append, hoisted state
+//                 handler); byte-identical output, differential-fuzzed
 
 import * as cssSelect from 'css-select';
 import * as cssWhat   from 'css-what';

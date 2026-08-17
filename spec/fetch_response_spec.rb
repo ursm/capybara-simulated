@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Fetch `Response` value-type semantics: a disturbed/locked stream body is rejected at
 # construction, `Response.json` throws on a non-encodable value, and a network-fetched
@@ -60,8 +61,9 @@ RSpec.describe 'Fetch Response semantics' do
         });
       });
     JS
-    sleep 0.1
-    r = JSON.parse(session.evaluate_script('globalThis.__r'))
+    # The fetch resolves on a later tick; wait for the OBSERVABLE, not the clock —
+    # a fixed sleep turns a slow CI worker into a `JSON::ParserError` on nil.
+    r = JSON.parse(poll_until { session.evaluate_script('globalThis.__r') })
     expect(r['builtMutable']).to eq('no-throw')
     expect(r['builtHas']).to eq('v')
     expect(r['fetchedThrew']).to eq('TypeError')

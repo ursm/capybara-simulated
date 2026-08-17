@@ -1,0 +1,96 @@
+diff --git a/lib/url-state-machine.js b/lib/url-state-machine.js
+index dd92fd09da8f1613e30ef05b0601322e8a59eb9b..54834afbdd377d064e1852c53aa3b742214eee56 100644
+--- a/lib/url-state-machine.js
++++ b/lib/url-state-machine.js
+@@ -543,14 +543,35 @@ function URLStateMachine(input, base, encoding, url, stateOverride) {
+   this.insideBrackets = false;
+   this.passwordTokenSeen = false;
+ 
+-  this.input = Array.from(this.input, c => c.codePointAt(0));
++  // csim patch: build the code-point array with a plain loop — `Array.from(input,
++  // c => c.codePointAt(0))` runs the string iterator plus a closure per character,
++  // which on a megabyte-long `data:` URL is the parse's single biggest allocation.
++  {
++    const str = this.input;
++    const cps = [];
++    let n = 0;
++    for (let i = 0; i < str.length; ++i) {
++      const cp = str.codePointAt(i);
++      cps[n++] = cp;
++      if (cp > 0xFFFF) ++i;
++    }
++    this.input = cps;
++  }
+ 
++  let handlerState = null;
++  let handler = null;
+   for (; this.pointer <= this.input.length; ++this.pointer) {
+     const c = this.input[this.pointer];
+-    const cStr = isNaN(c) ? undefined : String.fromCodePoint(c);
+-
+-    // exec state machine
+-    const ret = this[`parse ${this.state}`](c, cStr);
++    const cStr = c === undefined ? undefined : String.fromCodePoint(c);
++
++    // csim patch: exec state machine with the handler looked up only when the state
++    // CHANGES. Upstream evaluates ``this[`parse ${this.state}`]`` per code point —
++    // a string concatenation and a megamorphic property load for every character.
++    if (this.state !== handlerState) {
++      handlerState = this.state;
++      handler = this[`parse ${handlerState}`];
++    }
++    const ret = handler.call(this, c, cStr);
+     if (!ret) {
+       break; // terminate algorithm
+     } else if (ret === failure) {
+@@ -1059,6 +1080,22 @@ URLStateMachine.prototype["parse path"] = function parsePath(c) {
+   return true;
+ };
+ 
++// csim patch: the intrinsics the two fast paths below use, captured at module
++// load. The bundle is evaluated before any page script, so app-JS prototype
++// pollution (`Array.prototype.slice`, `Function.prototype.apply`, …) can't reach
++// the parser through them.
++const csimFromCharCode = String.fromCharCode;
++const csimArraySlice = Array.prototype.slice;
++
++// csim patch: code points the opaque-path state appends VERBATIM: printable ASCII, which the
++// C0-control percent-encode set (<= 0x1F or > 0x7E) leaves alone, minus the ones
++// the state's own branches claim — `?` and `#` end the path, U+0020 has its
++// lookahead branch, and `%` carries the escape-validity parse error. A maximal run
++// of these is appended in one slice below.
++function isOpaquePathPassthrough(c) {
++  return c > 0x20 && c <= 0x7E && c !== 0x23 && c !== 0x25 && c !== 0x3F;
++}
++
+ URLStateMachine.prototype["parse opaque path"] = function parseOpaquePath(c) {
+   if (c === p("?")) {
+     this.url.query = "";
+@@ -1086,7 +1123,26 @@ URLStateMachine.prototype["parse opaque path"] = function parseOpaquePath(c) {
+     }
+ 
+     if (!isNaN(c)) {
+-      this.url.path += utf8PercentEncodeCodePoint(c, isC0ControlPercentEncode);
++      // csim patch: a maximal run of passthrough code points is appended in ONE
++      // slice instead of one `utf8PercentEncodeCodePoint` + rope append each — the
++      // difference between O(n) allocations and none on a multi-megabyte `data:`
++      // URL. Same output and same parse errors: every code point in the run takes
++      // the "not a URL code point" branch above, which already fired for the first.
++      if (isOpaquePathPassthrough(c)) {
++        const input = this.input;
++        let end = this.pointer;
++        while (end + 1 < input.length && isOpaquePathPassthrough(input[end + 1])) {
++          ++end;
++        }
++        let run = "";
++        for (let i = this.pointer; i <= end; i += 4096) {
++          run += csimFromCharCode.apply(null, csimArraySlice.call(input, i, Math.min(i + 4096, end + 1)));
++        }
++        this.url.path += run;
++        this.pointer = end;
++      } else {
++        this.url.path += utf8PercentEncodeCodePoint(c, isC0ControlPercentEncode);
++      }
+     }
+   }
+ 
