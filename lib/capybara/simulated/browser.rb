@@ -2030,6 +2030,11 @@ module Capybara
         target = @history_idx + delta
         return if target < 0 || target >= @history.size
         if same_document_traversal?(@history_idx, target)
+          # …unless this is the page being navigated away from, running its last
+          # due-now step: the navigation already under way wins, and moving the
+          # index here would leave it pointing at an entry that isn't the document
+          # about to commit (see `flush_outgoing_page_init`).
+          return :same_document if @flushing_outgoing_page
           # Pure pushState traversal — no VM rebuild, safe to run
           # inline; the popstate dispatch happens within the current
           # call's JS context.
@@ -2065,10 +2070,13 @@ module Capybara
       end
 
       private def perform_history_traverse(target)
+        # Before the index below moves (see `flush_outgoing_page_init`).
+        flush_outgoing_page_init if @timers_active
         capture_outgoing_form_state
         @history_idx = target
         replay_history_entry(@history[target])
         restore_form_state(@history[target])
+        restore_flushed_nav_intents
       end
 
       # Snapshot the OUTGOING document's form-control state into the history entry
@@ -3024,6 +3032,10 @@ module Capybara
       def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
+        # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
+        # `from_history` already flushed at its own entry point, which commits the
+        # history index before it gets here.
+        flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
         unless from_history || depth > 0
           capture_outgoing_form_state
           record_history({method: :post, url: url, body: body, content_type: content_type})
@@ -3090,6 +3102,7 @@ module Capybara
         end
         if download_response?(headers)
           save_downloaded_response(url, headers, resp_body)
+          restore_flushed_nav_intents
           return
         end
         @current_url = url
@@ -7724,6 +7737,8 @@ module Capybara
       # document — for `window.open(blobURL)` / a blob: aux-window navigation,
       # where the blob isn't rack-navigable and lives in the opener's isolate.
       def boot_blob_document(url, bytes, content_type)
+        # Before the URL below lands (see `flush_outgoing_page_init`).
+        flush_outgoing_page_init if @timers_active
         @current_url = url.to_s
         ct = content_type.to_s.empty? ? 'text/html' : content_type.to_s
         # Blob string parts are UTF-8-encoded; when the Blob type carries no
@@ -10196,7 +10211,10 @@ module Capybara
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
       def refresh
+        # Before the replay below commits anything (see `flush_outgoing_page_init`).
+        flush_outgoing_page_init if @timers_active
         replay_history_entry(@history[@history_idx], is_reload: true)
+        restore_flushed_nav_intents
       end
       # `history.pushState(state, '', '/path')` ships the URL through
       # `__setCurrentUrl` and lands here. Tab controllers / SPA frameworks
@@ -10622,6 +10640,10 @@ module Capybara
       def navigate(url, depth: 0, referer: @current_url, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
+        # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
+        # `from_history` already flushed at its own entry point, which commits the
+        # history index before it gets here.
+        flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
         # Capture the entry referer (the page initiating this navigation,
         # e.g. clicked link's host page) at depth 0 — internal redirects
         # at deeper depths don't replace the user-visible referrer.
@@ -10734,6 +10756,9 @@ module Capybara
           boot_response_into_ctx(html)
         ensure
           @navigating = prior_navigating
+          # No document committed (a download, a raise mid-fetch) → the page that
+          # flushed is still live and still means what its timers asked for.
+          restore_flushed_nav_intents if depth.zero?
         end
       end
 
@@ -10750,21 +10775,10 @@ module Capybara
       # small (~10 retry intervals) so failing-assertion paths don't pay
       # for the wait.
       def boot_response_into_ctx(html)
-        # Before discarding the OUTGOING page's VM, flush its DUE-NOW init work so
-        # persistent side effects (localStorage / cookies) survive into the next
-        # page. forem's login redirect kicks off `fetchBaseData` — a
-        # `setTimeout(0)` (fetch.js) whose `.then` writes `current_user` to
-        # localStorage — but the interactive gen-yield `settle` bails on the first
-        # init mutation before that due-now fetch fires; without this flush the
-        # cache write is lost on rebuild and the next page (which reads it
-        # synchronously to reveal logged-in UI) renders as logged-out. `maxMs: 0`
-        # fires only ALREADY-due timers (the setTimeout(0) + its `.then` chain),
-        # NOT delayed timers — so the lazy wall-sync timer model is preserved (a
-        # freshly-loaded, not-yet-navigated-away page keeps its own pending
-        # setTimeout(0)s untouched; smoke_spec "queries DOM before advancing
-        # pending timers"). A real browser lets the outgoing page's in-flight init
-        # finish before the next document loads; this is the in-process analogue.
-        flush_outgoing_page_init if @timers_active
+        # (The outgoing page's due-now init ran back at the navigation's entry
+        # point — `flush_outgoing_page_init`, called before anything commits.)
+        # This IS the commit, so whatever that page stashed dies with it.
+        @flushed_nav_intents = nil
         # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
@@ -10865,38 +10879,126 @@ module Capybara
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
       end
 
-      # Run one due-now event-loop step on the OUTGOING page (see
-      # `boot_response_into_ctx`). The outgoing page's timers may call
-      # `location.* / history.* / reload`, which only STASH a Ruby-side intent —
-      # but we are navigating away, so those intents are moot and must NOT leak
-      # into the page we are about to load (otherwise the next find's
-      # `tick_real_time` would consume a stray `@pending_location` and navigate
-      # off the freshly-loaded page). Snapshot/restore the nav-intent slots to
-      # keep the flush transparent; swallow any throw so a flaky outgoing-page
-      # timer can't abort loading the next page (the page it would affect is
-      # being discarded on the very next line).
+      # Run one due-now event-loop step on the page being navigated AWAY from,
+      # before this navigation commits anything. Two reasons it exists, and the
+      # ordering is what makes both work:
+      #
+      # 1. Its due-now init has persistent side effects the next page reads.
+      #    forem's login redirect kicks off `fetchBaseData` — a `setTimeout(0)`
+      #    (fetch.js) whose `.then` writes `current_user` to localStorage — but
+      #    the interactive gen-yield `settle` bails on the first init mutation
+      #    before that due-now fetch fires; without this flush the cache write is
+      #    lost on rebuild and the next page (which reads it synchronously to
+      #    reveal logged-in UI) renders as logged-out. `maxMs: 0` fires only
+      #    ALREADY-due timers (the setTimeout(0) + its `.then` chain), NOT delayed
+      #    ones, so the lazy wall-sync timer model is preserved (a freshly-loaded,
+      #    not-yet-navigated-away page keeps its own pending setTimeout(0)s
+      #    untouched; smoke_spec "queries DOM before advancing pending timers").
+      #
+      # 2. Those tasks can still touch the URL, and a browser lets them — the
+      #    outgoing document keeps running until the new response COMMITS.
+      #    Measured (Chrome 151, a page whose timers `replaceState('/replaced')`
+      #    then `pushState('/pushed')` while a slow `/arrived` is in flight):
+      #    `/arrived` loads at `/arrived`, and going back from it lands on
+      #    `/pushed` — the outgoing document's entries are real, they just don't
+      #    move the incoming document's URL. Running here reproduces that: the
+      #    mirrors (`history_state` / `history_push` / `history_go`, which all take
+      #    effect IMMEDIATELY on `@current_url` and `@history`) act on the outgoing
+      #    entry, and this navigation's `record_history` / `@current_url = url`
+      #    then commit on top. Flushing AFTER the commit — where this used to
+      #    live — let a late SPA redirect rewrite the incoming URL instead:
+      #    Mastodon signs in to `/`, whose router schedules a `<Redirect to=
+      #    '/home'>`, and a `visit` of a profile URL came back reporting — and
+      #    rendering — `/home`.
+      #
+      # `location.* / reload` only STASH a Ruby-side intent, which IS moot once we
+      # are leaving (the next find's `tick_real_time` would otherwise consume a
+      # stray `@pending_location` and navigate off the freshly-loaded page), so
+      # those slots are cleared for the step and restored after — except on the
+      # paths where nothing commits, which put them back (`restore_flushed_nav_intents`).
+      # Any throw is swallowed: a flaky outgoing-page timer must not abort loading
+      # the next page.
+      #
+      # Two consequences of running here rather than at the rebuild, both intended
+      # and both more browser-like: the outgoing page's due-now cookie / storage /
+      # `serviceWorker.register()` writes now land BEFORE the navigation request is
+      # dispatched (so the request carries what a browser's would), and
+      # `capture_outgoing_form_state` sees values its timers set. One is invisible
+      # rather than intended: `@navigating` is still false here, so a URL the flush
+      # produces doesn't join `@recent_urls` — which is what keeps a polling
+      # `have_current_path` from seeing the discarded page's URL.
+      # Every "navigate later" slot a page's JS can stash into. Cleared for the
+      # duration of the flush and restored after, so the outgoing page's intents
+      # neither leak into the incoming page nor clobber the live one. Listed here
+      # (rather than saved individually) because a re-assignment does NOT restore a
+      # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` are
+      # Hashes keyed by realm and the frame-submit / frame-reload slots are Arrays.
+      NAV_INTENT_SLOTS = %i[
+        @pending_location @pending_reload @pending_history_traverse
+        @pending_window_nav @pending_frame_nav @pending_frame_submit
+        @pending_frame_reload @pending_frame_traverse
+      ].freeze
+      private_constant :NAV_INTENT_SLOTS
+
       def flush_outgoing_page_init
-        saved_location     = @pending_location
-        saved_reload       = @pending_reload
-        saved_traverse     = @pending_history_traverse
-        saved_frame_nav    = @pending_frame_nav
-        saved_frame_submit = @pending_frame_submit
-        saved_frame_reload = @pending_frame_reload
+        saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
+        NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
+        # A same-document `history.back()` from the flushed page takes effect INLINE
+        # (`history_go`), moving `@history_idx` under the navigation now committing —
+        # the document would end up being the incoming page while the index pointed at
+        # the entry the outgoing page stepped to, so a later `go_forward` replayed the
+        # wrong entry. Chrome resolves the race the other way (measured, 151: a
+        # `history.back()` fired while a slow document is in flight CANCELS that
+        # navigation and traverses), but a `visit` that silently doesn't happen is
+        # worse for a test driver than a dropped traversal, so the navigation wins and
+        # the traversal is discarded — the same last-wins rule planned navigations use.
+        @flushing_outgoing_page = true
         begin
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         rescue StandardError
-          # Outgoing page is discarded next line; its flush error is moot.
+          # Outgoing page is discarded by this navigation; its flush error is moot.
         ensure
-          @pending_location         = saved_location
-          @pending_reload           = saved_reload
-          @pending_history_traverse = saved_traverse
-          # Don't let a frame-nav / frame-submit / frame-reload intent stashed by
-          # an outgoing-page timer leak into the fresh page — its realm id belongs
-          # to the discarded page (and a reused context id could mis-fire against
-          # an unrelated realm on the new page).
-          @pending_frame_nav        = saved_frame_nav
-          @pending_frame_submit     = saved_frame_submit
-          @pending_frame_reload     = saved_frame_reload
+          @flushing_outgoing_page = false
+          # What the flush itself stashed, kept for the paths that DON'T commit a new
+          # document (a `Content-Disposition: attachment` response, a raise mid-fetch):
+          # there the page lives on, so its `location.href = …` must still happen.
+          @flushed_nav_intents = NAV_INTENT_SLOTS.each_with_object({}) {|slot, h|
+            v = instance_variable_get(slot)
+            h[slot] = v unless v.nil?
+          }
+          saved.each {|slot, value| instance_variable_set(slot, value) }
+        end
+      end
+
+      # Put back what `flush_outgoing_page_init` took from a page that turned out to
+      # be staying (see above). `boot_response_into_ctx` drops the stash instead — a
+      # committed navigation really does discard the document that stashed it. An
+      # intent the live page has set since wins; the per-realm Hash / Array slots
+      # merge, so neither side's entries are lost.
+      def restore_flushed_nav_intents
+        intents = @flushed_nav_intents
+        @flushed_nav_intents = nil
+        return if intents.nil? || intents.empty? || @restoring_flushed_nav_intents
+
+        intents.each do |slot, flushed|
+          current = instance_variable_get(slot)
+          merged =
+            case current
+            when nil   then flushed
+            when Hash  then flushed.is_a?(Hash) ? flushed.merge(current) : current
+            when Array then flushed.is_a?(Array) ? flushed + current : current
+            else            current
+            end
+          instance_variable_set(slot, merged)
+        end
+        # And run them. The flush consumed the task that stashed them, so the
+        # settle that follows a user action sees nothing left to do and would
+        # leave the page sitting on a redirect it has already asked for.
+        @restoring_flushed_nav_intents = true
+        begin
+          drain_pending_navigation_once
+        ensure
+          @restoring_flushed_nav_intents = false
         end
       end
 
