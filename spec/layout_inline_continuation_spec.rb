@@ -233,6 +233,26 @@ RSpec.describe 'inline continuation' do
     expect(s[3]).to eq(frag[3])
   end
 
+  # The pointer is aimed at the element's first rect CLIPPED to the viewport, which is only an
+  # answer once the element is in it: WebDriver scrolls first and measures after. Measuring first
+  # clipped an off-screen rect down to nothing and aimed the click at the viewport's corner — a
+  # link below the fold then took a click its own handler never saw.
+  it 'aims a click at an element that is out of view after scrolling it in' do
+    body = '<div style="height:2000px"></div>' \
+           '<div id="d" style="width:420px">Lorem ipsum dolor sit ' \
+           '<a id="a" href="#">a link that is long enough to wrap over two lines here</a> tail.</div>'
+    _boxes, _w, _line, session = measure(body, ['#a'])
+    session.execute_script(<<~JS)
+      window.__hit = null;
+      document.addEventListener('click', function (e) {
+        var el = document.elementFromPoint(e.clientX, e.clientY);
+        window.__hit = el ? el.id || el.tagName : null;
+      }, true);
+    JS
+    session.find(:css, '#a').click
+    expect(session.evaluate_script('window.__hit')).to eq('a')
+  end
+
   # …and nothing at all once the element stops being rendered. A fragmented inline never goes
   # through the box path, so the pieces it left behind have to be gated on the way out — a page
   # that probes `getClientRects().length` (jQuery `:visible`) would otherwise read a hidden
