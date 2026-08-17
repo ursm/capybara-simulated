@@ -207,9 +207,30 @@ RSpec.describe 'inline continuation' do
     boxes, w = measure(body, ['#nw', '#pb', '#plain'], probes: ['Hello world', 'Hello '])
     nw, pb, plain = boxes
     expect(nw[2]).to be_within(0.05).of(w['Hello '])
+    # An edge is not content, so it does not rescue a space the break is about to eat either.
     expect(plain[2]).to be_within(0.05).of(w['Hello '])
     # One space between the two words on every line, whatever sits between them.
     expect(pb[0] + pb[2] + (w['Hello world'] - w['Hello '])).to be_within(0.05).of(w['Hello world'] + 5)
+  end
+
+  # A PRESERVED trailing space is not collapsible, so it collapses with nothing: the space
+  # after a `white-space: pre` box survives (CSS Text 3 §4.1.1).
+  it 'does not collapse a space against a preserved one' do
+    body = '<div id="d" style="width:400px">A<span style="white-space:pre">a </span>' \
+           '<span id="s"> b</span>Z</div>'
+    boxes, w = measure(body, ['#s'], probes: [' b'])
+    expect(boxes[0][2]).to be_within(0.05).of(w[' b'])   # Chrome: 13.34, the space kept
+  end
+
+  # An inline whose only content is a space the break then ate keeps a fragment on the line it
+  # reached — the line box is there, it is just empty.
+  it 'keeps a zero-width fragment on the line a break emptied' do
+    body = '<div id="d" style="width:120px">Hello<span id="s"> </span>wwwwwwwwwwwwwwwwwwww</div>' \
+           '<div id="one"><span id="frag">x</span></div>'
+    boxes, = measure(body, ['#s', '#frag'])
+    s, frag = boxes
+    expect(s[2]).to eq(0)                              # Chrome: [36.47, 0, 0, 17]
+    expect(s[3]).to eq(frag[3])
   end
 
   # …and nothing at all once the element stops being rendered. A fragmented inline never goes
@@ -283,6 +304,31 @@ RSpec.describe 'inline continuation' do
     boxes, w, _line, session = measure(body, ['#s'], probes: ['wordone wordtwo'])
     expect(session.evaluate_script("document.querySelector('#s').getClientRects().length")).to eq(1)
     expect(boxes[0][2]).to be_within(0.05).of(w['wordone wordtwo'])   # Chrome: 125.41, one line
+  end
+
+  # …and its whole SUBTREE keeps that slot. Numbering only the box left its children painting
+  # above the boxes that follow it, so a click on one of those landed inside the dropdown.
+  it 'keeps the content of a deferred absolute child below those boxes too' do
+    body = '<div id="d" style="width:400px;position:relative">Menu<span>x' \
+           '<div id="first" style="position:absolute;left:50px;top:50px;width:200px;height:100px">' \
+           '<span style="display:inline-block;width:200px;height:100px"></span></div></span>' \
+           '<div id="second" style="position:absolute;left:100px;top:80px;width:200px;height:100px"></div></div>'
+    _boxes, _w, _line, session = measure(body, ['#second'])
+    expect(session.evaluate_script('(document.elementFromPoint(150, 120) || {}).id')).to eq('second')
+  end
+
+  # A percentage inset resolves against the containing block's USED size, which an auto-height
+  # box only knows once its own content is laid out. Placed during the child loop, the dropdown
+  # every nav bar has resolved `top: 100%` against 0 and opened ON its trigger.
+  it 'resolves a percentage inset against a containing block that back-filled its height' do
+    body = '<div id="d"><span id="s" style="display:inline-block;position:relative">Menu' \
+           '<div id="dd" style="position:absolute;top:100%;left:0;width:150px">Dashboard</div></span></div>'
+    boxes, w = measure(body, ['#s', '#dd'], probes: ['Menu'])
+    s, dd = boxes
+    expect(dd[1]).to eq(s[1] + s[3])                   # Chrome: 18, under the trigger
+    # …and the trigger is as wide as its own word: an out-of-flow box is not part of what its
+    # parent wraps (counting the menu made the nav item 200px too wide).
+    expect(s[2]).to be_within(0.05).of(w['Menu'])
   end
 
   # An inline box with nothing in it generates no line box at all — Chrome reports an
