@@ -232,6 +232,31 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(s.evaluate_script("(e => e && e.id)(document.elementFromPoint(50, 20))")).to eq('btn')
   end
 
+  # `position: sticky` scrolls with its container until it reaches the offset it was given, then
+  # stays there while the content keeps scrolling under it — as far as the end of its containing
+  # block. Every number below is Chrome 137-measured. Without it a sticky sidebar scrolled off the
+  # top of the viewport: a click on one of its links "scrolled it into view" and threw the page's
+  # scroll position away.
+  it 'sticks a box to its scrollport until its containing block runs out' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0;font:16px sans-serif}
+        #hdr{position:sticky;top:10px;height:40px}
+        #inner{height:300px}
+        #tall{height:2000px}
+      </style></head><body><div id="inner"><div id="hdr">header</div></div><div id="tall"></div></body></html>
+    HTML
+    s = simulated_session(app)
+    s.visit '/'
+    # Chrome: 10, 10, -240. Its flow position is 0, so the offset holds it at 10 from the start;
+    # at 500 its containing block (300 tall) has scrolled past and takes it with it.
+    expect(box(s, 'hdr')[1]).to eq(10)
+    s.execute_script('window.scrollTo(0, 100)')
+    expect(box(s, 'hdr')[1]).to eq(10)
+    s.execute_script('window.scrollTo(0, 500)')
+    expect(box(s, 'hdr')[1]).to eq(-240)
+  end
+
   it 'does not stretch an inline box around its absolutely positioned content' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
       <!DOCTYPE html><html><head><style>
