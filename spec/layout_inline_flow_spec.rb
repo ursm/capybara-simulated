@@ -257,6 +257,28 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     expect(box(s, 'hdr')[1]).to eq(-240)
   end
 
+  # `scroll-margin` is the gap a page asks to be left around a box when something scrolls to it —
+  # how a site with a fixed header keeps an anchor target from landing under it. Chrome measured on
+  # this markup: `scrollIntoView()` stops at 1150 of a 1200px offset, leaving the target's top at
+  # exactly the 50px the page asked for.
+  it 'leaves a box its scroll-margin when scrolling to it' do
+    app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
+      <!DOCTYPE html><html><head><style>
+        body{margin:0}
+        #hdr{position:fixed;top:0;left:0;right:0;height:50px}
+        #pad{height:1200px}
+        #t{scroll-margin-top:50px;height:30px}
+        #rest{height:1500px}
+      </style></head><body><div id="hdr">h</div><div id="pad"></div><div id="t">target</div>
+      <div id="rest"></div></body></html>
+    HTML
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script("document.getElementById('t').scrollIntoView()")
+    expect(s.evaluate_script('Math.round(window.scrollY)')).to eq(1150)
+    expect(box(s, 't')[1]).to eq(50)
+  end
+
   it 'does not stretch an inline box around its absolutely positioned content' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [<<~HTML]] }
       <!DOCTYPE html><html><head><style>
