@@ -308,10 +308,12 @@ RSpec.describe 'inline continuation' do
 
   # …and its whole SUBTREE keeps that slot. Numbering only the box left its children painting
   # above the boxes that follow it, so a click on one of those landed inside the dropdown.
+  # (…including when it holds a positioned element of its own, which is every real dropdown: the
+  # paint chain compares where each positioned box sits, not just how deep it is.)
   it 'keeps the content of a deferred absolute child below those boxes too' do
     body = '<div id="d" style="width:400px;position:relative">Menu<span>x' \
            '<div id="first" style="position:absolute;left:50px;top:50px;width:200px;height:100px">' \
-           '<span style="display:inline-block;width:200px;height:100px"></span></div></span>' \
+           '<div style="position:relative;height:100px"></div></div></span>' \
            '<div id="second" style="position:absolute;left:100px;top:80px;width:200px;height:100px"></div></div>'
     _boxes, _w, _line, session = measure(body, ['#second'])
     expect(session.evaluate_script('(document.elementFromPoint(150, 120) || {}).id')).to eq('second')
@@ -329,6 +331,47 @@ RSpec.describe 'inline continuation' do
     # …and the trigger is as wide as its own word: an out-of-flow box is not part of what its
     # parent wraps (counting the menu made the nav item 200px too wide).
     expect(s[2]).to be_within(0.05).of(w['Menu'])
+  end
+
+  # A box's own edges open it on the line its CONTENT starts on. Placed when the box opens —
+  # before its first word is measured — the opening edge was stranded on the line above when
+  # that word didn't fit, fabricating a fragment there: the union then spanned both lines and
+  # its centre, which is where a click is aimed, fell in the gap between them.
+  it 'carries its opening edge down to the line its content starts on' do
+    body = '<div id="d" style="width:100px">wrap wrap <a id="pad" href="#" style="padding:0 5px">wrapwrap</a></div>' \
+           '<div id="e" style="width:100px">wrap wrap <a id="mar" href="#" style="margin-left:5px">wrapwrap</a></div>' \
+           '<div id="one"><span id="frag">x</span></div>'
+    boxes, w, line, session = measure(body, ['#pad', '#mar', '#frag'], probes: ['wrapwrap'])
+    pad, mar, frag = boxes
+    expect(pad[1]).to eq(line)                         # Chrome: [0, 18, 79.36, 17] — ONE line
+    expect(pad[3]).to eq(frag[3])
+    expect(pad[2]).to be_within(0.05).of(w['wrapwrap'] + 10)
+    expect(mar[0]).to eq(5)                            # …and a margin comes down with it
+    expect(session.evaluate_script("document.querySelector('#pad').getClientRects().length")).to eq(1)
+    x, y = pad[0] + pad[2] / 2, pad[1] + pad[3] / 2
+    expect(session.evaluate_script("(document.elementFromPoint(#{x}, #{y}) || {}).id")).to eq('pad')
+  end
+
+  # A box the page declared as `height: 0` is not one whose height is still to be filled — an
+  # absolute child of it resolves `top: 100%` against 0, and the box itself stays 0.
+  it 'does not wait on a containing block that declared a zero height' do
+    body = '<div id="d" style="position:relative;height:0;width:300px">Hello content' \
+           '<div id="a" style="position:absolute;top:100%;left:0;width:50px;height:20px"></div></div>'
+    boxes, = measure(body, ['#d', '#a'])
+    d, a = boxes
+    expect(d[3]).to eq(0)                              # Chrome: the declared height stands
+    expect(a[1]).to eq(d[1])                           # …so `top: 100%` is 0
+  end
+
+  # A box held back for its containing block is still part of what that block wraps: a tall
+  # dropdown extends the document's scroll range, which is what `scroll_to` and in-view checks
+  # read.
+  it 'counts a deferred absolute child in the scroll extent of what it waited for' do
+    body = '<nav id="d" style="position:relative;width:200px">Menu<span>x' \
+           '<div id="a" style="position:absolute;top:100%;left:0;width:400px;height:2000px"></div></span></nav>'
+    _boxes, _w, _line, session = measure(body, ['#d'])
+    expect(session.evaluate_script("document.querySelector('#d').scrollHeight")).to eq(2018)
+    expect(session.evaluate_script('document.documentElement.scrollHeight')).to be >= 2018
   end
 
   # An inline box with nothing in it generates no line box at all — Chrome reports an
