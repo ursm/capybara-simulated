@@ -374,6 +374,39 @@ RSpec.describe 'inline continuation' do
     expect(session.evaluate_script('document.documentElement.scrollHeight')).to be >= 2018
   end
 
+  # …only when OVERFLOW forced the break, and only its OWN edges. A `<br>` is a break
+  # opportunity AFTER the edge, so the fragment it opened stays where it is; and a box nested
+  # inside the one being carried is carrying its own edges, which must not be counted twice.
+  it 'carries only its own edges, and only past a break it could not avoid' do
+    body = '<div id="a" style="width:100px">wrap wrap ' \
+           '<span id="out" style="padding-left:10px"><span id="in" style="padding-left:20px">wrapwrap</span></span></div>' \
+           '<div id="b" style="width:200px">a<span id="br" style="padding-left:20px"><br>b</span></div>' \
+           '<div id="c" style="width:60px"><span style="padding-left:10px">aaaaaaaaaa</span></div><div id="after">x</div>'
+    boxes, w, line, session = measure(body, ['#out', '#in', '#br', '#c', '#after'], probes: ['wrapwrap'])
+    out, inn, br, c, after = boxes
+    expect(out[0]).to eq(0)                            # Chrome: [0, 18, 99.36, 17]
+    expect(inn[0]).to eq(10)                           # …and the inner box after its own padding
+    expect(out[2]).to be_within(0.05).of(w['wrapwrap'] + 30)
+    expect(inn[2]).to be_within(0.05).of(w['wrapwrap'] + 20)
+    expect(session.evaluate_script("document.querySelector('#br').getClientRects().length")).to eq(2)
+    # A padded box at the START of a line has nothing to break at, so its own padding must not
+    # break the line and leave an empty one behind.
+    expect(c[3]).to eq(line)                           # Chrome: 18, not 35
+    expect(after[1]).to eq(c[1] + c[3])
+  end
+
+  # A `z-index` inside a positioned box that has none of its own competes at the level ABOVE it:
+  # `position: relative` alone does not establish a stacking context.
+  it 'lets a z-index escape a positioned box that establishes no stacking context' do
+    body = '<div id="d" style="position:relative">' \
+           '<div id="first" style="position:absolute;left:0;top:0;width:300px;height:120px">' \
+           '<div id="inner" style="position:relative;z-index:10;height:40px"></div></div>' \
+           '<div id="second" style="position:absolute;left:0;top:0;width:300px;height:200px"></div></div>'
+    boxes, _w, _line, session = measure(body, ['#second'])
+    x, y = boxes[0][0] + 100, boxes[0][1] + 20
+    expect(session.evaluate_script("(document.elementFromPoint(#{x}, #{y}) || {}).id")).to eq('inner')
+  end
+
   # An inline box with nothing in it generates no line box at all — Chrome reports an
   # empty rect for it and gives the block around it a height of 0.
   it 'generates no line box for an empty inline' do
