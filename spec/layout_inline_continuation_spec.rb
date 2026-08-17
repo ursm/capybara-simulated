@@ -374,10 +374,10 @@ RSpec.describe 'inline continuation' do
     expect(session.evaluate_script('document.documentElement.scrollHeight')).to be >= 2018
   end
 
-  # …only when OVERFLOW forced the break, and only its OWN edges. A `<br>` is a break
-  # opportunity AFTER the edge, so the fragment it opened stays where it is; and a box nested
-  # inside the one being carried is carrying its own edges, which must not be counted twice.
-  it 'carries only its own edges, and only past a break it could not avoid' do
+  # …because it is not placed until then. A `<br>` or a preserved newline is a break opportunity
+  # AFTER the edge, so the fragment it opened stays where it is; an overflow break has nothing to
+  # break at, and the edge goes down with the content it was waiting for.
+  it 'places an opening edge only where its content lands' do
     body = '<div id="a" style="width:100px">wrap wrap ' \
            '<span id="out" style="padding-left:10px"><span id="in" style="padding-left:20px">wrapwrap</span></span></div>' \
            '<div id="b" style="width:200px">a<span id="br" style="padding-left:20px"><br>b</span></div>' \
@@ -396,7 +396,26 @@ RSpec.describe 'inline continuation' do
   end
 
   # A `z-index` inside a positioned box that has none of its own competes at the level ABOVE it:
-  # `position: relative` alone does not establish a stacking context.
+  # `position: relative` alone does not establish a stacking context. One that DOES clamps its
+  # content to its own level, `z-index: 0` and `auto` paint in the same layer (tree order decides),
+  # and a negative z-index puts content behind its own ancestor.
+  it 'paints by stacking context rather than by depth' do
+    body = '<div id="z1" style="position:relative;height:60px">' \
+           '<div style="position:absolute;left:0;top:0;z-index:0;width:200px;height:60px">' \
+           '<div id="inside" style="width:200px;height:60px"></div></div>' \
+           '<div id="over" style="position:absolute;left:0;top:0;width:200px;height:60px"></div></div>' \
+           '<div id="z2" style="position:relative;height:60px">' \
+           '<div id="first" style="position:absolute;left:0;top:0;width:200px;height:60px"></div>' \
+           '<div id="last" style="position:absolute;left:0;top:0;z-index:0;width:200px;height:60px"></div></div>' \
+           '<div id="z3" style="position:relative;height:60px"><div id="par" style="width:200px;height:60px">' \
+           '<div style="position:relative;z-index:-1;width:200px;height:60px"></div></div></div>'
+    boxes, _w, _line, session = measure(body, ['#z1', '#z2', '#z3'])
+    hit = ->(box) { session.evaluate_script("(document.elementFromPoint(#{box[0] + 100}, #{box[1] + 30}) || {}).id") }
+    expect(hit[boxes[0]]).to eq('over')                # a z-index:0 context does not lift its content
+    expect(hit[boxes[1]]).to eq('last')                # z-index:0 and auto are one layer, in order
+    expect(hit[boxes[2]]).to eq('par')                 # …and a negative one goes behind its parent
+  end
+
   it 'lets a z-index escape a positioned box that establishes no stacking context' do
     body = '<div id="d" style="position:relative">' \
            '<div id="first" style="position:absolute;left:0;top:0;width:300px;height:120px">' \
@@ -405,6 +424,35 @@ RSpec.describe 'inline continuation' do
     boxes, _w, _line, session = measure(body, ['#second'])
     x, y = boxes[0][0] + 100, boxes[0][1] + 20
     expect(session.evaluate_script("(document.elementFromPoint(#{x}, #{y}) || {}).id")).to eq('inner')
+  end
+
+  # An edge waiting to be placed takes no line height with it either: the line it did not open on
+  # keeps the block's own, whatever the box's font size.
+  it 'leaves the line it did not open on at the block line height' do
+    body = '<div id="d" style="width:100px">word <span id="s" style="font-size:40px;padding-left:20px">bbbb</span></div>'
+    boxes, _w, line = measure(body, ['#d', '#s'])
+    d, s = boxes
+    expect(s[1]).to eq(line)                           # Chrome: div 63, span y 18
+    expect(d[3]).to eq(line + s[3] + 1)                # …the 40px line under an 18px one
+  end
+
+  # …and an empty box shows them where it opened, on an ordinary line box.
+  it 'shows the edges of a box that never got any content' do
+    body = '<div id="d" style="width:200px"><span id="s" style="padding:5px"></span></div>'
+    boxes, _w, line = measure(body, ['#d', '#s'])
+    d, s = boxes
+    expect(s[2]).to eq(10)                             # Chrome: [0, -5, 10, 27] on an 18px line
+    expect(d[3]).to eq(line)
+  end
+
+  # An out-of-flow child of a box that has not opened yet is positioned from where that box turns
+  # out to open, not from the cursor it was reached at.
+  it 'positions an absolute child from where its inline box opens' do
+    body = '<div id="d" style="width:100px;position:relative">word <span style="padding-left:10px">' \
+           '<i id="a" style="position:absolute;width:5px;height:5px"></i>bbbbbbbb</span></div>'
+    boxes, _w, line = measure(body, ['#a'])
+    expect(boxes[0][0]).to eq(10)                      # Chrome: [10, 18] — the second line, past
+    expect(boxes[0][1]).to eq(line)                    # …the padding the box opened with
   end
 
   # An inline box with nothing in it generates no line box at all — Chrome reports an
