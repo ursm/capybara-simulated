@@ -244,6 +244,23 @@ RSpec.describe 'shorthand expansion' do
     JS
   end
 
+  # A `<time>`'s COMPUTED value is in seconds, whatever the author wrote (CSS Values 4 §7.2) —
+  # Chrome reports `250ms` as `0.25s`. The everyday reader is `parseFloat(style.animationDuration)
+  # * 1000`, which takes the authored `250ms` for 250 SECONDS: Discourse's modals waited that long
+  # to drop their `is-animating` class, which cost its system suite 114 failures.
+  it 'reports a time in seconds however it was written' do
+    got = both(<<~CSS, %w[animationDuration animationDelay transitionDuration transitionDelay])
+      animation: k 250ms ease 1500ms;
+      transition: opacity 250ms linear 0.5s;
+    CSS
+    expect(got).to eq(['0.25s', '1.5s', '0.25s', '0.5s'])
+  end
+
+  it 'keeps every layer of a time list in seconds' do
+    got = both('transition: opacity 250ms, width 1s, color 40ms;', %w[transitionDuration])
+    expect(got).to eq(['0.25s, 1s, 0.04s'])
+  end
+
   it 'rejects a layer list with an empty layer' do
     # A trailing comma is a malformed list; a browser drops the whole declaration rather than
     # reading a second, all-initials layer out of it.
