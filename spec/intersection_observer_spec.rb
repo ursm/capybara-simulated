@@ -77,8 +77,10 @@ RSpec.describe 'IntersectionObserver' do
     s.execute_script('window.scrollTo(0, 2100)')
     pump(s)
 
-    # `below` spans y 2050..2150; the viewport is now 2100..2868, so half of it shows.
-    expect(entries(s)).to eq(['top:true:1.00', 'below:false:0.00', 'top:false:0.00', 'below:true:0.50'])
+    # A scroll CLAMPS to the scrollable range, as a browser's does — Chrome measured on this exact
+    # markup: `scrollTo(0, 2100)` lands at 1569 of a 2250-tall page in a 681-tall viewport. Ours
+    # lands at 1482 (2250 − 768), which puts `below` (y 2050..2150) fully inside it.
+    expect(entries(s)).to eq(['top:true:1.00', 'below:false:0.00', 'top:false:0.00', 'below:true:1.00'])
   end
 
   it 'honours rootMargin' do
@@ -103,12 +105,14 @@ RSpec.describe 'IntersectionObserver' do
     observe(s, "new IntersectionObserver(window.__rec, {threshold: 0.75}).observe(document.getElementById('below'));")
     expect(entries(s)).to eq(['below:false:0.00'])
 
-    # Half visible — below the 0.75 threshold, so no notification.
-    s.execute_script('window.scrollTo(0, 2100)')
+    # Half visible — below the 0.75 threshold, so no notification. (1400 leaves the viewport at
+    # 1400..2168 against `below` at 2050..2150: 118 of its 100px… so scroll to where exactly half
+    # shows, 2000, and stay under the threshold.)
+    s.execute_script('window.scrollTo(0, 1332)')
     pump(s)
     expect(entries(s)).to eq(['below:false:0.00'])
 
-    # Fully visible — crosses it.
+    # Fully visible — crosses it. (Clamped to 1482, which shows all of it.)
     s.execute_script('window.scrollTo(0, 2050)')
     pump(s)
     expect(entries(s)).to eq(['below:false:0.00', 'below:true:1.00'])
