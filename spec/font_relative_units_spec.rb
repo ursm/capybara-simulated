@@ -38,8 +38,10 @@ RSpec.describe 'font-relative units' do
     expect((one[2] * 10).round(3)).to eq(ten[2].round(3))
   end
 
-  # …and it follows the FONT, not the size: a serif face and a monospace one give
-  # different answers at the same 16px.
+  # …and it follows the FONT, not the size: each family answers with its own `0`.
+  # The equalities hold in ANY environment — a box with no usable font metrics
+  # estimates the run and the unit from the same figure, which is the point of
+  # `build_font_advance_table` refusing a table it got nothing out of.
   it 'reads ch from whichever font the element resolves to' do
     body = <<~HTML
       <div id="sans" style="font-family:Arial;width:10ch"></div>
@@ -54,10 +56,19 @@ RSpec.describe 'font-relative units' do
     expect(sans[2].round(3)).to eq(p_sans[2].round(3))
     expect(serif[2].round(3)).to eq(p_serif[2].round(3))
     expect(mono[2].round(3)).to eq(p_mono[2].round(3))
-    # The three faces really do differ — without that, the equalities above would
-    # also hold for the flat 0.5em this replaced.
-    expect([sans[2], serif[2], mono[2]].uniq.size).to eq(3)
+
+    # …and where the faces DO resolve, they differ — without that the equalities
+    # above would also hold for the flat 0.5em this replaced. Skipped rather than
+    # weakened on a box with no font metrics (a CI image without fontconfig): every
+    # family estimates 8px per character there, so there is nothing to tell apart.
+    widths = [sans[2], serif[2], mono[2]]
+    skip 'no font metrics on this box — every family falls back to the estimate' if widths.uniq == [FALLBACK_10CH_PX]
+
+    expect(widths.uniq.size).to be > 1
   end
+
+  # 10ch of the 0.5em fallback at the 16px these examples use.
+  FALLBACK_10CH_PX = 80
 
   # `ex` is the x-height, which is smaller than the `0` advance in every face here
   # and — the point — is NOT half the font size.
@@ -70,8 +81,12 @@ RSpec.describe 'font-relative units' do
     boxes, = measure(body, ['#ex', '#ch', '#em'], style: 'margin:0;font:16px Arial')
     ex, ch, em = boxes
     expect(em[2]).to eq(160)                      # 10em at 16px, by definition
-    expect(ex[2]).not_to eq(em[2] / 2)            # …and not 10 * 8px
     expect(ex[2]).to be_between(0.4 * em[2], 0.6 * em[2])
+    # The x-height is under the `0` advance in every face — but only a box that HAS
+    # the metrics can say so; without them both are the same 0.5em estimate.
+    skip 'no font metrics on this box' if [ex[2], ch[2]] == [FALLBACK_10CH_PX, FALLBACK_10CH_PX]
+
+    expect(ex[2]).not_to eq(em[2] / 2)            # …and not 10 * 8px
     expect(ex[2]).to be < ch[2]
   end
 
