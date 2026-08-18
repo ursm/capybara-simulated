@@ -7059,6 +7059,11 @@ module Capybara
           adv[cp.chr] = px
           total += px
         end
+        # A file we could open but got nothing out of — an empty cmap, a `hmtx` of
+        # zeroes — is not a font table, it's a table that would measure every string
+        # as zero-wide. Answer nil so every caller takes the same estimate, rather
+        # than some measuring 0 and others (the `ch` unit) falling back to 0.5em.
+        return nil unless total.positive?
         # The font's own vertical metrics (hhea), as per-em factors. A browser rounds
         # each metric to whole px and then sums, which is why Liberation Sans at 16px
         # gives an 18px line box (14 + 3 + 1) and a 17px inline content box (14 + 3)
