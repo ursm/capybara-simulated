@@ -105,14 +105,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Version comes from package.json's `packageManager` field — the bundles are
-      # compared byte for byte, so the builder has to be pinned as well.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v6
+      # Installs pnpm AND node in one step (the successor to pnpm/action-setup +
+      # actions/setup-node; needs the pnpm v11+ that package.json's
+      # `packageManager` pins). The version comes from that field rather than from
+      # here — the bundles are compared byte for byte, so the builder has to be
+      # pinned as well. `install: false` keeps the install its own explicit,
+      # FROZEN step: this job means nothing if the deps aren't the locked ones.
+      - uses: pnpm/setup@v2
         with:
-          node-version: 24
-          cache: pnpm
+          runtime: node@24
+          cache: true
+          install: false
 
       - run: pnpm install --frozen-lockfile
 
