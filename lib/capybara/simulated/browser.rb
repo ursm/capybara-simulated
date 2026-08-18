@@ -7063,7 +7063,12 @@ module Capybara
         # each metric to whole px and then sums, which is why Liberation Sans at 16px
         # gives an 18px line box (14 + 3 + 1) and a 17px inline content box (14 + 3)
         # — a single combined factor rounds to the wrong answer for one or the other.
-        {'adv' => adv, 'avg' => total / 95.0}.merge(font_vmetric_factors(file, upm) || {})
+        #
+        # `xh` is the font's x-height as a per-em factor — CSS's `ex` unit. Zero when
+        # the font doesn't carry one (OS/2 below version 2), and the JS side then
+        # falls back to the spec's 0.5em, as browsers do.
+        {'adv' => adv, 'avg' => total / 95.0, 'xh' => g[:x_height].to_f / upm}
+          .merge(font_vmetric_factors(file, upm) || {})
       end
 
       # `hhea`'s ascender / descender / lineGap as per-em factors: the caller scales
@@ -7428,6 +7433,10 @@ module Capybara
           upm:       upm,
           typo_asc:  s16(data[(os2 || hhea) + (os2 ? 68 : 4), 2]),
           typo_desc: s16(data[(os2 || hhea) + (os2 ? 70 : 6), 2]),
+          # `sxHeight` — the height of the lowercase glyphs, which is what CSS's `ex`
+          # unit is. It only exists from OS/2 version 2 on, and a font may leave it
+          # zero; the caller falls back to the spec's 0.5em then, as browsers do.
+          x_height:  (os2 && data[os2, 2].unpack1('n') >= 2 ? s16(data[os2 + 86, 2]) : 0),
           advances:  advances,
           # A malformed cmap shouldn't discard the (already-read) upm / advances / typo
           # metrics, so isolate its parse — an empty map just means advances fall back.
