@@ -34,7 +34,28 @@ jobs:
       # path shells out to `ffprobe` + `ffmpeg` for first-frame decode (the WPT
       # imagebitmap video subtests need it, else their factory rejects). Install
       # both before the spec run.
-      - run: sudo apt-get update && sudo apt-get install -y libvips42t64 ffmpeg
+      - name: Install libvips + ffmpeg
+        # `--no-install-recommends` because most of the 102 MB apt otherwise fetches
+        # is ffmpeg's recommends — a pocketsphinx speech model, OpenAL, JACK, the
+        # Intel VA drivers — and none of it is what the specs decode with: the video
+        # fixtures are h264 and vp9, both out of libavcodec60, which ffmpeg DEPENDS
+        # on. It halves this step on a good day.
+        #
+        # The bounds are for a bad one. `azure.archive.ubuntu.com` — the mirror the
+        # runner image points at — stalled for hours around GitHub's 2026-08-17
+        # incident: one leg reported `Fetched 102 MB in 24min 2s (70.7 kB/s)` against
+        # the ~9 MB/s its siblings got, and another couldn't reach the mirror at all.
+        # A bounded call plus one retry turns that into a fast, obvious failure that
+        # `gh run rerun --failed` can pick up, rather than a job that sits until its
+        # own timeout.
+        timeout-minutes: 6
+        run: |
+          apt_try() {
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
+                             install -y --no-install-recommends libvips42t64 ffmpeg
+          }
+          apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -72,7 +93,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - run: sudo apt-get update && sudo apt-get install -y libvips42t64 ffmpeg
+      - name: Install libvips + ffmpeg
+        # `--no-install-recommends` because most of the 102 MB apt otherwise fetches
+        # is ffmpeg's recommends — a pocketsphinx speech model, OpenAL, JACK, the
+        # Intel VA drivers — and none of it is what the specs decode with: the video
+        # fixtures are h264 and vp9, both out of libavcodec60, which ffmpeg DEPENDS
+        # on. It halves this step on a good day.
+        #
+        # The bounds are for a bad one. `azure.archive.ubuntu.com` — the mirror the
+        # runner image points at — stalled for hours around GitHub's 2026-08-17
+        # incident: one leg reported `Fetched 102 MB in 24min 2s (70.7 kB/s)` against
+        # the ~9 MB/s its siblings got, and another couldn't reach the mirror at all.
+        # A bounded call plus one retry turns that into a fast, obvious failure that
+        # `gh run rerun --failed` can pick up, rather than a job that sits until its
+        # own timeout.
+        timeout-minutes: 6
+        run: |
+          apt_try() {
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
+            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
+                             install -y --no-install-recommends libvips42t64 ffmpeg
+          }
+          apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
 
       - uses: ruby/setup-ruby@v1
         with:
