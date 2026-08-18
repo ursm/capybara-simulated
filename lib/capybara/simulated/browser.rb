@@ -7050,20 +7050,30 @@ module Capybara
         upm = g[:upm].to_f
         return nil unless upm.positive?
 
+        # A character the font doesn't map is LEFT OUT rather than recorded as zero:
+        # absent means "no figure for this one", which the JS side answers with the
+        # table's mean, while a recorded zero would measure the character as taking
+        # no space at all. (A CI image's `monospace` mapped no digits, so a `ch` —
+        # defined as the advance of `0` — read as zero-wide while the same string
+        # measured 8px/char.)
         adv   = {}
         total = 0.0
+        count = 0
         (32..126).each do |cp|
-          gid   = g[:cmap][cp]
-          units = gid ? (g[:advances][gid] || 0) : 0
-          px    = units / upm
+          gid   = g[:cmap][cp] or next
+          units = g[:advances][gid] || 0
+          next unless units.positive?
+
+          px = units / upm
           adv[cp.chr] = px
           total += px
+          count += 1
         end
         # A file we could open but got nothing out of — an empty cmap, a `hmtx` of
         # zeroes — is not a font table, it's a table that would measure every string
         # as zero-wide. Answer nil so every caller takes the same estimate, rather
         # than some measuring 0 and others (the `ch` unit) falling back to 0.5em.
-        return nil unless total.positive?
+        return nil unless count.positive?
         # The font's own vertical metrics (hhea), as per-em factors. A browser rounds
         # each metric to whole px and then sums, which is why Liberation Sans at 16px
         # gives an 18px line box (14 + 3 + 1) and a 17px inline content box (14 + 3)
@@ -7072,7 +7082,7 @@ module Capybara
         # `xh` is the font's x-height as a per-em factor — CSS's `ex` unit. Zero when
         # the font doesn't carry one (OS/2 below version 2), and the JS side then
         # falls back to the spec's 0.5em, as browsers do.
-        {'adv' => adv, 'avg' => total / 95.0, 'xh' => g[:x_height].to_f / upm}
+        {'adv' => adv, 'avg' => total / count, 'xh' => g[:x_height].to_f / upm}
           .merge(font_vmetric_factors(file, upm) || {})
       end
 
