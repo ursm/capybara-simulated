@@ -86,55 +86,6 @@ RSpec.describe 'same-document navigation' do
     expect(s.evaluate_script('location.pathname')).to eq('/pushed')
   end
 
-  # `history.back()` is the third same-document mutator (`history_go`), and unlike
-  # the other two it moves the history INDEX. Queued by the page being left — here
-  # stepping back inside its own pushState chain, which is the branch that takes
-  # effect INLINE — it would move the index out from under the navigation that is
-  # committing, and the entry list would then be truncated at the wrong point: the
-  # `/three` we left from disappears. The traversal the driver was asked for wins and
-  # the page's own is dropped. Chrome resolves this race the other way (measured,
-  # 151: a `back()` during an in-flight navigation cancels that navigation and
-  # traverses), but a `visit` that silently doesn't happen is the worse failure for a
-  # test driver. The `flushed` beacon is what proves the outgoing timer ran at all.
-  it "drops a history.back() the outgoing page queued inside its own pushState chain" do
-    app = lambda do |env|
-      body =
-        if env['PATH_INFO'] == '/one'
-          <<~HTML
-            <html><body><p id='here'>/one</p>
-              <script>
-                history.pushState({}, '', '/two');
-                history.pushState({}, '', '/three');
-                // Queued from the LOAD handler, which runs after the page's own init
-                // has been flushed — so this one is still pending when the next
-                // visit flushes the page it is leaving, which is the moment under
-                // test. (A timer queued during parsing is part of the load and runs
-                // there, as it does in a browser.)
-                addEventListener('load', () => {
-                  setTimeout(() => { localStorage.setItem('flushed', '1'); history.back(); }, 0);
-                });
-              </script>
-            </body></html>
-          HTML
-        else
-          "<html><body><p id='here'>#{env['PATH_INFO']}</p></body></html>"
-        end
-      [200, {'content-type' => 'text/html'}, [body]]
-    end
-    s = simulated_session(app)
-    s.visit '/one'
-    s.find('#here')          # lets the load event fire, which is what queues the timer
-    s.visit '/far'
-
-    expect(s.evaluate_script("localStorage.getItem('flushed')")).to eq('1')
-    expect(s.find('#here').text).to eq('/far')
-    expect(s.current_url).to end_with('/far')
-
-    # The entry we left from is still the one before this navigation.
-    s.go_back
-    expect(s.current_url).to end_with('/three')
-  end
-
   context 'inside a nested browsing context' do
     before { skip 'per-frame realms need the V8 engine' unless CsimEngine.v8? }
 

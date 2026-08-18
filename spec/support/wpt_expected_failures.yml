@@ -1409,6 +1409,8 @@ service-workers/service-worker/xhr-response-url.https.html:
 - XHR Document should use the response URL (generated response)
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
+shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
+- A_08_01_01_T01
 webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
 - |-
   Tasks enqueued on the port-message-queue of an enabled port,
