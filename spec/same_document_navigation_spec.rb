@@ -105,7 +105,14 @@ RSpec.describe 'same-document navigation' do
               <script>
                 history.pushState({}, '', '/two');
                 history.pushState({}, '', '/three');
-                setTimeout(() => { localStorage.setItem('flushed', '1'); history.back(); }, 0);
+                // Queued from the LOAD handler, which runs after the page's own init
+                // has been flushed — so this one is still pending when the next
+                // visit flushes the page it is leaving, which is the moment under
+                // test. (A timer queued during parsing is part of the load and runs
+                // there, as it does in a browser.)
+                addEventListener('load', () => {
+                  setTimeout(() => { localStorage.setItem('flushed', '1'); history.back(); }, 0);
+                });
               </script>
             </body></html>
           HTML
@@ -116,6 +123,7 @@ RSpec.describe 'same-document navigation' do
     end
     s = simulated_session(app)
     s.visit '/one'
+    s.find('#here')          # lets the load event fire, which is what queues the timer
     s.visit '/far'
 
     expect(s.evaluate_script("localStorage.getItem('flushed')")).to eq('1')

@@ -297,6 +297,8 @@ module Capybara
         # The first find of a navigation observes the current DOM without a pre-tick (see
         # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
         @pre_tick_armed               = false
+        @read_ticked_since_nav        = false
+        @read_owes_tick               = false
         @polling_grace                = nil
         @last_polled_gen              = nil
         @idle_settle_polls            = 0
@@ -979,6 +981,9 @@ module Capybara
         # would have answered every `find` / `has_css?` from a document whose load had
         # never fired, while `page.html` showed the handler's work. One ivar test.
         flush_pending_window_load
+        # A read since the last query owes the clock a step — pay it here, where
+        # moving the clock can't strand a snapshot mid-walk (`tick_for_read`).
+        settle_read_debt
         tick_real_time if timer_wait_elapsed?
         # After the first find of a navigation, a later find IS Capybara retrying — arm the pre-tick
         # so subsequent polls advance the clock (a timer-driven element / removal the test awaits).
@@ -1031,6 +1036,39 @@ module Capybara
         @pre_tick_armed &&
           @timers_active &&
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
+      end
+
+      # What a READ (`text` on an already-found node) does to the clock.
+      #
+      # It can't advance it in place. `all(…).map(&:text)` walks N elements of ONE
+      # query, back to back — in a browser no page time passes between them — and a
+      # step per read walked the clock into the re-render those reads were racing,
+      # detaching the rest of the snapshot. Capybara can't recover from that: `all`
+      # hands back elements with `allow_reload: false`, so its retry re-reads the
+      # same dead nodes (Discourse `tags_spec:221`).
+      #
+      # It can't simply NOT advance it either. A read is the driver's heartbeat while
+      # a matcher polls: `have_text` re-reads a cached scope node without going back
+      # through `find`, and `polling?` stops answering true once the settle
+      # generation sits still, so suppressing the tick outright makes Capybara give
+      # up on a page that was about to change (a `not_to have_css` waiting on a
+      # timer to remove the node it names).
+      #
+      # So a read OWES a step and the next query pays it (`find_with_timer_fallback`).
+      # Reading a snapshot moves nothing; the poll that comes back round advances the
+      # clock before it looks again. (The page's own `setTimeout(0)` init doesn't
+      # depend on a read at all — `flush_page_init` runs it as the load ends, which
+      # is where a browser runs it.)
+      def tick_for_read(_handle)
+        @read_owes_tick = true
+      end
+
+      # Pay what the reads since the last query owe (see `tick_for_read`).
+      def settle_read_debt
+        return unless @read_owes_tick
+
+        @read_owes_tick = false
+        tick_real_time
       end
 
       # Cheap O(1) gate: is there any non-timer async channel with traffic
@@ -2443,7 +2481,13 @@ module Capybara
           # step SIZE below is deterministic.
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
-          if @timers_active && effective_step > 0
+          # An explicit `step_ms: 0` is "run what is already DUE, advance nothing" —
+          # the drain a browser does at the end of a load (`tick_for_read`). Every
+          # other zero-length step means there is nothing to do.
+          if @timers_active && effective_step.zero? && step_ms == 0
+            r = @runtime.run_loop_step(0)
+            @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+          elsif @timers_active && effective_step > 0
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -2872,6 +2916,9 @@ module Capybara
         # Disarm the find pre-tick so the FIRST find after this navigation reads the current DOM
         # without advancing timers (see timer_wait_elapsed?), independent of wall-clock timing.
         @pre_tick_armed     = false
+        # The next read is the first of this document — see `tick_for_read`.
+        @read_ticked_since_nav = false
+        @read_owes_tick        = false
         @context_gen       += 1
       end
 
@@ -10890,10 +10937,6 @@ module Capybara
         # A document's style sheets are part of what `load` waits for; the JS side
         # flushes their pending load tasks before dispatching (`sheetLoadTask`),
         # which is why nothing here advances the clock — an unrelated
-        # `setTimeout(fn, 0)` a page queued during parsing must still be PENDING
-        # when the visit returns (smoke_spec's "queries the DOM before advancing
-        # pending timers").
-        #
         # Marked, not fired: a `load` handler may navigate — submit a form, point an
         # iframe somewhere — and a navigation started while THIS one is still in
         # flight (`@navigating`) is not the same thing as one started from an idle
@@ -10901,6 +10944,26 @@ module Capybara
         # navigation, and failing that from the next find.
         @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
+        flush_page_init
+      end
+
+      # Run the page's own DUE-NOW init as the load ends — the `setTimeout(0)` a
+      # framework queues while parsing, and the microtasks behind it.
+      #
+      # This is where a browser runs it: Chrome 151 on
+      # `<div id=t>…</div><script>setTimeout(() => t.remove(), 0)</script>` serves a
+      # document with no `#t` at all. The driver used to leave it pending and let the
+      # first element READ fire it instead, which put the page's first re-render in
+      # the middle of whatever the test was doing at the time — for Discourse's tag
+      # list, in the middle of `all(…).map(&:text)`, detaching the elements the map
+      # was walking.
+      #
+      # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
+      # pending and a test can still observe the state before it.
+      def flush_page_init
+        return unless @timers_active
+
+        tick_real_time(step_ms: 0)
       end
 
       # Run one due-now event-loop step on the page being navigated AWAY from,

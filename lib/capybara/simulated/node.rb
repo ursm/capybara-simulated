@@ -25,25 +25,22 @@ module Capybara
 
       attr_reader :handle_id, :context_gen, :realm_id
 
-      # Tick the virtual clock unconditionally on the text path. Unlike
-      # `Node#[]` (attribute reads), the text readers are NOT preceded by
-      # a `find_css` that ticks under the wall throttle: `have_text` /
-      # `assert_text` polls `.text` directly against an already-found,
-      # cached scope node, so the find loop short-circuits without
-      # re-ticking. Gating these behind `timer_wait_elapsed?` therefore
-      # stalls a pure text-poll loop's virtual clock and scheduled
-      # `setTimeout`s never fire (smoke_spec virtual-clock contract).
-      # They run ~once per poll-scope (not once per matched result like
-      # the attribute filters the audit targeted), so they are not the
-      # O(N) hot path and are safe to tick every call.
+      # The text readers advance the virtual clock, unlike `Node#[]`
+      # (attribute reads) which sit behind a `find_css` that already
+      # ticked: `have_text` / `assert_text` polls `.text` directly against
+      # an already-found, cached scope node, so the find loop
+      # short-circuits without re-ticking and a page waiting on a timer
+      # would never make progress. `tick_for_read` decides WHEN: a read
+      # leaves the clock where it is and the next query pays the step, so
+      # a walk over one query's results can't be stranded mid-way.
       def all_text
-        browser.tick_real_time
+        browser.tick_for_read(handle_id)
         check_stale
         normalize_spacing(browser.all_text(handle_id))
       end
 
       def visible_text
-        browser.tick_real_time
+        browser.tick_for_read(handle_id)
         check_stale
         normalize_visible_spacing(browser.visible_text(handle_id))
       end
