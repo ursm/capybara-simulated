@@ -15,6 +15,11 @@ jobs:
   # supported Ruby versions.
   test:
     runs-on: ubuntu-latest
+    # Runs in 5-8 min; the cap is there for the runner-side hangs (an apt mirror
+    # that never answers has stalled this step for 20+ min more than once), which
+    # GitHub would otherwise let sit for its 6-hour default before anyone can
+    # `gh run rerun --failed`.
+    timeout-minutes: 25
 
     strategy:
       fail-fast: false
@@ -60,6 +65,9 @@ jobs:
   # layer, not the (V8-matrix-covered) Ruby driver code.
   test-quickjs:
     runs-on: ubuntu-latest
+    # QuickJS runs the same files ~2x slower than V8 (7-12 min), so it gets more
+    # room than the V8 matrix — same reason for having a cap at all.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -91,6 +99,8 @@ jobs:
   # `patches/` edit that was committed without rebuilding. Rebuild and diff.
   bundles:
     runs-on: ubuntu-latest
+    # Seconds of work; anything near this is a hang.
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v7
