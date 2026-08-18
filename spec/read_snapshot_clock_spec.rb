@@ -16,6 +16,12 @@ require_relative 'support/session_teardown'
 # elements with `allow_reload: false`, so every retry re-reads the same dead
 # nodes. Discourse's `tags_spec` reads its tag list exactly this way, right after
 # a save that re-renders it.
+# The DEFERRED half — a read of a different node owing a step that the next query
+# pays — is measured by the WPT gate rather than here: dropping it (and keeping only
+# the same-node tick) fails
+# `html/semantics/forms/form-submission-0/form-data-set-usv.html` and
+# `dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html`,
+# both of which drive a page through reads that never repeat a node.
 RSpec.describe 'the virtual clock and element reads' do
   # A page that paints one `setTimeout(0)` in, then REPLACES its list on a short
   # timer — the shape a framework re-render has, and what makes a half-read
@@ -60,13 +66,43 @@ RSpec.describe 'the virtual clock and element reads' do
     expect(texts).to eq(%w[a b c])
   end
 
-  # …and the poll loop still gets there: `have_text` re-queries until the timer
-  # fires, which is the contract that makes reads advance the clock at all.
-  it 'still lets a polling matcher advance the clock until a timer fires' do
-    s = simulated_session(app(delay: 60))
+  # …and a matcher polling ONE node still gets there. This is the half the deferral
+  # can't take away: `assert_text` re-reads the node it was given without going back
+  # through `find`, and for a node Capybara won't reload — anything from `all` /
+  # `first`, or any node with `automatic_reload` off — no query will ever run to pay
+  # a deferred step, so the read itself has to advance the clock when it is the same
+  # node again. (This page rewrites the node's TEXT rather than replacing it, which
+  # is what a text poll is for; a node that gets replaced goes stale under any
+  # driver.)
+  def updating_app(delay:)
+    lambda do |_env|
+      body = <<~HTML
+        <!doctype html><html><body>
+          <div class="v">waiting</div><div class="v">waiting</div>
+          <script>
+            setTimeout(() => {
+              document.querySelectorAll('.v').forEach(el => { el.textContent = 'ready'; });
+            }, #{delay});
+          </script>
+        </body></html>
+      HTML
+      [200, {'content-type' => 'text/html'}, [body]]
+    end
+  end
+
+  it 'lets a matcher polling one non-reloadable node advance the clock' do
+    s = simulated_session(updating_app(delay: 300))
     s.visit '/'
 
-    expect(s).to have_css('.item', text: 'late0')
+    expect { s.first('.v').assert_text('ready') }.not_to raise_error
+  end
+
+  # The same for a scope: `within` re-reads through the scope node.
+  it 'lets a matcher polling inside a non-reloadable scope advance the clock' do
+    s = simulated_session(updating_app(delay: 300))
+    s.visit '/'
+
+    expect { s.within(s.all('.v').first) { s.assert_text('ready') } }.not_to raise_error
   end
 
   # The negative form of the same contract, and the one that caught a wall-clock
@@ -89,5 +125,31 @@ RSpec.describe 'the virtual clock and element reads' do
     # capybara/rspec, so the negative matcher would fall through to RSpec's generic
     # predicate form (`has_css?` negated), which asks ONCE and waits for nothing.
     expect(s.has_no_css?('#badge', text: '1')).to be(true)
+  end
+
+  # The page's init runs with the LOAD, not with whatever the test does first —
+  # which is the half that makes the snapshot walk above safe. Asserted through
+  # `page.html`, a read that goes nowhere near an element handle or a matcher's
+  # retry loop, so nothing but the load can have run the timer.
+  it 'has run the page init by the time the visit returns' do
+    initialising = lambda do |_env|
+      body = <<~HTML
+        <!doctype html><html><body>
+          <div id="spinner">loading</div>
+          <div id="later">still here</div>
+          <script>
+            setTimeout(() => { document.getElementById('spinner').remove(); }, 0);
+            setTimeout(() => { document.getElementById('later').remove(); }, 5000);
+          </script>
+        </body></html>
+      HTML
+      [200, {'content-type' => 'text/html'}, [body]]
+    end
+    s = simulated_session(initialising)
+    s.visit '/'
+
+    html = s.html
+    expect(html).not_to include('id="spinner"')
+    expect(html).to include('id="later"')      # …and no further, so a delayed state is still observable
   end
 end

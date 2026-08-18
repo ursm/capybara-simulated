@@ -297,8 +297,8 @@ module Capybara
         # The first find of a navigation observes the current DOM without a pre-tick (see
         # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
         @pre_tick_armed               = false
-        @read_ticked_since_nav        = false
         @read_owes_tick               = false
+        @last_read_handle             = nil
         @polling_grace                = nil
         @last_polled_gen              = nil
         @idle_settle_polls            = 0
@@ -1013,12 +1013,12 @@ module Capybara
         result.nil? || (result.respond_to?(:empty?) && result.empty?)
       end
 
-      # Minimum wall-clock gap before find() re-ticks. The smoke
-      # contract is "first find returns the current DOM without
-      # firing pending timers" — apps assert `have_selector` on a
-      # `<div>` whose constructor schedules a `setTimeout(0)` to
-      # remove it, expecting to catch the div before removal. Keep
-      # this above one Ruby boundary so a single visit+find pair
+      # Minimum wall-clock gap before find() re-ticks, so a burst of finds in one
+      # poll iteration doesn't advance the clock once each. (It used to also carry
+      # "the first find returns the DOM before a `setTimeout(0)` runs"; the page's
+      # own init now runs with the LOAD, where a browser runs it — see
+      # `flush_page_init`.) Keep this above one Ruby boundary so a single visit+find
+      # pair
       # doesn't accidentally tick.
       FIND_PRE_TICK_MIN_S = 0.05
       # Whether a find should advance the clock BEFORE reading the DOM. The FIRST find after a
@@ -1040,34 +1040,40 @@ module Capybara
 
       # What a READ (`text` on an already-found node) does to the clock.
       #
-      # It can't advance it in place. `all(…).map(&:text)` walks N elements of ONE
-      # query, back to back — in a browser no page time passes between them — and a
-      # step per read walked the clock into the re-render those reads were racing,
+      # It can't advance it on every read. `all(…).map(&:text)` walks N elements of
+      # ONE query, back to back — in a browser no page time passes between them — and
+      # a step per read walked the clock into the re-render those reads were racing,
       # detaching the rest of the snapshot. Capybara can't recover from that: `all`
-      # hands back elements with `allow_reload: false`, so its retry re-reads the
-      # same dead nodes (Discourse `tags_spec:221`).
+      # hands back elements with `allow_reload: false`, so its retry re-reads the same
+      # dead nodes (Discourse `tags_spec:221`).
       #
-      # It can't simply NOT advance it either. A read is the driver's heartbeat while
-      # a matcher polls: `have_text` re-reads a cached scope node without going back
-      # through `find`, and `polling?` stops answering true once the settle
-      # generation sits still, so suppressing the tick outright makes Capybara give
-      # up on a page that was about to change (a `not_to have_css` waiting on a
-      # timer to remove the node it names).
+      # It can't stop advancing it either. A read is the driver's heartbeat while a
+      # matcher polls: `assert_text` re-reads its node without going back through
+      # `find`, and for a node that can't be reloaded — anything from `all` / `first`,
+      # or any node when `Capybara.automatic_reload` is off — no find will ever run,
+      # so the page would sit still until the wait expired.
       #
-      # So a read OWES a step and the next query pays it (`find_with_timer_fallback`).
-      # Reading a snapshot moves nothing; the poll that comes back round advances the
-      # clock before it looks again. (The page's own `setTimeout(0)` init doesn't
-      # depend on a read at all — `flush_page_init` runs it as the load ends, which
-      # is where a browser runs it.)
-      def tick_for_read(_handle)
+      # The two are told apart by WHICH node is read:
+      #
+      #   the same handle again  → a matcher polling its node → advance now
+      #   a different handle     → the next element of a walk → owe it, and let the
+      #                            next query pay (`settle_read_debt`), where moving
+      #                            the clock can't strand a snapshot mid-walk
+      #
+      # (The page's own `setTimeout(0)` init doesn't depend on a read at all —
+      # `flush_page_init` runs it with the load, which is where a browser runs it.)
+      def tick_for_read(handle)
+        repeat            = @last_read_handle == handle
+        @last_read_handle = handle
+        return tick_real_time if repeat
+
         @read_owes_tick = true
       end
 
-      # Pay what the reads since the last query owe (see `tick_for_read`).
+      # Pay what a read since the last query owes (see `tick_for_read`).
       def settle_read_debt
         return unless @read_owes_tick
 
-        @read_owes_tick = false
         tick_real_time
       end
 
@@ -2072,6 +2078,14 @@ module Capybara
           # due-now step: the navigation already under way wins, and moving the
           # index here would leave it pointing at an entry that isn't the document
           # about to commit (see `flush_outgoing_page_init`).
+          #
+          # Hard to reach on purpose since the page's own init runs with the load
+          # (`flush_page_init`) and every find and action drains what is due as it
+          # goes: a traversal has to come due in the instant between the last of
+          # those and the navigation. It stays because the flush CAN still fire one
+          # — a timer that came due while the test was busy in Ruby — and the cost
+          # of being wrong there is a history index that doesn't describe the
+          # document.
           return :same_document if @flushing_outgoing_page
           # Pure pushState traversal — no VM rebuild, safe to run
           # inline; the popstate dispatch happens within the current
@@ -2473,6 +2487,9 @@ module Capybara
         # advanced the clock, the inner calls would only re-drain
         # already-fired timers.
         return if @ticking
+        # Any advance discharges what a read owed (`tick_for_read`) — including one an
+        # action or a find made for its own reasons.
+        @read_owes_tick = false
         @ticking = true
         begin
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -2481,13 +2498,7 @@ module Capybara
           # step SIZE below is deterministic.
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
-          # An explicit `step_ms: 0` is "run what is already DUE, advance nothing" —
-          # the drain a browser does at the end of a load (`tick_for_read`). Every
-          # other zero-length step means there is nothing to do.
-          if @timers_active && effective_step.zero? && step_ms == 0
-            r = @runtime.run_loop_step(0)
-            @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
-          elsif @timers_active && effective_step > 0
+          if @timers_active && effective_step > 0
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -2916,9 +2927,9 @@ module Capybara
         # Disarm the find pre-tick so the FIRST find after this navigation reads the current DOM
         # without advancing timers (see timer_wait_elapsed?), independent of wall-clock timing.
         @pre_tick_armed     = false
-        # The next read is the first of this document — see `tick_for_read`.
-        @read_ticked_since_nav = false
-        @read_owes_tick        = false
+        # No read of the previous document owes anything — see `tick_for_read`.
+        @read_owes_tick   = false
+        @last_read_handle = nil
         @context_gen       += 1
       end
 
@@ -10913,9 +10924,10 @@ module Capybara
         # negative assertion (have_no_*) passes early or a reactive control (a toggle
         # whose handler a chunk wires up) does nothing. `run_loop_step(0)` fires only
         # ALREADY-due timers (the setTimeout(0) chunks + their .then chains, which
-        # may insert further due-now chunks), NOT delayed app timers — so the lazy
-        # wall-sync clock is preserved (smoke_spec "queries DOM before advancing
-        # pending timers"). Bounded by the finite pending-script count.
+        # may insert further due-now chunks), NOT delayed app timers — so a test can
+        # still observe the state before a delayed one (smoke_spec "has run the page
+        # init a browser runs during the load, but not its later timers"). Bounded by
+        # the finite pending-script count.
         if @runtime.respond_to?(:run_loop_step)
           BOOT_SCRIPT_DRAIN_MAX_ITER.times do
             break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
@@ -10944,6 +10956,12 @@ module Capybara
         # navigation, and failing that from the next find.
         @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
+        # …and fired HERE for a main document, before anything pumps the task queue:
+        # a browser's `load` precedes the page's own `setTimeout(0)`, and deferring
+        # it to the next drain put every page's load AFTER the init it is supposed to
+        # precede. An AUXILIARY window keeps the deferral — its first load belongs to
+        # its opener, and consuming that one-shot here loses it entirely.
+        flush_pending_window_load unless @defer_window_load
         flush_page_init
       end
 
@@ -10960,10 +10978,33 @@ module Capybara
       #
       # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
       # pending and a test can still observe the state before it.
+      # KNOWN DIVERGENCE, measured: this runs BEFORE the window `load` event, and a
+      # browser runs it after. Chrome 151 on a page that logs each step gives
+      # `microtask, DCL, load, timeout0`; we give `microtask, DCL, timeout0, load`.
+      # Both orders were tried against the conformance gate and only this one is
+      # green — firing `load` here instead costs
+      # `shadow-dom/…/inert-html-elements/test-001` and
+      # `…/the-input-element/range-restore-oninput-onchange-event`, and draining
+      # after the load event costs `…/form-submission-0/form-data-set-usv` and
+      # `dom/events/event-global-is-still-set-when-coercing-beforeunload-result`.
+      # The page's STATE at the end of the load is right either way; it is the
+      # ordering between the two that is wrong, and the load event's own placement
+      # (deferred out of the commit, see `@window_load_due`) is the knot to untie
+      # before this can move.
       def flush_page_init
         return unless @timers_active
 
-        tick_real_time(step_ms: 0)
+        # `maxMs: 0` — fire what is already DUE and advance the clock by nothing, so
+        # a `setTimeout(fn, 50)` stays pending and a test can still observe the state
+        # before it. Capped like every other drain (a page whose zero-delay timer
+        # reschedules itself would otherwise burn the full 10 000-iteration budget on
+        # every load: measured 33 ms per visit against 9 ms). Swallowed for the same
+        # reason `flush_outgoing_page_init` swallows: a page that throws from its own
+        # init has a problem, but `visit` isn't it.
+        r = @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+        @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+      rescue StandardError => e
+        log_console('warn', "page init failed: #{e.class}: #{e.message}")
       end
 
       # Run one due-now event-loop step on the page being navigated AWAY from,
@@ -10980,7 +11021,8 @@ module Capybara
       #    ALREADY-due timers (the setTimeout(0) + its `.then` chain), NOT delayed
       #    ones, so the lazy wall-sync timer model is preserved (a freshly-loaded,
       #    not-yet-navigated-away page keeps its own pending setTimeout(0)s
-      #    untouched; smoke_spec "queries DOM before advancing pending timers").
+      #    untouched; smoke_spec "has run the page init a browser runs during the
+      #    load, but not its later timers").
       #
       # 2. Those tasks can still touch the URL, and a browser lets them — the
       #    outgoing document keeps running until the new response COMMITS.
