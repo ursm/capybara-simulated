@@ -201,7 +201,15 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     )
   end
 
-  it 'queries the current DOM before advancing pending timers' do
+  # A `setTimeout(fn, 0)` a page queues while parsing has RUN by the time the load
+  # ends — measured in Chrome 151, which serves this exact document with no
+  # `#transient` in it at all. This used to assert the opposite (the driver left the
+  # timer pending and the first element read fired it), which put a page's first
+  # re-render in the middle of whatever the test did next.
+  #
+  # A DELAYED timer is still pending, and that is what a test observing a transient
+  # state actually needs — the second expectation.
+  it 'has run the page init a browser runs during the load, but not its later timers' do
     timer_app = Rack::Builder.new {
       run lambda {|_env|
         [
@@ -213,7 +221,11 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
               <html>
                 <body>
                   <div id="transient">still here</div>
-                  <script>setTimeout(() => document.getElementById('transient').remove(), 0)</script>
+                  <div id="later">still here</div>
+                  <script>
+                    setTimeout(() => document.getElementById('transient').remove(), 0);
+                    setTimeout(() => document.getElementById('later').remove(), 5000);
+                  </script>
                 </body>
               </html>
             HTML
@@ -224,7 +236,8 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
     s = simulated_session(timer_app)
     s.visit '/'
 
-    expect(s).to have_selector('#transient')
+    expect(s).to have_no_selector('#transient')
+    expect(s).to have_selector('#later')
   end
 
   it 'parses full documents assigned to a detached documentElement innerHTML' do
