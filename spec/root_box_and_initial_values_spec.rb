@@ -74,16 +74,20 @@ RSpec.describe 'root box + computed initial values' do
     expect(s.evaluate_script('document.documentElement.clientHeight')).to eq(768)
   end
 
-  it 'scrolls a click target into view by the minimum, not to the centre' do
+  it 'centres a click target that is out of view, without moving the axis it already fits' do
     s = session(tall_page)
     s.find(:css, '#below').click
-    # WebDriver's element-click scrolls the target into view the way `scrollIntoView({block:
-    # 'nearest', inline: 'nearest'})` does — the minimum on each axis — so the box lands at the
-    # BOTTOM of the viewport and the horizontal offset is untouched. Centring instead moved the
-    # page sideways on a page whose horizontal overflow was incidental, shifting everything the
-    # test looked at next.
+    # The driver stands in for Cuprite / Playwright, whose click scrolls through CDP's
+    # `DOM.scrollIntoViewIfNeeded` — Blink's `CenterIfNeeded`. A target entirely out of view is
+    # CENTRED: 1500 - (768 - 20) / 2. (Chrome measures 1177 on this page rather than 1126 only
+    # because its scrollport is 666 tall where ours is 768 — it subtracts the horizontal scrollbar
+    # this page's 1600px content produces, and we don't model scrollbars. Same formula.)
+    #
+    # The axes are independent, which is what the old minimum-move alignment was really protecting:
+    # `#below` fits horizontally, so `scrollX` stays 0 even though the page overflows sideways.
+    # Chrome measured: `sx: 0`.
     expect(s.evaluate_script('window.scrollX')).to eq(0)
-    expect(s.evaluate_script('window.scrollY')).to eq(1520 - 768)
+    expect(s.evaluate_script('window.scrollY')).to eq(1500 - ((768 - 20) / 2))
   end
 
   it 'reports initial values, not empty strings, for properties nothing sets' do
@@ -418,7 +422,7 @@ RSpec.describe 'root box + computed initial values' do
     expect(s.evaluate_script("(document.elementFromPoint(60, 415) || {}).id")).to eq('far')
   end
 
-  it 'leaves a tall panel alone when part of it is already showing' do
+  it 'moves a partly showing tall panel to its nearest edge' do
     s = session(<<~HTML)
       <!DOCTYPE html>
       <html><head><style>
@@ -427,10 +431,11 @@ RSpec.describe 'root box + computed initial values' do
       <body><div id="spacer"></div><div id="panel">panel</div></body></html>
     HTML
     s.find(:css, '#panel').click
-    # WebDriver clicks the IN-VIEW centre point, so a box with any part in the viewport already has
-    # a clickable one. Aligning its top instead scrolled the page on every click of anything taller
-    # than the window.
-    expect(s.evaluate_script('window.scrollY')).to eq(0)
+    # A box that is PARTLY showing takes Blink's third branch — the closest edge, i.e. the minimum
+    # move — so the panel's top comes to the viewport top and nothing jumps. Chrome measured on this
+    # page: 100. (Centring, which is what a box entirely out of view gets, would say 267 here; the
+    # old rule left the page at 0 and never brought the panel's top into view at all.)
+    expect(s.evaluate_script('window.scrollY')).to eq(100)
   end
 
   it 'expands an inline background shorthand to its longhands' do

@@ -9,7 +9,7 @@ require_relative 'support/session_teardown'
 # not to `calc(15px)`. All of these reported '' before, which is the "we can't know" answer for
 # something a browser knows exactly.
 RSpec.describe 'CSS math functions' do
-  def computed(decls, props, extra_css: '')
+  def computed(decls, props, extra_css: '', selector: '#t')
     html = <<~HTML
       <!DOCTYPE html>
       <html><head><style>:root { --gap: 8px } #{extra_css} #t { #{decls} }</style></head>
@@ -18,7 +18,7 @@ RSpec.describe 'CSS math functions' do
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] }
     with_simulated_session(app) {|s|
       s.visit '/'
-      s.evaluate_script("(() => { const c = getComputedStyle(document.getElementById('t')); return #{props.inspect}.map(p => c[p]); })()")
+      s.evaluate_script("(() => { const c = getComputedStyle(document.querySelector('#{selector}')); return #{props.inspect}.map(p => c[p]); })()")
     }
   end
 
@@ -61,13 +61,16 @@ RSpec.describe 'CSS math functions' do
       .to eq(['5px', '2px'])
   end
 
-  it 'leaves a percentage expression to layout' do
-    # A percentage needs a per-property basis this stage doesn't have, so the value is kept as
-    # written rather than guessed at. Chrome resolves these against the containing block (`754px` /
-    # `392px` in the measured fixture); reporting '' is the same honest "needs layout" the driver
-    # already gives for a bare `50%` width.
-    expect(computed('margin-left: calc(100% - 10px)', %w[marginLeft])).to eq([''])
-    expect(computed('width: calc(50% + 10px)',        %w[width])).to eq([''])
+  it 'resolves a percentage expression at layout, where the basis exists' do
+    # A percentage needs a per-property basis the COMPUTED stage doesn't have — so the
+    # expression survives to layout, which does, and the resolved value is the used one.
+    # Written against the basis measured in the page (the body's content width, since
+    # the UA margin makes it narrower than the viewport) rather than a copied figure:
+    # Chrome 151 resolves both the same way on the same fixture.
+    basis = computed('', %w[width], selector: 'body').first.to_f
+    px = ->(n) { "#{n.to_i == n ? n.to_i : n}px" }
+    expect(computed('margin-left: calc(100% - 10px)', %w[marginLeft])).to eq([px[basis - 10]])
+    expect(computed('width: calc(50% + 10px)',        %w[width])).to eq([px[(basis / 2) + 10]])
   end
 
   # The cases below were all invisible to the table above, which only exercised length math on
@@ -171,15 +174,17 @@ RSpec.describe 'CSS math functions' do
   end
 
   it 'keeps a declaration it cannot reduce rather than dropping it' do
-    # Two CONSERVATIVE divergences, both deliberate. Division by zero is infinity in CSS (Chrome
-    # clamps it to `3.35544e+07px`), not a type error — calling it invalid dropped the declaration
-    # and handed the cascade to a lower one, which is the bug that mattered. An unknown UNIT is kept
-    # for the same reason: this table has no `lh` / `cqw` / `ic`, so rejecting what it doesn't list
-    # would drop real CSS. Both compute '' — the driver's honest "we don't know" — where Chrome has
-    # a number.
+    # Two CONSERVATIVE divergences, both deliberate. Division by zero is infinity in CSS, not a
+    # type error — calling it invalid dropped the declaration and handed the cascade to a lower
+    # one, which is the bug that mattered. An unknown UNIT is kept for the same reason: this table
+    # has no `lh` / `cqw` / `ic`, so rejecting what it doesn't list would drop real CSS.
+    #
+    # Both now report the USED margin the box ended up with, which for a value layout can't make a
+    # length of is `0px` — where Chrome clamps the infinity to `3.35544e+07px` and agrees on the
+    # `0px` for the unknown unit. The remaining divergence is that one clamp.
     expect(computed('margin-left: calc(10px / 0)', %w[marginLeft], extra_css: 'div { margin-left: 7px }'))
-      .to eq([''])
-    expect(computed('margin-left: calc(1toString + 2px)', %w[marginLeft])).to eq([''])
+      .to eq(['0px'])
+    expect(computed('margin-left: calc(1toString + 2px)', %w[marginLeft])).to eq(['0px'])
   end
 
   it 'agrees across ALL the CSSOM write surfaces about invalid math' do

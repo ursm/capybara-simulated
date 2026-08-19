@@ -114,8 +114,9 @@ RSpec.describe 'computed value serialization' do
     # not answering. Chrome on a 100x40 box: `matrix(1, 0, 0, 1, -50, -20)`.
     expect(computed('transform: translate(-50%, -50%); width: 100px; height: 40px', %w[transform]))
       .to eq(['matrix(1, 0, 0, 1, -50, -20)'])
-    # A component we can't resolve leaves the author's value rather than inventing a matrix.
-    expect(computed('transform: translateX(2em)', %w[transform])).to eq(['translateX(2em)'])
+    # …and a relative length is a length once the computed value has absolutized it, so it
+    # composes into the matrix like any other (Chrome 151: `matrix(1, 0, 0, 1, 32, 0)`).
+    expect(computed('transform: translateX(2em)', %w[transform])).to eq(['matrix(1, 0, 0, 1, 32, 0)'])
   end
 
   it 'keeps a colour word that is part of a path' do

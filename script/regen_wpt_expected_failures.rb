@@ -165,9 +165,13 @@ H
 
 out_hdr = <<~H
   # WPT OUT-OF-SCOPE failures — subtests that fail because they need a subsystem we
-  # deliberately do NOT model (per CLAUDE.md rule 1): a layout/rendering engine, a
-  # real async runtime / streams, IDNA / legacy-multibyte encoding tables, or a spec
-  # edge no real library/app depends on. These are NOT a backlog; each carries the
+  # deliberately do NOT model (per CLAUDE.md rule 1): a RENDERING engine (glyph shaping
+  # — kerning / ligatures / bidi — the line-breaking algorithm, flex / grid track sizing,
+  # `display: contents`), a real async runtime, legacy-multibyte / Unicode-version-tied
+  # encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
+  # box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
+  # or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion —
+  # 1023 inset / used-value subtests were excluded on that stale claim and moved back. These are NOT a backlog; each carries the
   # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
   #
   # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
