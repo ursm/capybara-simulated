@@ -2747,12 +2747,7 @@ css/css-flexbox/balance/flex-line-count-valid.html:
 css/css-flexbox/balance/flex-wrap-computed.html:
 - Property flex-wrap value 'balance wrap'
 - Property flex-wrap value 'balance wrap-reverse'
-- Property flex-wrap value 'balance'
-- Property flex-wrap value 'nowrap'
 - Property flex-wrap value 'wrap balance'
-- Property flex-wrap value 'wrap'
-- Property flex-wrap value 'wrap-reverse balance'
-- Property flex-wrap value 'wrap-reverse'
 css/css-flexbox/balance/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "2 balance wrap" should not set the property value
 - e.style['flex-wrap'] = "auto" should not set the property value
@@ -3174,27 +3169,6 @@ css/css-flexbox/image-as-flexitem-size-007v.html:
 - ".flexbox > img 7"
 - ".flexbox > img 8"
 - ".flexbox > img 9"
-css/css-flexbox/inheritance.html:
-- Property align-content does not inherit
-- Property align-content has initial value normal
-- Property align-items does not inherit
-- Property align-items has initial value normal
-- Property align-self does not inherit
-- Property align-self has initial value auto
-- Property flex-basis does not inherit
-- Property flex-basis has initial value auto
-- Property flex-direction does not inherit
-- Property flex-direction has initial value row
-- Property flex-grow does not inherit
-- Property flex-grow has initial value 0
-- Property flex-shrink does not inherit
-- Property flex-shrink has initial value 1
-- Property flex-wrap does not inherit
-- Property flex-wrap has initial value nowrap
-- Property justify-content does not inherit
-- Property justify-content has initial value normal
-- Property order does not inherit
-- Property order has initial value 0
 css/css-flexbox/inline-flexbox-wrap-vertically-width-calculation.html:
 - ".inline-flexbox 10"
 - ".inline-flexbox 11"
@@ -3509,18 +3483,8 @@ css/css-flexbox/overflow-auto-006.html:
 - ".flexbox, .inline-flexbox 8"
 - ".flexbox, .inline-flexbox 9"
 css/css-flexbox/parsing/flex-basis-computed.html:
-- Property flex-basis value '1px'
-- Property flex-basis value '400%'
-- Property flex-basis value 'auto'
-- Property flex-basis value 'calc(0% + 10px)'
 - Property flex-basis value 'calc(10% + 0px)'
 - Property flex-basis value 'calc(10%)'
-- Property flex-basis value 'calc(10px + 0.5em)'
-- Property flex-basis value 'calc(10px - 0.5em)'
-- Property flex-basis value 'content'
-- Property flex-basis value 'fit-content'
-- Property flex-basis value 'max-content'
-- Property flex-basis value 'min-content'
 css/css-flexbox/parsing/flex-basis-invalid.html:
 - e.style['flex-basis'] = "-1px" should not set the property value
 - e.style['flex-basis'] = "-2%" should not set the property value
@@ -3531,47 +3495,19 @@ css/css-flexbox/parsing/flex-basis-invalid.html:
 - e.style['flex-basis'] = "auto content" should not set the property value
 - e.style['flex-basis'] = "none" should not set the property value
 css/css-flexbox/parsing/flex-computed.html:
-- Property flex value '1 1 calc(-10em)'
-- Property flex value '1 1 calc(10em)'
 - Property flex value '1 1 calc(10px + (sign(20cqw - 10px) * 5px))'
-- Property flex value '1'
-- Property flex value '2 3'
-- Property flex value '4 5 6px'
-- Property flex value '7% 8'
-- Property flex value '8 auto'
 - Property flex value 'calc(-1) calc(-1) 0'
 - Property flex value 'calc(1) calc(2 + 1) calc(3px)'
 - Property flex value 'calc(10 + (sign(20cqw - 10px) * 5)) calc(10 + (sign(20cqw -
   10px) * 5)) 1px'
-- Property flex value 'calc(10px + 0.5em)'
-- Property flex value 'calc(10px - 0.5em)'
-- Property flex value 'none'
-css/css-flexbox/parsing/flex-direction-computed.html:
-- Property flex-direction value 'column'
-- Property flex-direction value 'column-reverse'
-- Property flex-direction value 'row'
-- Property flex-direction value 'row-reverse'
 css/css-flexbox/parsing/flex-direction-invalid.html:
 - e.style['flex-direction'] = "auto" should not set the property value
 - e.style['flex-direction'] = "column row-reverse" should not set the property value
-css/css-flexbox/parsing/flex-flow-computed.html:
-- Property flex-flow value 'column wrap-reverse'
-- Property flex-flow value 'row-reverse wrap'
-css/css-flexbox/parsing/flex-grow-computed.html:
-- Property flex-grow value '0'
-- Property flex-grow value '1'
-- Property flex-grow value '2.34e+06'
-- Property flex-grow value '6.78e+08'
 css/css-flexbox/parsing/flex-grow-invalid.html:
 - e.style['flex-grow'] = "1." should not set the property value
 css/css-flexbox/parsing/flex-invalid.html:
 - e.style['flex'] = "9 none" should not set the property value
 - e.style['flex'] = "none 1" should not set the property value
-css/css-flexbox/parsing/flex-shrink-computed.html:
-- Property flex-shrink value '0'
-- Property flex-shrink value '1'
-- Property flex-shrink value '2.34e+06'
-- Property flex-shrink value '6.78e+08'
 css/css-flexbox/parsing/flex-shrink-invalid.html:
 - e.style['flex-shrink'] = "1." should not set the property value
 css/css-flexbox/parsing/flex-valid.html:
@@ -3581,17 +3517,9 @@ css/css-flexbox/parsing/flex-valid.html:
 - e.style['flex'] = "calc(1) calc(2 + 1) calc(3px)" should set the property value
 - e.style['flex'] = "calc(10 + (sign(20cqw - 10px) * 5)) calc(10 + (sign(20cqw - 10px)
   * 5)) 1px" should set the property value
-css/css-flexbox/parsing/flex-wrap-computed.html:
-- Property flex-wrap value 'nowrap'
-- Property flex-wrap value 'wrap'
-- Property flex-wrap value 'wrap-reverse'
 css/css-flexbox/parsing/flex-wrap-invalid.html:
 - e.style['flex-wrap'] = "auto" should not set the property value
 - e.style['flex-wrap'] = "nowrap wrap" should not set the property value
-css/css-flexbox/parsing/order-computed.html:
-- Property order value '-45'
-- Property order value '0'
-- Property order value '123'
 css/css-flexbox/parsing/order-invalid.html:
 - e.style['order'] = "auto" should not set the property value
 css/css-flexbox/parsing/webkit-aliases.html:
@@ -3707,9 +3635,6 @@ css/cssom/cssom-fontfacerule-constructors.html:
 - The style attribute must return a CSSFontFaceDescriptors block
 css/cssom/cssstyledeclaration-nested.html:
 - CSSNestedDeclarationBlock cssom interactions
-css/cssom/cssstyledeclaration-properties.html:
-- 'CSS Test: CSSStyleDeclaration properties are defined as WebIDL attributes, not
-  using getOwnPropertyNames()'
 css/cssom/cssstyledeclaration-registered-custom-properties.html:
 - Only relevant custom properties are included
 - Registered custom properties are included in CSSComputedStyleDeclaration
