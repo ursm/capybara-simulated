@@ -80,6 +80,39 @@ RSpec.describe 'layout insets' do
     expect(rect_of(s, 'pin')).to eq([894, 748, 30, 20])
   end
 
+  it 'insets an anchored box by its own margin, whichever edge it is anchored to' do
+    # A margin is part of where an out-of-flow box sits, `auto` or not — and the box has to REPORT
+    # the same figure it was placed by. Chrome, in a 400x300 relative containing block:
+    # `left: 20; margin-left: 30` sits at 50, and `right: 10; margin-right: 7` at 343 (400−10−40−7).
+    markup = <<~HTML
+      <div id="cb" style="position:relative;width:400px;height:300px">
+        <div id="lead" style="position:absolute;top:10px;left:20px;margin:20px 0 0 30px;width:50px;height:50px"></div>
+        <div id="trail" style="position:absolute;bottom:10px;right:10px;margin:0 7px 5px 0;width:40px;height:40px"></div>
+        <div id="mid" style="position:absolute;top:0;bottom:0;left:0;height:50px;width:60px;margin:auto"></div>
+      </div>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{markup}</body>)]] })
+    s.visit '/'
+    expect(rect_of(s, 'lead')).to  eq([50, 30, 50, 50])
+    expect(rect_of(s, 'trail')).to eq([343, 245, 40, 40])
+    # Between BOTH insets, an `auto` margin takes the slack (§10.6.4) — and reports it: Chrome says
+    # `125px`, not `auto` and not `0px`.
+    expect(rect_of(s, 'mid')).to eq([0, 125, 60, 50])
+    # A box STRETCHED between two insets is that gap less its own margins, on both axes: Chrome
+    # makes `inset: 0; margin: 10px` in a 400x300 block 380x280, not 400x300 hanging off both far
+    # edges.
+    stretch = <<~HTML
+      <div id="cb2" style="position:relative;width:400px;height:300px">
+        <div id="inset" style="position:absolute;inset:0;margin:10px"></div>
+      </div>
+    HTML
+    s2 = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{stretch}</body>)]] })
+    s2.visit '/'
+    expect(rect_of(s2, 'inset')).to eq([10, 10, 380, 280])
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('mid')).marginTop")).to eq('125px')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('lead')).marginLeft")).to eq('30px')
+  end
+
   it 'stretches `inset: 0` across the whole viewport, occluding what is under it' do
     s = session
     # Chrome: 0 0 1024 681 (viewport-filling); ours 768 tall.
