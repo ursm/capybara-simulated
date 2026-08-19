@@ -27,7 +27,7 @@
 // visits real `.html` test files.
 
 import { mkdir, writeFile, rm, readdir, rmdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,7 +128,21 @@ const TREES = [
                                        // API, no layout. `.tentative` algorithms (Argon2 / cSHAKE / SHA-3 / Ed448
                                        // curve448 / AES-OCB / ML-KEM) auto-route out; getPublicKey / encap_decap /
                                        // supports are .tentative too.
+  'css/css-flexbox',                   // CSS Flexbox — the objective bar for the flex layout the driver
+                                       // resolves on both axes (§9.7 bases / grow / shrink / the automatic
+                                       // minimum / gaps / auto margins / justify / align). Vendored
+                                       // HARNESS-ONLY (see below): the tree is ~2000 files and three
+                                       // quarters of them are reftests, which compare rendered pixels and
+                                       // are not something this driver can ever answer.
 ];
+
+// Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually
+// include the harness. `css/css-flexbox` is 2000 files of which ~330 are testharness tests; the
+// rest are reftests (`*-ref.html` and the pixel-comparison tests pointing at them), which the
+// runner already skips — it only visits `.html` that includes `/resources/testharness.js` — so
+// vendoring them would commit 1600 files that can never report a result. A tree listed here is
+// still a normal entry in TREES: it is scanned for tests exactly like any other.
+const HARNESS_ONLY_TREES = ['css/css-flexbox'];
 
 // Support-only trees: vendored whole so absolute-path includes (`/common/…`)
 // resolve at serve time, but the runner does NOT scan them for test files.
@@ -167,6 +181,22 @@ const SUPPORT_FILES = [
   // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
   // the file is a plain array of keyword strings (no further includes).
   'css/css-fonts/support/font-family-keywords.js',
+  // The CSS value-test helpers: `test_valid_value` / `test_computed_value` /
+  // `test_shorthand_value` / `test_interpolation` / `assert_inherited`. The css-flexbox
+  // parsing/ + animation/ + balance/ slices are written entirely in terms of them (41 files,
+  // every one of which generated NOTHING without them), and they are pure CSS-value tests —
+  // the cascade engine's own surface, no layout involved. Self-contained on top of testharness.
+  'css/support/parsing-testcommon.js',
+  'css/support/computed-testcommon.js',
+  'css/support/shorthand-testcommon.js',
+  'css/support/interpolation-testcommon.js',
+  'css/support/inheritance-testcommon.js',
+  // The layout oracle every CSS layout suite is written against: `checkLayout()` turns an
+  // element's `data-expected-width` / `-height` / `data-offset-x` / `-y` annotations into
+  // testharness subtests. 220 of the 368 vendored css-flexbox tests include it by absolute path —
+  // without it they load, silently generate NO subtests, and "complete" green, which is worse
+  // than failing. It is self-contained on top of testharness.
+  'resources/check-layout-th.js',
   // service-workers fetch-request-redirect / fetch-canvas-tainting-video load
   // getAudioURI()/getVideoURI()'s /media/sound_5.* and fetch-access-control.py's
   // /media/movie_5.* — vendor the four small files, not the whole media tree.
@@ -245,8 +275,27 @@ async function pool(items, n, worker) {
   process.stderr.write('\n');
 }
 
+// Is this path inside a HARNESS_ONLY tree, and if so is it one of the files we keep? Support
+// files ride along whole (they are what the tests include); everything else has to be an `.html`
+// carrying the harness. Decided AFTER the fetch, because "is this a testharness test" is a fact
+// about the file's content, not its name.
+function inHarnessOnlyTree(path) {
+  return HARNESS_ONLY_TREES.some((t) => path === t || path.startsWith(`${t}/`));
+}
+function keepInHarnessOnlyTree(path, buf) {
+  const segments = path.split('/');
+  if (segments.includes('support') || segments.includes('resources')) return true;
+  if (!/\.(html|htm|xht|xhtml)$/i.test(path)) return false;
+  // The same names `WptRunner.test_files` rejects, rejected here too, so a file it would never
+  // visit is never committed either.
+  if (/-(ref|notref|manual)\.(html|htm|xht|xhtml)$/i.test(path)) return false;
+  return buf.includes('/resources/testharness.js');
+}
+
+let skipped = 0;
 async function vendorPath(sha, path) {
   const buf = await fetchRaw(sha, path);
+  if (inHarnessOnlyTree(path) && !keepInHarnessOnlyTree(path, buf)) { skipped++; return; }
   const dest = join(OUT, path);
   await mkdir(dirname(dest), { recursive: true });
   await writeFile(dest, buf);
@@ -279,12 +328,10 @@ async function main() {
   const sha = await resolveSha(REF);
   console.error(`Vendoring web-platform-tests @ ${sha}`);
 
-  // Clean the vendored trees (but keep our committed resources/testharnessreport.js).
-  for (const tree of [...TREES, ...SUPPORT_TREES]) {
-    await cleanTree(join(OUT, tree));
-  }
-  await rm(join(OUT, 'resources', 'testharness.js'), { force: true });
-
+  // LIST FIRST, clean second. The listing is a handful of API calls and it is what fails when the
+  // network is down or GitHub rate-limits an unauthenticated run — cleaning before knowing the
+  // download can even start left the corpus DELETED and the working tree needing a
+  // `git checkout -- spec/wpt` to recover (measured, twice).
   const paths = [];
   for (const tree of [...TREES, ...SUPPORT_TREES]) {
     const blobs = await listBlobs(sha, tree);
@@ -294,19 +341,32 @@ async function main() {
   paths.push('resources/testharness.js');
   paths.push(...SUPPORT_FILES);
 
+  // Clean the vendored trees (but keep our committed resources/testharnessreport.js).
+  for (const tree of [...TREES, ...SUPPORT_TREES]) {
+    await cleanTree(join(OUT, tree));
+  }
+  await rm(join(OUT, 'resources', 'testharness.js'), { force: true });
+
   console.error(`Downloading ${paths.length} files (concurrency ${CONCURRENCY})…`);
   await pool(paths, CONCURRENCY, (p) => vendorPath(sha, p));
+  if (skipped) console.error(`  ${skipped} reftest/unused files fetched and dropped (harness-only trees)`);
 
   await writeFile(
     join(OUT, 'WPT_VERSION'),
     `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}` +
+      `\nharness-only trees: ${HARNESS_ONLY_TREES.join(', ')}` +
       `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}\n`
   );
   console.error(`Done. Pinned SHA written to spec/wpt/WPT_VERSION.`);
   console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_gate  # refresh the allowlist`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Only when RUN, never when imported. `main()` deletes every vendored tree before it downloads,
+// so a module that merely wants the lists (a reviewer reconstructing WPT_VERSION, a future
+// script reusing TREES) used to wipe spec/wpt as a side effect of `import`.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
