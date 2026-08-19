@@ -4,8 +4,7 @@ require_relative 'support/session_teardown'
 
 # `scrollend` (CSSOM-View): the driver models the spec "pending scroll event
 # targets" — scrollend is queued on a position change and dispatched at the next
-# rendering update (not synchronously), so a scroller removed before then has its
-# pending scrollend dropped. An element scroller fires on the element only
+# rendering update, not synchronously. An element scroller fires on the element only
 # (bubbles:false); the viewport scroller fires at the document (bubbles:true),
 # reaching a window listener exactly once via bubbling.
 RSpec.describe 'scrollend event' do
@@ -69,16 +68,19 @@ RSpec.describe 'scrollend event' do
     expect(s.evaluate_script('window.__el')).to eq(0)
   end
 
-  it 'drops a pending scrollend when the scroller is removed before the render update' do
+  it 'still fires the scrollend of a scroller removed before the render update' do
     s = session
     s.execute_script(<<~JS)
       window.__fired = 0;
       const el = document.getElementById('s');
       el.addEventListener('scrollend', () => { window.__fired++; });
-      el.scrollTop = 100;        // queues a pending scrollend
-      el.remove();               // ...removed before the render-phase flush
+      el.scrollTop = 100;
+      el.remove();
     JS
     pump(s)
-    expect(s.evaluate_script('window.__fired')).to eq(0)
+    # Chrome 151, measured: a box scrolled and removed in the same task gets BOTH its `scroll` and
+    # its `scrollend` — "run the scroll steps" has no connectedness test. (This example used to
+    # assert the opposite, on a claim about real browsers that turned out to be untrue.)
+    expect(s.evaluate_script('window.__fired')).to eq(1)
   end
 end

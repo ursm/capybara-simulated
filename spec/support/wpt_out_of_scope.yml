@@ -29419,6 +29419,18 @@ dom/events/scrolling/scroll-cross-origin-iframes.html:
 - name: Verify sibling cross-origin iframes can wheel-scroll.
   reason: Wheel-scrolling cross-origin iframes needs wheel event + scroll geometry
     + viewport layout subsystem we don't model.
+dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
+- name: No scrollend is received after removing parent div
+  reason: 'The scroller is removed MID-ANIMATION: the test scrolls with smooth behavior
+    and removes it from the scroll handler at half the offset, so the scroll never
+    completes and its scrollend is cancelled. We model no scroll ANIMATION (every
+    scroll lands instantly), so that state does not exist here — by the time a handler
+    can remove the box its scroll HAS completed, and Chrome fires both scroll and
+    scrollend for a box scrolled and removed in the same task (measured, headed Chrome
+    151), which is what we match. .tentative on top of that.'
+- name: No scrollend is received after removing scrolling element
+  reason: 'Same test, same reason: the scroller is removed while a smooth scroll is
+    still animating, which our instant-scroll model has no equivalent of.'
 dom/events/scrolling/scroll-event-fired-to-element.html:
 - name: scrollTop and scrollLeft when scrolling above maximum offset.
   reason: Clamping scrollTop/scrollLeft to scrollable max requires layout-computed
