@@ -1,7 +1,11 @@
 # WPT OUT-OF-SCOPE failures — subtests that fail because they need a subsystem we
-# deliberately do NOT model (per CLAUDE.md rule 1): a layout/rendering engine, a
-# real async runtime / streams, IDNA / legacy-multibyte encoding tables, or a spec
-# edge no real library/app depends on. These are NOT a backlog; each carries the
+# deliberately do NOT model (per CLAUDE.md rule 1): a RENDERING engine (glyph shaping
+# — kerning / ligatures / bidi — the line-breaking algorithm, flex / grid track sizing,
+# `display: contents`), a real async runtime, legacy-multibyte / Unicode-version-tied
+# encoding tables, or a spec edge no real library/app depends on. NOT "layout" wholesale:
+# box layout IS modeled (CLAUDE.md lists it as already in scope), so a failing geometry
+# or resolved-value subtest is a coarse-model gap to diagnose, not an automatic exclusion —
+# 1023 inset / used-value subtests were excluded on that stale claim and moved back. These are NOT a backlog; each carries the
 # reason it is earned out-of-scope. The in-scope roadmap is wpt_expected_failures.yml.
 #
 # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
@@ -28753,6 +28757,440 @@ WebCryptoAPI/supports.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/alignment/flex-align-baseline-line-clamp-001.tentative.html:
+- name: ".target > * 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 11"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 13"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 15"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 17"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 19"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 21"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 23"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 3"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 5"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 7"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 9"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/alignment/flex-align-baseline-line-clamp-002.tentative.html:
+- name: ".target > * 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 10"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 11"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 12"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 13"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 14"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 15"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 16"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 17"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 18"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 19"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 2"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 20"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 21"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 22"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 23"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 24"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 3"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 4"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 5"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 6"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 7"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 8"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 9"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/alignment/flex-align-baseline-line-clamp-003.tentative.html:
+- name: ".target > * 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 10"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 11"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 12"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 13"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 14"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 15"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 16"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 17"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 18"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 19"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 2"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 20"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 21"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 22"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 23"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 24"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 3"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 4"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 5"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 6"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 7"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 8"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".target > * 9"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/fieldset-as-container-justify-center.tentative.html:
+- name: ".item 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/flex-container-max-content-002.tentative.html:
+- name: ".flex 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 11"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 12"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 13"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 14"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 15"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 16"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 17"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 18"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 19"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 2"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 20"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 21"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 23"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 24"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 3"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 4"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 5"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 6"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 7"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 8"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 9"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-flexbox/flex-container-min-content-002.tentative.html:
+- name: ".flex 1"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 10"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 11"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 12"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 13"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 14"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 15"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 16"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 17"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 18"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 19"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 2"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 20"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 21"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 22"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 23"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 24"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 3"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 4"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 5"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 6"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 7"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 8"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: ".flex 9"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 css/cssom/CSSContainerRule.tentative.html:
 - name: "@container (min-width: 100px) {}"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -29419,18 +29857,6 @@ dom/events/scrolling/scroll-cross-origin-iframes.html:
 - name: Verify sibling cross-origin iframes can wheel-scroll.
   reason: Wheel-scrolling cross-origin iframes needs wheel event + scroll geometry
     + viewport layout subsystem we don't model.
-dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
-- name: No scrollend is received after removing parent div
-  reason: 'The scroller is removed MID-ANIMATION: the test scrolls with smooth behavior
-    and removes it from the scroll handler at half the offset, so the scroll never
-    completes and its scrollend is cancelled. We model no scroll ANIMATION (every
-    scroll lands instantly), so that state does not exist here — by the time a handler
-    can remove the box its scroll HAS completed, and Chrome fires both scroll and
-    scrollend for a box scrolled and removed in the same task (measured, headed Chrome
-    151), which is what we match. .tentative on top of that.'
-- name: No scrollend is received after removing scrolling element
-  reason: 'Same test, same reason: the scroller is removed while a smooth scroll is
-    still animating, which our instant-scroll model has no equivalent of.'
 dom/events/scrolling/scroll-event-fired-to-element.html:
 - name: scrollTop and scrollLeft when scrolling above maximum offset.
   reason: Clamping scrollTop/scrollLeft to scrollable max requires layout-computed
@@ -29577,6 +30003,18 @@ dom/events/scrolling/scrollend-event-for-user-scroll.html:
     input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
     layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
     is activated; previously vacuous.
+dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
+- name: No scrollend is received after removing parent div
+  reason: 'The scroller is removed MID-ANIMATION: the test scrolls with smooth behavior
+    and removes it from the scroll handler at half the offset, so the scroll never
+    completes and its scrollend is cancelled. We model no scroll ANIMATION (every
+    scroll lands instantly), so that state does not exist here — by the time a handler
+    can remove the box its scroll HAS completed, and Chrome fires both scroll and
+    scrollend for a box scrolled and removed in the same task (measured, headed Chrome
+    151), which is what we match. .tentative on top of that.'
+- name: No scrollend is received after removing scrolling element
+  reason: 'Same test, same reason: the scroller is removed while a smooth scroll is
+    still animating, which our instant-scroll model has no equivalent of.'
 dom/events/scrolling/wheel-event-transactions-basic.html:
 - name: The wheel event transactions target may not be a scroll frame
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
@@ -43027,6 +43465,23 @@ html/semantics/forms/the-select-element/customizable-select/select-picker-option
 - name: CSS animations on option elements restart when the base-select picker reopens.
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
     picker pseudo-elements — no animation/rendering engine.
+html/semantics/forms/the-select-element/customizable-select/select-picker-popover-open-invalid.tentative.html:
+- name: '"::picker(select):popover-open" should be an invalid selector'
+  reason: 'Unratified `.tentative` spec, so out per CLAUDE.md rule 1 — but the failure
+    is a REAL driver gap, not spec churn: our selector parser ACCEPTS `::picker(select):popover-open`
+    where it must reject it (a pseudo-class after a pseudo-element that does not permit
+    one). It reads as new here only because this file was silently EMPTY until `/css/support/parsing-testcommon.js`
+    was vendored (it 404d, `test_invalid_selector` was undefined, the file completed
+    with zero subtests and the gate never saw it). Fix the parser when `::picker()`
+    ratifies and this re-enters in scope.'
+- name: '"select::picker(select):popover-open" should be an invalid selector'
+  reason: 'Unratified `.tentative` spec, so out per CLAUDE.md rule 1 — but the failure
+    is a REAL driver gap, not spec churn: our selector parser ACCEPTS `::picker(select):popover-open`
+    where it must reject it (a pseudo-class after a pseudo-element that does not permit
+    one). It reads as new here only because this file was silently EMPTY until `/css/support/parsing-testcommon.js`
+    was vendored (it 404d, `test_invalid_selector` was undefined, the file completed
+    with zero subtests and the gate never saw it). Fix the parser when `::picker()`
+    ratifies and this re-enters in scope.'
 html/semantics/forms/the-select-element/customizable-select/select-picker-starting-style.html:
 - name: "@starting-style should work on ::picker(select) just like a popover."
   reason: CSS animations/transitions + top-layer/@starting-style on the customizable-select
