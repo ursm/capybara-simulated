@@ -48,8 +48,17 @@ jobs:
         # A bounded call plus one retry turns that into a fast, obvious failure that
         # `gh run rerun --failed` can pick up, rather than a job that sits until its
         # own timeout.
+        #
+        # …which stopped being enough on 2026-08-19: six jobs across three runs, every
+        # one `exit 124` on that 120 s bound, and re-running never converged. In every
+        # log the azure legs answer `Ign:` while `archive.ubuntu.com` — its sibling in
+        # the same mirrorlist — answers `Hit:` throughout, so apt spends the whole
+        # budget timing out on a mirror it does not need. Dropping the azure entry
+        # sends it straight to the one that works. The bound and the retry stay: they
+        # are what turns the NEXT bad mirror into a fast failure rather than a hang.
         timeout-minutes: 6
         run: |
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt || true
           apt_try() {
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
@@ -107,8 +116,17 @@ jobs:
         # A bounded call plus one retry turns that into a fast, obvious failure that
         # `gh run rerun --failed` can pick up, rather than a job that sits until its
         # own timeout.
+        #
+        # …which stopped being enough on 2026-08-19: six jobs across three runs, every
+        # one `exit 124` on that 120 s bound, and re-running never converged. In every
+        # log the azure legs answer `Ign:` while `archive.ubuntu.com` — its sibling in
+        # the same mirrorlist — answers `Hit:` throughout, so apt spends the whole
+        # budget timing out on a mirror it does not need. Dropping the azure entry
+        # sends it straight to the one that works. The bound and the retry stay: they
+        # are what turns the NEXT bad mirror into a fast failure rather than a hang.
         timeout-minutes: 6
         run: |
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt || true
           apt_try() {
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
