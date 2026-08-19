@@ -227,6 +227,70 @@ RSpec.describe 'cascade invalidation' do
       .to eq([['rtl', '0px', '7px'], ['ltr', '7px', '0px']])
   end
 
+  # …and the same state change has to reach the BOXES, not just the CSSOM. Layout keyed its memos on
+  # the rule-set version, which no state change moves, so an element styled by a dynamic selector
+  # kept the box it was first laid out with — `getBoundingClientRect` served the placeholder-shown
+  # 300px after the field was filled. Chrome 151, same page: 300 then 100.
+  it 'relays out an element a dynamic selector restyles' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { width: 100px } #t:placeholder-shown { width: 300px }</style></head>' \
+        '<body><input id="t" placeholder="p"></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "document.getElementById('t').getBoundingClientRect().width"
+    before = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('t').setRangeText('abc', 0, 0)")
+    expect([before, s.evaluate_script(read)]).to eq([300, 100])
+  end
+
+  # …and CLEARING the live value counts as changing it. `<form>.reset()` and a `type` change drop
+  # the dirty value flag with `delete`, which no assignment helper can catch — so an emptied field
+  # kept the box it had while it was full, on both the CSSOM and the geometry side.
+  it 'relays out a control whose value a form reset cleared' do
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '#t { width: 100px } #t:placeholder-shown { width: 300px }</style></head>' \
+        '<body><form id="f"><input id="t" placeholder="p"></form></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    read = "document.getElementById('t').getBoundingClientRect().width"
+    s.evaluate_script("document.getElementById('t').value = 'abc'")
+    filled = s.evaluate_script(read)
+    s.evaluate_script("document.getElementById('f').reset()")
+    expect([filled, s.evaluate_script(read)]).to eq([100, 300])
+  end
+
+  # The other half of the same contract, and the one rule 3 cares about: a dynamic rule that only
+  # PAINTS must not invalidate layout at all. Keyed on the style-state generation unconditionally,
+  # one `setRangeText` on a page with a `:hover { background: … }` rule relaid out the whole
+  # document — 1 ms became 2.9 s for 100 type-and-measure rounds on a 300-row page.
+  it 'does not relay out for a dynamic rule that only paints' do
+    rows = (1..200).map {|i| "<div class='r'>row #{i}</div>" }.join
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><head><style>' \
+        '.r { padding: 2px } .r:hover { background: #eee }</style></head>' \
+        "<body><input id='t'>#{rows}</body></html>"]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    elapsed = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t'), e = document.querySelector('.r');
+        e.getBoundingClientRect();                       // warm the pass
+        const t0 = Date.now();
+        for (let i = 0; i < 100; i++) { t.setRangeText('x', 0, 0); e.getBoundingClientRect(); }
+        return Date.now() - t0;
+      })()
+    JS
+    # A full relayout per keystroke is ~2 s on this page; a cached one is single-digit ms. The
+    # bound is loose enough to survive a slow machine and still an order of magnitude under the
+    # regression it exists to catch.
+    expect(elapsed).to be < 300
+  end
+
   it 'never caches an element another realm owns' do
     # Per-frame realms are a V8 (rusty_racer) feature; QuickJS keeps a same-realm fallback, so there
     # is no second realm for the cache to be confused between.

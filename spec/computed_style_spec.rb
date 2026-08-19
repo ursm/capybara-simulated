@@ -65,6 +65,49 @@ RSpec.describe 'getComputedStyle resolved values' do
     expect(r['child']).to eq('40px')   # inherits #outer
   end
 
+  # …and across the units that need something other than the parent's size: the VIEWPORT
+  # (`font-size: 5vw` is how a responsive page scales its type — it used to inherit instead,
+  # since the resolver's unit table stopped at the absolute units) and the FONT FILE (`ex` /
+  # `ch` measure the PARENT's font, because this element's is what they are computing; they
+  # answered a flat 0.5em, which is only the spec's fallback for a font we can't read).
+  #
+  # The font-derived pair is asserted as a RELATION to the same metrics elsewhere in the page
+  # rather than as pixels, so it holds whichever face fontconfig serves. Chrome 151 here
+  # (16px Arial → Liberation Sans): 2ex = 16.906px, 3ch = 26.695px, 5vw = 51.2px at 1024.
+  it 'resolves font-size against the viewport and the font file' do
+    session = build_session(<<~HTML)
+      <!DOCTYPE html><html><head><style>
+        body { margin: 0; font: 16px Arial }
+        #vw { font-size: 5vw } #vmin { font-size: 1vmin }
+        #ex { font-size: 2ex } #ch { font-size: 3ch }
+        #probe { white-space: pre; font: 16px Arial }
+      </style></head><body>
+        <div id="vw"></div><div id="vmin"></div><div id="ex"></div><div id="ch"></div>
+        <span id="probe">0</span>
+      </body></html>
+    HTML
+    out = session.evaluate_script(<<~JS)
+      const fs = (id) => parseFloat(getComputedStyle(document.getElementById(id)).fontSize);
+      JSON.stringify({
+        vw: fs('vw'), vmin: fs('vmin'), ex: fs('ex'), ch: fs('ch'),
+        w: window.innerWidth, h: window.innerHeight,
+        zero: document.getElementById('probe').getBoundingClientRect().width,
+      });
+    JS
+    r = JSON.parse(out)
+    expect(r['vw']).to be_within(0.001).of(r['w'] * 0.05)
+    expect(r['vmin']).to be_within(0.001).of([r['w'], r['h']].min * 0.01)
+
+    # `3ch` is three advances of the parent's `0` — the same figure the page renders that
+    # glyph at. (`ex` has no such probe: an x-height isn't a measurable run, so it is pinned
+    # only as strictly between the flat fallback and the `0` advance, which is where every
+    # face here puts it.)
+    expect(r['ch']).to be_within(0.001).of(r['zero'] * 3)
+    skip 'no font metrics on this box — every unit falls back to 0.5em' if r['zero'] == 8
+    expect(r['ex']).to be > 16          # not the flat 2 * 0.5em
+    expect(r['ex']).to be < r['ch'] / 3 * 2
+  end
+
   it 'resolves the inherited font longhands (weight / style / line-height / family)' do
     session = build_session(<<~HTML)
       <!DOCTYPE html><html><head><style>

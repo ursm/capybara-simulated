@@ -63,8 +63,6 @@ css/cssom/at-namespace.html:
 css/cssom/base-uri.html:
 - KeyframeEffect constructor
 - KeyframeEffect.setKeyframes
-css/cssom/computed-style-001.html:
-- relative_property_values
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
 css/cssom/computed-style-003.html:
@@ -75,9 +73,7 @@ css/cssom/computed-style-004.html:
 - Check that the resolved width of the inner div is affected by changing the width
   of outer iframe.
 css/cssom/computed-style-005.html:
-- absolute_computed_margins
 - relative_computed_left_and_right
-- relative_computed_margins
 css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
 css/cssom/cssimportrule-parent.html:
@@ -106,6 +102,9 @@ css/cssom/font-family-serialization-001.html:
 - 'Specified: three-word family name serializes unquoted'
 css/cssom/font-shorthand-serialization.html:
 - The font shorthand should be serialized just like any other shorthand.
+css/cssom/getComputedStyle-animations-replaced-into-ib-split.html:
+- getComputedStyle() should return animation styles for nodes just inserted into the
+  document, even if they're in an IB-split
 css/cssom/getComputedStyle-detached-subtree.html:
 - getComputedStyle returns no style for descendant outside the flat tree
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
@@ -113,11 +112,1195 @@ css/cssom/getComputedStyle-detached-subtree.html:
 - 'getComputedStyle returns no style for element in non-rendered iframe (display:
   none) from iframe''s window'
 - getComputedStyle returns no style for element outside the flat tree
+css/cssom/getComputedStyle-display-none-001.html:
+- 'getComputedStyle gets invalidated in display: none subtrees due to inherited changes
+  to an ancestor shadow host'
+css/cssom/getComputedStyle-dynamic-subdoc.html:
+- getComputedStyle cross-doc properly reflects media query changes
+css/cssom/getComputedStyle-insets-absolute.html:
+- horizontal-tb ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - calc() is absolutized into pixels
+css/cssom/getComputedStyle-insets-fixed.html:
+- horizontal-tb ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages absolutize the computed
+  value when overconstrained
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- horizontal-tb rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-lr rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - Percentages absolutize the computed value
+  when overconstrained
+- vertical-rl rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - calc() is absolutized into pixels
+css/cssom/getComputedStyle-insets-grid.html:
+- 'Position absolute getComputedStyle left (for display: grid)'
+css/cssom/getComputedStyle-insets-relative.html:
+- horizontal-tb ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb ltr inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If opposite sides are 'auto', they
+  resolve to used value
+- horizontal-tb rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-lr rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- horizontal-tb rtl inside vertical-rl rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- horizontal-tb rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-lr rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-lr rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-lr rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl ltr inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb ltr - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - If end side is 'auto' and start side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside horizontal-tb rtl - If start side is 'auto' and end side
+  is not, 'auto' resolves to used value
+- vertical-rl rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-lr rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl ltr - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - If end side is 'auto' and start side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - If opposite sides are 'auto', they resolve
+  to used value
+- vertical-rl rtl inside vertical-rl rtl - If start side is 'auto' and end side is
+  not, 'auto' resolves to used value
+- vertical-rl rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - calc() is absolutized into pixels
 css/cssom/getComputedStyle-insets-relpos-inline.html:
 - OOF with left auto right fixed in relpos inline container
 - OOF with left auto right fixed in relpos inline container with mixed directions
 - OOF with left fixed right auto in relpos inline container
 - OOF with left fixed right auto in relpos inline container with mixed directions
+css/cssom/getComputedStyle-insets-sticky-container-for-abspos.html:
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - calc() is absolutized into pixels
+css/cssom/getComputedStyle-insets-sticky.html:
+- horizontal-tb ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- horizontal-tb rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-lr rtl inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl ltr inside vertical-rl rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside horizontal-tb rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-lr rtl - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl ltr - calc() is absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - Percentages are absolutized into pixels
+- vertical-rl rtl inside vertical-rl rtl - calc() is absolutized into pixels
+css/cssom/getComputedStyle-resolved-min-size-auto.html:
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="block-with-degenerate-aspect-ratio"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="block-with-two-part-degenerate-aspect-ratio"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="block-with-two-part-valid-aspect-ratio"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="block-with-valid-aspect-ratio"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="display-none-subtree-flex-item"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="display-none-subtree-grid-item"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="inline-with-degenerate-aspect-ratio"
+- Resolved value of min-width & min-height 'auto' keyword behaves as expected on element
+  with id="inline-with-valid-aspect-ratio"
+css/cssom/getComputedStyle-sticky-pos-percent.html:
+- 'Sticky element''s top property percentage value should be resolved against the
+  div with overflow: hidden'
 css/cssom/invalid-pseudo-elements.html:
 - 'CSSOM: Test that rules with invalid pseudo elements are not found'
 css/cssom/page-descriptors.html:
