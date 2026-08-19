@@ -121,4 +121,25 @@ RSpec.describe 'layout box model' do
     # scrollHeight - clientHeight = 150 is what a scroll_to(:bottom) reaches; the
     # scrollTop SETTER doesn't clamp yet (see the note in dom-nodes.js).
   end
+  describe 'offsetLeft / offsetTop' do
+    # CSSOM-View measures them from the offsetParent's PADDING edge, not its border edge. Reading
+    # from the border box put every offset inside a bordered positioned ancestor out by that
+    # border — 9 where Chrome says 4 for a 5px one — and WPT's own layout oracle
+    # (`check-layout-th.js`, `data-offset-x` / `-y`) is written against exactly this value.
+    it 'measures from the padding edge of the offsetParent' do
+      body = <<~HTML
+        <div id="p" style="position:relative;padding:3px 4px;border:5px solid;width:60px;height:40px">
+          <div id="flow" style="height:6px"></div>
+          <div id="abs" style="position:absolute;left:0;top:0;height:6px;width:8px"></div>
+        </div>
+      HTML
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<body style="margin:0">#{body}</body>)]] })
+      s.visit '/'
+      # Chrome: the in-flow child sits at the content origin — 4 / 3 from the padding edge — and
+      # the abspos one, whose insets place it AT that padding edge, at 0 / 0.
+      expect(s.evaluate_script("(e => [e.offsetLeft, e.offsetTop])(document.getElementById('flow'))")).to eq([4, 3])
+      expect(s.evaluate_script("(e => [e.offsetLeft, e.offsetTop])(document.getElementById('abs'))")).to eq([0, 0])
+    end
+  end
+
 end
