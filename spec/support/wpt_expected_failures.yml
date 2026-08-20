@@ -5469,6 +5469,23 @@ fetch/h1-parsing/status-code.window.js:
 - 'HTTP/1.1 99 NOT OK '
 - HTTP/1.1 BLAH (network error)
 - HTTP/1.1 C8 (network error)
+hr-time/clamped-time-origin-isolated.https.html:
+- timeOrigins are clamped.
+hr-time/cross-origin-isolated-timing-attack.https.html:
+- The recommended minimum resolution of the Performance interface has been set to
+  5 microseconds for cross-origin isolated contexts.
+hr-time/navigation-start-post-before-unload.html:
+- timeOrigin should be set after beforeunload
+hr-time/performance-tojson.html:
+- Test performance.toJSON()
+hr-time/test_cross_frame_start.html:
+- Child and parent time bases are correct
+- Child created at least 1 second after parent
+hr-time/timeOrigin.html:
+- Window and worker timeOrigins are close when created one after another.
+- Window and worker timeOrigins differ when worker is created after a delay.
+hr-time/window-worker-timeOrigin.window.js:
+- timeOrigin and now() should be correctly ordered between window and worker
 html/canvas/element/color-type/2d.color.type.u8p3.to.f16srgb.to.u8p3.html:
 - test srgb float16 canvas storing 8-bit display-p3 data accurately
 html/canvas/element/color-type/2d.color.type.u8srgb.to.f16p3.to.u8srgb.html:

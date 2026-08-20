@@ -47,6 +47,8 @@ const REF = process.env.WPT_REF || PINNED;
 // (just the harness) below — the rest of resources/ is large and unneeded.
 const TREES = [
   'dom', 'domparsing', 'url', 'encoding', 'shadow-dom',
+  'hr-time',                           // DOMHighResTimeStamp: performance.now() resolution +
+                                       // monotonicity + timeOrigin — the gate for the sub-ms clock
   'FileAPI',                           // Blob / File / FileReader / createObjectURL — data API, no layout
   'html/dom',                          // IDL attribute REFLECTION (content attr <-> IDL prop) — the IDL
                                        // coverage gate only checks member EXISTENCE; this checks behaviour
