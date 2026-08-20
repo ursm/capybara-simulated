@@ -140,6 +140,24 @@ RSpec.describe 'layout box model' do
       expect(s.evaluate_script("(e => [e.offsetLeft, e.offsetTop])(document.getElementById('flow'))")).to eq([4, 3])
       expect(s.evaluate_script("(e => [e.offsetLeft, e.offsetTop])(document.getElementById('abs'))")).to eq([0, 0])
     end
+
+    # CSSOM-View: a `position: fixed` element's offsetParent is null. The verdict must come from
+    # the LIVE cascade: nothing on a bare `offsetParent` read forces a layout pass, so a verdict
+    # read off the last pass's box (`_lb.fixed`) answers with the position the element HAD — the
+    # gBCR here warms exactly that stale state before the style write flips it.
+    it 'answers offsetParent null the moment an element becomes position: fixed' do
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<body><div id="t">x</div></body>'] ] })
+      s.visit '/'
+      expect(s.evaluate_script(<<~JS)).to eq(['BODY', nil])
+        (() => {
+          const t = document.getElementById('t');
+          t.getBoundingClientRect();
+          const before = t.offsetParent && t.offsetParent.tagName;
+          t.style.position = 'fixed';
+          return [before, t.offsetParent && t.offsetParent.tagName];
+        })()
+      JS
+    end
   end
 
 end
