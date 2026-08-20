@@ -56,6 +56,18 @@ RSpec.describe 'the virtual clock and element reads' do
 
   # One query, one observation: reading its elements one by one must not walk the
   # clock into the timer that replaces them.
+  #
+  # The assertion accepts EITHER the original list or the fully-replaced one, and
+  # forbids only a TORN read (a mix, or a dead-node read). The contract under test
+  # is the walk's atomicity — the harm the deferral prevents is the clock moving
+  # BETWEEN the reads of one query, detaching the elements mid-walk. Whether the
+  # replace timer fires BEFORE the query is a separate, wall-anchored question:
+  # under CI load the gap between two Capybara calls can cross the pre-tick
+  # interval, and that tick legitimately fast-forwards to the timer horizon — a
+  # browser under the same stall replaces the list before the read too. Asserting
+  # `a b c` exactly raced that boundary (one flatware test-quickjs failure,
+  # 2026-08-20); a broken deferral still goes red here, because a mid-walk
+  # advance yields exactly the mixed/dead-node shape both accepted values exclude.
   it 'does not advance the clock while reading the elements of one query' do
     s = simulated_session(app(delay: 60))
     s.visit '/'
@@ -63,7 +75,7 @@ RSpec.describe 'the virtual clock and element reads' do
 
     texts = s.all('.item').map(&:text)
 
-    expect(texts).to eq(%w[a b c])
+    expect([%w[a b c], %w[late0 late1 late2]]).to include(texts)
   end
 
   # …and a matcher polling ONE node still gets there. This is the half the deferral
