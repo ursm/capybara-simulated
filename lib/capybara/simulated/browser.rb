@@ -11129,10 +11129,17 @@ module Capybara
         # page's `load` would slip past the visit and the two engines would disagree about
         # what a post-visit read sees. Bounded — a genuinely slow endpoint defers `load` to a
         # later drain instead of stalling the visit.
+        # Delivery runs INSIDE the wait: `image_loads_pending?` counts undelivered results (it
+        # only falls at delivery, deliberately — the tick gates key on it), so a park that only
+        # sleeps until the deadline burns the whole budget even when every fetch landed in
+        # milliseconds — measured 248 ms on every image-bearing Avo boot.
         if image_loads_pending?
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + IMAGE_LOAD_BOOT_BUDGET_S
-          sleep 0.005 while image_loads_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
-          deliver_image_loads
+          loop do
+            deliver_image_loads
+            break unless image_loads_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+            sleep 0.005
+          end
         end
         flush_pending_window_load unless @defer_window_load
         flush_page_init
