@@ -71,6 +71,13 @@ RSpec.describe 'cascade invalidation' do
       ['target',            '<div id="t">x</div>',
        '#t:target { color: rgb(0, 128, 0) }',
        "location.hash = '#t';",                                               'rgb(0, 128, 0)'],
+      ['checked option',    '<select id="s"><option value="a">a</option>' \
+                            '<option value="b" id="t">b</option></select>',
+       '#t:checked { color: rgb(0, 128, 0) }',
+       "document.getElementById('s').value = 'b';",                           'rgb(0, 128, 0)'],
+      ['custom validity',   '<input id="t">',
+       '#t:invalid { color: rgb(0, 128, 0) }',
+       "document.getElementById('t').setCustomValidity('bad');",              'rgb(0, 128, 0)'],
       ['filtered',          '<input id="i" list="dl"><datalist id="dl"><option id="t">alpha</option>' \
                             '<option>beta</option></datalist>',
        '#t:filtered { color: rgb(0, 128, 0) }',
@@ -881,6 +888,74 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got[1]).to be > got[0]
+  end
+
+  it 'relays out a :target rule on a fragment navigation' do
+    css = '#t { height: 20px } #t:target { height: 120px }'
+    s = simulated_session(gated_page('<div id="t">x</div><p id="after">after</p>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        location.hash = '#t';
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1] - got[0]).to eq(100)
+  end
+
+  it 'relays out a :checked-driven rule when an option is selected programmatically' do
+    # Style reads under a dynamic rule are taint-uncached and always fresh — the STALE layer is
+    # layout: the select's box memo keys on the epoch, which only the selectedness funnel's
+    # style-state bump moves.
+    css = 'select { height: 20px } select:has(option:checked[value="b"]) { height: 120px }'
+    body = '<select id="s"><option value="a">a</option><option value="b">b</option></select><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.getElementById('s').value = 'b';
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1] - got[0]).to eq(100)
+  end
+
+  it 'relays out an :invalid-driven rule on setCustomValidity' do
+    css = '#t { height: 20px } #t:invalid { height: 120px }'
+    body = '<input id="t"><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.getElementById('t').setCustomValidity('bad');
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1] - got[0]).to eq(100)
+  end
+
+  it 'drops :modal styling on show() after showModal()' do
+    # `:modal` is internal state: with `open` already set, show()'s setAttribute is
+    # value-identical and nothing else said the state flipped.
+    css = '#t { height: 20px } #t:modal { height: 120px }'
+    s = simulated_session(gated_page('<dialog id="t">x</dialog>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        t.showModal();
+        const modal = t.getBoundingClientRect().height;
+        t.show();
+        return [modal, t.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([120, 20])
   end
 
   # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,
