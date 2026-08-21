@@ -141,6 +141,9 @@ module Capybara
       SCREEN_SIZE = [1024, 768].freeze
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
+      # How long a boot will park for the page's own <img> fetches before letting the window
+      # `load` defer to a later drain (see boot_response_into_ctx).
+      IMAGE_LOAD_BOOT_BUDGET_S = 0.25
       # Per-`run_loop_step` task cap (its `maxIter`). Bounds a self-rescheduling
       # timer/microtask storm so one settle iter returns to Ruby; large enough
       # for the heaviest legit chain (Mastodon hydrate, Turbo stream batch).
@@ -488,6 +491,15 @@ module Capybara
         @keepalive_inflight = 0
         @keepalive_seq      = 0
         @keepalive_lock     = Mutex.new
+        # Async <img> loads: fetch + decode on a thread (a real browser never blocks the parser
+        # on an image), delivered into the realm by `deliver_image_loads` from the same drain
+        # funnel the other background channels use. Threads are fire-and-forget like keepalive's;
+        # a result whose element (or realm) is gone is simply dropped at delivery.
+        @image_load_seq     = 0
+        @image_load_results = {}
+        @image_load_flights = {}
+        @image_load_pending = 0
+        @image_load_lock    = Mutex.new
         @sw_nav_seq       = 0
         # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
         # per navigation CHAIN, re-minted when a redirect hop crosses origins (a reserved
@@ -1087,7 +1099,7 @@ module Capybara
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
       end
 
       # Single-slot cache for the most recent find_xpath / find_css /
@@ -1834,8 +1846,9 @@ module Capybara
           deliver_hijacked_fetches
           deliver_window_messages
           deliver_websocket_events
+          deliver_image_loads
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
           # pair: it fires due timers, runs a per-task microtask checkpoint (so
           # chained .then / MutationObserver delivery interleave spec-correctly),
@@ -1849,6 +1862,7 @@ module Capybara
           deliver_hijacked_fetches
           deliver_window_messages
           deliver_websocket_events
+          deliver_image_loads
           break if @runtime.settle_gen > start_gen
           # A background worker thread owes us a CONTRACTUAL reply (a swack / bcack /
           # fetch_response is posted under `ensure`, so it always comes) but hasn't posted it
@@ -1877,7 +1891,11 @@ module Capybara
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending? && !websocket_pending?
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending? && !websocket_pending? && !image_loads_pending?
+          # Only in-flight image loads keeping us here? Yield the GVL briefly so their fetch
+          # threads (~20 ms each) can finish inside this settle instead of a later poll —
+          # spinning empty zero-budget loop steps would starve exactly the thread we wait on.
+          sleep 0.005 if image_loads_pending? && !@timers_active && !@runtime.has_ready_timer?
           prev_gen = @runtime.settle_gen
         end
         @find_cache_dirty = true
@@ -2481,7 +2499,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -2842,7 +2860,7 @@ module Capybara
       # Returns true if any channel delivered.
       private def drain_async_channels
         n = deliver_worker_messages + deliver_event_source_events + deliver_hijacked_fetches +
-            deliver_window_messages + deliver_websocket_events
+            deliver_window_messages + deliver_websocket_events + deliver_image_loads
         @find_cache_dirty = true if n.positive?
         n.positive?
       end
@@ -2872,7 +2890,7 @@ module Capybara
         end
         # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
         #     land before jumping the clock: advance one fixed step, reset the guard.
-        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending?
+        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_loads_pending?
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
@@ -3179,6 +3197,14 @@ module Capybara
         # is discarding — firing it against the next one would be a load event for a
         # document that never loaded.
         @window_load_due = false
+        # In-flight async image loads belong to the outgoing test's pages: discard the slots so
+        # a slow endpoint can't hold the NEXT test's tick gates and window-load deferral open.
+        # A thread that finishes after this finds its slot gone and drops the result.
+        @image_load_lock.synchronize do
+          @image_load_results.clear
+          @image_load_flights.clear
+          @image_load_pending = 0
+        end
         @cookies.clear
         @cookie_flags.clear
         @auth_cache.clear
@@ -6602,6 +6628,14 @@ module Capybara
       # `defer_window_load`), so this only clears the marker there.
       private def flush_pending_window_load
         return unless @window_load_due
+        # `load` waits for the document's subresources, and images are now fetched async —
+        # deliver any that have landed and hold the event while some are still in flight. The
+        # settle loop stays alive on `image_loads_pending?` (with a brief GVL-yielding park when
+        # images are the only pending work) and the tick gates re-check every poll, so this is a
+        # short deferral, never a stall. Matches a real browser: window `load` fires after every
+        # <img> settles.
+        deliver_image_loads
+        return false if image_loads_pending?
 
         @window_load_due = false
         # An AUXILIARY window's first load is its opener's to fire — ONE-SHOT, because
@@ -6887,6 +6921,128 @@ module Capybara
         r
       end
 
+      # Start an async <img> load: resolve + capture the requesting document identity on THIS
+      # (the main) thread, then fetch + decode on a background one. Returns the request id the
+      # JS side files its pending element under, or -1 when the URL can't resolve (the caller
+      # falls back to the synchronous path). The heavy call chain is exactly `load_image`'s —
+      # same cache, same CORS enforcement, same taint verdict — just off-thread.
+      def image_load_start(url, cors = false, credentials = 'same-origin')
+        key = resolve_against_current(url.to_s)
+        return -1 unless key.is_a?(String)
+        origin_base = @current_url
+        id = nil
+        @image_load_lock.synchronize do
+          id = (@image_load_seq += 1)
+          @image_load_results[id] = :pending
+          @image_load_pending += 1
+          # SINGLE-FLIGHT per request identity: N <img>s sharing a src (an avatar column) must
+          # not race N identical Rack requests + decodes where the sync path did one fetch and
+          # N−1 cache hits. Followers just register their id on the in-flight group; the one
+          # thread finalizes every member with the shared result.
+          flight = [key, cors, credentials, cors ? url_origin(origin_base) : nil]
+          if (group = @image_load_flights[flight])
+            group << id
+            next
+          end
+          @image_load_flights[flight] = [id]
+          Thread.new do
+            r = nil
+            begin
+              r = begin
+                image_load_result(key, cors, credentials, origin_base)
+              rescue StandardError
+                nil
+              end
+            ensure
+              # `ensure`, exactly like keepalive's thread: an escaping non-StandardError (or a
+              # kill) must not strand the slots as :pending forever — that would hold every tick
+              # gate and the window-load deferral open for the rest of the session. `reset!`
+              # discards the whole slot table, and the `== :pending` guard keeps a finishing
+              # orphan from resurrecting its entry afterwards. The pending counter holds until
+              # DELIVERY — "pending" means in-flight OR finished-but-undelivered, or the tick
+              # gate closes before the result lands. Every follower of this flight shares the
+              # one result.
+              @image_load_lock.synchronize do
+                members = @image_load_flights.delete(flight) || [id]
+                members.each do |m|
+                  @image_load_results[m] = {result: r} if @image_load_results[m] == :pending
+                end
+              end
+            end
+          end
+        end
+        id
+      end
+
+      # The thread-side body: everything except the transfer stash (engine-affine, done at
+      # delivery on the main thread). Result mirrors `load_image`'s shapes with the raw entry.
+      private def image_load_result(key, cors, credentials, origin_base)
+        entry = cached_image(key, cors, credentials, origin_base: origin_base)
+        return {'unsupported' => true} if entry == :unsupported
+        tainted = origin_tainted?(key, cors, client_url: origin_base)
+        return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
+        return nil unless entry
+        { entry: entry, tainted: tainted }
+      end
+
+      def image_loads_pending?
+        @image_load_pending.positive?
+      end
+
+      # Hand every finished async image load to its realm. The id→element map is realm-local
+      # (each realm evaluates its own bridge), so the result is offered to the main realm first
+      # and then to each frame realm until one consumes it; an id nobody knows (its page died)
+      # is dropped. Returns the number delivered.
+      def deliver_image_loads
+        finished = nil
+        @image_load_lock.synchronize do
+          return 0 if @image_load_results.empty?
+          finished = @image_load_results.reject {|_, v| v == :pending }
+          finished.each_key {|k| @image_load_results.delete(k) }
+          @image_load_pending -= finished.size
+        end
+        return 0 if finished.empty?
+        n = 0
+        finished.each do |id, slot|
+          payload = image_result_payload(slot[:result])
+          consumed = false
+          begin
+            consumed = @runtime.call('__csimApplyAsyncImage', id, payload) == true
+          rescue StandardError
+            nil
+          end
+          if !consumed && @runtime.respond_to?(:frame_realm_ids)
+            @runtime.frame_realm_ids.each do |rid|
+              begin
+                consumed = @runtime.realm_call(rid, '__csimApplyAsyncImage', id, payload) == true
+                break if consumed
+              rescue StandardError
+                nil
+              end
+            end
+          end
+          # Nobody consumed it (its page is gone): reclaim the stashed bitmap, or every
+          # navigated-away image on an image-heavy run pins its RGBA buffer until teardown.
+          if !consumed && payload.is_a?(Hash)
+            transfer_buffer_fetch(payload['refId']) if payload['refId']
+            transfer_buffer_fetch(payload['refIdP3']) if payload['refIdP3']
+          end
+          n += 1
+        end
+        n
+      end
+
+      # Shape a thread result into what `_applyImageResult` reads, stashing the bitmap for
+      # transfer HERE, on the main thread, only for results that actually deliver.
+      private def image_result_payload(r)
+        return nil if r.nil?
+        return r unless r.is_a?(Hash) && r.key?(:entry)
+        entry = r[:entry]
+        out = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => r[:tainted]}
+        out['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
+        out
+      end
+
       # Whether a successfully-loaded image taints a canvas it's drawn into: its bytes came
       # cross-origin without CORS approval — i.e. a no-cors http(s) load from a different origin
       # than the document. A CORS load that reached here passed the Access-Control check (so it's
@@ -6920,11 +7076,11 @@ module Capybara
       # sessions), so an origin-blind key would serve one origin's CORS success to another origin
       # whose load should fail. A no-cors load is origin-independent (it always reads the bytes),
       # so it keeps the bare URL key and shares the cache with the decode / canvas loaders.
-      private def cached_image(key, cors = false, credentials = 'same-origin')
-        cache_key = cors ? "cors:#{credentials}:#{url_origin(@current_url)}:#{key}" : key
+      private def cached_image(key, cors = false, credentials = 'same-origin', origin_base: @current_url)
+        cache_key = cors ? "cors:#{credentials}:#{url_origin(origin_base)}:#{key}" : key
         cached = @@image_cache_lock.synchronize { @@image_cache[cache_key] }
         return cached if cached
-        bytes = image_source_bytes(key, cors, credentials)
+        bytes = image_source_bytes(key, cors, credentials, origin_base: origin_base)
         return bytes if bytes == :unsupported
         return nil unless bytes
         entry = decode_or_nil(bytes)
@@ -6943,12 +7099,17 @@ module Capybara
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
-      private def image_source_bytes(key, cors = false, credentials = 'same-origin')
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin', origin_base: @current_url)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
-          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials)
+          # The requesting DOCUMENT identity is pinned to what it was when the load started —
+          # on the async path this runs on a background thread, and a concurrent navigation
+          # must not swing the CORS / SameSite / Referer verdicts (or the origin-scoped cache
+          # key) to a document that never issued this request.
+          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials,
+                              client_url: origin_base, referrer: origin_base)
           return nil unless result && result['status'].to_i < 400
           bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
           bytes.empty? ? nil : bytes
@@ -10961,6 +11122,18 @@ module Capybara
         # it to the next drain put every page's load AFTER the init it is supposed to
         # precede. An AUXILIARY window keeps the deferral — its first load belongs to
         # its opener, and consuming that one-shot here loses it entirely.
+        # The window `load` this boot owes waits for the images the parse just started (HTML:
+        # load fires after subresources). Give their fetch threads a short GVL-yielding window
+        # to land: on V8 they overlap the boot's JS (rusty releases the GVL) and are usually
+        # done already; QuickJS holds the GVL through eval, so without this park every image
+        # page's `load` would slip past the visit and the two engines would disagree about
+        # what a post-visit read sees. Bounded — a genuinely slow endpoint defers `load` to a
+        # later drain instead of stalling the visit.
+        if image_loads_pending?
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + IMAGE_LOAD_BOOT_BUDGET_S
+          sleep 0.005 while image_loads_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          deliver_image_loads
+        end
         flush_pending_window_load unless @defer_window_load
         flush_page_init
       end
