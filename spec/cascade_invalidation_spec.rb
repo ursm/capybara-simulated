@@ -503,6 +503,245 @@ RSpec.describe 'cascade invalidation' do
     expect(moved).to be(false)
   end
 
+  # ── the class-TOKEN layout gate ──────────────────────────────────────────────────────────────
+  # A class write used to mark the whole subtree layout-dirty unconditionally. Now only a flipped
+  # token that some box-moving rule mentions does; a paint-utility flip or a same-set rewrite
+  # keeps every descendant's box memo. `__csimSubtreeMarks` is the observable for the "kept"
+  # side — geometry cannot distinguish a surviving memo from an equal recompute.
+
+  it 'relays out a descendant when a container gains a class a descendant rule reads' do
+    css = '.panel { height: 20px } .open .panel { height: 120px }'
+    s = simulated_session(gated_page('<div id="c"><div><div class="panel" id="p">x</div></div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p');
+        const before = p.getBoundingClientRect().height;
+        document.getElementById('c').className = 'open';
+        return [before, p.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([20, 120])
+  end
+
+  it 'relays out a descendant through an identifier nested in :not()' do
+    # The collection descends into `:not` / `:is`: skipping nested identifiers is permissive for
+    # the presence gate but STALE for invalidation — 'off' must be in the token set.
+    # The target sits TWO levels down: a direct child would be healed by the parent's own
+    # usedSize re-read, and the spec would pass without the subtree mark it exists to pin.
+    css = '.kid { height: 20px } .wrap:not(.off) .kid { height: 120px }'
+    s = simulated_session(gated_page('<div class="wrap off" id="c"><div><div class="kid" id="k">x</div></div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const k = document.getElementById('k');
+        const before = k.getBoundingClientRect().height;
+        document.getElementById('c').classList.remove('off');
+        return [before, k.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([20, 120])
+  end
+
+  it 'keeps descendant layout memos across a paint-only class flip' do
+    css = '.panel { height: 20px } .red { color: rgb(255, 0, 0) }'
+    s = simulated_session(gated_page('<div id="c"><div class="panel" id="p">x</div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('p').getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        const c = document.getElementById('c');
+        c.classList.add('red');
+        c.className = c.className;                          // same-string rewrite
+        c.className = 'red ';                               // same token set, reserialized
+        const h = document.getElementById('p').getBoundingClientRect().height;
+        return [globalThis.__csimSubtreeMarks() - marks, h, getComputedStyle(c).color];
+      })()
+    JS
+    expect(got).to eq([0, 20, 'rgb(255, 0, 0)'])
+  end
+
+  it 'stays conservative when a literal [class="…"] layout rule exists' do
+    # The one selector shape that can see serialization order makes the gate ungateable.
+    css = 'div { height: 20px } [class="a b"] { height: 120px }'
+    s = simulated_session(gated_page('<div class="a b" id="p">x</div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const p = document.getElementById('p');
+        const before = p.getBoundingClientRect().height;
+        const marks = globalThis.__csimSubtreeMarks();
+        p.className = 'b a';
+        return [before, p.getBoundingClientRect().height, globalThis.__csimSubtreeMarks() > marks];
+      })()
+    JS
+    expect(got[0]).to eq(120)
+    expect(got[2]).to be(true)
+  end
+
+  it 'stays conservative when a [class^=…] layout rule exists' do
+    css = '[class^="col-"] { width: 50px } .panel { height: 20px }'
+    s = simulated_session(gated_page('<div id="c"><div class="panel" id="p">x</div></div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('p').getBoundingClientRect();
+        const marks = globalThis.__csimSubtreeMarks();
+        document.getElementById('c').classList.add('unrelated');
+        return globalThis.__csimSubtreeMarks() > marks;
+      })()
+    JS
+    expect(got).to be(true)
+  end
+
+  it 'relays out descendants of a subject-position box-property flip' do
+    # Subject-position tokens take the SUBTREE mark even for pure box properties: a heal through
+    # the parent's relayout looked sufficient, but an abspos descendant anchored to the subject's
+    # containing block escapes it (see ruleMovesBoxes) — so the classification stays conservative.
+    css = '.box { width: 100px } .box.wide { width: 200px } .half { width: 50% }'
+    body = '<div class="box" id="c"><div class="half"><div class="half" id="g">x</div></div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = document.getElementById('g');
+        const before = g.getBoundingClientRect().width;
+        document.getElementById('c').classList.add('wide');
+        return [before, g.getBoundingClientRect().width];
+      })()
+    JS
+    expect(got).to eq([25, 50])
+  end
+
+  it 'moves an abspos descendant anchored to a subject whose height flips' do
+    # The case that demoted SELF: the anchor's placement only reruns inside a relayouted
+    # ancestor, and the intermediate auto-height element would otherwise reuse.
+    css = '.box { position: relative; height: 200px } .box.tall { height: 400px }'
+    body = '<div class="box" id="c"><div><div style="position: absolute; bottom: 0; height: 10px" id="a">x</div></div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a');
+        const before = a.getBoundingClientRect().y;
+        document.getElementById('c').classList.add('tall');
+        return [before, a.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1] - got[0]).to eq(200)
+  end
+
+  it 'stays conservative for class writes inside (or beside) a shadow tree' do
+    # Shadow sheets are not in the page rule index: a page hosting any shadow root answers every
+    # class write with the subtree mark, or a shadow sheet's own `.open .panel` would go stale.
+    s = simulated_session(gated_page('<div id="h"></div>', css: '.noop-rule { width: 1px }'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('h').attachShadow({mode: 'open'});
+        sr.innerHTML = '<style>.wrap .panel { height: 120px } .panel { height: 20px }</style>' +
+                       '<div id="w"><div><div class="panel" id="p">x</div></div></div>';
+        const p = sr.getElementById('p');
+        const before = p.getBoundingClientRect().height;
+        sr.getElementById('w').className = 'wrap';
+        return [before, p.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([20, 120])
+  end
+
+  it 'keeps relaying out when a custom-prop rule feeds an inline var() consumer' do
+    # The rule's custom property is unreachable from the sheets; the inline consumer is sighted
+    # only at first layout — after the gate was built — so the token carries a VAR bit resolved
+    # against the sticky flag at write time.
+    css = '.on { --h: 300px }'
+    body = '<div id="c"><div><div style="height: var(--h, 50px)" id="g">x</div></div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = document.getElementById('g');
+        const before = g.getBoundingClientRect().height;
+        document.getElementById('c').classList.add('on');
+        return [before, g.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([50, 300])
+  end
+
+  it 'scopes token REMOVAL through the DESC path too' do
+    css = '.host { height: 20px } body.chrome-x .host { height: 120px }'
+    body = '<div class="host" id="h">x</div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.body.classList.add('chrome-x');
+        const h = document.getElementById('h');
+        const grown = h.getBoundingClientRect().height;
+        document.body.classList.remove('chrome-x');
+        return [grown, h.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([120, 20])
+  end
+
+  it 'keeps the subtree mark for a subject flip declaring an inherited property' do
+    css = '.big-text { font-size: 32px }'
+    body = '<div id="c"><div><div id="g">word</div></div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = document.getElementById('g');
+        const before = g.getBoundingClientRect().height;
+        document.getElementById('c').classList.add('big-text');
+        return [before, g.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 'scopes a non-subject flip on <body> to the matching subjects' do
+    # The os-pc shape: widget CSS mentions a body-level class in ancestor position; stamping it
+    # must not cost the whole page its layout memos — exactly one subject takes the subtree mark.
+    css = '.host { height: 20px } body.chrome-x .host { height: 120px }'
+    body = '<div id="other"><div>quiet</div></div><div class="host" id="h">x</div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h');
+        const before = h.getBoundingClientRect().height;
+        const marks = globalThis.__csimSubtreeMarks();
+        document.body.classList.add('chrome-x');
+        return [before, h.getBoundingClientRect().height, globalThis.__csimSubtreeMarks() - marks];
+      })()
+    JS
+    expect(got).to eq([20, 120, 1])
+  end
+
+  it 'reaches a later sibling INTERIOR through a sibling-combinator rule' do
+    # Scope for `~` is the writer's PARENT: the affected subject is not inside the writer's
+    # subtree. The stale case is the sibling's INTERIOR — an inherited property two levels down,
+    # where the parent's own re-derivation of the sibling's box cannot heal (main previously
+    # left the grandchild's text at the old font-size).
+    css = '.a ~ .b { font-size: 32px }'
+    body = '<div id="first">x</div><div class="b"><div><div id="deep">word</div></div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('deep');
+        const before = d.getBoundingClientRect().height;
+        document.getElementById('first').classList.add('a');
+        return [before, d.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
   # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,
   # so none is an invalidation bug:
   #   * `:user-invalid` / `:user-valid` don't respond to `reportValidity()` (the user-interacted
