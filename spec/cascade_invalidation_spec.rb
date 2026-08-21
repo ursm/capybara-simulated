@@ -742,6 +742,147 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1]).to be > got[0]
   end
 
+  # ── scoped dynamic-state dirtying ────────────────────────────────────────────────────────────
+  # An ARMED dynamic layout rule used to put the style-state generation into the layout epoch:
+  # every focus/hover/checked flip killed every box memo on the page. Now the flip dirties
+  # exactly the armed rules' subject matches (at ensureLayout entry), and the epoch stays still.
+
+  it 'keeps the epoch still on an ARMED page: a state flip dirties only the subjects' do
+    body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div>' \
+           '<div id="far"><div><div>quiet</div></div></div><p id="after">after</p>'
+    s = simulated_session(gated_page(body))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        const epoch = globalThis.__csimLayoutEpoch();
+        document.querySelector('.dd').focus();
+        const after2 = after.getBoundingClientRect().y;
+        return [after2 > before, globalThis.__csimLayoutEpoch() === epoch];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
+
+  it 'relays out a table grid when a dynamic display rule flips a row' do
+    # The scoped marks carry `structural=true` for display/visibility rules: the grid memo
+    # (structFresh) keys on the epoch this path deliberately keeps still.
+    css = '.toggle:checked ~ table .maybe-row { display: none }'
+    body = '<input type="checkbox" class="toggle" id="t">' \
+           '<table><tbody><tr class="maybe-row"><td>a</td></tr><tr><td id="keep">b</td></tr></tbody></table>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const keep = document.getElementById('keep');
+        const before = keep.getBoundingClientRect().y;
+        document.getElementById('t').checked = true;
+        return [before > 0, keep.getBoundingClientRect().y < before];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
+
+  it 'delivers an IntersectionObserver update for a state-revealed target' do
+    # The IO recheck early-returns on layoutGeneration(); the scoped marks move neither
+    # settleGen nor the epoch, so the generation carries the dirty sequence too.
+    s = simulated_session(gated_page('<div class="dd" tabindex="0"><div class="dd-content" id="c">content</div></div>'))
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      let delivered = false;
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!delivered) {
+            // The INITIAL delivery is unconditional; the RE-check after the flip is what the
+            // layoutGeneration gate can wrongly skip — flip only after the first delivery.
+            delivered = true;
+            if (e.isIntersecting) { io.disconnect(); done('early'); return; }
+            document.querySelector('.dd').focus();
+          } else if (e.isIntersecting) { io.disconnect(); done(true); return; }
+        }
+      });
+      io.observe(document.getElementById('c'));
+      setTimeout(() => done(false), 2000);
+    JS
+    expect(got).to be(true)
+  end
+
+  it 'queries Tailwind-style colon classes safely from both scoped paths' do
+    # The subject key is fed to querySelectorAll: an unescaped `checked:block` parses as a
+    # pseudo-class and THREW from inside the sweep (and from a class write's DESC path).
+    css = '.toggle:checked ~ .checked\\:block { display: block } ' \
+          '.checked\\:block { display: none } ' \
+          'body.mode-x .peer\\:pane { height: 120px } .peer\\:pane { height: 20px }'
+    body = '<input type="checkbox" class="toggle" id="t">' \
+           '<div class="checked:block" id="rev">revealed</div>' \
+           '<div class="peer:pane" id="pane">x</div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const rev = document.getElementById('rev');
+        const pane = document.getElementById('pane');
+        document.getElementById('t').checked = true;              // scoped state sweep
+        const revealed = rev.getBoundingClientRect().height > 0;
+        document.body.classList.add('mode-x');                    // class-write DESC path
+        return [revealed, pane.getBoundingClientRect().height];
+      })()
+    JS
+    expect(got).to eq([true, 120])
+  end
+
+  it 'relays out for a checkedness flip from the CLICK path too' do
+    # The style-state bump lives in setCheckedness — the funnel every checkedness writer
+    # shares. Bumping only in the IDL setter left a plain el.click() with stale geometry.
+    css = 'input:checked { height: 100px }'
+    body = '<input type="checkbox" id="t"><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.getElementById('t').click();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 'falls back to the epoch for a keyless dynamic subject' do
+    css = '.dd:focus-within > * { margin-top: 100px }'
+    body = '<div class="dd" tabindex="0"><div id="k">x</div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const k = document.getElementById('k');
+        const before = k.getBoundingClientRect().y;
+        document.querySelector('.dd').focus();
+        return [before, k.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1] - got[0]).to eq(100)
+  end
+
+  it 'extracts a subject per selector GROUP for the scoped path' do
+    css = '.never:hover .x { width: 1px } .dd:focus-within .dd-content { display: block }'
+    body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
+    s = simulated_session(gated_page(body, css: "#{css} .dd-content { display: none }"))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.querySelector('.dd').focus();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
   # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,
   # so none is an invalidation bug:
   #   * `:user-invalid` / `:user-valid` don't respond to `reportValidity()` (the user-interacted
