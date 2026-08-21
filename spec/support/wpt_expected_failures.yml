@@ -5498,12 +5498,6 @@ html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
 - color-mix works as CanvasGradient color input
 html/canvas/element/fill-and-stroke-styles/2d.gradient.relativecolor.html:
 - Relative color works as CanvasGradient color input
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.immediate.html:
-- 'Canvas test: 2d.pattern.image.incomplete.immediate'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.incomplete.reload.html:
-- 'Canvas test: 2d.pattern.image.incomplete.reload'
-html/canvas/element/fill-and-stroke-styles/2d.pattern.image.nonexistent-but-loading.html:
-- 'Canvas test: 2d.pattern.image.nonexistent-but-loading'
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'

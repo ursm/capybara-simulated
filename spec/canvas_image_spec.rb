@@ -2187,29 +2187,35 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['isPat']).to be true
   end
 
-  it 'decodes an <img> resource on src assignment (naturalWidth/complete + load event + drawImage)' do
+  it 'loads an <img> resource asynchronously (pending request, then load event + drawImage)' do
     session = simulated_session(app)
     session.visit('/')
-    out = session.evaluate_script(<<~JS)
+    # The fetch runs on a host thread, as a browser's does: within the assigning script the
+    # element models the spec's PENDING request — `complete` false, no intrinsic size, and a
+    # drawImage of it is the silent no-op the spec prescribes for a not-fully-decodable image.
+    out = session.evaluate_async_script(<<~JS)
+      const cb = arguments[arguments.length - 1];
       const img = document.createElement('img');
-      const events = [];
-      img.addEventListener('load',  () => events.push('load'));
-      img.addEventListener('error', () => events.push('error'));
-      img.src = '/test.png';
-      // Decode is synchronous, so the metrics are populated immediately; the
-      // event is async, so it hasn't fired within this same script.
-      const c = document.createElement('canvas'); c.width = 4; c.height = 3;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      JSON.stringify({
-        naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
-        width: img.width, height: img.height, complete: img.complete,
-        pxRed: Array.from(ctx.getImageData(0, 0, 1, 1).data),
-        pxGreen: Array.from(ctx.getImageData(1, 0, 1, 1).data),
-        events
+      const pendingAfterSrc = new Promise((res) => {
+        img.addEventListener('load', () => res(null));
+        img.src = '/test.png';
+      });
+      const pending = { naturalWidth: img.naturalWidth, complete: img.complete };
+      pendingAfterSrc.then(() => {
+        const c = document.createElement('canvas'); c.width = 4; c.height = 3;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        cb(JSON.stringify({
+          pending,
+          naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+          width: img.width, height: img.height, complete: img.complete,
+          pxRed: Array.from(ctx.getImageData(0, 0, 1, 1).data),
+          pxGreen: Array.from(ctx.getImageData(1, 0, 1, 1).data)
+        }));
       });
     JS
     r = JSON.parse(out)
+    expect(r['pending']).to eq('naturalWidth' => 0, 'complete' => false)
     expect(r['naturalWidth']).to eq(4)
     expect(r['naturalHeight']).to eq(3)
     expect(r['width']).to eq(4)      # width/height default to the intrinsic size
@@ -2217,7 +2223,6 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['complete']).to be true
     expect(r['pxRed']).to eq([255, 0, 0, 255])
     expect(r['pxGreen']).to eq([0, 255, 0, 255])
-    expect(r['events']).to eq([])    # load is deferred to a microtask
   end
 
   it 'fires load asynchronously and error for a broken <img>' do
@@ -2315,15 +2320,19 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   it 'resets natural size and re-arms loading when src is cleared' do
     session = simulated_session(app)
     session.visit('/')
-    out = session.evaluate_script(<<~JS)
+    out = session.evaluate_async_script(<<~JS)
+      const cb = arguments[arguments.length - 1];
       const img = new Image();
-      img.src = '/test.png';
-      const loaded = { w: img.naturalWidth };
-      img.removeAttribute('src');
-      const cleared = { w: img.naturalWidth, complete: img.complete };
-      img.src = '/test.png';   // same src again — must re-decode, not be swallowed
-      const reloaded = { w: img.naturalWidth };
-      JSON.stringify({ loaded, cleared, reloaded });
+      const await_load = () => new Promise((res) => img.addEventListener('load', () => res(null), { once: true }));
+      (async () => {
+        const p1 = await_load(); img.src = '/test.png'; await p1;
+        const loaded = { w: img.naturalWidth };
+        img.removeAttribute('src');
+        const cleared = { w: img.naturalWidth, complete: img.complete };
+        const p2 = await_load(); img.src = '/test.png'; await p2;   // same src again — must re-load, not be swallowed
+        const reloaded = { w: img.naturalWidth };
+        cb(JSON.stringify({ loaded, cleared, reloaded }));
+      })();
     JS
     r = JSON.parse(out)
     expect(r['loaded']['w']).to eq(4)

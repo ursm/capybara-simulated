@@ -35,11 +35,12 @@ module Capybara
     # (sha256(body)), so identical body → identical bytecode falls out
     # naturally.
     #
-    # No Mutex: MRI's Hash `[]`/`[]=` are atomic under the GVL, and Capybara
-    # test suites are serial per-process (parallel_tests forks rather than
-    # threads). A reader briefly racing a `refresh` may see a partial
-    # `stored_at`/`max_age` pair — that just means freshness is computed
-    # against a transient mix, never corrupted.
+    # No Mutex: MRI's Hash `[]`/`[]=` are atomic under the GVL. Concurrent access is
+    # real — async image loads (and keepalive fetches) run `rack_fetch` on background
+    # threads while the main thread fetches too — but every operation here is a single
+    # GVL-atomic Hash read or write of an immutable-once-built Entry, so the worst a
+    # racing reader sees is a partial `stored_at`/`max_age` pair on `refresh`: freshness
+    # computed against a transient mix, never a corrupted structure.
     class AssetCache
       Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :no_cache, :immutable, keyword_init: true) do
         # `must-revalidate` (RFC 9111 §5.2.2.2) only forbids reusing a

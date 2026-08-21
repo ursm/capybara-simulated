@@ -208,6 +208,18 @@ RSpec.describe 'layout: inline / flex / grid / table rows' do
     }
     s = simulated_session(app)
     s.visit '/'
+    # Images load asynchronously (as in a browser); geometry that depends on the decoded size
+    # is only settled once the loads land. A matcher poll is how a real test would wait — the
+    # boot usually delivers them before `visit` returns, but a loaded CI box can outrun it.
+    expect(s.evaluate_async_script(<<~JS)).to eq('loaded')
+      const cb = arguments[arguments.length - 1];
+      const imgs = ['ratio', 'real'].map((id) => document.getElementById(id));
+      const check = () => imgs.every((i) => i.complete);
+      if (check()) { cb('loaded'); } else {
+        imgs.forEach((i) => i.addEventListener('load', () => { if (check()) cb('loaded'); }));
+        imgs.forEach((i) => i.addEventListener('error', () => cb('error')));
+      }
+    JS
 
     expect(box(s, 'broken')[2, 2]).to eq([16, 16])     # Chrome: 16x16
     expect(box(s, 'sized')[2, 2]).to eq([120, 60])     # Chrome: 120x60 — attributes win
