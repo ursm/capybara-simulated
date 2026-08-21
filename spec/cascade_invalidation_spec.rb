@@ -180,6 +180,7 @@ RSpec.describe 'cascade invalidation' do
           plain:        d('#t'),
           structural:   d('li:first-child'),
           attribute:    d('input:disabled'),
+          active:       d('#t:active'),             // matcher-constant: isActive is () => false
           hover:        d('#t:hover'),
           chained:      d('a:link:hover'),          // the pseudo AFTER a matched one
           chainedInner: d(':is(:first-child:hover)'),
@@ -195,6 +196,7 @@ RSpec.describe 'cascade invalidation' do
       'plain'        => false,
       'structural'   => false,
       'attribute'    => false,
+      'active'       => false,
       'hover'        => true,
       'chained'      => true,
       'chainedInner' => true,
@@ -337,6 +339,168 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  # ── the dynamic-layout PRESENCE gate ─────────────────────────────────────────────────────────
+  # A dynamic rule that can move boxes makes the layout epoch listen to focus / hover / checked
+  # state — the whole document relays out per state change. The gate narrows that to "while every
+  # identifier the rule's compounds require exists in the document": widget CSS shipped site-wide
+  # (EasyMDE, flatpickr) stops taxing the pages that never render the widget. These specs pin both
+  # sides: the epoch must NOT move while the rule can't match, and MUST take effect the moment it
+  # can — including when the widget arrives only after the gate has answered once.
+
+  # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
+  # `describe` block lands at top level and collides across spec files.
+  def gated_css
+    '.dd-content { display: none } .dd:focus-within .dd-content { display: block }'
+  end
+
+  def gated_page(body, css: nil)
+    lambda {|_env|
+      [200, {'content-type' => 'text/html'},
+       ["<!DOCTYPE html><html><head><style>#{css || gated_css}</style></head><body>#{body}</body></html>"]]
+    }
+  end
+
+  it 'keeps dynamic state out of the layout epoch while the rule cannot match' do
+    s = simulated_session(gated_page('<input id="i"><p id="after">after</p>'))
+    s.visit '/'
+    moved = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('after').getBoundingClientRect();   // prime a layout pass
+        const before = globalThis.__csimLayoutEpoch();
+        document.getElementById('i').focus();
+        return globalThis.__csimLayoutEpoch() !== before;
+      })()
+    JS
+    expect(moved).to be(false)
+  end
+
+  it 'relays out on focus when the dynamic rule CAN match' do
+    body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
+    s = simulated_session(gated_page(body))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.querySelector('.dd').focus();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 're-arms the gate when the widget arrives after the gate has answered' do
+    s = simulated_session(gated_page('<p id="after">after</p>'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;              // gate answers "unarmed"
+        const dd = document.createElement('div');
+        dd.className = 'dd';
+        dd.tabIndex = 0;
+        dd.innerHTML = '<div class="dd-content">content</div>';
+        document.body.insertBefore(dd, after);
+        dd.focus();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 're-arms the gate when the widget arrives by a class WRITE' do
+    # The other half of the invalidation contract the gate rests on: a class-attribute write,
+    # not just an insertion, must reopen it.
+    s = simulated_session(gated_page('<div id="w" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;              // gate answers "unarmed"
+        const w = document.getElementById('w');
+        w.className = 'dd';
+        w.focus();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 'keeps relaying out for an inline style that consumes a custom property' do
+    # The escape valve for the one consumer the sheet-side reachability scan cannot see: an
+    # inline `width: var(--w)` with a dynamic rule writing `--w` must keep moving geometry.
+    css = '#t:focus { --w: 200px }'
+    s = simulated_session(gated_page('<div id="t" tabindex="0" style="width: var(--w, 50px)">x</div>', css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t');
+        const before = t.getBoundingClientRect().width;
+        t.focus();
+        return [before, t.getBoundingClientRect().width];
+      })()
+    JS
+    expect(got).to eq([50, 200])
+  end
+
+  it 'hit-tests fresh z-index after focus, without a relayout in between' do
+    # z-index is PAINT_ONLY, so a `:focus { z-index }` rule no longer forces a pass — the paint
+    # order must come out right anyway. `stackChain` bakes an ANCESTOR stacking context's
+    # `paintRank` (a z-index read) into a per-pass memo; the dynamic-rule taint bracket keeps a
+    # chain that considered such a rule uncached, so the second hit-test re-reads it live
+    # instead of replaying the pre-focus rank. Siblings compare their own ranks live, so the
+    # rule has to sit on the CONTEXT-ESTABLISHING ancestor for this to bite.
+    css = '#a, #b { position: absolute; left: 0; top: 0; width: 50px; height: 50px; z-index: 0 } ' \
+          '#ac, #bc { position: absolute; left: 0; top: 0; width: 50px; height: 50px } ' \
+          '#a:focus { z-index: 10 }'
+    body = '<div id="a" tabindex="0"><div id="ac">a</div></div><div id="b"><div id="bc">b</div></div>'
+    s = simulated_session(gated_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const before = document.elementFromPoint(25, 25).id;   // equal ranks: tree order, b's child
+        document.getElementById('a').focus();
+        return [before, document.elementFromPoint(25, 25).id];
+      })()
+    JS
+    expect(got).to eq(['bc', 'ac'])
+  end
+
+  it 're-arms the gate for a widget the STREAMING PARSER inserts after a mid-parse read' do
+    # Parser insertions bypass the dirtySeq funnel (recordChildList is observer-gated), so the
+    # armed memo carries its own parser-generation key. Without it, the inline script's read
+    # memoises "unarmed" and the widget the rest of the page parses in never reopens the gate.
+    body = '<script>document.documentElement.getBoundingClientRect();</script>' \
+           '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><p id="after">after</p>'
+    s = simulated_session(gated_page(body))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        const before = after.getBoundingClientRect().y;
+        document.querySelector('.dd').focus();
+        return [before, after.getBoundingClientRect().y];
+      })()
+    JS
+    expect(got[1]).to be > got[0]
+  end
+
+  it 'disarms the gate again when the widget leaves' do
+    body = '<div class="dd" tabindex="0"><div class="dd-content">content</div></div><input id="i"><p id="after">after</p>'
+    s = simulated_session(gated_page(body))
+    s.visit '/'
+    moved = s.evaluate_script(<<~JS)
+      (() => {
+        document.querySelector('.dd').remove();
+        document.getElementById('after').getBoundingClientRect();   // re-answer with the widget gone
+        const before = globalThis.__csimLayoutEpoch();
+        document.getElementById('i').focus();
+        return globalThis.__csimLayoutEpoch() !== before;
+      })()
+    JS
+    expect(moved).to be(false)
   end
 
   # KNOWN GAPS, all pre-existing — each measured identically on the commit before any of this work,
