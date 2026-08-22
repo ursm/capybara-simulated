@@ -839,7 +839,7 @@ module Capybara
         end
       end
 
-      def invalid_element_errors = [Capybara::Simulated::StaleElement]
+      def invalid_element_errors = [Capybara::Simulated::StaleElement, Capybara::Simulated::ClickIntercepted]
       def no_such_window_error   = Capybara::WindowError
 
       def save_screenshot(path, **_opts)
