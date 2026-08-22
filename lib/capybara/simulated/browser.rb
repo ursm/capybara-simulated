@@ -1253,11 +1253,18 @@ module Capybara
             # Wall-sleep between mousedown and mouseup so click handlers
             # reading `Date.now()` see the elapsed gap (selenium parity).
             init['mouseDownOnly'] = true
-            partial = dom_call('__csimClickResolve', handle, init)
-            sleep delay
-            dom_call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
+            partial = dom_call('__csimClickResolve', handle, init, {'interceptCheck' => true})
+            # An intercepted click never dispatched its mousedown — surface it
+            # here rather than letting clickFinish fire the up/click half against
+            # the covered target.
+            if partial.is_a?(Hash) && partial['kind'] == 'intercepted'
+              partial
+            else
+              sleep delay
+              dom_call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
+            end
           else
-            dom_call('__csimClickResolve', handle, init)
+            dom_call('__csimClickResolve', handle, init, {'interceptCheck' => true})
           end
         unless action.is_a?(Hash)
           settle
@@ -1298,6 +1305,13 @@ module Capybara
           return
         end
         case action['kind']
+        when 'intercepted'
+          # Nothing was dispatched — the click point is covered by an unrelated
+          # element. Retryable (invalid_element_errors): Capybara re-finds and
+          # re-clicks until the obstruction goes away, as with a real driver.
+          raise Capybara::Simulated::ClickIntercepted,
+                "element click intercepted: #{action['target']} is not clickable at point " \
+                "(#{action['x']}, #{action['y']}); other element would receive the click: #{action['other']}"
         when 'navigate'
           url = action['url'].to_s
           target = action['target'].to_s
@@ -1536,12 +1550,24 @@ module Capybara
         Base64.strict_encode64(bytes || '')
       end
 
+      # WebDriver's obscured-click refusal, shared by the click chains that don't
+      # route through `__csimClickResolve`. Raises the retryable error so
+      # Capybara re-finds and re-clicks once the overlay is gone.
+      private def raise_if_click_intercepted(handle, init)
+        r = dom_call('__csimClickInterceptedAt', handle, init)
+        return unless r.is_a?(Hash) && r['kind'] == 'intercepted'
+        raise Capybara::Simulated::ClickIntercepted,
+              "element click intercepted: #{r['target']} is not clickable at point " \
+              "(#{r['x']}, #{r['y']}); other element would receive the click: #{r['other']}"
+      end
+
       def right_click(handle, keys = [], **opts)
         mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
         init = {'bubbles' => true, 'cancelable' => true, 'button' => 2, 'which' => 3}.merge(click_event_init(handle, keys, opts))
+        raise_if_click_intercepted(handle, init)
         dom_call('__csimDispatchEvent', handle, 'mousedown', init)
         sleep opts[:delay].to_f if opts[:delay].to_f > 0
         dom_call('__csimDispatchEvent', handle, 'mouseup',     init)
@@ -1606,11 +1632,12 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
+        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
+        raise_if_click_intercepted(handle, init)
         # UI Events spec: two full mousedown→mouseup→click chains
         # before the trailing `dblclick`. Jspreadsheet (table-builder's
         # `.jss_worksheet`) enters edit mode on the inner mousedown.
         2.times { dom_call('__csimClickResolve', handle, opts) }
-        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
         dom_call('__csimDispatchEvent', handle, 'dblclick', init)
         # Real browsers' default-action on dblclick selects the word
         # under the cursor — ProseMirror / Tiptap "paste URL over
@@ -1814,6 +1841,18 @@ module Capybara
       # boundary.
       def mark_action_baseline
         @action_url_baseline = @current_url
+        # A user action re-arms the polling grace directly: its consequences can
+        # arrive through channels `polling?` cannot see yet — a streaming
+        # websocket message still on the server's side (Mastodon posts a status,
+        # the home-timeline update rides the stream a beat later). The grace used
+        # to be armed only by a settle-gen bump observed WHILE @timers_active —
+        # which the action's own settle usually provided incidentally — so a page
+        # that went fully idle the instant the action finished left `wait?` false
+        # and Capybara's very next matcher ran single-shot, racing the stream. A
+        # real driver never stops waiting; this keeps ours polling for a bounded
+        # window after every action while an untouched idle page still fails fast.
+        @polling_grace     = POLLING_GRACE_POLLS
+        @idle_settle_polls = 0
       end
 
       # Every user-action entry point (set / send_keys / select / unselect)

@@ -50,13 +50,14 @@ module CapybaraShared
   STYLE_HASH = 'matcher gap: :style Hash matching'
 
   DESCRIPTION_SKIPS = ({
-    # Click deliberately does NOT hit-test. The layout engine could tell us the element is covered
-    # (`obscured?` does exactly that), but reporting it means raising an `invalid_element_error`, and
-    # Capybara only retries those while `driver.wait?` is true. Ours reflects genuinely pending work
-    # (timers, workers, in-flight requests) rather than a fixed timeout, so the sibling "should retry
-    # clicking" / "should allow to retry longer" examples — which wait out an animation that uncovers
-    # the element — go red. Measured: the gate turns 1 example green and 2 red, so it stays out.
-    'Capybara::Session Simulated node #click should not retry clicking when wait is disabled'    => 'click does not hit-test: see the note above (net-negative against our wait? model)',
+    # Click DOES hit-test now, but the interception predicate is deliberately narrower than
+    # WebDriver's: only an unrelated obstructor covering the target AND >=80% of the viewport (the
+    # modal-backdrop / page-overlay shape) refuses the click, because the coarse layout produces
+    # partial sibling overlaps Chrome's geometry doesn't have (measured on Discourse: 131 false
+    # interceptions, e.g. a toggle switch's slider over its intentionally tiny checkbox). This
+    # upstream fixture's obstructor covers the button but not the page, so no error is raised.
+    # The sibling "should retry clicking" / "should allow to retry longer" examples pass.
+    'Capybara::Session Simulated node #click should not retry clicking when wait is disabled'    => 'interception is page-covering-overlays only (coarse-layout false positives); this fixture obstructor is element-sized',
 
     "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties" => STYLE_HASH,
     'Capybara::Session Simulated #has_css? :style option should support Hash'                    => STYLE_HASH

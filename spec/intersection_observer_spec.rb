@@ -118,6 +118,33 @@ RSpec.describe 'IntersectionObserver' do
     expect(entries(s)).to eq(['below:false:0.00', 'below:true:1.00'])
   end
 
+  # The delivery model is FRAME-PACED: every producer (observe()'s initial
+  # notification included) only raises a pending flag, and the render phase of
+  # the next event-loop step is the one delivery site. An app whose callback
+  # re-observes its target (Discourse's composer-image-node) therefore advances
+  # one round per step — in the eager-microtask model it looped unboundedly
+  # inside a single step, spinning thousands of layout passes (the ProseMirror
+  # composer hang).
+  it 'paces a callback that re-observes at one round per step' do
+    s = session
+    s.execute_script(<<~JS)
+      window.__rounds = 0;
+      const target = document.getElementById('top');
+      const reobserve = () => {
+        const io = new IntersectionObserver((_es, self) => {
+          window.__rounds++;
+          self.disconnect();
+          if (window.__rounds < 1000) reobserve();
+        });
+        io.observe(target);
+      };
+      reobserve();
+    JS
+    pump(s, 8)
+    rounds = s.evaluate_script('window.__rounds')
+    expect(rounds).to be_between(1, 30)
+  end
+
   it 'exposes the spec-shaped surface' do
     s = session
     s.execute_script(<<~JS)
