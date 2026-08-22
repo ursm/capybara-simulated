@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/driver/base'
+require 'capybara/server/animation_disabler'
 require 'weakref'
 require_relative 'browser'
 require_relative 'node'
@@ -67,7 +68,15 @@ module Capybara
       # loads. The Browser tracks both as "defaults" so `reset!`
       # (per-test teardown) restores them between specs.
       def initialize(app, js_engine: nil, viewport: nil, user_agent: nil)
-        @app             = app
+        # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
+        # middleware (session.rb adds AnimationDisabler to the Puma stack), which
+        # injects `animation-duration: 0s !important` CSS into every HTML response.
+        # This driver calls the Rack app in-process and never builds that server, so
+        # the same wrap happens here — an app suite that turns animations off
+        # (Discourse's rails_helper) must see the same 0s durations a real browser
+        # run sees, or every `await`-on-animation close path (FloatKit's menu) parks
+        # on a full-length animation-fallback timer no user action waits for.
+        @app             = Capybara.disable_animation ? Capybara::Server::AnimationDisabler.new(app) : app
         @js_engine       = js_engine
         # Cookies + localStorage are origin-shared across windows
         # (real browser semantics), so we own the jars at the Driver
