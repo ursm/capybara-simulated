@@ -29850,25 +29850,19 @@ dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.h
     is activated; previously vacuous.
 dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
 - name: Tests scrollend event for nested scrollIntoView.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for scrollIntoView with behavior 'auto' on root.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
+  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller (max_element_x/y
+    read back from a scrollTo(10000,10000) probe). Element-scroller offsets are deliberately
+    unclamped here — their content extents are the coarse ones, and clamping against an
+    under-measured extent turns real scrolls into silent no-ops (see the scrollTop setter) —
+    so the read-back can never equal the probe's clamped value. The root-scroller variants of
+    this file pass.
 - name: Tests scrollend event for scrollIntoView with behavior 'auto' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
-- name: Tests scrollend event for scrollIntoView with behavior 'smooth' on subframe.
-  reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch
-    input plus scroll geometry & snap-point animation — needs the deliberately-unmodeled
-    layout/input subsystem (CLAUDE.md rule 1). Now runs because <body onload=runTest()>
-    is activated; previously vacuous.
+  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller (max_element_x/y
+    read back from a scrollTo(10000,10000) probe). Element-scroller offsets are deliberately
+    unclamped here — their content extents are the coarse ones, and clamping against an
+    under-measured extent turns real scrolls into silent no-ops (see the scrollTop setter) —
+    so the read-back can never equal the probe's clamped value. The root-scroller variants of
+    this file pass.
 dom/events/scrolling/scrollend-event-fired-to-document.html:
 - name: testing, horizontal
   reason: Scroll/scrollend + wheel-transaction behavior driven by test_driver scroll/wheel/key/touch

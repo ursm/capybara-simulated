@@ -747,8 +747,16 @@ module Capybara
       # a `page.current_url` read between unrelated user actions
       # arrives long after the prior action's settle pushed
       # intermediates, falls past the cutoff, and surfaces the
-      # current URL directly.
-      RECENT_URLS_STALE_AGE_MS = 250
+      # current URL directly. The window is generous because the age
+      # it measures includes the gap between the action's own drain
+      # (which pushes the entries) and the matcher's FIRST read —
+      # under full-suite load that gap blew past a 250 ms window and
+      # a `have_current_path` right after a save-click missed the
+      # committed intermediate it was asserting on. The primary
+      # staleness signal is the next user action, which clears the
+      # queue outright (`mark_action_baseline`); this age is the
+      # backstop for action-less reads long after the fact.
+      RECENT_URLS_STALE_AGE_MS = 2000
 
       # The last committed top-level URL with NO event-loop tick — `current_url`
       # pumps `tick_real_time`, so calling it re-entrantly from inside a host-fn
@@ -1638,12 +1646,14 @@ module Capybara
         # before the trailing `dblclick`. Jspreadsheet (table-builder's
         # `.jss_worksheet`) enters edit mode on the inner mousedown.
         2.times { dom_call('__csimClickResolve', handle, opts) }
-        dom_call('__csimDispatchEvent', handle, 'dblclick', init)
-        # Real browsers' default-action on dblclick selects the word
-        # under the cursor — ProseMirror / Tiptap "paste URL over
-        # selection wraps with link" tests rely on the word being
-        # selected before the paste.
+        # A browser selects the word during the SECOND press's default action, so
+        # the selection is already in place when `dblclick` fires — ProseMirror's
+        # double-click handling reads the selection at event time, and selecting
+        # only afterwards let PM commit its own narrower word first (its anchor
+        # then survived the late correction: the paste-URL-over-selection test
+        # wrapped `**bold**` but not the adjacent `` `code` `` span).
         dom_call('__csimSelectWordAt', handle)
+        dom_call('__csimDispatchEvent', handle, 'dblclick', init)
         settle
       end
 
@@ -1841,6 +1851,11 @@ module Capybara
       # boundary.
       def mark_action_baseline
         @action_url_baseline = @current_url
+        # A NEW user action makes the previous action's intermediate-URL chain
+        # stale outright — whatever a poller didn't walk by now belongs to a
+        # story that is over. This, not the wall-clock age (which only backstops
+        # action-less late reads), is the primary bound on the queue's lifetime.
+        @recent_urls.clear if @recent_urls
         # A user action re-arms the polling grace directly: its consequences can
         # arrive through channels `polling?` cannot see yet — a streaming
         # websocket message still on the server's side (Mastodon posts a status,
