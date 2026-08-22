@@ -144,6 +144,10 @@ module Capybara
       # How long a boot will park for the page's own <img> fetches before letting the window
       # `load` defer to a later drain (see boot_response_into_ctx).
       IMAGE_LOAD_BOOT_BUDGET_S = 0.25
+      # How long a session boundary (reset! / dispose) will wait for background
+      # app-request threads to finish before abandoning them (see
+      # drain_app_request_threads). Generous vs the normal ms-scale request.
+      APP_REQUEST_DRAIN_BUDGET_S = 10
       # Per-`run_loop_step` task cap (its `maxIter`). Bounds a self-rescheduling
       # timer/microtask storm so one settle iter returns to Ruby; large enough
       # for the heaviest legit chain (Mastodon hydrate, Turbo stream batch).
@@ -483,9 +487,8 @@ module Capybara
         # The lock covers main-thread resets racing the worker-thread writes.
         @sw_raced_fetches = {}
         @sw_race_lock     = Mutex.new
-        # keepalive_start machinery: detached request threads + their results + the
-        # 64 KiB in-flight payload quota. Survives per-visit rebuilds by design.
-        @keepalive_threads  = []
+        # keepalive_start machinery: detached request results + the 64 KiB
+        # in-flight payload quota. Survives per-visit rebuilds by design.
         @keepalive_results  = {}
         @keepalive_inflight_sizes = {}
         @keepalive_inflight = 0
@@ -493,13 +496,20 @@ module Capybara
         @keepalive_lock     = Mutex.new
         # Async <img> loads: fetch + decode on a thread (a real browser never blocks the parser
         # on an image), delivered into the realm by `deliver_image_loads` from the same drain
-        # funnel the other background channels use. Threads are fire-and-forget like keepalive's;
-        # a result whose element (or realm) is gone is simply dropped at delivery.
+        # funnel the other background channels use. Threads are fire-and-forget WITHIN a page's
+        # lifetime; the session boundary drains them (see drain_app_request_threads). A result
+        # whose element (or realm) is gone is simply dropped at delivery.
         @image_load_seq     = 0
         @image_load_results = {}
         @image_load_flights = {}
         @image_load_pending = 0
         @image_load_lock    = Mutex.new
+        # EVERY background thread that runs a Rack request into the host app (async
+        # <img> loads, keepalive fetches) registers here via spawn_app_request_thread;
+        # drain_app_request_threads joins them at the session boundary — see reset!
+        # for the wedge this prevents.
+        @app_request_threads = {}
+        @app_request_lock    = Mutex.new
         @sw_nav_seq       = 0
         # Reserved-client ids for navigations (`FetchEvent.resultingClientId`): minted once
         # per navigation CHAIN, re-minted when a redirect hop crosses origins (a reserved
@@ -3192,14 +3202,65 @@ module Capybara
         boot_response_into_ctx(html)
       end
 
+      # Spawn a background thread that will call into the host Rack app, registered
+      # for the session-boundary drain. Spawn and registration share one critical
+      # section so the thread's ensure-side deregistration can never run first.
+      # Anything escaping the body — a fire-and-forget thread has nowhere to report
+      # it — is contained here so a later `join` can't re-raise it into `reset!`.
+      private def spawn_app_request_thread(&body)
+        @app_request_lock.synchronize do
+          thread = Thread.new do
+            begin
+              body.call
+            rescue Exception => e
+              warn "[capybara-simulated] background app request thread died: #{e.class}: #{e.message}"
+            ensure
+              @app_request_lock.synchronize { @app_request_threads.delete(Thread.current) }
+            end
+          end
+          @app_request_threads[thread] = true
+          thread
+        end
+      end
+
+      # Join every registered background app-request thread (see reset! for why they
+      # must not cross the session boundary). A thread that outlives the budget is
+      # DROPPED from the registry — one permanent wedge must cost one boundary its
+      # budget, not every later one — and warned about; its own ensure tolerates the
+      # early removal.
+      def drain_app_request_threads
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + APP_REQUEST_DRAIN_BUDGET_S
+        @app_request_lock.synchronize { @app_request_threads.keys }.each do |t|
+          next if t.join([deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0].max)
+          @app_request_lock.synchronize { @app_request_threads.delete(t) }
+          warn "[capybara-simulated] background app request still running at the session boundary (#{t.inspect})"
+        end
+      end
+
       def reset!
         # A load marked by the outgoing page's boot belongs to a document this reset
         # is discarding — firing it against the next one would be a load event for a
         # document that never loaded.
         @window_load_due = false
-        # In-flight async image loads belong to the outgoing test's pages: discard the slots so
-        # a slow endpoint can't hold the NEXT test's tick gates and window-load deferral open.
-        # A thread that finishes after this finds its slot gone and drops the result.
+        # Background app requests must not cross the session boundary — QUIESCE them
+        # before touching anything else. Diagnosed on Discourse (2026-08-22): a
+        # leftover async image fetch, holding ActiveRecord's pinned-connection + pool
+        # locks inside `checkout`, sat in a `PG::Connection#exec` that never returned
+        # while the next example's first DB access queued behind it (live lock-owner
+        # dump). The lost reply implicates a raw-socket co-user that bypasses AR's
+        # per-connection lock — Discourse's mini_sql `DB.exec` in test hooks fits —
+        # which is also why the harness drains again ahead of app after-hooks
+        # (csim_rspec prepend_after); this reset-time drain is the driver's own
+        # boundary. AR acquires those locks under
+        # `Thread.handle_interrupt(Exception => :never)`, so the wedge shrugged off
+        # Timeout and SIGTERM: the order-dependent 300 s example timeouts and the
+        # uninterruptible suite hang were both this. Joining mirrors a real stack
+        # anyway — the server finishes an aborted request; only the client-side wait
+        # is discarded.
+        drain_app_request_threads
+        # Discard the image-load slots so a slow endpoint can't hold the NEXT test's tick
+        # gates and window-load deferral open. A thread that finishes after this finds its
+        # slot gone and drops the result.
         @image_load_lock.synchronize do
           @image_load_results.clear
           @image_load_flights.clear
@@ -3292,6 +3353,10 @@ module Capybara
       # stores this window issued (the transfer registry is process-wide). Runs
       # while the runtime is still alive so the transferDrop call lands.
       def dispose
+        # An aux window's background app requests are the same boundary hazard
+        # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
+        # reset, so without this they'd cross into the next test untouched).
+        drain_app_request_threads
         drop_pending_transfers
         reset_workers
         reset_event_sources
@@ -4765,7 +4830,7 @@ module Capybara
         size = b64 ? (raw.bytesize * 3 / 4) - raw[-2, 2].to_s.count('=') : raw.bytesize
         id   = nil
         # ONE critical section for reserve + spawn: a reset between them would
-        # leave the spawned thread outside the kill list.
+        # leave the spawned thread unregistered for the boundary drain.
         @keepalive_lock.synchronize do
           return -1 if @keepalive_inflight + size > KEEPALIVE_QUOTA
 
@@ -4773,7 +4838,7 @@ module Capybara
           id = (@keepalive_seq += 1)
           @keepalive_results[id]        = :pending
           @keepalive_inflight_sizes[id] = size
-          @keepalive_threads << Thread.new do
+          spawn_app_request_thread do
             r = nil
             begin
               r = begin
@@ -4795,7 +4860,6 @@ module Capybara
                   @keepalive_inflight = [0, @keepalive_inflight - sz].max
                 end
                 @keepalive_results[id] = r if @keepalive_results[id] == :pending
-                @keepalive_threads.delete(Thread.current)
               end
             end
           end
@@ -6944,8 +7008,9 @@ module Capybara
             group << id
             next
           end
-          @image_load_flights[flight] = [id]
-          Thread.new do
+          group = [id]
+          @image_load_flights[flight] = group
+          spawn_app_request_thread do
             r = nil
             begin
               r = begin
@@ -6961,10 +7026,12 @@ module Capybara
               # orphan from resurrecting its entry afterwards. The pending counter holds until
               # DELIVERY — "pending" means in-flight OR finished-but-undelivered, or the tick
               # gate closes before the result lands. Every follower of this flight shares the
-              # one result.
+              # one result. Finalize OUR group only: after a reset cleared the table, the same
+              # key can belong to the NEXT session's flight — deleting that would hand its
+              # followers this stale result and orphan its own.
               @image_load_lock.synchronize do
-                members = @image_load_flights.delete(flight) || [id]
-                members.each do |m|
+                @image_load_flights.delete(flight) if @image_load_flights[flight].equal?(group)
+                group.each do |m|
                   @image_load_results[m] = {result: r} if @image_load_results[m] == :pending
                 end
               end
@@ -7829,6 +7896,23 @@ module Capybara
           w[:inbox] << :terminate
           w[:thread]&.kill
         end
+        # Reap the killed threads before the boundary's own DB work runs: Thread#kill
+        # is NOT deferred by ActiveRecord's `handle_interrupt(Exception => :never)`
+        # (only an `Object => :never` mask would defer it), so a kill can land
+        # mid-DB-call inside a worker's rack_fetch and leave the app's shared PG
+        # socket mid-protocol — the same wedge class drain_app_request_threads
+        # exists for. Bounded the same way; a worker past the budget is warned, not
+        # waited for forever.
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + APP_REQUEST_DRAIN_BUDGET_S
+        @workers.each_value do |w|
+          next if (t = w[:thread]).nil?
+          joined = begin
+            t.join([deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0].max)
+          rescue StandardError
+            t # join re-raised the thread's terminating error — it is dead, i.e. reaped
+          end
+          warn "[capybara-simulated] worker thread still running at the session boundary (#{t.inspect})" unless joined
+        end
         @workers.clear
         # The parked-activation latch goes with the realms (reset rebuilds them): leaving it
         # set would make every later SW message drain broadcast a try-activate forever.
@@ -7847,13 +7931,12 @@ module Capybara
         @sw_registered_scopes.clear
         @sw_activating_scopes.clear
         reset_sw_race_state
-        # Keepalive threads are NOT killed: surviving teardown is their contract —
-        # an aux window's close-time beacon completes AFTER its browser is disposed
-        # (reset_workers runs from dispose). They self-terminate in ~ms (in-process
-        # Rack; .py delays are virtualized) and self-remove; the per-id size map
-        # makes their late release/finalize generation-safe against these clears.
+        # Keepalive threads are never KILLED — delivering the beacon is their
+        # contract — but they no longer outlive the session boundary either:
+        # dispose/reset! drain them (join, so the beacon still lands) via
+        # drain_app_request_threads before this runs. The per-id size map makes a
+        # late release/finalize generation-safe against these clears regardless.
         @keepalive_lock.synchronize do
-          @keepalive_threads.clear
           @keepalive_results.clear
           @keepalive_inflight_sizes.clear
           @keepalive_inflight = 0

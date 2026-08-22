@@ -307,6 +307,17 @@ module Capybara
         browser.reset!
       end
 
+      # Join every window's background app-request threads (async <img> loads,
+      # keepalive fetches) without resetting anything else. The test harness calls
+      # this ahead of the app's own after-hooks: cleanup that bypasses
+      # ActiveRecord's per-connection lock (Discourse's mini_sql `DB.exec`) must
+      # not interleave with a still-running background request on the same raw
+      # socket — `reset!`'s drain alone runs after those hooks.
+      def drain_background_requests
+        @aux_windows.each {|w| w[:browser].drain_app_request_threads rescue nil }
+        browser.drain_app_request_threads
+      end
+
       # Dispose every auxiliary window and return focus to the primary — a fresh
       # browsing context has no sibling windows. Disposing each aux Browser tears
       # down its worker / SSE / websocket threads and its V8 isolate eagerly; left
