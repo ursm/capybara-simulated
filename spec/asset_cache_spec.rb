@@ -35,6 +35,11 @@ end
 # `fetch()`, not `<script src>` — classic script / stylesheet bodies have their own cross-visit
 # cache and would survive either way.
 RSpec.describe 'asset cache across reset!' do
+  # The cache is process-wide: don't leave the planted immutable entry for later spec files.
+  after do
+    Capybara::Simulated.clear_http_cache
+  end
+
   it 'keeps an immutable response and drops a max-age one' do
     hits = Hash.new(0)
     app = lambda {|env|

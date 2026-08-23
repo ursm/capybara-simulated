@@ -25,6 +25,11 @@ module Capybara
       @@maps = {}
       @@lock = Mutex.new
 
+      # Drop the fetched source maps (part of `Browser.clear_http_cache`).
+      def self.clear
+        @@lock.synchronize { @@maps.clear }
+      end
+
       def initialize(browser)
         @browser = browser
       end

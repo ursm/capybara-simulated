@@ -3388,9 +3388,14 @@ module Capybara
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
         # the app on subsequent visits. Fingerprinted assets
-        # (`Cache-Control: immutable`) survive: their URLs are content-
-        # addressable so a stale entry can't shadow a later test.
-        @@asset_cache.clear_volatile if @@asset_cache.respond_to?(:clear_volatile)
+        # (`Cache-Control: immutable`) survive, as in a persistent browser
+        # profile: their URLs are content-addressable so a stale entry can't
+        # shadow a later test. (The still-fresh script / stylesheet source memo
+        # `@@asset_src` and the @font-face files survive too — see there.) A test
+        # that needs the cold cache a fresh Playwright / Cuprite context starts
+        # with (its app reuses an immutable URL for new bytes) asks for it with
+        # `Driver#clear_http_cache`.
+        @@asset_cache.clear_volatile
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
@@ -3445,9 +3450,9 @@ module Capybara
       # dynamic with no freshness). This lets a loader persist the body across
       # visits and skip the round-trip next time, driven by the server's cache
       # directives (RFC 9111 §5.2.2 / §4.2.2 heuristic) — NOT a URL-shape guess.
-      # `clear_volatile` drops the body from the volatile per-visit asset cache,
-      # but a content-hashed asset's source is content-stable while fresh, so a
-      # loader's own cross-visit cache can hold it for `fresh_until`. Used by
+      # `clear_volatile` (at `reset!`) drops a non-immutable body from the asset
+      # cache, but a content-hashed asset's source is content-stable while fresh,
+      # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
       def durable_source(url)
@@ -3460,25 +3465,27 @@ module Capybara
 
       # Cross-visit cache of external asset bodies (classic `<script src>` bundles
       # AND linked `<link rel=stylesheet>` CSS), url → [body, fresh_until]. A
-      # fresh VM per visit (`reset_page` → `clear_volatile`) would otherwise
-      # re-fetch the same fingerprinted app assets (avo.base.js, avo.base.css, …)
-      # on every visit — a real browser HTTP-caches them once. Safety: only
-      # responses the server marks durably cacheable (`fresh_until` from max-age)
-      # are stored, and these are content-stable assets at content-hashed URLs
-      # (a change yields a new URL = cache miss), so a stale body can't shadow a
-      # later test. Survives `clear_volatile` (that is the point); size-capped.
+      # fresh VM per visit (`rebuild_ctx`) would otherwise re-fetch the same
+      # fingerprinted app assets (avo.base.js, avo.base.css, …) on every visit — a
+      # real browser HTTP-caches them once. Safety: only responses the server marks
+      # durably cacheable (`fresh_until` from max-age) are stored, and these are
+      # content-stable assets at content-hashed URLs (a change yields a new URL =
+      # cache miss), so a stale body can't shadow a later test. Survives `reset!`
+      # (that is the point — see `clear_http_cache` for the opt-out); size-capped.
       @@asset_src      = {}
       @@asset_src_lock = Mutex.new
       ASSET_SRC_MAX    = 4096
 
-      # Decoded-image cache: resolved-URL => {'width'=>, 'height'=>, 'bytes'=> packed
-      # RGBA String}. Decoding an image (libvips) is the expensive step, so — like the
-      # V8 bytecode cache and the script/stylesheet source cache above — we keep the
-      # decoded pixels and reuse them for every `<img>` sharing a src, across elements
-      # AND visits. Same content-stability assumption as `@@asset_src` (a URL's bytes
-      # are stable within a process; content-hashed / data: URLs that dominate satisfy
-      # it); size-capped so an app cycling through many distinct images can't grow it
-      # without bound.
+      # Decoded-image cache: SHA-256 of the encoded bytes => {'width'=>, 'height'=>,
+      # 'bytes'=> packed RGBA String}. Decoding an image (libvips) is the expensive
+      # step, so — like the V8 bytecode cache and the parsed-stylesheet cache — we keep
+      # the decoded pixels content-addressed and reuse them for every `<img>` whose
+      # bytes match, across elements AND visits. The bytes themselves come through
+      # `rack_fetch` on every load, so WHETHER a URL still yields the same image is the
+      # HTTP cache's (RFC 9111) call, not this table's — a `no-cache` avatar that
+      # changed on the server decodes afresh, and a test's new bytes at a reused URL
+      # are never shadowed by a previous test's pixels. Size-capped so an app cycling
+      # through many distinct images can't grow it without bound.
       @@image_cache      = {}
       @@image_cache_lock = Mutex.new
       IMAGE_CACHE_MAX    = 512
@@ -3491,6 +3498,24 @@ module Capybara
       @@font_file_cache      = {}
       @@font_file_lock       = Mutex.new
       @@font_files           = []   # pins the Tempfiles for the PROCESS (the cache is cross-visit)
+
+      # Empty the process-wide HTTP cache: the RFC 9111 store behind `rack_fetch` plus
+      # the URL-keyed memos layered on it — script / stylesheet source, @font-face
+      # files, source maps. What a test gets by starting with a fresh Playwright /
+      # Cuprite browser context — for an app that serves NEW bytes at a URL it marked
+      # `immutable` (Discourse's colour-palette stylesheet is digested from a DB row's
+      # id + version, both reused across rolled-back examples). Content-addressed caches
+      # (bytecode, parsed sheets, decoded images) stay: they can't go stale. Documents
+      # already loaded keep their in-memory subresources, as a browser's per-document
+      # memory cache does — the next fetch is what hits the network. The font Tempfiles
+      # stay pinned (`@@font_files`): a live document may still be shaping text with them.
+      def self.clear_http_cache
+        @@asset_cache.clear
+        @@asset_src_lock.synchronize { @@asset_src.clear }
+        @@font_file_lock.synchronize { @@font_file_cache.clear }
+        StackResolver.clear
+        nil
+      end
 
       # Body of an external durably-cacheable asset (classic script or stylesheet),
       # served from the cross-visit cache when still fresh, else fetched (which
@@ -7012,7 +7037,7 @@ module Capybara
       # raw pixels ride the transfer registry, like decode_image) or nil when the
       # fetch or decode fails (a broken image → the `<img>` fires `error`).
       # Fetch + decode an `<img>` resource to an RGBA bitmap for the drawImage /
-      # createPattern surface, memoized by resolved URL (see `@@image_cache`). Returns
+      # createPattern surface, the decode memoized by content (see `@@image_cache`). Returns
       # {'width','height','refId'} — a FRESH transfer stash per call, since
       # `fetchTransfer` consumes the registry entry — or nil when the resource can't be
       # fetched or decoded (the caller fires `error`). A scheme with no host-side reader
@@ -7189,21 +7214,19 @@ module Capybara
         doc.nil? || doc != res
       end
 
-      # A decoded-image cache entry for `key`, decoding + caching on a miss.
-      # :unsupported for a scheme we can't fetch host-side; nil on fetch/decode failure.
-      # A CORS load caches under a key tagged with the mode, the credentials, AND the requesting
-      # document origin — its success/failure is origin-dependent (a response's ACAO may allow one
-      # origin and not another), and @@image_cache is process-wide (shared across documents /
-      # sessions), so an origin-blind key would serve one origin's CORS success to another origin
-      # whose load should fail. A no-cors load is origin-independent (it always reads the bytes),
-      # so it keeps the bare URL key and shares the cache with the decode / canvas loaders.
+      # The decoded image for `key`: fetch the bytes (every load — the HTTP cache decides
+      # whether that is a network round trip), then decode, memoized by the bytes' digest.
+      # :unsupported for a scheme we can't fetch host-side; nil on fetch/decode failure. A
+      # CORS load's success is origin-dependent (a response's ACAO may allow one origin and
+      # not another) — fetching per load is what keeps the verdict the requesting document's
+      # own; only the origin-free decode result is shared.
       private def cached_image(key, cors = false, credentials = 'same-origin', origin_base: @current_url)
-        cache_key = cors ? "cors:#{credentials}:#{url_origin(origin_base)}:#{key}" : key
-        cached = @@image_cache_lock.synchronize { @@image_cache[cache_key] }
-        return cached if cached
         bytes = image_source_bytes(key, cors, credentials, origin_base: origin_base)
         return bytes if bytes == :unsupported
         return nil unless bytes
+        cache_key = Digest::SHA256.digest(bytes)
+        cached = @@image_cache_lock.synchronize { @@image_cache[cache_key] }
+        return cached if cached
         entry = decode_or_nil(bytes)
         # nil (broken) and :zero_size (valid but zero-area) both carry no bitmap to cache.
         return entry unless entry.is_a?(Hash)
@@ -7215,8 +7238,8 @@ module Capybara
       end
 
       # Raw (encoded) bytes for an image URL: `data:` decoded inline, http(s) via a
-      # binary-safe fetch (the raw bytes ride `body_b64`; the text body would mangle
-      # non-ASCII image bytes). A `cors` load threads 'cors' mode + credentials into the
+      # binary-safe fetch (`body_raw`; the text body would mangle non-ASCII image
+      # bytes). A `cors` load threads 'cors' mode + credentials into the
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
@@ -7227,12 +7250,12 @@ module Capybara
         elsif key.match?(%r{\Ahttps?://}i)
           # The requesting DOCUMENT identity is pinned to what it was when the load started —
           # on the async path this runs on a background thread, and a concurrent navigation
-          # must not swing the CORS / SameSite / Referer verdicts (or the origin-scoped cache
-          # key) to a document that never issued this request.
+          # must not swing the CORS / SameSite / Referer verdicts to a document that never
+          # issued this request.
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials,
-                              client_url: origin_base, referrer: origin_base)
+                              client_url: origin_base, referrer: origin_base, body_raw: true)
           return nil unless result && result['status'].to_i < 400
-          bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
+          bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         else
           :unsupported
@@ -7932,15 +7955,15 @@ module Capybara
       end
 
       # Raw font bytes for a URL: `data:` inline, http(s) via a binary-safe Rack fetch
-      # (the raw bytes ride `body_b64`; a text body would mangle the font's non-ASCII).
+      # (`body_raw`: a text body would mangle the font's non-ASCII).
       private def font_source_bytes(key)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif key.match?(%r{\Ahttps?://}i)
-          result = rack_fetch('GET', key, '', {}, 'follow')
+          result = rack_fetch('GET', key, '', {}, 'follow', body_raw: true)
           return nil unless result && result['status'].to_i < 400
-          bytes = result['body_b64'] ? Base64.decode64(result['body_b64']) : result['body'].to_s.b
+          bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         end
       end
@@ -9169,7 +9192,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9331,7 +9354,7 @@ module Capybara
             end
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected)
+            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw)
           end
           # only-if-cached forbids the network: no usable stored response → a network error.
           return nil if cache_mode == 'only-if-cached'
@@ -9479,7 +9502,7 @@ module Capybara
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
             cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
-            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected)
+            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw)
           end
           # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
@@ -9614,7 +9637,7 @@ module Capybara
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
           return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str) if no_cors_mode && crossed
-          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body)
+          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_raw: body_raw)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -9719,13 +9742,29 @@ module Capybara
       # text body when `body_b64` is absent.
       TEXT_CONTENT_TYPE_PREFIXES = %w[text/ application/json application/javascript application/ecmascript application/xml image/svg+xml].freeze
 
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil)
+      # `body_raw: true` is for a host-side BINARY consumer (an <img> / @font-face load
+      # that decodes the bytes here and never shows them to script): the bytes ride
+      # `body_raw` untouched and the text decode + base64 are skipped — they would be
+      # ~15 ms per MB of pure waste on a path that runs for EVERY image load.
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil, body_raw: false)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # A NUL in a header value is not a valid HTTP message; a real server can't
         # put it on the wire, so the fetch is a network error (nil → status 0 / a
         # thrown NetworkError for a sync XHR). See headers-normalize-response.
         return nil if hdrs.any? {|_, v| v.include?("\u0000") }
+        if body_raw
+          return {
+            'status'     => status,
+            'statusText' => '',
+            'headers'    => hdrs,
+            'body'       => '',
+            'body_raw'   => raw,
+            'url'        => url,
+            'redirected' => redirected,
+            'type'       => type
+          }
+        end
         is_text = text_response?(hdrs)
         # `body` crosses as TEXT — `responseText` semantics: the bytes decoded
         # as UTF-8 with invalid sequences replaced (a leading BOM selects the

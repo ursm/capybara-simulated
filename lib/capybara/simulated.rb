@@ -24,6 +24,10 @@ module Capybara
     # set together. Read-and-cleared by the register_driver block.
     class << self
       attr_accessor :next_driver_viewport, :next_driver_user_agent
+
+      # Empty the process-wide HTTP cache (see `Driver#clear_http_cache`) — the
+      # module-level form for a hook that runs before any session exists.
+      def clear_http_cache = Browser.clear_http_cache
     end
   end
 end
