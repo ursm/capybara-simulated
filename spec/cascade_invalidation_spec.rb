@@ -6,7 +6,9 @@ require_relative 'support/js_engine'
 # The cascade matches selectors LIVE on every read — that is how a DYNAMIC pseudo-class takes effect
 # at all. Anything that CACHES a cascade result therefore has to be invalidated by every input those
 # selectors read. Most already move `settleGen` (an attribute, the tree, the location) or
-# `cascadeVersion` (a stylesheet); the rest move `styleStateGen`.
+# `cascadeVersion` (a stylesheet); the rest are kept OUT of the cache by the taint bracket (a read
+# that considered a dynamic-pseudo rule is never memoised), and move `styleStateGen` only for the
+# layout-side sweep.
 #
 # This file exists because ENUMERATING those inputs by hand failed three times. Each round the
 # enumeration got better and still missed, because the axis that matters is not WHICH pseudo-classes
@@ -326,8 +328,9 @@ RSpec.describe 'cascade invalidation' do
   end
 
   it 'updates style when a shadow root ADOPTS a sheet in place' do
-    # Not a pseudo-class: an in-place mutation of the ObservableArray. The `adoptedStyleSheets`
-    # SETTER already invalidated; the array mutators moved no generation.
+    # Not a pseudo-class: an in-place mutation of the ObservableArray is a RULE-SET change, so it
+    # moves the cascade version (the memos' key) like the `adoptedStyleSheets` SETTER does — the
+    # array mutators once moved no generation at all.
     app = lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="h"></div></body></html>']]
     }
@@ -346,6 +349,58 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)'])
+  end
+
+  it 'updates style when a <style> lands in, or is edited inside, a shadow root after a read' do
+    # A shadow-scoped stylesheet change is invisible to the document cascade's content key; the
+    # per-root rule set and every memo key on the cascade VERSION, which the mutation moves directly.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body><div id="h"></div></body></html>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sr = document.getElementById('h').attachShadow({mode: 'open'});
+        sr.innerHTML = '<p id="p">x</p>';
+        const p = sr.getElementById('p');
+        const before = getComputedStyle(p).color;
+        const style = document.createElement('style');
+        style.textContent = 'p { color: rgb(0, 128, 0) }';
+        sr.appendChild(style);
+        const appended = getComputedStyle(p).color;
+        style.textContent = 'p { color: rgb(0, 0, 255) }';
+        const edited = getComputedStyle(p).color;
+        sr.removeChild(style);
+        return [before, appended, edited, getComputedStyle(p).color];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', 'rgb(0, 128, 0)', 'rgb(0, 0, 255)', 'rgb(0, 0, 0)'])
+  end
+
+  it 'updates :disabled style when a form-associated custom element is DEFINED after a read' do
+    # `:disabled` is a STATIC pseudo-class (attribute-driven, so its reads are cached) — but it
+    # also reads form-associatedness off the custom-element registry: until the class is defined
+    # the `disabled` attribute is inert on `<my-el>`, and the definition makes it match without
+    # any attribute, tree or stylesheet change. The definition moves the cascade version.
+    app = lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><html><head><style>
+          #t:disabled { color: rgb(0, 128, 0) } my-el:disabled span { color: rgb(0, 128, 0) }
+        </style></head><body><my-el id="t" disabled>x<span id="s">y</span></my-el></body></html>
+      HTML
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t'), sp = document.getElementById('s');
+        const before = [getComputedStyle(t).color, getComputedStyle(sp).color];
+        customElements.define('my-el', class extends HTMLElement { static formAssociated = true; });
+        return [before, [getComputedStyle(t).color, getComputedStyle(sp).color], t.matches(':disabled')];
+      })()
+    JS
+    expect(got).to eq([['rgb(0, 0, 0)', 'rgb(0, 0, 0)'], ['rgb(0, 128, 0)', 'rgb(0, 128, 0)'], true])
   end
 
   # ── the dynamic-layout PRESENCE gate ─────────────────────────────────────────────────────────
@@ -367,6 +422,32 @@ RSpec.describe 'cascade invalidation' do
       [200, {'content-type' => 'text/html'},
        ["<!DOCTYPE html><html><head><style>#{css || gated_css}</style></head><body>#{body}</body></html>"]]
     }
+  end
+
+  it 'keeps dynamic state out of the declared-value memo key, and lets a rule-set change in' do
+    # The taint bracket is what keeps a CACHED value independent of focus / typing / checkedness;
+    # moving the memo's key on every state write on top of it only cold-started every element's
+    # memo per keystroke (a third of all memo entries on a Discourse subset).
+    body = '<input id="i"><input id="c" type="checkbox"><p id="after">after</p>'
+    s = simulated_session(gated_page(body))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const after = document.getElementById('after');
+        getComputedStyle(after).color;                                   // prime the memo
+        const before = globalThis.__csimStyleEpoch();
+        document.getElementById('i').focus();
+        document.getElementById('i').value = 'typed';
+        document.getElementById('c').checked = true;
+        const afterState = globalThis.__csimStyleEpoch();
+        const style = document.createElement('style');
+        style.textContent = 'p { color: rgb(0, 128, 0) }';
+        document.head.appendChild(style);
+        const color = getComputedStyle(after).color;                     // a rule-set change reaches the memo
+        return [afterState === before, globalThis.__csimStyleEpoch() !== before, color];
+      })()
+    JS
+    expect(got).to eq([true, true, 'rgb(0, 128, 0)'])
   end
 
   it 'keeps dynamic state out of the layout epoch while the rule cannot match' do
