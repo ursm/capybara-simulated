@@ -316,6 +316,16 @@ module Capybara
         browser.reset!
       end
 
+      # Start the next fetches from a cold HTTP cache. `reset!` keeps what a persistent
+      # browser profile would — fresh `Cache-Control: immutable` responses, plus the
+      # still-fresh script / stylesheet sources and @font-face files — so a test whose
+      # app serves new bytes at a cacheable URL it already served (a stylesheet digested
+      # from a DB row that a rolled-back example reuses) asks for the cold cache a fresh
+      # Playwright / Cuprite context starts with. Process-wide: every session shares the
+      # one cache (`Capybara::Simulated.clear_http_cache` is the same call for a hook
+      # that runs before any session exists).
+      def clear_http_cache = Browser.clear_http_cache
+
       # Join every window's background app-request threads (async <img> loads,
       # keepalive fetches) without resetting anything else. The test harness calls
       # this ahead of the app's own after-hooks: cleanup that bypasses

@@ -179,10 +179,10 @@ module Capybara
       # at one day. Without this, a response carrying only `Last-Modified` is
       # revalidated on every fetch, which is what a real browser AVOIDS for e.g.
       # Discourse's content-hashed `/assets/*.js` (shipped with `Last-Modified`
-      # and no `Cache-Control`). In the volatile asset cache, cross-visit
-      # staleness is bounded by `clear_volatile` dropping non-immutable entries
-      # per visit; Browser's cross-visit `@@asset_src` cache has its own
-      # argument (it only holds content-stable assets at content-hashed URLs).
+      # and no `Cache-Control`). Here, cross-test staleness is bounded by
+      # `clear_volatile` dropping non-immutable entries at `reset!`; Browser's
+      # cross-session `@@asset_src` cache has its own argument (it only holds
+      # content-stable assets at content-hashed URLs).
       HEURISTIC_FRESHNESS_CAP = 24 * 60 * 60
 
       def heuristic_freshness(headers)
