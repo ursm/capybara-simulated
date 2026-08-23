@@ -84,6 +84,12 @@ module Capybara
       # adds to sprockets-served assets.
       SAFE_VARY_FIELDS = %w[accept-encoding].freeze
 
+      # Immutable entries live for the PROCESS now (they survive every reset), and a long app
+      # suite mints fresh content-addressed URLs per example (Discourse's per-test themes and
+      # colour schemes → new `/theme-javascripts/<sha1>.js` / `/stylesheets/*_<hash>.css`), so
+      # the map is bounded the way `@@asset_src` is: wipe and restart when it fills.
+      MAX_ENTRIES = 4096
+
       def initialize
         @entries = {}
       end
@@ -94,10 +100,15 @@ module Capybara
       # Per-test reset path: keep entries the server marked
       # `Cache-Control: immutable` (declared not to change for their
       # freshness lifetime, so a kept entry can't shadow a later test's
-      # response) and drop everything else, so test-local DB state
-      # reaches the app on the next visit.
+      # response — a real browser keeps them across navigations the same
+      # way) and drop everything else, so test-local DB state reaches the
+      # app on the next visit. This read `reject!` — the exact inverse —
+      # from the day it was written: every immutable asset was re-fetched
+      # once per example (Discourse's `/extra-locales/<sha1>/en/mf.js`
+      # alone is a 41 ms Rails render), while max-age'd non-immutable
+      # responses survived into the next test.
       def clear_volatile
-        @entries.reject! {|_, e| e.immutable }
+        @entries.select! {|_, e| e.immutable }
       end
 
       def store(url, status, headers, body)
@@ -117,6 +128,7 @@ module Capybara
         # Nothing useful to cache without a freshness signal or a
         # validator to revalidate against.
         return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil?
+        @entries.clear if @entries.size >= MAX_ENTRIES && !@entries.key?(url)
         @entries[url] = Entry.new(
           status:    status,
           headers:   h,
